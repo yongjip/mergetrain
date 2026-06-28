@@ -1,5 +1,5 @@
-# trainyard runtime state (queue DB, logs, temporary worktrees)
-.trainyard/
+# mergetrain runtime state (queue DB, logs, temporary worktrees)
+.mergetrain/
 
 # Python
 __pycache__/

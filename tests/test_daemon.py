@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from trainyard.daemon import daemon_loop
-from trainyard.store import connect, enqueue_job, list_jobs
+from mergetrain.daemon import daemon_loop
+from mergetrain.store import connect, enqueue_job, list_jobs
 
 
 class DaemonTests(unittest.TestCase):

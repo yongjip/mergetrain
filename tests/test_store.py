@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from trainyard.errors import LockHeld, QueueError
-from trainyard.store import (
+from mergetrain.errors import LockHeld, QueueError
+from mergetrain.store import (
     acquire_runner_lock,
     cancel_job,
     claim_all_queued,

@@ -1,4 +1,4 @@
-"""trainyard exception hierarchy."""
+"""mergetrain exception hierarchy."""
 
 from __future__ import annotations
 
@@ -6,15 +6,15 @@ from dataclasses import dataclass
 from typing import Sequence
 
 
-class TrainyardError(Exception):
-    """Base class for expected trainyard failures."""
+class MergetrainError(Exception):
+    """Base class for expected mergetrain failures."""
 
 
-class ConfigError(TrainyardError):
+class ConfigError(MergetrainError):
     """Raised when configuration cannot be loaded or validated."""
 
 
-class QueueError(TrainyardError):
+class QueueError(MergetrainError):
     """Raised for queue and lock errors."""
 
 
@@ -22,12 +22,12 @@ class LockHeld(QueueError):
     """Raised when another runner owns the queue lock."""
 
 
-class MergeBlocked(TrainyardError):
+class MergeBlocked(MergetrainError):
     """Raised when a task branch cannot be merged into the integration train."""
 
 
 @dataclass(slots=True)
-class CommandFailed(TrainyardError):
+class CommandFailed(MergetrainError):
     """A subprocess returned a non-zero exit code."""
 
     command: Sequence[str] | str

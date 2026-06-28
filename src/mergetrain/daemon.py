@@ -25,7 +25,7 @@ def daemon_loop(
     say: Say = print,
     install_signal_handlers: bool = True,
 ) -> None:
-    """Run an auto-only trainyard daemon loop.
+    """Run an auto-only mergetrain daemon loop.
 
     The daemon only claims jobs with ``auto_deploy = 1``. It does not decide
     whether a job is safe for unattended deployment; it trusts the enqueue-time
@@ -38,7 +38,7 @@ def daemon_loop(
     def request_stop(signum, frame):  # type: ignore[no-untyped-def]
         nonlocal should_stop
         should_stop = True
-        say(f"trainyard daemon received signal {signum}; finishing current tick")
+        say(f"mergetrain daemon received signal {signum}; finishing current tick")
 
     old_handlers: dict[int, Any] = {}
     if install_signal_handlers:
@@ -59,15 +59,15 @@ def daemon_loop(
                             auto_only=True,
                         )
                         if jobs:
-                            say(f"trainyard daemon processing {len(jobs)} auto job(s)")
+                            say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
                             process_batch(conn, jobs)
                     else:
-                        say("trainyard daemon tick: no auto-approved queued jobs")
+                        say("mergetrain daemon tick: no auto-approved queued jobs")
                 finally:
                     release_runner_lock(conn, owner=actual_owner)
                     conn.close()
             except Exception as exc:
-                say(f"trainyard daemon tick error: {exc}")
+                say(f"mergetrain daemon tick error: {exc}")
                 try:
                     conn = connect(db_path)
                     try:

@@ -247,7 +247,7 @@ def _requeue_orphans(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         UPDATE deploy_queue
-        SET status = 'queued', started_at = '', note = 're-queued by trainyard (previous runner gone)'
+        SET status = 'queued', started_at = '', note = 're-queued by mergetrain (previous runner gone)'
         WHERE status = 'in_progress'
         """
     )
@@ -348,7 +348,7 @@ def claim_next_job(
         job_id = int(row["id"])
         conn.execute(
             "UPDATE deploy_queue SET status = 'in_progress', started_at = ?, note = ? WHERE id = ?",
-            (utc_now(), "claimed by trainyard runner", job_id),
+            (utc_now(), "claimed by mergetrain runner", job_id),
         )
     return get_job(conn, job_id)
 

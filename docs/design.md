@@ -1,6 +1,6 @@
 # Design & architecture
 
-trainyard is a local-agent / worktree / deploy-branch-first deploy train. It serializes the committed branches that AI coding agents produce — each in its own Git worktree — through one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon.
+mergetrain is a local-agent / worktree / deploy-branch-first deploy train. It serializes the committed branches that AI coding agents produce — each in its own Git worktree — through one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon.
 
 This document describes the model and how the pieces fit together. For task-oriented detail, see the sibling guides: [install](install.md), [quickstart](quickstart.md), [config reference](config.md), [CLI reference](cli.md), [daemon](daemon.md), [failure modes](failure-modes.md), [security](security.md), [agent contract](agent-contract.md), [adapter pattern](adapter-pattern.md), and [development](development.md).
 
@@ -25,7 +25,7 @@ Agents never push deploy refs themselves; they enqueue and read JSON. One runner
 
 **Runner lock** — a single `runner` row in the `locks` table that guarantees exactly one runner processes the queue at a time. Liveness is derived from the owner's PID, so a dead runner is reclaimed while a live one is never stolen (see [Safety & liveness](#safety--liveness)).
 
-**Integration worktree** — a disposable, detached Git worktree created under `state.worktree_root`, named `{project.name}-trainyard-{job_id}-{random8}`, starting from the integration ref. The runner merges here, so agents never check out or push the deploy branch.
+**Integration worktree** — a disposable, detached Git worktree created under `state.worktree_root`, named `{project.name}-mergetrain-{job_id}-{random8}`, starting from the integration ref. The runner merges here, so agents never check out or push the deploy branch.
 
 **Gate** — a pre-push verification command (`gates` in config) run inside the integration worktree. A gate failure is a pre-push failure: nothing ships.
 
@@ -134,7 +134,7 @@ The runner lock records an owner (`{user}:{pid}` by default) and an expiry. Owne
 - `PermissionError` → `alive`
 - other `OSError` → `unknown`
 
-From that: a **dead** owner's lock is reclaimed immediately; an **alive** owner is never stolen, even past TTL; an **unknown** owner whose lock has not expired blocks progress; an unknown owner with an expired lock but an `in_progress` job is **not** auto-reclaimed (a human must inspect). If there is no lock but `in_progress` jobs remain, the next claim re-queues them with the note `re-queued by trainyard (previous runner gone)`. Recovery commands are in [failure modes](failure-modes.md).
+From that: a **dead** owner's lock is reclaimed immediately; an **alive** owner is never stolen, even past TTL; an **unknown** owner whose lock has not expired blocks progress; an unknown owner with an expired lock but an `in_progress` job is **not** auto-reclaimed (a human must inspect). If there is no lock but `in_progress` jobs remain, the next claim re-queues them with the note `re-queued by mergetrain (previous runner gone)`. Recovery commands are in [failure modes](failure-modes.md).
 
 ## Branch model
 
@@ -152,7 +152,7 @@ On success every merged job shares that `deploy_sha`. A conflicting branch becom
 
 ## Design principles
 
-trainyard is built so an LLM agent can operate it reliably:
+mergetrain is built so an LLM agent can operate it reliably:
 
 - **Non-interactive.** Every agent-facing command is non-interactive; ambiguous intent fails. A bare `run-batch` is rejected — `--validate-only` or `--deploy` is required.
 - **JSON-first.** `doctor`, `status`, `agent-contract`, and `gc` all emit machine-readable JSON for deciding the next step.
@@ -169,8 +169,8 @@ The core ships no provider APIs for Kubernetes, AWS, Argo, Vercel, GitHub, GitLa
 
 `0.1.0` ships the core: SQLite-backed queue, PID-aware runner lock, Git worktree merge trains, configurable gates and atomic push refs, the auto-only daemon, and JSON-first `doctor`/`status`/`agent-contract`/`gc`. Candidate next steps:
 
-- `trainyard config validate`, plus clearer errors for a missing remote/integration ref, gate-name uniqueness, and an empty-`push_refs` warning surfaced in `doctor`.
-- Observability: `trainyard logs <job_id>`, `trainyard inspect <job_id> --json`, machine-readable failure categories, optional metrics export.
+- `mergetrain config validate`, plus clearer errors for a missing remote/integration ref, gate-name uniqueness, and an empty-`push_refs` warning surfaced in `doctor`.
+- Observability: `mergetrain logs <job_id>`, `mergetrain inspect <job_id> --json`, machine-readable failure categories, optional metrics export.
 - Daemon operations: recommended log rotation, a stale-lock inspection command, and a health-check pattern.
 - A protected-branch guard list and documented branch-naming conventions for `gc --delete-branches`.
 - Packaging/release hardening: classifiers, a release workflow, and editable-install / old-pip fallbacks.

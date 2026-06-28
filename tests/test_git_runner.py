@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from trainyard.config import load_config
-from trainyard.git_runner import GitRunner
-from trainyard.store import connect, enqueue_job, get_job
+from mergetrain.config import load_config
+from mergetrain.git_runner import GitRunner
+from mergetrain.store import connect, enqueue_job, get_job
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -55,7 +55,7 @@ gates:
 deploy:
   verify: []
 """
-            config_path = repo / ".trainyard.yaml"
+            config_path = repo / ".mergetrain.yaml"
             config_path.write_text(config_text, encoding="utf-8")
             config = load_config(repo=repo)
             conn = connect(config.state.db)

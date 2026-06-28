@@ -3,7 +3,7 @@
 Default config file name:
 
 ```text
-.trainyard.yaml
+.mergetrain.yaml
 ```
 
 ## `project`
@@ -19,9 +19,9 @@ project:
 
 ```yaml
 state:
-  db: .trainyard/queue.sqlite
-  logs: .trainyard/logs
-  worktree_root: .trainyard/worktrees
+  db: .mergetrain/queue.sqlite
+  logs: .mergetrain/logs
+  worktree_root: .mergetrain/worktrees
 ```
 
 Relative paths are resolved from the repository root.
@@ -110,7 +110,7 @@ deploy:
 ```
 
 Verify hooks run after push. A verify failure may mean the remote ref was already
-updated; trainyard marks jobs as `deployed` and records a warning note.
+updated; mergetrain marks jobs as `deployed` and records a warning note.
 
 ## Placeholders and environment
 
@@ -126,10 +126,10 @@ ${worktree}
 Equivalent environment variables:
 
 ```text
-TRAINYARD_PROJECT
-TRAINYARD_INTEGRATION_REF
-TRAINYARD_REPO
-TRAINYARD_WORKTREE
+MERGETRAIN_PROJECT
+MERGETRAIN_INTEGRATION_REF
+MERGETRAIN_REPO
+MERGETRAIN_WORKTREE
 ```
 
 Commands are executed through `/bin/sh`; treat config files as trusted code.

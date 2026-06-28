@@ -3,14 +3,14 @@
 All commands share global options, which may appear **before or after** the subcommand (the parser normalizes their position, since agents often misplace them):
 
 ```sh
-trainyard --config <path> --repo <repo> --db <sqlite> <command>
-trainyard doctor --json --repo /path/to/repo      # equivalent to:
-trainyard --repo /path/to/repo doctor --json
+mergetrain --config <path> --repo <repo> --db <sqlite> <command>
+mergetrain doctor --json --repo /path/to/repo      # equivalent to:
+mergetrain --repo /path/to/repo doctor --json
 ```
 
 | Global option | Meaning |
 |---|---|
-| `--config` | Path to `.trainyard.yaml` (defaults to `<repo>/.trainyard.yaml`). |
+| `--config` | Path to `.mergetrain.yaml` (defaults to `<repo>/.mergetrain.yaml`). |
 | `--repo` | Repository root or worktree path (defaults to the current directory). |
 | `--db` | Override the SQLite DB path from config. |
 | `--version` | Print the version and exit. |
@@ -18,16 +18,16 @@ trainyard --repo /path/to/repo doctor --json
 Command summary:
 
 ```text
-trainyard init [--project NAME] [--write] [--force]
-trainyard agent-contract [--json]
-trainyard enqueue --task TASK --branch BRANCH [options]
-trainyard status [--json] [--limit N]
-trainyard doctor [--json]
-trainyard run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
-trainyard run-batch (--validate-only | --deploy) [--keep-worktree] [--json]
-trainyard daemon [--interval SECONDS] [--once] [--keep-worktree]
-trainyard gc [--json] [--apply] [--delete-branches]
-trainyard cancel JOB_ID [--note NOTE] [--json]
+mergetrain init [--project NAME] [--write] [--force]
+mergetrain agent-contract [--json]
+mergetrain enqueue --task TASK --branch BRANCH [options]
+mergetrain status [--json] [--limit N]
+mergetrain doctor [--json]
+mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
+mergetrain run-batch (--validate-only | --deploy) [--keep-worktree] [--json]
+mergetrain daemon [--interval SECONDS] [--once] [--keep-worktree]
+mergetrain gc [--json] [--apply] [--delete-branches]
+mergetrain cancel JOB_ID [--note NOTE] [--json]
 ```
 
 ## `init`
@@ -35,19 +35,19 @@ trainyard cancel JOB_ID [--note NOTE] [--json]
 Print or write starter config and agent instructions.
 
 ```sh
-trainyard init --project demo            # print config to stdout
-trainyard init --project demo --write    # write files into the repo
+mergetrain init --project demo            # print config to stdout
+mergetrain init --project demo --write    # write files into the repo
 ```
 
-`--write` creates `.trainyard.yaml`, `AGENTS.trainyard.md`, and `CLAUDE.trainyard.md`. Existing files are not overwritten without `--force`. See [config reference](config.md).
+`--write` creates `.mergetrain.yaml`, `AGENTS.mergetrain.md`, and `CLAUDE.mergetrain.md`. Existing files are not overwritten without `--force`. See [config reference](config.md).
 
 ## `agent-contract`
 
 Print the short operating rules an agent must follow.
 
 ```sh
-trainyard agent-contract
-trainyard agent-contract --json
+mergetrain agent-contract
+mergetrain agent-contract --json
 ```
 
 `--json` emits `name`, `purpose`, `rules`, and `boundary`. See [agent contract](agent-contract.md).
@@ -57,7 +57,7 @@ trainyard agent-contract --json
 Add a task branch to the queue.
 
 ```sh
-trainyard enqueue --task feature-a --branch agent/feature-a --capture-sha
+mergetrain enqueue --task feature-a --branch agent/feature-a --capture-sha
 ```
 
 | Option | Meaning |
@@ -82,7 +82,7 @@ Defaults are safe: enqueue fails if the worktree is missing or dirty, if the cur
 Print queue and lock state.
 
 ```sh
-trainyard status --json --limit 50
+mergetrain status --json --limit 50
 ```
 
 `--json` returns `ok`, `db`, `lock`, and `jobs`. `--limit` caps the job list (default 50).
@@ -92,7 +92,7 @@ trainyard status --json --limit 50
 Diagnose config, queue, Git remote, integration ref, GC candidates, and the next safe action.
 
 ```sh
-trainyard doctor --json
+mergetrain doctor --json
 ```
 
 Key JSON fields: `ok`, `version`, `config`, `config_exists`, `db`, `db_existed_before`, `state.logs`, `state.worktree_root`, `git.repo_root`, `git.current_branch`, `git.worktree_clean`, `git.remote_url`, `git.remote_exists`, `git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`, `gc.worktree_candidates`, and `next_action`.
@@ -113,8 +113,8 @@ Key JSON fields: `ok`, `version`, `config`, `config_exists`, `db`, `db_existed_b
 Process exactly one queued job. Requires `--validate-only` or `--deploy`.
 
 ```sh
-trainyard run-next --validate-only
-trainyard run-next --deploy
+mergetrain run-next --validate-only
+mergetrain run-next --deploy
 ```
 
 `--keep-worktree` leaves the temporary integration worktree in place for inspection. See [Design → Runner behavior](design.md#runner-behavior).
@@ -124,8 +124,8 @@ trainyard run-next --deploy
 Process all currently queued jobs as one merge train. Requires `--validate-only` or `--deploy`.
 
 ```sh
-trainyard run-batch --validate-only
-trainyard run-batch --deploy
+mergetrain run-batch --validate-only
+mergetrain run-batch --deploy
 ```
 
 This is the primary command for shipping several agent commits in sequence. Conflicts block only the offending job; a train gate failure isolates merged jobs one-by-one. See [Design → Batch](design.md#batch--merge-train-run-batch).
@@ -135,8 +135,8 @@ This is the primary command for shipping several agent commits in sequence. Conf
 Run an unattended, auto-only worker.
 
 ```sh
-trainyard daemon --interval 15
-trainyard daemon --once
+mergetrain daemon --interval 15
+mergetrain daemon --once
 ```
 
 Claims only jobs enqueued with `--auto`. See the [daemon guide](daemon.md).
@@ -146,9 +146,9 @@ Claims only jobs enqueued with `--auto`. See the [daemon guide](daemon.md).
 Clean up temporary worktrees and, optionally, terminal branches. Dry-run by default.
 
 ```sh
-trainyard gc --json                              # dry run
-trainyard gc --apply --json                      # remove temp worktrees
-trainyard gc --apply --delete-branches --json    # also delete terminal branches
+mergetrain gc --json                              # dry run
+mergetrain gc --apply --json                      # remove temp worktrees
+mergetrain gc --apply --delete-branches --json    # also delete terminal branches
 ```
 
 Branch deletion only targets branches of `deployed`/`validated`/`canceled` jobs and never deletes a protected ref (`push_refs`, the integration branch) or the currently checked-out branch.
@@ -158,7 +158,7 @@ Branch deletion only targets branches of `deployed`/`validated`/`canceled` jobs 
 Cancel a non-terminal queue item. Terminal items cannot be cancelled.
 
 ```sh
-trainyard cancel 12 --note "replaced by rebased branch"
+mergetrain cancel 12 --note "replaced by rebased branch"
 ```
 
 ## Exit codes

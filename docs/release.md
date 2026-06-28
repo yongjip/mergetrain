@@ -9,7 +9,7 @@
 2. Verify CLI contract.
 
    ```sh
-   PYTHONPATH=src python -m trainyard agent-contract --json
+   PYTHONPATH=src python -m mergetrain agent-contract --json
    ```
 
 3. Build package.
@@ -22,7 +22,7 @@
 
    ```sh
    python -m pip install dist/*.whl
-   trainyard --version
+   mergetrain --version
    ```
 
 5. Tag release.

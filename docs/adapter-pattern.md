@@ -1,12 +1,12 @@
 # Adapter pattern
 
-Core trainyard is provider-neutral. Service-specific behavior should live in a
+Core mergetrain is provider-neutral. Service-specific behavior should live in a
 thin adapter or wrapper.
 
 A wrapper may:
 
 - Inject `--repo`, `--config`, and `--db` defaults.
-- Translate legacy command names to trainyard commands.
+- Translate legacy command names to mergetrain commands.
 - Set service-specific environment variables.
 - Provide service-specific gate and verify scripts.
 

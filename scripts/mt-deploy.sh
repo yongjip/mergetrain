@@ -3,10 +3,10 @@
 # Shows exactly what will ship; only deploys when you pass --confirm (or -y).
 # Usage:
 #   scripts/ty-deploy.sh                 # dry run: print what would ship, exit 2
-#   scripts/ty-deploy.sh --confirm       # actually run: trainyard run-batch --deploy
-# Override the binary for testing: TRAINYARD_BIN="python3 -m trainyard"
+#   scripts/ty-deploy.sh --confirm       # actually run: mergetrain run-batch --deploy
+# Override the binary for testing: MERGETRAIN_BIN="python3 -m mergetrain"
 set -eo pipefail
-TY="${TRAINYARD_BIN:-trainyard}"
+TY="${MERGETRAIN_BIN:-mergetrain}"
 
 CONFIRM=0
 ARGS=()
