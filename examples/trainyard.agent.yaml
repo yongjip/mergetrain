@@ -1,0 +1,14 @@
+# Example metadata for an agent/wrapper that wants to discover trainyard commands.
+name: trainyard-agent-contract
+commands:
+  status_json: trainyard status --json
+  doctor_json: trainyard doctor --json
+  enqueue: trainyard enqueue --task "<task>" --branch "<branch>" --capture-sha
+  validate_batch: trainyard run-batch --validate-only
+  deploy_batch: trainyard run-batch --deploy
+  daemon_once: trainyard daemon --once
+rules:
+  - commit before enqueue
+  - do not push deploy refs directly
+  - prefer JSON output
+  - use --auto only after explicit unattended-deploy approval

@@ -1,0 +1,20 @@
+# trainyard for LLM agents
+
+trainyard serializes committed local branches through a SQLite queue and a
+single Git worktree runner.
+
+Rules:
+- Work on a task branch/worktree.
+- Commit before enqueueing.
+- Do not push deploy refs directly.
+- Prefer `trainyard doctor --json` and `trainyard status --json`.
+- Use `--auto` only after explicit unattended-deploy approval.
+- Use `run-batch --validate-only` for validation and `run-batch --deploy` for deployment.
+
+Core commands:
+- `trainyard enqueue --task TASK --branch BRANCH --capture-sha`
+- `trainyard status --json`
+- `trainyard doctor --json`
+- `trainyard run-batch --validate-only`
+- `trainyard run-batch --deploy`
+- `trainyard daemon --once`

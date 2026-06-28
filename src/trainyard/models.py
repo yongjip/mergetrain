@@ -1,0 +1,78 @@
+"""Core data models for trainyard."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from typing import Any
+
+ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed")
+TERMINAL_STATUSES = ("deployed", "canceled", "validated")
+ALL_STATUSES = ACTIVE_STATUSES + TERMINAL_STATUSES
+
+
+@dataclass(slots=True)
+class Job:
+    id: int
+    task: str
+    branch: str
+    worktree_path: str = ""
+    status: str = "queued"
+    base_sha: str = ""
+    head_sha: str = ""
+    deploy_sha: str = ""
+    requested_at: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    log_path: str = ""
+    note: str = ""
+    auto_deploy: bool = False
+
+    @classmethod
+    def from_row(cls, row: Any) -> "Job":
+        return cls(
+            id=int(row["id"]),
+            task=str(row["task"]),
+            branch=str(row["branch"]),
+            worktree_path=str(row["worktree_path"] or ""),
+            status=str(row["status"]),
+            base_sha=str(row["base_sha"] or ""),
+            head_sha=str(row["head_sha"] or ""),
+            deploy_sha=str(row["deploy_sha"] or ""),
+            requested_at=str(row["requested_at"] or ""),
+            started_at=str(row["started_at"] or ""),
+            finished_at=str(row["finished_at"] or ""),
+            log_path=str(row["log_path"] or ""),
+            note=str(row["note"] or ""),
+            auto_deploy=bool(row["auto_deploy"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["auto_deploy"] = bool(self.auto_deploy)
+        return data
+
+
+@dataclass(slots=True)
+class RunnerLock:
+    name: str
+    owner: str
+    worktree_path: str = ""
+    head_sha: str = ""
+    acquired_at: str = ""
+    expires_at: str = ""
+    liveness: str = "unknown"
+
+    @classmethod
+    def from_row(cls, row: Any, *, liveness: str = "unknown") -> "RunnerLock":
+        return cls(
+            name=str(row["name"]),
+            owner=str(row["owner"]),
+            worktree_path=str(row["worktree_path"] or ""),
+            head_sha=str(row["head_sha"] or ""),
+            acquired_at=str(row["acquired_at"] or ""),
+            expires_at=str(row["expires_at"] or ""),
+            liveness=liveness,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
