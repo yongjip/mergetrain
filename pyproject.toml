@@ -3,14 +3,14 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "trainyard"
+name = "mergetrain"
 version = "0.1.0"
 description = "LLM-friendly local deploy train for coding-agent worktrees"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-  { name = "trainyard contributors" }
+  { name = "mergetrain contributors" }
 ]
 keywords = ["llm", "ai-agent", "git", "deploy", "merge-train", "sqlite", "worktree"]
 classifiers = [
@@ -32,15 +32,15 @@ yaml = ["PyYAML>=6.0"]
 dev = ["build>=1.0", "hatchling>=1.21", "PyYAML>=6.0"]
 
 [project.scripts]
-trainyard = "trainyard.cli:main"
+mergetrain = "mergetrain.cli:main"
 
 [project.urls]
-Homepage = "https://example.invalid/trainyard"
-Documentation = "https://example.invalid/trainyard/docs"
-Issues = "https://example.invalid/trainyard/issues"
+Homepage = "https://github.com/yongjip/mergetrain"
+Documentation = "https://github.com/yongjip/mergetrain/tree/main/docs"
+Issues = "https://github.com/yongjip/mergetrain/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/trainyard"]
+packages = ["src/mergetrain"]
 
 [tool.hatch.build.targets.sdist]
 include = [

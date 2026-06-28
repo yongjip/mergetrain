@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from trainyard.cli import main, normalize_global_options
+from mergetrain.cli import main, normalize_global_options
 
 
 class CliTests(unittest.TestCase):
@@ -32,8 +32,8 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(out):
                 code = main(["--repo", str(repo), "init", "--project", "demo", "--write"])
             self.assertEqual(code, 0)
-            self.assertTrue((repo / ".trainyard.yaml").exists())
-            self.assertTrue((repo / "AGENTS.trainyard.md").exists())
+            self.assertTrue((repo / ".mergetrain.yaml").exists())
+            self.assertTrue((repo / "AGENTS.mergetrain.md").exists())
 
 
 if __name__ == "__main__":

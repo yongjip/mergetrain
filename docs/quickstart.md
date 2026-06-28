@@ -5,10 +5,10 @@
 From your Git repository root:
 
 ```sh
-trainyard init --project example-app --write
+mergetrain init --project example-app --write
 ```
 
-Edit `.trainyard.yaml` so `git.remote`, `git.integration_branch`, `git.push_refs`,
+Edit `.mergetrain.yaml` so `git.remote`, `git.integration_branch`, `git.push_refs`,
 `gates`, and `deploy.verify` match your service.
 
 ## 2. Create a task branch
@@ -23,15 +23,15 @@ git commit -m "feature a"
 ## 3. Enqueue
 
 ```sh
-trainyard doctor --json
-trainyard enqueue --task "feature a" --branch codex/feature-a --capture-sha
-trainyard status --json
+mergetrain doctor --json
+mergetrain enqueue --task "feature a" --branch codex/feature-a --capture-sha
+mergetrain status --json
 ```
 
 ## 4. Validate
 
 ```sh
-trainyard run-batch --validate-only
+mergetrain run-batch --validate-only
 ```
 
 A successful validation marks merged jobs as `validated` and does not push.
@@ -41,7 +41,7 @@ A successful validation marks merged jobs as `validated` and does not push.
 After explicit approval:
 
 ```sh
-trainyard run-batch --deploy
+mergetrain run-batch --deploy
 ```
 
 Deploy mode runs gates first, then performs an atomic push to configured
@@ -52,8 +52,8 @@ Deploy mode runs gates first, then performs an atomic push to configured
 Use `--auto` only when unattended deploy is explicitly approved:
 
 ```sh
-trainyard enqueue --task "safe fix" --branch codex/safe-fix --capture-sha --auto
-trainyard daemon --interval 15
+mergetrain enqueue --task "safe fix" --branch codex/safe-fix --capture-sha --auto
+mergetrain daemon --interval 15
 ```
 
 The daemon ignores manual queued jobs.

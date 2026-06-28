@@ -1,10 +1,10 @@
 # Daemon
 
-`trainyard daemon` is a foreground auto-only worker.
+`mergetrain daemon` is a foreground auto-only worker.
 
 ```sh
-trainyard daemon --interval 15
-trainyard daemon --once
+mergetrain daemon --interval 15
+mergetrain daemon --once
 ```
 
 ## Behavior
@@ -21,13 +21,13 @@ trainyard daemon --once
 For a simple local service:
 
 ```sh
-nohup trainyard daemon --interval 15 >> .trainyard/daemon.log 2>&1 &
+nohup mergetrain daemon --interval 15 >> .mergetrain/daemon.log 2>&1 &
 ```
 
 For schedulers, prefer one-shot ticks:
 
 ```sh
-trainyard daemon --once
+mergetrain daemon --once
 ```
 
 Then run it from cron, launchd, systemd timer, or a service-specific supervisor.

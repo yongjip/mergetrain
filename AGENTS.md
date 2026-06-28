@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repository contains `trainyard`, a local deploy train for coding-agent
+This repository contains `mergetrain`, a local deploy train for coding-agent
 worktrees.
 
 ## Agent operating rules
@@ -8,7 +8,7 @@ worktrees.
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
 3. Do not push deploy refs directly.
-4. Read `trainyard doctor --json` or `trainyard status --json` before deciding
+4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
    the next action.
 5. Use `--auto` only after explicit unattended-deploy approval.
 6. Let one runner or daemon own merge, test, push, and verify.
@@ -19,8 +19,8 @@ worktrees.
 
 ```sh
 PYTHONPATH=src python -m unittest discover -s tests
-PYTHONPATH=src python -m trainyard agent-contract --json
-PYTHONPATH=src python -m trainyard init --project demo
+PYTHONPATH=src python -m mergetrain agent-contract --json
+PYTHONPATH=src python -m mergetrain init --project demo
 ```
 
 ## Boundaries

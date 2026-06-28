@@ -2,9 +2,9 @@ project:
   name: example-app
 
 state:
-  db: .trainyard/queue.sqlite
-  logs: .trainyard/logs
-  worktree_root: .trainyard/worktrees
+  db: .mergetrain/queue.sqlite
+  logs: .mergetrain/logs
+  worktree_root: .mergetrain/worktrees
 
 git:
   remote: origin

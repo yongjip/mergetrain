@@ -1,13 +1,13 @@
 # Agent contract
 
-Agents interacting with trainyard must follow this contract.
+Agents interacting with mergetrain must follow this contract.
 
 ## Rules
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
 3. Do not push deploy refs directly.
-4. Read `trainyard doctor --json` or `trainyard status --json` before deciding
+4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
    the next action.
 5. Use `--auto` only after explicit unattended-deploy approval.
 6. Let one runner or daemon own merge, test, push, and verify.
@@ -17,14 +17,14 @@ Agents interacting with trainyard must follow this contract.
 ## Machine-readable contract
 
 ```sh
-trainyard agent-contract --json
+mergetrain agent-contract --json
 ```
 
 The JSON payload includes `name`, `purpose`, `rules`, and `boundary`.
 
 ## Next-action guidance
 
-`trainyard doctor --json` returns `next_action` values:
+`mergetrain doctor --json` returns `next_action` values:
 
 - `wait_for_runner`
 - `run_daemon_or_run_batch_deploy_when_approved`

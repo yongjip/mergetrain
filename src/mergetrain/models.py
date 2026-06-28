@@ -1,4 +1,4 @@
-"""Core data models for trainyard."""
+"""Core data models for mergetrain."""
 
 from __future__ import annotations
 

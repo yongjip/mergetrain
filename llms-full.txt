@@ -1,6 +1,6 @@
-# trainyard full LLM operating guide
+# mergetrain full LLM operating guide
 
-trainyard is a local deploy train for coding-agent worktrees. It is not a
+mergetrain is a local deploy train for coding-agent worktrees. It is not a
 background job queue, cloud CI provider, deploy provider wrapper, or PR-first
 merge queue.
 
@@ -9,8 +9,8 @@ merge queue.
 Agents should:
 1. Work in task-specific branches and worktrees.
 2. Commit a clean result before enqueueing.
-3. Run `trainyard doctor --json` before deciding the next queue action.
-4. Enqueue with `trainyard enqueue --task TASK --branch BRANCH --capture-sha`.
+3. Run `mergetrain doctor --json` before deciding the next queue action.
+4. Enqueue with `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`.
 5. Never push configured deploy refs directly.
 6. Leave merge/test/push/verify to one runner or daemon.
 7. Use `--auto` only after explicit unattended-deploy approval.
@@ -28,19 +28,19 @@ Agents should:
 ## Safe commands
 
 ```sh
-trainyard status --json
-trainyard doctor --json
-trainyard agent-contract --json
-trainyard gc --json
+mergetrain status --json
+mergetrain doctor --json
+mergetrain agent-contract --json
+mergetrain gc --json
 ```
 
 ## Consent-sensitive commands
 
 ```sh
-trainyard run-batch --deploy
-trainyard enqueue --auto ...
-trainyard gc --apply
-trainyard gc --apply --delete-branches
+mergetrain run-batch --deploy
+mergetrain enqueue --auto ...
+mergetrain gc --apply
+mergetrain gc --apply --delete-branches
 ```
 
 Do not infer consent from context. Require explicit user/operator approval for

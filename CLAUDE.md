@@ -1,19 +1,19 @@
-# CLAUDE.md — operating trainyard from Dispatch
+# CLAUDE.md — operating mergetrain from Dispatch
 
-This repository ships **trainyard**, a local deploy train for coding-agent worktrees (see [README.md](./README.md) and [docs/](./docs/)). This file tells you, the agent, how to **operate the trainyard queue** when a task is dispatched from the phone (Cowork Dispatch). Optimize for short, reliable, phone-readable results. Setup and the phone phrasebook live in [docs/mobile.md](./docs/mobile.md).
+This repository ships **mergetrain**, a local deploy train for coding-agent worktrees (see [README.md](./README.md) and [docs/](./docs/)). This file tells you, the agent, how to **operate the mergetrain queue** when a task is dispatched from the phone (Cowork Dispatch). Optimize for short, reliable, phone-readable results. Setup and the phone phrasebook live in [docs/mobile.md](./docs/mobile.md).
 
 ## Ground rules
 
-- trainyard runs locally on this machine's git repo. Run commands from the repo root that contains `.trainyard.yaml`, or pass `--repo <path>` to operate another service repo.
-- **Always read state first:** run `trainyard doctor --json` and `trainyard status --json` before acting, and decide from that JSON — never from assumptions.
+- mergetrain runs locally on this machine's git repo. Run commands from the repo root that contains `.mergetrain.yaml`, or pass `--repo <path>` to operate another service repo.
+- **Always read state first:** run `mergetrain doctor --json` and `mergetrain status --json` before acting, and decide from that JSON — never from assumptions.
 - Every command is non-interactive and JSON-first. Prefer `--json`, then summarize. Don't paste raw JSON unless asked.
 
 ## You may do these without asking
 
-- `trainyard status --json` and `trainyard doctor --json` — inspect the queue, lock, and `next_action`.
-- `trainyard gc --json` — dry-run cleanup preview (does **not** delete anything).
-- `trainyard run-batch --validate-only` — validate the queued train; this never pushes.
-- `trainyard enqueue --task "<t>" --branch <b> --capture-sha` — only for a branch that is already committed and on a clean worktree.
+- `mergetrain status --json` and `mergetrain doctor --json` — inspect the queue, lock, and `next_action`.
+- `mergetrain gc --json` — dry-run cleanup preview (does **not** delete anything).
+- `mergetrain run-batch --validate-only` — validate the queued train; this never pushes.
+- `mergetrain enqueue --task "<t>" --branch <b> --capture-sha` — only for a branch that is already committed and on a clean worktree.
 
 ## Deploy policy — confirm, then deploy
 
@@ -22,13 +22,13 @@ A deploy ships code. **Never deploy as a side effect of another request.** Befor
 1. Run `doctor --json` and `status --json`.
 2. Post a short summary of exactly what will ship: the queued job IDs and branches, the integration ref, the doctor `next_action`, and anything `blocked`/`failed`.
 3. **Wait for the user's explicit confirmation in the thread** (e.g. "deploy", "yes ship it", "go"). A vague or general instruction is not confirmation.
-4. Only then run `trainyard run-batch --deploy` (or `scripts/ty-deploy.sh --confirm`).
+4. Only then run `mergetrain run-batch --deploy` (or `scripts/ty-deploy.sh --confirm`).
 5. Report the outcome: which jobs are now `deployed`, the `deploy_sha`, and any post-push verify warning recorded in the note.
 
 ## Do NOT do these unless explicitly told
 
-- `trainyard enqueue ... --auto` or `trainyard daemon` — these bypass the confirm-then-deploy step (unattended deploy).
-- Destructive cleanup: `trainyard gc --apply`, `gc --delete-branches`, or `trainyard cancel <id>`.
+- `mergetrain enqueue ... --auto` or `mergetrain daemon` — these bypass the confirm-then-deploy step (unattended deploy).
+- Destructive cleanup: `mergetrain gc --apply`, `gc --delete-branches`, or `mergetrain cancel <id>`.
 
 ## Blocked / failed jobs
 

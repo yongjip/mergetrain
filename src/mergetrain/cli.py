@@ -1,4 +1,4 @@
-"""Command-line interface for trainyard."""
+"""Command-line interface for mergetrain."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import __version__
-from .config import TrainyardConfig, load_config, render_default_config
+from .config import MergetrainConfig, load_config, render_default_config
 from .daemon import daemon_loop
-from .errors import CommandFailed, ConfigError, QueueError, TrainyardError
+from .errors import CommandFailed, ConfigError, QueueError, MergetrainError
 from .git_runner import (
     GitRunner,
     apply_gc,
@@ -78,13 +78,13 @@ def dump_json(payload: Any) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-def config_from_args(args: argparse.Namespace) -> TrainyardConfig:
+def config_from_args(args: argparse.Namespace) -> MergetrainConfig:
     return load_config(config_path=args.config, repo=args.repo, db_override=args.db)
 
 
 def agent_contract_payload() -> dict[str, Any]:
     return {
-        "name": "trainyard agent contract",
+        "name": "mergetrain agent contract",
         "purpose": "Serialize committed local task branches through one merge/test/push/verify runner.",
         "rules": [
             "Work on a task-specific branch and worktree.",
@@ -107,7 +107,7 @@ def agent_contract_payload() -> dict[str, Any]:
 def render_agent_contract() -> str:
     payload = agent_contract_payload()
     rules = "\n".join(f"{i}. {rule}" for i, rule in enumerate(payload["rules"], start=1))
-    return f"""# trainyard agent contract
+    return f"""# mergetrain agent contract
 
 Purpose: {payload['purpose']}
 
@@ -132,9 +132,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(config_text, end="")
         return 0
     files = {
-        repo / ".trainyard.yaml": config_text,
-        repo / "AGENTS.trainyard.md": render_agent_contract(),
-        repo / "CLAUDE.trainyard.md": render_agent_contract(),
+        repo / ".mergetrain.yaml": config_text,
+        repo / "AGENTS.mergetrain.md": render_agent_contract(),
+        repo / "CLAUDE.mergetrain.md": render_agent_contract(),
     }
     written: list[str] = []
     for path, content in files.items():
@@ -428,16 +428,16 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="trainyard")
-    parser.add_argument("--version", action="version", version=f"trainyard {__version__}")
-    parser.add_argument("--config", help="Path to .trainyard.yaml")
+    parser = argparse.ArgumentParser(prog="mergetrain")
+    parser.add_argument("--version", action="version", version=f"mergetrain {__version__}")
+    parser.add_argument("--config", help="Path to .mergetrain.yaml")
     parser.add_argument("--repo", default=str(Path.cwd()), help="Repository root or worktree path")
     parser.add_argument("--db", help="Override SQLite DB path")
     subparsers = parser.add_subparsers(dest="command")
 
     p_init = subparsers.add_parser("init", help="Print or write starter config and agent docs")
     p_init.add_argument("--project", help="Project name for config and worktree prefixes")
-    p_init.add_argument("--write", action="store_true", help="Write .trainyard.yaml and agent docs")
+    p_init.add_argument("--write", action="store_true", help="Write .mergetrain.yaml and agent docs")
     p_init.add_argument("--force", action="store_true", help="Overwrite generated files")
     p_init.set_defaults(func=cmd_init)
 
@@ -512,10 +512,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except KeyboardInterrupt:
-        print("trainyard: interrupted", file=sys.stderr)
+        print("mergetrain: interrupted", file=sys.stderr)
         return 130
-    except (TrainyardError, CommandFailed, ConfigError, QueueError) as exc:
-        print(f"trainyard: error: {exc}", file=sys.stderr)
+    except (MergetrainError, CommandFailed, ConfigError, QueueError) as exc:
+        print(f"mergetrain: error: {exc}", file=sys.stderr)
         return 1
 
 

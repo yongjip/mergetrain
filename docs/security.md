@@ -2,12 +2,12 @@
 
 ## Config trust boundary
 
-`.trainyard.yaml` is trusted code. Gate and verify commands run through
+`.mergetrain.yaml` is trusted code. Gate and verify commands run through
 `/bin/sh` in the integration worktree. Do not use untrusted config files.
 
 ## Secrets
 
-- Do not store provider tokens or credentials in `.trainyard.yaml`.
+- Do not store provider tokens or credentials in `.mergetrain.yaml`.
 - Prefer environment variables, your shell environment, or a service-specific
   secret manager.
 - Logs may contain command output. Gate and verify commands should avoid printing

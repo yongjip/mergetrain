@@ -1,23 +1,23 @@
 # Development
 
-How to work on trainyard itself. For using trainyard in a repo, start with [quickstart](quickstart.md).
+How to work on mergetrain itself. For using mergetrain in a repo, start with [quickstart](quickstart.md).
 
 ## Project layout
 
 ```text
-trainyard/
-  src/trainyard/
+mergetrain/
+  src/mergetrain/
     __init__.py        # version
-    __main__.py        # python -m trainyard
+    __main__.py        # python -m mergetrain
     cli.py             # argument parsing and command handlers
-    config.py          # .trainyard.yaml loading (+ built-in YAML subset parser)
+    config.py          # .mergetrain.yaml loading (+ built-in YAML subset parser)
     daemon.py          # auto-only daemon loop
-    errors.py          # TrainyardError hierarchy
+    errors.py          # MergetrainError hierarchy
     git_runner.py      # worktree merge train, gates, atomic push, verify, gc
     models.py          # Job and RunnerLock dataclasses, status sets
     store.py           # SQLite schema, queue ops, runner lock
   docs/                # this documentation set
-  examples/            # example .trainyard.yaml and agent metadata
+  examples/            # example .mergetrain.yaml and agent metadata
   integrations/        # thin service wrapper examples
   tests/               # unittest suite
   pyproject.toml
@@ -25,7 +25,7 @@ trainyard/
   llms.txt  llms-full.txt
 ```
 
-trainyard uses a `src/` layout and has **zero required runtime dependencies**. PyYAML is optional; when it is absent, `config.py` falls back to a small YAML-subset parser that understands the generated config shape.
+mergetrain uses a `src/` layout and has **zero required runtime dependencies**. PyYAML is optional; when it is absent, `config.py` falls back to a small YAML-subset parser that understands the generated config shape.
 
 ## Running tests
 
@@ -56,12 +56,12 @@ When adding behavior, add or extend the matching `tests/test_*.py` module.
 
 ## Packaging
 
-The build backend is `hatchling`; the wheel packages `src/trainyard` and exposes the `trainyard` console script.
+The build backend is `hatchling`; the wheel packages `src/mergetrain` and exposes the `mergetrain` console script.
 
 ```sh
 python -m build
 python -m pip install dist/*.whl
-trainyard --version
+mergetrain --version
 ```
 
 Supported Python: 3.10+. See the [release checklist](release.md) for the full publish flow.

@@ -12,19 +12,19 @@ git rebase <remote>/<integration-branch>
 # resolve conflicts
 git add .
 git commit --amend
-trainyard enqueue --task "rebased task" --branch <blocked-branch> --capture-sha
+mergetrain enqueue --task "rebased task" --branch <blocked-branch> --capture-sha
 ```
 
 ## Gate failure
 
 Gate failures are pre-push failures. The deploy ref is not updated. In batch
-mode, trainyard attempts to isolate merged jobs one-by-one so unrelated jobs can
+mode, mergetrain attempts to isolate merged jobs one-by-one so unrelated jobs can
 still validate/deploy.
 
 ## Push failure
 
 Push failures mark jobs as `failed`. Inspect the job log path from
-`trainyard status --json`.
+`mergetrain status --json`.
 
 ## Post-push verify failure
 
@@ -40,8 +40,8 @@ reclaimed.
 Inspect with:
 
 ```sh
-trainyard doctor --json
-trainyard status --json
+mergetrain doctor --json
+mergetrain status --json
 ```
 
 ## Orphan `in_progress`
@@ -50,7 +50,7 @@ If the runner lock is gone and `in_progress` jobs remain, the next lock claim
 re-queues them with this note:
 
 ```text
-re-queued by trainyard (previous runner gone)
+re-queued by mergetrain (previous runner gone)
 ```
 
 ## Temporary worktrees
@@ -58,17 +58,17 @@ re-queued by trainyard (previous runner gone)
 Dry-run cleanup:
 
 ```sh
-trainyard gc --json
+mergetrain gc --json
 ```
 
 Apply cleanup:
 
 ```sh
-trainyard gc --apply --json
+mergetrain gc --apply --json
 ```
 
 Delete terminal local branches as well:
 
 ```sh
-trainyard gc --apply --delete-branches --json
+mergetrain gc --apply --delete-branches --json
 ```

@@ -1,8 +1,8 @@
-# trainyard
+# mergetrain
 
 **An LLM-friendly local deploy train for coding-agent worktrees.**
 
-trainyard takes the committed branches that your AI coding agents produce — each in its own local worktree — and runs them down a single track: one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon. It turns "several agents all trying to ship at once" into a safe, serialized, machine-readable pipeline.
+mergetrain takes the committed branches that your AI coding agents produce — each in its own local worktree — and runs them down a single track: one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon. It turns "several agents all trying to ship at once" into a safe, serialized, machine-readable pipeline.
 
 > Status: alpha (`v0.1.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
 
@@ -17,13 +17,13 @@ When several Codex/Claude/LLM sessions work on the same repo at the same time, e
 - Each branch passes its own tests, but the *merge of several branches in sequence* can still be broken.
 - Conflicts, stale locks, duplicate enqueues, and "is the daemon allowed to deploy this?" all become judgment calls — and you do not want an LLM guessing at those.
 
-Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, bors) solve a related problem, but they are PR-first, remote-CI-first, and platform-first. trainyard is for the other workflow: **local-agent, worktree-first, deploy-branch-first.**
+Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, bors) solve a related problem, but they are PR-first, remote-CI-first, and platform-first. mergetrain is for the other workflow: **local-agent, worktree-first, deploy-branch-first.**
 
 ## How it works
 
 ```
   agent A ─┐
-  agent B ─┼─▶  trainyard queue (SQLite)  ─▶  one runner (lock)
+  agent B ─┼─▶  mergetrain queue (SQLite)  ─▶  one runner (lock)
   agent C ─┘                                      │
                                                   ▼
                           fresh integration worktree @ origin/main
@@ -45,19 +45,19 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 python -m pip install -e .
 
 # 1. Scaffold config + agent docs in your repo
-trainyard init --project my-app --write
+mergetrain init --project my-app --write
 
 # 2. An agent finishes work, commits, and enqueues its branch
-trainyard enqueue --task "add health check" --branch agent/health --capture-sha
+mergetrain enqueue --task "add health check" --branch agent/health --capture-sha
 
 # 3. See the queue and lock state (machine-readable)
-trainyard status --json
+mergetrain status --json
 
 # 4. Validate the whole train without shipping
-trainyard run-batch --validate-only
+mergetrain run-batch --validate-only
 
 # 5. Ship — explicit, never implicit
-trainyard run-batch --deploy
+mergetrain run-batch --deploy
 ```
 
 Every agent-facing command is non-interactive and requires explicit intent: `--validate-only` or `--deploy`, never a bare `run-batch`.
@@ -73,18 +73,18 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 
 Full reference in [docs/design.md](./docs/design.md) and the [CLI reference](./docs/cli.md).
 
-## When to use trainyard
+## When to use mergetrain
 
 | Your workflow is… | Use |
 |---|---|
 | PR-first, remote-CI-first, hosted platform | GitHub / GitLab merge queue, Mergify, Aviator |
-| Local agents in worktrees shipping to a deploy branch | **trainyard** |
+| Local agents in worktrees shipping to a deploy branch | **mergetrain** |
 
-trainyard is **not** a general-purpose job queue (it won't replace Celery/RQ/Sidekiq), a CI provider, or a deploy provider. The core is provider-neutral: your push targets, test commands, and deploy checks live in config, not in trainyard.
+mergetrain is **not** a general-purpose job queue (it won't replace Celery/RQ/Sidekiq), a CI provider, or a deploy provider. The core is provider-neutral: your push targets, test commands, and deploy checks live in config, not in mergetrain.
 
 ## Configuration
 
-A single `.trainyard.yaml` at your repo root holds all policy. The core stays neutral; you bring the commands.
+A single `.mergetrain.yaml` at your repo root holds all policy. The core stays neutral; you bring the commands.
 
 ```yaml
 project:
@@ -111,26 +111,26 @@ See the [config reference](./docs/config.md) for the full schema, placeholders, 
 
 ## For AI agents
 
-trainyard is designed so an agent can operate it from a short contract and JSON output, without guessing:
+mergetrain is designed so an agent can operate it from a short contract and JSON output, without guessing:
 
 1. Work on a task-specific branch in its own worktree.
 2. Commit before enqueuing.
 3. Never push deploy refs directly.
-4. Read `trainyard doctor --json` / `status --json` before acting.
+4. Read `mergetrain doctor --json` / `status --json` before acting.
 5. Use `--auto` only after explicit human approval for unattended deploys.
 6. Let one runner or daemon own merge → test → push → verify.
 7. Fix `blocked`/`failed` work on the owning branch and enqueue a fresh clean job.
 
-`trainyard init` writes `AGENTS.trainyard.md` / `CLAUDE.trainyard.md` so your agents pick this up automatically.
+`mergetrain init` writes `AGENTS.mergetrain.md` / `CLAUDE.mergetrain.md` so your agents pick this up automatically.
 
 ## Documentation
 
 - [Quickstart](./docs/quickstart.md) · [Install](./docs/install.md)
 - [CLI reference](./docs/cli.md) — every command and flag
-- [Config reference](./docs/config.md) — `.trainyard.yaml` schema, placeholders, env vars
+- [Config reference](./docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
 - [Design & architecture](./docs/design.md) — the model, data model, and safety guarantees
 - [Daemon](./docs/daemon.md) · [Failure modes](./docs/failure-modes.md) — operating it day to day
-- [Manage from your phone](./docs/mobile.md) — drive trainyard via Cowork Dispatch
+- [Manage from your phone](./docs/mobile.md) — drive mergetrain via Cowork Dispatch
 - [Agent contract](./docs/agent-contract.md) — the rules agents follow
 - [Security](./docs/security.md) · [Adapter pattern](./docs/adapter-pattern.md) · [Development](./docs/development.md) · [Release](./docs/release.md)
 

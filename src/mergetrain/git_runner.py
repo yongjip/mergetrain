@@ -1,4 +1,4 @@
-"""Git worktree runner for trainyard."""
+"""Git worktree runner for mergetrain."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import uuid
 from pathlib import Path
 from typing import IO, Iterable, Sequence
 
-from .config import GateConfig, TrainyardConfig
-from .errors import CommandFailed, MergeBlocked, TrainyardError
+from .config import GateConfig, MergetrainConfig
+from .errors import CommandFailed, MergeBlocked, MergetrainError
 from .models import Job
 from .store import mark_job, utc_now
 
@@ -124,7 +124,7 @@ def git_rev_parse(path: str | Path, ref: str) -> str:
     return git_output(["rev-parse", f"{ref}^{{commit}}"], cwd=path)
 
 
-def expand_command(command: str, *, config: TrainyardConfig, worktree: Path) -> str:
+def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) -> str:
     replacements = {
         "${integration_ref}": config.git.integration_ref,
         "${project}": config.project.name,
@@ -137,14 +137,14 @@ def expand_command(command: str, *, config: TrainyardConfig, worktree: Path) -> 
     return expanded
 
 
-def command_env(*, config: TrainyardConfig, worktree: Path) -> dict[str, str]:
+def command_env(*, config: MergetrainConfig, worktree: Path) -> dict[str, str]:
     env = os.environ.copy()
     env.update(
         {
-            "TRAINYARD_PROJECT": config.project.name,
-            "TRAINYARD_INTEGRATION_REF": config.git.integration_ref,
-            "TRAINYARD_REPO": str(config.repo),
-            "TRAINYARD_WORKTREE": str(worktree),
+            "MERGETRAIN_PROJECT": config.project.name,
+            "MERGETRAIN_INTEGRATION_REF": config.git.integration_ref,
+            "MERGETRAIN_REPO": str(config.repo),
+            "MERGETRAIN_WORKTREE": str(worktree),
         }
     )
     return env
@@ -153,7 +153,7 @@ def command_env(*, config: TrainyardConfig, worktree: Path) -> dict[str, str]:
 class GitRunner:
     """Executes queued branches in temporary Git worktrees."""
 
-    def __init__(self, config: TrainyardConfig):
+    def __init__(self, config: MergetrainConfig):
         self.config = config
         self.repo = config.repo
 
@@ -167,7 +167,7 @@ class GitRunner:
 
     def _worktree_path(self, first_job_id: int) -> Path:
         suffix = uuid.uuid4().hex[:8]
-        name = f"{self.config.project.name}-trainyard-{first_job_id}-{suffix}"
+        name = f"{self.config.project.name}-mergetrain-{first_job_id}-{suffix}"
         return self.config.state.worktree_root / name
 
     def _cleanup_worktree(self, worktree: Path, *, log: IO[str] | None, keep_worktree: bool) -> None:
@@ -202,7 +202,7 @@ class GitRunner:
 
     def push_verified_head(self, *, worktree: Path, log: IO[str] | None = None) -> None:
         if not self.config.git.push_refs:
-            raise TrainyardError("git.push_refs must not be empty for deploy mode")
+            raise MergetrainError("git.push_refs must not be empty for deploy mode")
         push_args = ["git", "push", "--atomic", self.config.git.remote]
         push_args.extend(f"HEAD:{ref}" for ref in self.config.git.push_refs)
         run_command(push_args, cwd=worktree, log=log)
@@ -228,7 +228,7 @@ class GitRunner:
         worktree = self._worktree_path(job.id)
         deploy_sha = ""
         with log_path.open("w", encoding="utf-8") as log:
-            log.write(f"trainyard job {job.id}: {job.task}\n")
+            log.write(f"mergetrain job {job.id}: {job.task}\n")
             log.write(f"branch: {job.branch}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
                 self._prepare_worktree(worktree=worktree, log=log)
@@ -254,7 +254,7 @@ class GitRunner:
                 return mark_job(conn, job.id, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
             except CommandFailed as exc:
                 return mark_job(conn, job.id, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
-            except TrainyardError as exc:
+            except MergetrainError as exc:
                 return mark_job(conn, job.id, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
             except Exception as exc:  # pragma: no cover - defensive boundary
                 return mark_job(conn, job.id, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=f"unexpected error: {exc}")
@@ -279,7 +279,7 @@ class GitRunner:
         results: list[Job] = []
         deploy_sha = ""
         with log_path.open("w", encoding="utf-8") as log:
-            log.write(f"trainyard batch starting at job {jobs[0].id}\n")
+            log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
             log.write(f"jobs: {[job.id for job in jobs]}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
                 self._prepare_worktree(worktree=worktree, log=log)
@@ -333,7 +333,7 @@ class GitRunner:
                 for job in merged_jobs or jobs:
                     results.append(mark_job(conn, job.id, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc)))
                 return results
-            except TrainyardError as exc:
+            except MergetrainError as exc:
                 for job in merged_jobs or jobs:
                     results.append(mark_job(conn, job.id, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc)))
                 return results
@@ -345,15 +345,15 @@ class GitRunner:
                 self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
 
 
-def find_worktree_gc_candidates(config: TrainyardConfig) -> list[dict[str, str]]:
+def find_worktree_gc_candidates(config: MergetrainConfig) -> list[dict[str, str]]:
     root = config.state.worktree_root
-    prefix = f"{config.project.name}-trainyard-"
+    prefix = f"{config.project.name}-mergetrain-"
     if not root.exists():
         return []
     candidates = []
     for path in sorted(root.iterdir()):
         if path.is_dir() and path.name.startswith(prefix):
-            candidates.append({"path": str(path), "reason": "temporary trainyard worktree"})
+            candidates.append({"path": str(path), "reason": "temporary mergetrain worktree"})
     return candidates
 
 
@@ -365,7 +365,7 @@ def current_branch(repo: Path) -> str:
     return git_current_branch(repo)
 
 
-def apply_gc(config: TrainyardConfig, *, delete_branches: Iterable[str] = ()) -> dict[str, list[dict[str, str]]]:
+def apply_gc(config: MergetrainConfig, *, delete_branches: Iterable[str] = ()) -> dict[str, list[dict[str, str]]]:
     removed_worktrees: list[dict[str, str]] = []
     deleted_branches: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
