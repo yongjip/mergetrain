@@ -1,0 +1,31 @@
+project:
+  name: example-app
+
+state:
+  db: .trainyard/queue.sqlite
+  logs: .trainyard/logs
+  worktree_root: .trainyard/worktrees
+
+git:
+  remote: origin
+  integration_branch: main
+  push_refs:
+    - main
+
+queue:
+  lock_ttl_minutes: 30
+  daemon_interval_seconds: 15
+
+agent:
+  require_clean_worktree_before_enqueue: true
+  require_explicit_auto_approval: true
+  prefer_json_status: true
+
+gates:
+  - name: diff-check
+    run: git diff --check ${integration_ref}..HEAD
+  - name: tests
+    run: python -m unittest discover -s tests
+
+deploy:
+  verify: []

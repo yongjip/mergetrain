@@ -1,0 +1,47 @@
+# trainyard full LLM operating guide
+
+trainyard is a local deploy train for coding-agent worktrees. It is not a
+background job queue, cloud CI provider, deploy provider wrapper, or PR-first
+merge queue.
+
+## Contract
+
+Agents should:
+1. Work in task-specific branches and worktrees.
+2. Commit a clean result before enqueueing.
+3. Run `trainyard doctor --json` before deciding the next queue action.
+4. Enqueue with `trainyard enqueue --task TASK --branch BRANCH --capture-sha`.
+5. Never push configured deploy refs directly.
+6. Leave merge/test/push/verify to one runner or daemon.
+7. Use `--auto` only after explicit unattended-deploy approval.
+
+## Status interpretation
+
+- `queued`: waiting for a runner.
+- `in_progress`: claimed by a single-job runner.
+- `blocked`: merge conflict or user action needed.
+- `failed`: gate or command failure.
+- `validated`: validation succeeded without push.
+- `deployed`: deploy push succeeded; note may include post-push verify warning.
+- `canceled`: user canceled the item.
+
+## Safe commands
+
+```sh
+trainyard status --json
+trainyard doctor --json
+trainyard agent-contract --json
+trainyard gc --json
+```
+
+## Consent-sensitive commands
+
+```sh
+trainyard run-batch --deploy
+trainyard enqueue --auto ...
+trainyard gc --apply
+trainyard gc --apply --delete-branches
+```
+
+Do not infer consent from context. Require explicit user/operator approval for
+unattended deploy and deploy execution.
