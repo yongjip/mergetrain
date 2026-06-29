@@ -272,14 +272,25 @@ def acquire_runner_lock(
             live = owner_liveness(current_owner)
             expired = _parse_utc(str(row["expires_at"])) <= datetime.now(timezone.utc)
             if live == Liveness.DEAD:
+                # Owner process is gone: reclaim immediately.
                 _delete_lock(conn, name=name)
-            elif live == Liveness.ALIVE:
-                raise LockHeld(f"runner lock is held by alive owner: {current_owner}")
             elif not expired:
-                raise LockHeld(f"runner lock is held by unknown owner: {current_owner}")
+                # Lease is still valid. A healthy runner refreshes its lease while
+                # working (see refresh_runner_lock), so a non-expired lease means the
+                # owner is genuinely active — never steal it, whether the PID looks
+                # alive or merely unknown. This is the concurrency guarantee.
+                raise LockHeld(f"runner lock is held by {live} owner: {current_owner}")
             elif _in_progress_count(conn) > 0:
-                raise LockHeld("expired runner lock has unknown owner and in-progress jobs")
+                # Lease expired but jobs are still marked in_progress: a runner died
+                # mid-job. Refuse automatic reclaim so an operator can investigate.
+                raise LockHeld(
+                    f"expired runner lock ({live} owner {current_owner}) has in-progress jobs"
+                )
             else:
+                # Lease expired with no in-progress work. The owner is not actively
+                # working: dead, hung, or a reused PID that merely looks alive. The
+                # stale lease is reclaimable — this removes the permanent-lock failure
+                # mode where a recycled PID kept an abandoned lock alive forever.
                 _delete_lock(conn, name=name)
         else:
             if _in_progress_count(conn) > 0:

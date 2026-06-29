@@ -43,6 +43,26 @@ class StoreTests(unittest.TestCase):
         release_runner_lock(conn, owner=f"user:{os.getpid()}")
         self.assertIsNone(get_lock(conn))
 
+    def test_expired_lease_is_reclaimable_even_if_pid_alive(self) -> None:
+        conn = self.make_conn()
+        # The current PID is alive, but the lease is already expired and nothing is
+        # in flight. A healthy runner would have refreshed its lease; an abandoned
+        # lock (or a recycled PID that merely looks alive) must not block forever.
+        acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=-1)
+        lock = acquire_runner_lock(conn, owner=f"newrunner:{os.getpid()}", ttl_minutes=30)
+        self.assertEqual(lock.owner, f"newrunner:{os.getpid()}")
+
+    def test_expired_lease_with_in_progress_jobs_is_not_stolen(self) -> None:
+        conn = self.make_conn()
+        # Acquire while nothing is in flight (so no orphan requeue), then leave a job
+        # mid-flight. An expired lease with in_progress work is held back for operator
+        # investigation rather than auto-reclaimed.
+        acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=-1)
+        job = enqueue_job(conn, task="a", branch="a")
+        mark_job(conn, job.id, status="in_progress")
+        with self.assertRaises(LockHeld):
+            acquire_runner_lock(conn, owner=f"newrunner:{os.getpid()}")
+
     def test_auto_only_batch_claim_skips_manual_jobs(self) -> None:
         conn = self.make_conn()
         manual = enqueue_job(conn, task="manual", branch="manual")

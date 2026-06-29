@@ -309,7 +309,14 @@ def cmd_run_next(args: argparse.Namespace) -> int:
         if job is None:
             payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
         else:
-            result = GitRunner(config).process_one(conn, job, deploy=deploy, keep_worktree=args.keep_worktree)
+            result = GitRunner(config).process_one(
+                conn,
+                job,
+                deploy=deploy,
+                keep_worktree=args.keep_worktree,
+                owner=owner,
+                ttl_minutes=config.queue.lock_ttl_minutes,
+            )
             payload = _results_payload([result])
     finally:
         release_runner_lock(conn, owner=owner)
@@ -335,7 +342,14 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         if not jobs:
             payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
         else:
-            results = GitRunner(config).process_batch(conn, jobs, deploy=deploy, keep_worktree=args.keep_worktree)
+            results = GitRunner(config).process_batch(
+                conn,
+                jobs,
+                deploy=deploy,
+                keep_worktree=args.keep_worktree,
+                owner=owner,
+                ttl_minutes=config.queue.lock_ttl_minutes,
+            )
             payload = _results_payload(results)
     finally:
         release_runner_lock(conn, owner=owner)
@@ -354,14 +368,22 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
 def cmd_daemon(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     runner = GitRunner(config)
+    owner = default_owner()
 
     def process_batch(conn, jobs: list[Job]) -> object:  # type: ignore[no-untyped-def]
-        return runner.process_batch(conn, jobs, deploy=True, keep_worktree=args.keep_worktree)
+        return runner.process_batch(
+            conn,
+            jobs,
+            deploy=True,
+            keep_worktree=args.keep_worktree,
+            owner=owner,
+            ttl_minutes=config.queue.lock_ttl_minutes,
+        )
 
     daemon_loop(
         db_path=str(config.state.db),
         process_batch=process_batch,
-        owner=default_owner(),
+        owner=owner,
         interval_seconds=args.interval or config.queue.daemon_interval_seconds,
         lock_ttl_minutes=config.queue.lock_ttl_minutes,
         once=args.once,

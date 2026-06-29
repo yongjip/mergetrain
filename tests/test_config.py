@@ -16,7 +16,9 @@ class ConfigTests(unittest.TestCase):
 
     def test_relative_paths_resolve_from_repo(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
+            # Resolve symlinks (e.g. macOS /var -> /private/var) so the expected
+            # paths match what load_config() produces after its own .resolve().
+            repo = Path(td).resolve()
             (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
             config = load_config(repo=repo)
             self.assertEqual(config.project.name, "demo")
