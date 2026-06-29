@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from mergetrain.config import load_config, load_yaml, render_default_config
+from mergetrain.errors import ConfigError
 
 
 class ConfigTests(unittest.TestCase):
@@ -24,6 +25,14 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.project.name, "demo")
             self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
             self.assertEqual(config.git.integration_ref, "origin/main")
+
+
+    def test_malformed_yaml_raises_config_error(self) -> None:
+        # Whichever parser is active (PyYAML or the built-in subset parser), a
+        # malformed document must surface as ConfigError so the CLI exits cleanly
+        # with "mergetrain: error: ..." rather than dumping a raw traceback.
+        with self.assertRaises(ConfigError):
+            load_yaml("project:\n  name: x\n bad-indent: y\n")
 
 
 if __name__ == "__main__":

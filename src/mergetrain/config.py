@@ -195,7 +195,10 @@ def load_yaml(text: str) -> dict[str, Any]:
         import yaml  # type: ignore
     except Exception:
         return _parse_simple_yaml(text)
-    loaded = yaml.safe_load(text) or {}
+    try:
+        loaded = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"invalid YAML: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ConfigError("top-level YAML value must be a mapping")
     return loaded
