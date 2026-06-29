@@ -12,7 +12,7 @@ from typing import IO, Iterable, Sequence
 from .config import GateConfig, MergetrainConfig
 from .errors import CommandFailed, MergeBlocked, MergetrainError
 from .models import Job
-from .store import mark_job, utc_now
+from .store import mark_job, refresh_runner_lock, utc_now
 
 
 def _render_command(command: Sequence[str] | str) -> str:
@@ -161,6 +161,31 @@ class GitRunner:
         self.config.state.logs.mkdir(parents=True, exist_ok=True)
         self.config.state.worktree_root.mkdir(parents=True, exist_ok=True)
 
+    def _refresh_lease(
+        self,
+        conn,
+        *,
+        owner: str | None,
+        ttl_minutes: int,
+        worktree: Path,
+        head_sha: str = "",
+    ) -> None:
+        """Extend the runner lease so a long-running job is never seen as stale.
+
+        A healthy runner keeps its lease valid for the whole job; only a dead,
+        hung, or recycled-PID owner lets the lease expire and become reclaimable.
+        No-op when ``owner`` is None (e.g. direct test calls without a lock).
+        """
+        if owner is None:
+            return
+        refresh_runner_lock(
+            conn,
+            owner=owner,
+            ttl_minutes=ttl_minutes,
+            worktree_path=str(worktree),
+            head_sha=head_sha,
+        )
+
     def _log_path(self, prefix: str, first_job_id: int) -> Path:
         stamp = utc_now().replace(":", "").replace("-", "").replace("Z", "")
         return self.config.state.logs / f"{prefix}-{first_job_id}-{stamp}.log"
@@ -222,6 +247,8 @@ class GitRunner:
         *,
         deploy: bool,
         keep_worktree: bool = False,
+        owner: str | None = None,
+        ttl_minutes: int = 30,
     ) -> Job:
         self._ensure_state_dirs()
         log_path = self._log_path("job", job.id)
@@ -232,12 +259,14 @@ class GitRunner:
             log.write(f"branch: {job.branch}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
                 self._prepare_worktree(worktree=worktree, log=log)
+                self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree)
                 merge = run_command(["git", "merge", "--no-edit", job.branch], cwd=worktree, log=log, check=False)
                 if merge.returncode != 0:
                     raise MergeBlocked(merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}")
                 if not git_worktree_clean(worktree):
                     raise MergeBlocked("integration worktree is dirty after merge")
                 deploy_sha = git_rev_parse(worktree, "HEAD")
+                self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree, head_sha=deploy_sha)
                 self._run_gates(worktree=worktree, log=log)
                 verify_warning = ""
                 if deploy:
@@ -268,6 +297,8 @@ class GitRunner:
         *,
         deploy: bool,
         keep_worktree: bool = False,
+        owner: str | None = None,
+        ttl_minutes: int = 30,
     ) -> list[Job]:
         jobs = list(jobs)
         if not jobs:
@@ -283,8 +314,10 @@ class GitRunner:
             log.write(f"jobs: {[job.id for job in jobs]}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
                 self._prepare_worktree(worktree=worktree, log=log)
+                self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree)
                 for job in jobs:
                     log.write(f"\n## merge job {job.id}: {job.branch}\n")
+                    self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree)
                     merge = run_command(["git", "merge", "--no-edit", job.branch], cwd=worktree, log=log, check=False)
                     if merge.returncode != 0:
                         note = merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}"
@@ -308,13 +341,23 @@ class GitRunner:
                     log.write("\nno jobs were merged\n")
                     return results
                 deploy_sha = git_rev_parse(worktree, "HEAD")
+                self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree, head_sha=deploy_sha)
                 try:
                     self._run_gates(worktree=worktree, log=log)
                 except CommandFailed as exc:
                     log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
                     self._cleanup_worktree(worktree, log=log, keep_worktree=False)
                     for job in merged_jobs:
-                        results.append(self.process_one(conn, job, deploy=deploy, keep_worktree=keep_worktree))
+                        results.append(
+                            self.process_one(
+                                conn,
+                                job,
+                                deploy=deploy,
+                                keep_worktree=keep_worktree,
+                                owner=owner,
+                                ttl_minutes=ttl_minutes,
+                            )
+                        )
                     return results
                 verify_warning = ""
                 if deploy:

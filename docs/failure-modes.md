@@ -33,9 +33,20 @@ marked `deployed` with a warning note instead of `failed`.
 
 ## Stale lock
 
-The runner lock records an owner and expiry. A dead PID can be reclaimed. A live
-PID is not stolen. An unknown owner with in-progress work is not automatically
-reclaimed.
+The runner lock records an owner and a lease expiry. A running runner refreshes
+its lease throughout a job, so an active runner's lease is always valid.
+
+Reclaim rules when another runner tries to acquire:
+
+- **Dead owner PID** — reclaimed immediately.
+- **Valid (non-expired) lease** — never stolen, whether the owner PID looks alive
+  or unknown. This is the concurrency guarantee.
+- **Expired lease, no in-progress jobs** — reclaimed, even if the owner PID still
+  looks alive. A healthy runner would have refreshed its lease, so an expired
+  lease means the owner is dead, hung, or a recycled PID. This prevents a reused
+  PID from holding an abandoned lock open forever.
+- **Expired lease with in-progress jobs** — not auto-reclaimed; left for operator
+  investigation.
 
 Inspect with:
 
