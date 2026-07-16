@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .errors import ConfigError
 
@@ -43,6 +43,8 @@ class GitConfig:
 class QueueConfig:
     lock_ttl_minutes: int = 30
     daemon_interval_seconds: int = 15
+    heartbeat_interval_seconds: int = 10
+    command_timeout_seconds: int = 3600
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +215,12 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "worktree_root": ".mergetrain/worktrees",
         },
         "git": {"remote": "origin", "integration_branch": "main", "push_refs": ["main"]},
-        "queue": {"lock_ttl_minutes": 30, "daemon_interval_seconds": 15},
+        "queue": {
+            "lock_ttl_minutes": 30,
+            "daemon_interval_seconds": 15,
+            "heartbeat_interval_seconds": 10,
+            "command_timeout_seconds": 3600,
+        },
         "agent": {
             "require_clean_worktree_before_enqueue": True,
             "require_explicit_auto_approval": True,
@@ -242,6 +249,8 @@ git:
 queue:
   lock_ttl_minutes: 30
   daemon_interval_seconds: 15
+  heartbeat_interval_seconds: 10
+  command_timeout_seconds: 3600
 
 agent:
   require_clean_worktree_before_enqueue: true
@@ -282,22 +291,48 @@ def _as_gate_list(value: Any, *, key: str) -> tuple[GateConfig, ...]:
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise ConfigError(f"{key}[{index}] must be a mapping")
-        name = str(item.get("name", "")).strip()
-        run = str(item.get("run", "")).strip()
+        name_value = item.get("name", "")
+        run_value = item.get("run", "")
+        if not isinstance(name_value, str) or not isinstance(run_value, str):
+            raise ConfigError(f"{key}[{index}] name and run must be strings")
+        name = name_value.strip()
+        run = run_value.strip()
         if not name or not run:
             raise ConfigError(f"{key}[{index}] requires name and run")
         gates.append(GateConfig(name=name, run=run))
     return tuple(gates)
 
 
-def _tuple_of_str(value: Any, *, fallback: Iterable[str]) -> tuple[str, ...]:
-    if value in (None, ""):
-        return tuple(fallback)
-    if isinstance(value, str):
-        return (value,)
-    if isinstance(value, list):
-        return tuple(str(item) for item in value if str(item).strip())
-    raise ConfigError("expected string or list of strings")
+def _nonempty_string(value: Any, *, key: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{key} must be a non-empty string")
+    return value.strip()
+
+
+def _push_refs(value: Any) -> tuple[str, ...]:
+    items = [value] if isinstance(value, str) else value
+    if not isinstance(items, list) or not items:
+        raise ConfigError("git.push_refs must contain at least one ref")
+    refs: list[str] = []
+    for index, item in enumerate(items):
+        refs.append(_nonempty_string(item, key=f"git.push_refs[{index}]"))
+    if len(set(refs)) != len(refs):
+        raise ConfigError("git.push_refs must not contain duplicates")
+    return tuple(refs)
+
+
+def _positive_int(value: Any, *, key: str) -> int:
+    if isinstance(value, bool):
+        raise ConfigError(f"{key} must be a positive integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+    else:
+        raise ConfigError(f"{key} must be a positive integer")
+    if parsed <= 0:
+        raise ConfigError(f"{key} must be a positive integer")
+    return parsed
 
 
 def _resolve_path(repo: Path, value: Any, default: str) -> Path:
@@ -336,20 +371,43 @@ def load_config(
     )
 
     git_data = _as_mapping(data, "git")
-    integration_branch = str(git_data.get("integration_branch") or "main")
-    push_refs = _tuple_of_str(git_data.get("push_refs"), fallback=(integration_branch,))
-    if not push_refs:
-        push_refs = (integration_branch,)
+    integration_branch = _nonempty_string(
+        git_data.get("integration_branch", "main"), key="git.integration_branch"
+    )
+    push_refs = (
+        _push_refs(git_data["push_refs"])
+        if "push_refs" in git_data
+        else (integration_branch,)
+    )
     git = GitConfig(
-        remote=str(git_data.get("remote") or "origin"),
+        remote=_nonempty_string(git_data.get("remote", "origin"), key="git.remote"),
         integration_branch=integration_branch,
         push_refs=push_refs,
     )
 
     queue_data = _as_mapping(data, "queue")
+    lock_ttl_minutes = _positive_int(
+        queue_data.get("lock_ttl_minutes", 30), key="queue.lock_ttl_minutes"
+    )
+    heartbeat_interval_seconds = _positive_int(
+        queue_data.get("heartbeat_interval_seconds", 10),
+        key="queue.heartbeat_interval_seconds",
+    )
+    if heartbeat_interval_seconds >= lock_ttl_minutes * 60:
+        raise ConfigError(
+            "queue.heartbeat_interval_seconds must be shorter than queue.lock_ttl_minutes"
+        )
     queue = QueueConfig(
-        lock_ttl_minutes=int(queue_data.get("lock_ttl_minutes", 30)),
-        daemon_interval_seconds=int(queue_data.get("daemon_interval_seconds", 15)),
+        lock_ttl_minutes=lock_ttl_minutes,
+        daemon_interval_seconds=_positive_int(
+            queue_data.get("daemon_interval_seconds", 15),
+            key="queue.daemon_interval_seconds",
+        ),
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
+        command_timeout_seconds=_positive_int(
+            queue_data.get("command_timeout_seconds", 3600),
+            key="queue.command_timeout_seconds",
+        ),
     )
 
     agent_data = _as_mapping(data, "agent")
@@ -362,6 +420,9 @@ def load_config(
     deploy_data = _as_mapping(data, "deploy")
     deploy = DeployConfig(verify=_as_gate_list(deploy_data.get("verify", []), key="deploy.verify"))
     gates = _as_gate_list(data.get("gates", []), key="gates")
+    gate_names = [gate.name for gate in (*gates, *deploy.verify)]
+    if len(set(gate_names)) != len(gate_names):
+        raise ConfigError("gate and deploy.verify names must be unique")
 
     return MergetrainConfig(
         project=ProjectConfig(name=project_name),

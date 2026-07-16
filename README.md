@@ -71,7 +71,7 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 
 - **Job** — one task branch waiting in the queue, with the SHAs captured at enqueue time.
 - **Validated train** — an exact, deployable group of jobs that passed gates together and is waiting for explicit deploy approval.
-- **Runner lock** — guarantees exactly one runner processes the queue at a time, with PID-liveness checks so a dead runner is reclaimed but a live one is never stolen from.
+- **Runner lock** — gives every claim a unique lease token, heartbeats through long-running commands, and prevents a stale runner from overwriting a newer owner.
 - **Integration worktree** — a disposable, detached Git worktree built on your integration ref. The runner merges here, so agents never checkout or push the deploy branch.
 - **Gate** — a verification command (diff-check, tests, secret-scan…) run once over the assembled train *before* push. A gate failure means nothing ships.
 - **Verify hook** — a command run *after* push to confirm the deploy is live.
@@ -100,6 +100,11 @@ git:
   remote: origin
   integration_branch: main
   push_refs: [main]          # atomic push targets on deploy
+
+queue:
+  lock_ttl_minutes: 30
+  heartbeat_interval_seconds: 10
+  command_timeout_seconds: 3600
 
 gates:
   - name: diff-check

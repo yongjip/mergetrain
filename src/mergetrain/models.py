@@ -32,6 +32,8 @@ class Job:
     validation_base_sha: str = ""
     validation_sha: str = ""
     validated_head_sha: str = ""
+    claim_token: str = ""
+    cancel_requested_at: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> "Job":
@@ -56,11 +58,14 @@ class Job:
             validation_base_sha=str(row["validation_base_sha"] or ""),
             validation_sha=str(row["validation_sha"] or ""),
             validated_head_sha=str(row["validated_head_sha"] or ""),
+            claim_token=str(row["claim_token"] or ""),
+            cancel_requested_at=str(row["cancel_requested_at"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["auto_deploy"] = bool(self.auto_deploy)
+        data.pop("claim_token", None)
         return data
 
 
@@ -72,6 +77,7 @@ class RunnerLock:
     head_sha: str = ""
     acquired_at: str = ""
     expires_at: str = ""
+    token: str = ""
     liveness: str = "unknown"
 
     @classmethod
@@ -83,8 +89,11 @@ class RunnerLock:
             head_sha=str(row["head_sha"] or ""),
             acquired_at=str(row["acquired_at"] or ""),
             expires_at=str(row["expires_at"] or ""),
+            token=str(row["token"] or ""),
             liveness=liveness,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("token", None)
+        return data

@@ -65,16 +65,24 @@ This produces:
 git push --atomic platform HEAD:develop HEAD:main
 ```
 
+If `push_refs` is omitted it defaults to `integration_branch`. An explicitly
+empty list, null value, blank ref, or duplicate ref is a configuration error;
+deploy targets never fail open to `main`.
+
 ## `queue`
 
 ```yaml
 queue:
   lock_ttl_minutes: 30
   daemon_interval_seconds: 15
+  heartbeat_interval_seconds: 10
+  command_timeout_seconds: 3600
 ```
 
-`lock_ttl_minutes` controls runner lock expiry. A live PID owner is not stolen
-even after TTL expiry.
+`lock_ttl_minutes` controls runner lock expiry. Managed Git, gate, and verify
+commands renew the lease every `heartbeat_interval_seconds`; the heartbeat must
+be shorter than the TTL. `command_timeout_seconds` terminates a command and
+marks the affected job failed. All queue timing values must be positive.
 
 ## `agent`
 

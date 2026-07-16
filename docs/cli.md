@@ -176,8 +176,15 @@ mergetrain cancel 12 --note "replaced by rebased branch"
 ```
 
 Canceling one member of a validated train cancels every still-validated member
-of that train so a partial copy of the approved train cannot later deploy.
+of that train so a partial copy of the approved train cannot later deploy. For
+an `in_progress` train, cancel records `cancel_requested_at` for every job with
+the same claim token. The runner notices the request during its heartbeat,
+terminates the active subprocess group, and records the final `canceled` state.
 
 ## Exit codes
 
-`0` success · `1` an expected error (config, queue, command failure) · `2` usage error (no subcommand) · `130` interrupted (`Ctrl-C`).
+`0` all requested jobs succeeded · `1` a job blocked/failed or an expected
+config/queue/command error · `2` usage error · `130` interrupted (`Ctrl-C`).
+In JSON mode, run results include `ok`, `result` (`success`, `partial`, or
+`failed`), per-status `counts`, and `jobs`. Expected exceptions are emitted as
+`{"ok": false, "error": {"code", "message", "retryable"}}`.

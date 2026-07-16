@@ -79,13 +79,20 @@ fi
 
 echo
 echo "Deploying…"
+set +e
 res="$($TY run-batch --deploy --json "${RUN_ARGS[@]}")"
+rc=$?
+set -e
 TY_RES="$res" python3 <<'PY'
 import json, os
-for j in json.loads(os.environ["TY_RES"]).get("jobs", []):
+d = json.loads(os.environ["TY_RES"])
+for j in d.get("jobs", []):
     sha = (j.get('deploy_sha') or '')[:10]
     note = (j.get('note') or '').splitlines()
     note = note[0] if note else ''
     print(f"#{j['id']} {j['status']:<11} {j['branch']}"
           + (f" sha={sha}" if sha else "") + (f"  - {note}" if note else ""))
+if not d.get("jobs") and d.get("error"):
+    print(d["error"].get("message", "deploy failed"))
 PY
+exit "$rc"

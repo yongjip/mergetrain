@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
 from mergetrain.config import load_config
-from mergetrain.git_runner import GitRunner
-from mergetrain.store import acquire_runner_lock, connect, enqueue_job, get_job, get_lock
+from mergetrain.errors import CommandFailed
+from mergetrain.git_runner import GitRunner, run_shell
+from mergetrain.store import (
+    cancel_job,
+    claim_all_queued,
+    connect,
+    enqueue_job,
+    get_job,
+    get_lock,
+    release_runner_lock,
+)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -19,7 +31,7 @@ def git(cwd: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def make_demo_repo(root: Path) -> tuple[Path, Path]:
+def make_demo_repo(root: Path, *, gate_command: str = "") -> tuple[Path, Path]:
     """Create a remote+clone with a ``feature/a`` branch and return (repo, marker).
 
     The gate appends to ``marker`` once per gate run so tests can assert the train
@@ -42,6 +54,10 @@ def make_demo_repo(root: Path) -> tuple[Path, Path]:
     git(repo, "commit", "-m", "a")
     git(repo, "switch", "main")
     marker = root / "gate-count.txt"
+    gate_command = gate_command or (
+        f"{sys.executable} -c \"from pathlib import Path; p=Path('{marker}'); "
+        "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
+    )
     config_text = f"""project:
   name: demo
 state:
@@ -53,9 +69,14 @@ git:
   integration_branch: main
   push_refs:
     - main
+queue:
+  lock_ttl_minutes: 1
+  daemon_interval_seconds: 1
+  heartbeat_interval_seconds: 1
+  command_timeout_seconds: 30
 gates:
   - name: marker
-    run: {sys.executable} -c \"from pathlib import Path; p=Path('{marker}'); p.write_text(p.read_text() + 'x' if p.exists() else 'x')\"
+    run: {gate_command}
 deploy:
   verify: []
 """
@@ -64,6 +85,21 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_managed_command_timeout_terminates_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            started = time.monotonic()
+            with self.assertRaises(CommandFailed) as raised:
+                run_shell(
+                    f'{sys.executable} -c "import time; time.sleep(10)"',
+                    cwd=td,
+                    env=os.environ.copy(),
+                    log=io.StringIO(),
+                    timeout_seconds=0.2,
+                    pulse_interval_seconds=0.1,
+                )
+            self.assertEqual(raised.exception.returncode, 124)
+            self.assertLess(time.monotonic() - started, 3)
+
     def test_batch_merges_jobs_and_runs_gate_once(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -145,14 +181,11 @@ class GitRunnerTests(unittest.TestCase):
             owner = f"runner:{os.getpid()}"
             conn = connect(config.state.db)
             try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
-                # Hold the lock with an already-expired lease (as a long job's lease
-                # would lapse). process_batch must refresh it so a concurrent runner
-                # cannot reclaim the lock out from under an active deploy.
-                acquire_runner_lock(conn, owner=owner, ttl_minutes=-1)
+                enqueue_job(conn, task="a", branch="feature/a")
+                claimed = claim_all_queued(conn, owner=owner, ttl_minutes=-1)
                 before = get_lock(conn)
                 results = GitRunner(config).process_batch(
-                    conn, [job], deploy=False, owner=owner, ttl_minutes=30
+                    conn, claimed, deploy=False, owner=owner, ttl_minutes=30
                 )
                 after = get_lock(conn)
             finally:
@@ -162,6 +195,63 @@ class GitRunnerTests(unittest.TestCase):
             self.assertIsNotNone(after)
             # Lease advanced from expired (past) to valid (~30 min ahead).
             self.assertGreater(after.expires_at, before.expires_at)
+
+    def test_long_gate_heartbeats_and_cooperatively_cancels(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = f'{sys.executable} -c "import time; time.sleep(10)"'
+            repo, _marker = make_demo_repo(root, gate_command=gate)
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            claimed = claim_all_queued(conn, owner=owner, ttl_minutes=1)
+            token = claimed[0].claim_token
+            conn.close()
+
+            results: list = []
+            errors: list[Exception] = []
+
+            def run() -> None:
+                worker_conn = connect(config.state.db)
+                try:
+                    results.extend(
+                        GitRunner(config).process_batch(
+                            worker_conn,
+                            claimed,
+                            deploy=False,
+                            owner=owner,
+                            ttl_minutes=1,
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover - surfaced below
+                    errors.append(exc)
+                finally:
+                    worker_conn.close()
+
+            worker = threading.Thread(target=run)
+            worker.start()
+            time.sleep(0.5)
+            control = connect(config.state.db)
+            control.execute(
+                "UPDATE locks SET expires_at = '2000-01-01T00:00:00Z' WHERE token = ?",
+                (token,),
+            )
+            control.commit()
+            time.sleep(1.5)
+            self.assertGreater(get_lock(control).expires_at, "2000-01-01T00:00:00Z")
+            cancel_job(control, job.id)
+            control.close()
+            worker.join(timeout=6)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual([result.status for result in results], ["canceled"])
+            cleanup = connect(config.state.db)
+            try:
+                release_runner_lock(cleanup, owner=owner, token=token)
+            finally:
+                cleanup.close()
 
 
 if __name__ == "__main__":

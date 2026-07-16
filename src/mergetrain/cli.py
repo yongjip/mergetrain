@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -308,19 +309,35 @@ def _mode_from_args(args: argparse.Namespace) -> bool:
 
 
 def _results_payload(results: list[Job]) -> dict[str, Any]:
-    return {"ok": True, "jobs": [job.to_dict() for job in results]}
+    status_counts = Counter(job.status for job in results)
+    successful = sum(status_counts[status] for status in ("validated", "deployed"))
+    ok = successful == len(results)
+    if ok:
+        result = "success"
+    elif successful:
+        result = "partial"
+    else:
+        result = "failed"
+    return {
+        "ok": ok,
+        "result": result,
+        "counts": dict(sorted(status_counts.items())),
+        "jobs": [job.to_dict() for job in results],
+    }
 
 
 def cmd_run_next(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
     config = config_from_args(args)
     owner = default_owner()
+    lease_token = ""
     conn = connect(config.state.db)
     try:
         job = claim_next_job(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if job is None:
-            payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
+            payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
+            lease_token = job.claim_token
             result = GitRunner(config).process_one(
                 conn,
                 job,
@@ -331,7 +348,8 @@ def cmd_run_next(args: argparse.Namespace) -> int:
             )
             payload = _results_payload([result])
     finally:
-        release_runner_lock(conn, owner=owner)
+        if lease_token:
+            release_runner_lock(conn, owner=owner, token=lease_token)
         conn.close()
     if args.json:
         dump_json(payload)
@@ -341,7 +359,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
                 print(f"#{job_data['id']} {job_data['status']}: {job_data['branch']}")
         else:
             print(payload.get("note", "done"))
-    return 0
+    return 0 if payload["ok"] else 1
 
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
@@ -350,6 +368,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         raise QueueError("--train-id requires --deploy")
     config = config_from_args(args)
     owner = default_owner()
+    lease_token = ""
     conn = connect(config.state.db)
     try:
         if deploy:
@@ -362,8 +381,9 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if not jobs:
-            payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
+            payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
+            lease_token = jobs[0].claim_token
             results = GitRunner(config).process_batch(
                 conn,
                 jobs,
@@ -374,7 +394,8 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             )
             payload = _results_payload(results)
     finally:
-        release_runner_lock(conn, owner=owner)
+        if lease_token:
+            release_runner_lock(conn, owner=owner, token=lease_token)
         conn.close()
     if args.json:
         dump_json(payload)
@@ -384,7 +405,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 print(f"#{job_data['id']} {job_data['status']}: {job_data['branch']}")
         else:
             print(payload.get("note", "done"))
-    return 0
+    return 0 if payload["ok"] else 1
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:
@@ -467,7 +488,8 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     if args.json:
         dump_json({"ok": True, "job": job.to_dict()})
     else:
-        print(f"canceled job {job.id}: {job.branch}")
+        action = "cancellation requested for" if job.cancel_requested_at else "canceled"
+        print(f"{action} job {job.id}: {job.branch}")
     return 0
 
 
@@ -558,10 +580,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except KeyboardInterrupt:
-        print("mergetrain: interrupted", file=sys.stderr)
+        if getattr(args, "json", False):
+            dump_json({"ok": False, "error": {"code": "interrupted", "message": "interrupted"}})
+        else:
+            print("mergetrain: interrupted", file=sys.stderr)
         return 130
     except (MergetrainError, CommandFailed, ConfigError, QueueError) as exc:
-        print(f"mergetrain: error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            code = "".join(
+                [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]
+            ).lstrip("_")
+            dump_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": code,
+                        "message": str(exc),
+                        "retryable": type(exc).__name__ in {"LockHeld", "LostLease"},
+                    },
+                }
+            )
+        else:
+            print(f"mergetrain: error: {exc}", file=sys.stderr)
         return 1
 
 

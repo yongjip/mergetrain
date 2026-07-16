@@ -34,6 +34,42 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             load_yaml("project:\n  name: x\n bad-indent: y\n")
 
+    def test_explicit_empty_push_refs_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "git:\n  integration_branch: main\n  push_refs: []\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "at least one ref"):
+                load_config(repo=repo)
+
+    def test_omitted_push_refs_defaults_to_integration_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "git:\n  remote: origin\n  integration_branch: release\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(load_config(repo=repo).git.push_refs, ("release",))
+
+    def test_invalid_queue_timing_and_duplicate_gate_names_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "queue:\n  lock_ttl_minutes: 1\n  heartbeat_interval_seconds: 60\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "must be shorter"):
+                load_config(repo=repo)
+            (repo / ".mergetrain.yaml").write_text(
+                "gates:\n  - name: tests\n    run: echo true\n"
+                "deploy:\n  verify:\n    - name: tests\n      run: echo true\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "must be unique"):
+                load_config(repo=repo)
+
 
 if __name__ == "__main__":
     unittest.main()

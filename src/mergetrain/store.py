@@ -5,15 +5,17 @@ from __future__ import annotations
 import getpass
 import os
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .errors import LockHeld, QueueError
+from .errors import CancellationRequested, LockHeld, LostLease, QueueError
 from .models import ACTIVE_STATUSES, ALL_STATUSES, Job, RunnerLock, TERMINAL_STATUSES
 
 RUNNER_LOCK_NAME = "runner"
+SCHEMA_VERSION = 2
 
 
 class Liveness:
@@ -61,13 +63,26 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout = 5000")
     # WAL is not available for in-memory DBs, but SQLite quietly returns memory.
     conn.execute("PRAGMA journal_mode = WAL")
-    ensure_schema(conn)
+    try:
+        ensure_schema(conn)
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if version > SCHEMA_VERSION:
+        raise QueueError(
+            f"queue schema version {version} is newer than supported version {SCHEMA_VERSION}"
+        )
+    if version == SCHEMA_VERSION:
+        return
+
+    with immediate(conn):
+        conn.execute(
+            """
         CREATE TABLE IF NOT EXISTS deploy_queue (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           task TEXT NOT NULL,
@@ -88,35 +103,50 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           validated_at TEXT NOT NULL DEFAULT '',
           validation_base_sha TEXT NOT NULL DEFAULT '',
           validation_sha TEXT NOT NULL DEFAULT '',
-          validated_head_sha TEXT NOT NULL DEFAULT ''
-        );
-
+          validated_head_sha TEXT NOT NULL DEFAULT '',
+          claim_token TEXT NOT NULL DEFAULT '',
+          cancel_requested_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+        )
+        conn.execute(
+            """
         CREATE TABLE IF NOT EXISTS locks (
           name TEXT PRIMARY KEY,
           owner TEXT NOT NULL,
           worktree_path TEXT NOT NULL DEFAULT '',
           head_sha TEXT NOT NULL DEFAULT '',
           acquired_at TEXT NOT NULL,
-          expires_at TEXT NOT NULL
-        );
+          expires_at TEXT NOT NULL,
+          token TEXT NOT NULL DEFAULT ''
+        )
         """
-    )
-    migrations = (
-        "ALTER TABLE deploy_queue ADD COLUMN auto_deploy INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE deploy_queue ADD COLUMN train_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE deploy_queue ADD COLUMN train_size INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE deploy_queue ADD COLUMN validated_at TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE deploy_queue ADD COLUMN validation_base_sha TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE deploy_queue ADD COLUMN validation_sha TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE deploy_queue ADD COLUMN validated_head_sha TEXT NOT NULL DEFAULT ''",
-    )
-    for migration in migrations:
-        try:
-            conn.execute(migration)
-        except sqlite3.OperationalError as exc:
-            if "duplicate column name" not in str(exc).lower():
-                raise
-    conn.commit()
+        )
+
+        migrations = {
+            1: (
+                ("deploy_queue", "auto_deploy", "INTEGER NOT NULL DEFAULT 0"),
+                ("deploy_queue", "train_id", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "train_size", "INTEGER NOT NULL DEFAULT 0"),
+                ("deploy_queue", "validated_at", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "validation_base_sha", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "validation_sha", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "validated_head_sha", "TEXT NOT NULL DEFAULT ''"),
+            ),
+            2: (
+                ("deploy_queue", "claim_token", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "cancel_requested_at", "TEXT NOT NULL DEFAULT ''"),
+                ("locks", "token", "TEXT NOT NULL DEFAULT ''"),
+            ),
+        }
+        for next_version in range(version + 1, SCHEMA_VERSION + 1):
+            for table, column, definition in migrations[next_version]:
+                columns = {
+                    str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            conn.execute(f"PRAGMA user_version = {next_version}")
 
 
 def default_owner() -> str:
@@ -261,16 +291,27 @@ def _in_progress_count(conn: sqlite3.Connection) -> int:
 
 
 def _requeue_orphans(conn: sqlite3.Connection) -> None:
+    now = utc_now()
     conn.execute(
         """
         UPDATE deploy_queue
-        SET status = 'queued', started_at = '', note = 're-queued by mergetrain (previous runner gone)'
+        SET status = 'canceled', finished_at = ?, claim_token = '',
+            note = CASE WHEN note = '' THEN 'canceled after previous runner stopped' ELSE note END
+        WHERE status = 'in_progress' AND cancel_requested_at != ''
+        """,
+        (now,),
+    )
+    conn.execute(
+        """
+        UPDATE deploy_queue
+        SET status = 'queued', started_at = '', claim_token = '', cancel_requested_at = '',
+            note = 're-queued by mergetrain (previous runner gone)'
         WHERE status = 'in_progress'
         """
     )
 
 
-def acquire_runner_lock(
+def _acquire_runner_lock(
     conn: sqlite3.Connection,
     *,
     owner: str | None = None,
@@ -282,79 +323,112 @@ def acquire_runner_lock(
     owner = owner or default_owner()
     now = utc_now()
     expires = _plus_minutes(ttl_minutes)
-    with immediate(conn):
-        row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
-        if row is not None:
-            current_owner = str(row["owner"])
-            live = owner_liveness(current_owner)
-            expired = _parse_utc(str(row["expires_at"])) <= datetime.now(timezone.utc)
-            if live == Liveness.DEAD:
-                # Owner process is gone: reclaim immediately.
-                _delete_lock(conn, name=name)
-            elif not expired:
-                # Lease is still valid. A healthy runner refreshes its lease while
-                # working (see refresh_runner_lock), so a non-expired lease means the
-                # owner is genuinely active — never steal it, whether the PID looks
-                # alive or merely unknown. This is the concurrency guarantee.
-                raise LockHeld(f"runner lock is held by {live} owner: {current_owner}")
-            elif _in_progress_count(conn) > 0:
-                # Lease expired but jobs are still marked in_progress: a runner died
-                # mid-job. Refuse automatic reclaim so an operator can investigate.
-                raise LockHeld(
-                    f"expired runner lock ({live} owner {current_owner}) has in-progress jobs"
-                )
-            else:
-                # Lease expired with no in-progress work. The owner is not actively
-                # working: dead, hung, or a reused PID that merely looks alive. The
-                # stale lease is reclaimable — this removes the permanent-lock failure
-                # mode where a recycled PID kept an abandoned lock alive forever.
-                _delete_lock(conn, name=name)
+    token = uuid.uuid4().hex
+    row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
+    if row is not None:
+        current_owner = str(row["owner"])
+        live = owner_liveness(current_owner)
+        expired = _parse_utc(str(row["expires_at"])) <= datetime.now(timezone.utc)
+        if live == Liveness.DEAD:
+            _delete_lock(conn, name=name)
+            _requeue_orphans(conn)
+        elif not expired:
+            raise LockHeld(f"runner lock is held by {live} owner: {current_owner}")
+        elif _in_progress_count(conn) > 0:
+            raise LockHeld(
+                f"expired runner lock ({live} owner {current_owner}) has in-progress jobs"
+            )
         else:
-            if _in_progress_count(conn) > 0:
-                _requeue_orphans(conn)
-        conn.execute(
-            """
-            INSERT INTO locks (name, owner, worktree_path, head_sha, acquired_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (name, owner, worktree_path, head_sha, now, expires),
-        )
-    lock = get_lock(conn, name=name)
+            _delete_lock(conn, name=name)
+    elif _in_progress_count(conn) > 0:
+        _requeue_orphans(conn)
+    conn.execute(
+        """
+        INSERT INTO locks (name, owner, worktree_path, head_sha, acquired_at, expires_at, token)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (name, owner, worktree_path, head_sha, now, expires, token),
+    )
+    row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
+    lock = RunnerLock.from_row(row, liveness=owner_liveness(owner)) if row is not None else None
     assert lock is not None
     return lock
+
+
+def acquire_runner_lock(
+    conn: sqlite3.Connection,
+    *,
+    owner: str | None = None,
+    ttl_minutes: int = 30,
+    name: str = RUNNER_LOCK_NAME,
+    worktree_path: str = "",
+    head_sha: str = "",
+) -> RunnerLock:
+    with immediate(conn):
+        return _acquire_runner_lock(
+            conn,
+            owner=owner,
+            ttl_minutes=ttl_minutes,
+            name=name,
+            worktree_path=worktree_path,
+            head_sha=head_sha,
+        )
 
 
 def refresh_runner_lock(
     conn: sqlite3.Connection,
     *,
     owner: str,
+    token: str,
     ttl_minutes: int = 30,
     name: str = RUNNER_LOCK_NAME,
     worktree_path: str = "",
     head_sha: str = "",
+    check_cancel: bool = True,
 ) -> None:
+    if not token:
+        raise LostLease("runner lease token is missing")
     with immediate(conn):
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE locks
             SET expires_at = ?, worktree_path = ?, head_sha = ?
-            WHERE name = ? AND owner = ?
+            WHERE name = ? AND owner = ? AND token = ?
             """,
-            (_plus_minutes(ttl_minutes), worktree_path, head_sha, name, owner),
+            (_plus_minutes(ttl_minutes), worktree_path, head_sha, name, owner, token),
         )
+        if cur.rowcount != 1:
+            raise LostLease(f"runner lease is no longer owned by {owner}")
+        if check_cancel:
+            canceled = conn.execute(
+                """
+                SELECT 1 FROM deploy_queue
+                WHERE status = 'in_progress' AND claim_token = ? AND cancel_requested_at != ''
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+            if canceled is not None:
+                raise CancellationRequested("cancellation requested for the active train")
 
 
 def release_runner_lock(
     conn: sqlite3.Connection,
     *,
     owner: str | None = None,
+    token: str | None = None,
     name: str = RUNNER_LOCK_NAME,
 ) -> bool:
     with immediate(conn):
         if owner is None:
             cur = conn.execute("DELETE FROM locks WHERE name = ?", (name,))
+        elif token is not None:
+            cur = conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (name, owner, token),
+            )
         else:
-            cur = conn.execute("DELETE FROM locks WHERE name = ? AND owner = ?", (name, owner))
+            raise LostLease("runner lease token is required for owner-guarded release")
     return cur.rowcount > 0
 
 
@@ -365,18 +439,26 @@ def claim_next_job(
     ttl_minutes: int = 30,
 ) -> Job | None:
     owner = owner or default_owner()
-    acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
     with immediate(conn):
+        lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
         row = conn.execute(
             "SELECT * FROM deploy_queue WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
         ).fetchone()
         if row is None:
-            conn.execute("DELETE FROM locks WHERE name = ? AND owner = ?", (RUNNER_LOCK_NAME, owner))
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
             return None
         job_id = int(row["id"])
         conn.execute(
-            "UPDATE deploy_queue SET status = 'in_progress', started_at = ?, note = ? WHERE id = ?",
-            (utc_now(), "claimed by mergetrain runner", job_id),
+            """
+            UPDATE deploy_queue
+            SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
+                cancel_requested_at = ''
+            WHERE id = ? AND status = 'queued'
+            """,
+            (utc_now(), "claimed by mergetrain runner", lock.token, job_id),
         )
     return get_job(conn, job_id)
 
@@ -389,11 +471,34 @@ def claim_all_queued(
     auto_only: bool = False,
 ) -> list[Job]:
     owner = owner or default_owner()
-    acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
-    jobs = list_jobs_fifo(conn, status="queued", auto_only=auto_only)
-    if not jobs:
-        release_runner_lock(conn, owner=owner)
-    return jobs
+    with immediate(conn):
+        lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+        if auto_only:
+            rows = conn.execute(
+                "SELECT id FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 1 ORDER BY id ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id FROM deploy_queue WHERE status = 'queued' ORDER BY id ASC"
+            ).fetchall()
+        job_ids = [int(row["id"]) for row in rows]
+        if not job_ids:
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
+            return []
+        placeholders = ",".join("?" for _ in job_ids)
+        conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
+                cancel_requested_at = ''
+            WHERE id IN ({placeholders}) AND status = 'queued'
+            """,
+            (utc_now(), "claimed by mergetrain batch runner", lock.token, *job_ids),
+        )
+    return [get_job(conn, job_id) for job_id in job_ids]
 
 
 def validated_train_summaries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -460,8 +565,8 @@ def claim_deploy_batch(
     """Claim one exact validated train, or queued jobs when none is pending."""
 
     owner = owner or default_owner()
-    acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
-    try:
+    with immediate(conn):
+        lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
         summaries = validated_train_summaries(conn)
         if train_id:
             matches = [summary for summary in summaries if summary["train_id"] == train_id]
@@ -485,11 +590,32 @@ def claim_deploy_batch(
         else:
             jobs = list_jobs_fifo(conn, status="queued")
         if not jobs:
-            release_runner_lock(conn, owner=owner)
-        return jobs
-    except Exception:
-        release_runner_lock(conn, owner=owner)
-        raise
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
+            return []
+        job_ids = [job.id for job in jobs]
+        expected_status = "validated" if selected is not None else "queued"
+        placeholders = ",".join("?" for _ in job_ids)
+        cur = conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
+                cancel_requested_at = ''
+            WHERE id IN ({placeholders}) AND status = ?
+            """,
+            (
+                utc_now(),
+                "claimed by mergetrain deploy runner",
+                lock.token,
+                *job_ids,
+                expected_status,
+            ),
+        )
+        if cur.rowcount != len(job_ids):
+            raise QueueError("validated train changed while it was being claimed")
+    return [get_job(conn, job_id) for job_id in job_ids]
 
 
 def mark_job(
@@ -506,13 +632,23 @@ def mark_job(
     validation_base_sha: str = "",
     validation_sha: str = "",
     validated_head_sha: str = "",
+    expected_claim_token: str | None = None,
 ) -> Job:
     if status not in ALL_STATUSES:
         raise QueueError(f"unknown job status: {status}")
     finished_at = utc_now() if status in TERMINAL_STATUSES or status in {"blocked", "failed"} else ""
+    where = "id = ?"
+    where_values: list[Any] = [job_id]
+    if expected_claim_token is not None:
+        if not expected_claim_token:
+            raise LostLease("job claim token is missing")
+        where += " AND status = 'in_progress' AND claim_token = ?"
+        where_values.append(expected_claim_token)
+        if status not in {"canceled", "deployed"}:
+            where += " AND cancel_requested_at = ''"
     with immediate(conn):
-        conn.execute(
-            """
+        cur = conn.execute(
+            f"""
             UPDATE deploy_queue
             SET status = ?, deploy_sha = COALESCE(NULLIF(?, ''), deploy_sha),
                 log_path = COALESCE(NULLIF(?, ''), log_path), note = ?, finished_at = ?,
@@ -521,8 +657,13 @@ def mark_job(
                 validated_at = COALESCE(NULLIF(?, ''), validated_at),
                 validation_base_sha = COALESCE(NULLIF(?, ''), validation_base_sha),
                 validation_sha = COALESCE(NULLIF(?, ''), validation_sha),
-                validated_head_sha = COALESCE(NULLIF(?, ''), validated_head_sha)
-            WHERE id = ?
+                validated_head_sha = COALESCE(NULLIF(?, ''), validated_head_sha),
+                claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
+                cancel_requested_at = CASE
+                    WHEN ? IN ('in_progress', 'canceled') THEN cancel_requested_at
+                    ELSE ''
+                END
+            WHERE {where}
             """,
             (
                 status,
@@ -536,9 +677,19 @@ def mark_job(
                 validation_base_sha,
                 validation_sha,
                 validated_head_sha,
-                job_id,
+                status,
+                status,
+                *where_values,
             ),
         )
+        if cur.rowcount != 1:
+            row = conn.execute(
+                "SELECT status, claim_token, cancel_requested_at FROM deploy_queue WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is not None and str(row["cancel_requested_at"] or ""):
+                raise CancellationRequested(f"cancellation requested for job {job_id}")
+            raise LostLease(f"job {job_id} is no longer owned by this runner")
     return get_job(conn, job_id)
 
 
@@ -546,6 +697,29 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
     job = get_job(conn, job_id)
     if job.status in TERMINAL_STATUSES:
         raise QueueError(f"terminal job cannot be canceled: {job_id}")
+    if job.status == "in_progress":
+        requested_at = utc_now()
+        cancel_note = note or "cancellation requested by user"
+        with immediate(conn):
+            if job.claim_token:
+                conn.execute(
+                    """
+                    UPDATE deploy_queue
+                    SET cancel_requested_at = ?, note = ?
+                    WHERE status = 'in_progress' AND claim_token = ?
+                    """,
+                    (requested_at, cancel_note, job.claim_token),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE deploy_queue
+                    SET cancel_requested_at = ?, note = ?
+                    WHERE id = ? AND status = 'in_progress'
+                    """,
+                    (requested_at, cancel_note, job_id),
+                )
+        return get_job(conn, job_id)
     if job.status == "validated" and job.train_id:
         cancel_note = note or f"validated train {job.train_id} canceled by user"
         with immediate(conn):

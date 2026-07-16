@@ -186,9 +186,16 @@ dj=$("$MT" --repo "$NOCFG" doctor --json); drc=$?
 section "S1c  malformed config -> clean error, no traceback"
 R=$(setup s1c)
 printf 'project:\n  name: e2e\n bad-indent: x\n' > "$R/.mergetrain.yaml"
-err=$("$MT" --repo "$R" doctor --json 2>&1 >/dev/null); rc=$?
-{ [ "$rc" = 1 ] && printf '%s' "$err" | grep -q 'mergetrain: error' && ! printf '%s' "$err" | grep -q 'Traceback'; } \
+err=$("$MT" --repo "$R" doctor --json 2>&1); rc=$?
+{ [ "$rc" = 1 ] && [ "$(echo "$err" | jget error.code 2>/dev/null)" = "config_error" ] && ! printf '%s' "$err" | grep -q 'Traceback'; } \
   && ok "malformed config: clean error, exit 1, no traceback" || no "malformed config rc=$rc err=$err"
+
+section "S1d  explicit empty push refs fail closed"
+R=$(setup s1d)
+printf 'git:\n  remote: origin\n  integration_branch: main\n  push_refs: []\n' > "$R/.mergetrain.yaml"
+err=$("$MT" --repo "$R" doctor --json 2>&1); rc=$?
+{ [ "$rc" = 1 ] && [ "$(echo "$err" | jget error.code 2>/dev/null)" = "config_error" ] && echo "$err" | grep -q 'at least one ref'; } \
+  && ok "empty push_refs rejected instead of defaulting to main" || no "empty push_refs accepted: rc=$rc err=$err"
 
 section "S2/S3  enqueue, status, doctor, duplicate guard"
 R=$(setup s2); make_branch "$R" feature/a a.txt aaa
@@ -307,6 +314,7 @@ enq "$R" --task y --branch feature/y $ENQ >/dev/null 2>&1
 rb=$("$MT" --repo "$R" run-batch --deploy --json)
 allst=$(echo "$rb" | "$VPY" -c "import sys,json;print(','.join(sorted(j['status'] for j in json.load(sys.stdin)['jobs'])))")
 echo "    statuses: [$allst]"
+[ "$(echo "$rb" | jget result)" = "partial" ] && ok "partial batch reports result=partial" || no "partial result not reported"
 echo "$allst" | grep -q blocked && ok "conflicting job blocked" || no "no blocked: $allst"
 echo "$allst" | grep -q deployed && ok "other job deployed" || no "no deployed: $allst"
 
@@ -328,8 +336,9 @@ section "S9  gate failure -> failed, remote NOT updated"
 R=$(setup s9 gatefail); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
-[ "$(echo "$rb" | jget jobs.0.status)" = "failed" ] && ok "job failed on gate failure" || no "status not failed"
+rb=$("$MT" --repo "$R" run-batch --deploy --json); rc=$?
+{ [ "$rc" = 1 ] && [ "$(echo "$rb" | jget ok)" = "False" ] && [ "$(echo "$rb" | jget jobs.0.status)" = "failed" ]; } \
+  && ok "job failure returns ok=false and exit 1" || no "failure outcome incorrect: rc=$rc payload=$rb"
 [ "$before" = "$(remote_main "$(dirname "$R")")" ] && ok "remote UNCHANGED (no push on gate fail)" || no "remote changed despite gate fail!"
 [ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "fix_blocked_job" ] && ok "doctor=fix_blocked_job" || no "doctor next_action wrong"
 

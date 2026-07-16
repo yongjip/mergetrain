@@ -46,11 +46,11 @@ python -m unittest discover -s tests
 
 The suite covers the behaviors that make the queue safe:
 
-- **store** — increasing enqueue IDs; duplicate active-branch rejection; validated-train identity and exact deploy claims; validated branches excluded from GC; re-enqueue allowed after a terminal state; the runner lock blocks concurrent claims; orphan `in_progress` jobs are re-queued then reclaimed; stale-lock behavior; `auto_only` claims; whole-train cancellation; and additive legacy-DB migrations.
+- **store** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; orphan recovery; and versioned legacy-DB migrations.
 - **daemon** — `--once` processes only auto jobs and leaves manual jobs queued; repeated DB connections do not leak file descriptors; a tick exception releases the lock and leaves the job queued.
-- **git_runner** — `push_verified_head` uses the configured atomic refs; validation records an exact train; validated deploys rebuild safely after integration movement; changed task HEADs block deployment; initial batch failures still isolate individual jobs.
-- **cli** — `agent-contract --json` emits a machine-readable payload; status exposes validated train identity; `doctor --json` returns the correct `next_action`; global options work after the subcommand; `init --write` creates the generic files.
-- **config** — the built-in YAML subset parser reads the default config without PyYAML; defaults and path resolution work.
+- **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
+- **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, `doctor` next actions, global option normalization, and init output.
+- **config** — built-in YAML parsing, fail-closed deploy refs, positive queue timing, unique gate names, defaults, and path resolution.
 
 When adding behavior, add or extend the matching `tests/test_*.py` module.
 

@@ -48,6 +48,7 @@ def daemon_loop(
 
     try:
         while True:
+            lease_token = ""
             try:
                 conn = connect(db_path)
                 try:
@@ -59,23 +60,17 @@ def daemon_loop(
                             auto_only=True,
                         )
                         if jobs:
+                            lease_token = jobs[0].claim_token
                             say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
                             process_batch(conn, jobs)
                     else:
                         say("mergetrain daemon tick: no auto-approved queued jobs")
                 finally:
-                    release_runner_lock(conn, owner=actual_owner)
+                    if lease_token:
+                        release_runner_lock(conn, owner=actual_owner, token=lease_token)
                     conn.close()
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")
-                try:
-                    conn = connect(db_path)
-                    try:
-                        release_runner_lock(conn, owner=actual_owner)
-                    finally:
-                        conn.close()
-                except Exception:
-                    pass
             if once or should_stop:
                 break
             time.sleep(max(1, int(interval_seconds)))
