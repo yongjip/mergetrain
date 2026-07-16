@@ -3,60 +3,60 @@
 ## Evidence
 
 - Source visual truth: `/Users/yongjip/.codex/generated_images/019f6ab0-17e0-7e43-a4f9-4f080fd7505e/exec-b523bd1e-b6b9-4b57-9a89-ee9d5b8e7968.png`
-- Browser-rendered implementation: `/private/tmp/mergetrain-dashboard-final.png`
-- Full-view comparison: `/private/tmp/mergetrain-dashboard-comparison-final.png`
-- Focused main-track comparison: `/private/tmp/mergetrain-dashboard-focused-main.png`
-- Focused status-rail comparison: `/private/tmp/mergetrain-dashboard-focused-rail.png`
-- Responsive capture: `/private/tmp/mergetrain-dashboard-responsive.png`
+- User feedback source: `/var/folders/q_/dsp0jv093b56dl2zvd9dzjs00000gn/T/codex-clipboard-f7d7e0b8-6f1c-4b1c-ac07-6277e25d8c59.png`
+- Browser-rendered implementation: `/private/tmp/mergetrain-dashboard-clarity-viewport.png`
+- Full-view comparison: `/private/tmp/mergetrain-dashboard-clarity-comparison.png`
+- Focused Activity comparison: `/private/tmp/mergetrain-dashboard-activity-comparison.png`
+- Responsive capture: `/private/tmp/mergetrain-dashboard-clarity-responsive.png`
 - URL: `http://127.0.0.1:8765/`
-- Viewport: requested `1440 × 1024` CSS pixels; rendered client width `1425` because of the vertical scrollbar. Responsive check used `820 × 1180`.
-- State: three assembled jobs, train-wide gate 2 running, healthy local runner, one blocked historical job, live SSE connection.
+- Viewports: `1440 × 1024` desktop and `820 × 1180` responsive.
+- State: PREVIEW DATA, three assembled jobs, gate 3/4 (`e2e`) running, `diff-check` and `unit` complete, `package` waiting, active runner, one blocked historical job, connected SSE stream.
 
 ## Findings
 
-- No actionable P0, P1, or P2 mismatch remains.
-- [P3] Dynamic task names wrap to two lines in the implementation where the reference uses shorter single-line examples. The fixed two-line title area keeps real job cards aligned and prevents truncating useful task context, so this is accepted as resilient behavior.
-- [P3] The implementation represents the dynamic gate set with a count badge instead of four permanently rendered substep circles. This preserves the reference hierarchy without implying a fixed number of gates.
+- No actionable P0, P1, or P2 issue remains.
+- [P3] The added current-check panel makes the desktop page taller than the original visual target. This is accepted because the requested operational meaning, exact command, gate sequence, and scope now appear before the job cards without weakening the existing hierarchy.
+- [P3] At 820 px, the long Activity list naturally extends below the fold. It remains readable and has no horizontal overflow; a future density preference could offer a compact timeline without removing the default explanations.
 
 ## Required Fidelity Surfaces
 
-- Fonts and typography: bundled Inter Variable and JetBrains Mono Variable reproduce the reference's sans/mono hierarchy, weights, compact timestamps, and code labels. Long task and branch values wrap or truncate without changing card alignment.
-- Spacing and layout rhythm: the desktop frame keeps the header, main train track, activity timeline, and persistent right rail in the same visual order and proportion as the reference. Card spacing, dividers, border radii, and vertical rhythm are consistent. At 820 px the rail moves below the main content and job cards stack without horizontal overflow (`scrollWidth == clientWidth == 805`).
-- Colors and visual tokens: blue progress, green success/health, amber next action, red blocked state, navy text, warm-white background, and low-contrast dividers map directly to the reference semantics and retain readable contrast.
-- Image quality and asset fidelity: this dashboard has no photographic or illustrative imagery. Visible icons and the favicon use the bundled Phosphor icon family; no emoji, placeholder bitmap, handcrafted inline SVG, or CSS-drawn substitute is used.
-- Copy and content: headings, status messages, blocked reason, next safe action, and read-only footer are understandable without external context. Dynamic differences in job IDs, task names, and timestamps are expected test data, not design drift.
-- Icons and polish: icons share one stroke/fill family, align to text baselines, and change color consistently with state. The motion indicator stops under `prefers-reduced-motion: reduce`.
-- Accessibility: document landmarks, heading levels, named train/job regions, semantic time/code content, responsive text wrapping, and reduced-motion handling are present. The dashboard intentionally has no controls or mutation actions, so there are no keyboard-only interactions to exercise.
+- Fonts and typography: bundled Inter Variable and JetBrains Mono Variable remain consistent with the source. The new hierarchy uses a 24 px current-check title, 14 px explanations, and 10–12 px phase/state metadata. Commands truncate safely rather than stretching the layout.
+- Spacing and layout rhythm: the original header, train rail, job track, activity timeline, and right status rail remain in the same order and proportions. The current-check panel uses the existing 7 px radius, line weight, blue state token, and compact grid rhythm rather than introducing a different component language.
+- Colors and visual tokens: blue running, green complete, amber preview/next action, red blocked, gray started/waiting, navy text, warm-white background, and low-contrast separators preserve the source semantics. `STARTED` is deliberately neutral so a historical start event cannot look currently active.
+- Image quality and asset fidelity: there is no photographic or illustrative imagery. All visible icons remain from the bundled Phosphor family; there are no emoji, handcrafted SVGs, CSS illustrations, or placeholder assets.
+- Copy and content: `CONNECTED` now names the browser data channel, `Runner ACTIVE/IDLE` names process ownership, PREVIEW DATA explicitly says that synthetic commands are not executing, and every Activity row states its phase, effective state, explanation, and command/detail where available.
+- Accessibility and behavior: semantic landmarks and heading levels are intact; current gates use a named region and ordered list; preview data uses a status region; reduced motion remains supported. The dashboard has no controls or mutation actions, so there are no keyboard-only control paths to test.
 
 ## Browser and Functional Checks
 
-- Primary behavior: initial snapshot render, live SSE state, relative time updates, train/job progress, activity timeline, blocked history, next-safe-action explanation, and responsive recomposition.
-- Read-only contract: mutation methods return `405 read_only` in the automated server test.
-- Console: 0 errors and 0 warnings after the final navigation.
-- Network: `/api/snapshot` returned 200 and the page reported `LIVE`.
-- Desktop overflow: none (`scrollWidth == clientWidth == 1425`).
-- Responsive overflow at 820 px: none (`scrollWidth == clientWidth == 805`).
-- Focused comparisons were used because card typography, status semantics, runner health, blocked detail, and next-action copy were too small to judge reliably from the combined full view alone.
+- Primary behavior: initial snapshot, SSE-connected status, separate runner state, current gate summary, four-gate sequence, gate command, scope, elapsed time, Activity explanations, historical `STARTED` resolution, blocked history, and next-safe-action guidance.
+- Desktop: `window.innerWidth = 1440`, `clientWidth = scrollWidth = 1425`; no horizontal overflow.
+- Responsive: `window.innerWidth = 820`, `clientWidth = scrollWidth = 805`; no horizontal overflow.
+- Console: 0 warnings and 0 errors after the final desktop reload.
+- Read-only server behavior and preview labeling are covered by automated HTTP tests.
+- Focused comparison was required because the phase/state chips, explanatory copy, and distinction between `RUNNING`, `COMPLETE`, and historical `STARTED` are too small to judge from the full-view comparison alone.
 
 ## Comparison History
 
-1. Initial comparison found P2 font loading and asset issues: the inlined mono subset was blocked by the CSP and the favicon returned 404. The build now emits self-hosted font files, retains `font-src 'self'`, and generates a Phosphor-based favicon. The post-fix desktop capture renders without font artifacts or console errors.
-2. The next comparison found a P2 state-semantics issue: jobs already merged into the train could still appear waiting during train-wide gates. Runner events now record each job's assembly result, the snapshot exposes completed job IDs, and cards correctly show assembly complete while the gate phase remains train-wide. Activity suppresses redundant per-job merge noise when a batch-level assembly event exists.
-3. The accessibility pass found a P2 continuous-motion gap. A reduced-motion media query now disables the live spinner animation. Browser inspection confirmed the rule is present in the loaded production stylesheet.
-4. Final full-view and focused comparisons found no remaining actionable P0/P1/P2 issue. The two P3 differences above are intentional data-resilience choices.
+1. The user feedback image exposed a P1 semantic ambiguity: `LIVE` described the SSE connection but looked like runner execution, and synthetic QA data looked operational. The header now says `CONNECTED`; Runner separately says `ACTIVE` or `IDLE`; `--preview` adds both a PREVIEW badge and a plain-language banner stating that no shown command is executing.
+2. The same image exposed a P1 gate identity mismatch: the phase badge showed four gates while Activity said `2/3`. The snapshot now derives one shared gate total, structured names, indexes, states, and current gate from runner events. The final evidence consistently shows `Gate 3 of 4 · e2e` and the ordered `diff-check → unit → e2e → package` sequence.
+3. The first clarity implementation still showed an old `Assembling validated train` start event as `RUNNING` after a later assembly success. This was a P1 truthfulness defect. Activity now resolves historical active events against later terminal events and labels them `STARTED`; only the unresolved latest gate remains `RUNNING`.
+4. The initial Activity rows had a P2 comprehension gap: messages and raw details did not explain purpose or distinguish commands from context. Each row now has phase/state metadata, purpose copy, and a command treatment only for gates; non-command context is labeled `DETAIL`.
+5. Final full-view, focused Activity, and responsive comparisons found no remaining actionable P0/P1/P2 issue.
 
 ## Implementation Checklist
 
-- [x] Match the selected Live Track / Signal Board direction.
-- [x] Preserve truthful train-wide and per-job status semantics.
-- [x] Bundle fonts and icon assets under the local CSP.
-- [x] Verify live desktop rendering with zero console errors.
-- [x] Verify responsive stacking and zero horizontal overflow.
-- [x] Support reduced motion.
-- [x] Keep every dashboard surface read-only.
+- [x] Separate browser connectivity from runner execution.
+- [x] Mark synthetic data unambiguously.
+- [x] Show the exact current gate, position, purpose, command, scope, and elapsed time.
+- [x] Show the complete ordered gate set and per-gate state.
+- [x] Explain every visible Activity milestone.
+- [x] Resolve historical starts so they do not look currently active.
+- [x] Preserve the local read-only contract and responsive layout.
+- [x] Verify zero browser console errors and zero horizontal overflow.
 
 ## Follow-up Polish
 
-- If a future compact mode is added, allow users to choose one-line task titles; keep the current two-line default for operational clarity.
+- Consider an optional compact Activity density after real-world use confirms whether operators prefer five detailed rows or more terse history.
 
 final result: passed

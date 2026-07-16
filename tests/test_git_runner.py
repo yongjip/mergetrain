@@ -12,7 +12,7 @@ from pathlib import Path
 
 from mergetrain.config import load_config
 from mergetrain.errors import CommandFailed
-from mergetrain.git_runner import GitRunner, run_shell
+from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.store import (
     cancel_job,
     claim_all_queued,
@@ -86,6 +86,15 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_dashboard_command_masks_obvious_secret_values(self) -> None:
+        rendered = _dashboard_command(
+            "TEST_TOKEN=fixture-value run-check --password fixture-password"
+        )
+        self.assertEqual(
+            rendered,
+            "TEST_TOKEN=[redacted] run-check --password [redacted]",
+        )
+
     def test_managed_command_timeout_terminates_process_group(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             started = time.monotonic()
@@ -125,6 +134,8 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
             self.assertIn("Merged feature/a", [event.message for event in events])
             self.assertIn("Running gate 2/2: marker", [event.message for event in events])
+            running_gate = next(event for event in events if event.message == "Running gate 2/2: marker")
+            self.assertEqual(running_gate.detail, config.gates[0].run)
 
     def test_validated_batch_deploys_after_integration_ref_moves(self) -> None:
         with tempfile.TemporaryDirectory() as td:

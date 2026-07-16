@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -26,13 +27,29 @@ from .models import Job
 from .store import get_job, mark_job, record_run_event, refresh_runner_lock, utc_now
 
 Pulse = Callable[[], None]
-GateProgress = Callable[[str, str, int, int], None]
+GateProgress = Callable[[str, str, int, int, str], None]
+
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|CREDENTIAL)[A-Z0-9_]*)=([^\s]+)"
+)
+_SENSITIVE_OPTION = re.compile(
+    r"(?i)(--(?:token|secret|password|passwd|api[-_]?key|credential)(?:=|\s+))([^\s]+)"
+)
 
 
 def _render_command(command: Sequence[str] | str) -> str:
     if isinstance(command, str):
         return command
     return " ".join(str(part) for part in command)
+
+
+def _dashboard_command(command: Sequence[str] | str) -> str:
+    """Render a bounded gate command while masking obvious inline secrets."""
+
+    rendered = _render_command(command)
+    rendered = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", rendered)
+    rendered = _SENSITIVE_OPTION.sub(r"\1[redacted]", rendered)
+    return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
 
 
 def _stop_process(process: subprocess.Popen[str]) -> None:
@@ -436,10 +453,11 @@ class GitRunner:
         on_gate: GateProgress | None = None,
     ) -> None:
         total = 1 + len(self.config.gates)
+        diff_command = ["git", "diff", "--check", f"{self.config.git.integration_ref}..HEAD"]
         if on_gate:
-            on_gate("diff-check", "active", 1, total)
+            on_gate("diff-check", "active", 1, total, _dashboard_command(diff_command))
         run_command(
-            ["git", "diff", "--check", f"{self.config.git.integration_ref}..HEAD"],
+            diff_command,
             cwd=worktree,
             log=log,
             pulse=pulse,
@@ -447,13 +465,13 @@ class GitRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         if on_gate:
-            on_gate("diff-check", "success", 1, total)
+            on_gate("diff-check", "success", 1, total, _dashboard_command(diff_command))
         for index, gate in enumerate(self.config.gates, start=2):
             if on_gate:
-                on_gate(gate.name, "active", index, total)
+                on_gate(gate.name, "active", index, total, _dashboard_command(gate.run))
             self._run_gate(gate, worktree=worktree, log=log, pulse=pulse)
             if on_gate:
-                on_gate(gate.name, "success", index, total)
+                on_gate(gate.name, "success", index, total, _dashboard_command(gate.run))
 
     def _run_verify_hooks(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None
@@ -565,7 +583,7 @@ class GitRunner:
         normal_pulse = lambda: pulse(check_cancel=True)
         ownership_pulse = lambda: pulse(check_cancel=False)
 
-        def gate_progress(name: str, state: str, index: int, total: int) -> None:
+        def gate_progress(name: str, state: str, index: int, total: int, command: str) -> None:
             verb = "Running" if state == "active" else "Passed"
             self._event(
                 conn,
@@ -574,6 +592,7 @@ class GitRunner:
                 phase="gating",
                 state=state,
                 message=f"{verb} gate {index}/{total}: {name}",
+                detail=command,
             )
 
         with log_path.open("w", encoding="utf-8") as log:
@@ -793,7 +812,7 @@ class GitRunner:
         normal_pulse = lambda: pulse(check_cancel=True)
         ownership_pulse = lambda: pulse(check_cancel=False)
 
-        def gate_progress(name: str, state: str, index: int, total: int) -> None:
+        def gate_progress(name: str, state: str, index: int, total: int, command: str) -> None:
             verb = "Running" if state == "active" else "Passed"
             self._event(
                 conn,
@@ -801,6 +820,7 @@ class GitRunner:
                 phase="gating",
                 state=state,
                 message=f"{verb} gate {index}/{total}: {name}",
+                detail=command,
             )
 
         def finish(item: Job, **values) -> Job:

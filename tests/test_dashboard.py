@@ -46,13 +46,45 @@ class DashboardTests(unittest.TestCase):
                     state="success",
                     message=f"Merged {claimed[0].branch}",
                 )
+                record_run_event(
+                    conn,
+                    claim_token=claimed[0].claim_token,
+                    phase="gating",
+                    state="success",
+                    message="Passed gate 1/2: diff-check",
+                    detail="git diff --check origin/main..HEAD",
+                )
+                record_run_event(
+                    conn,
+                    claim_token=claimed[0].claim_token,
+                    phase="gating",
+                    state="active",
+                    message="Running gate 2/2: diff-check",
+                    detail="git diff --check ${integration_ref}..HEAD",
+                )
             finally:
                 conn.close()
 
             payload = build_dashboard_snapshot(config)
             self.assertEqual(payload["train"]["selection"], "running")
-            self.assertEqual(payload["progress"]["phase"], "assembling")
+            self.assertEqual(payload["progress"]["phase"], "gating")
             self.assertEqual(payload["progress"]["completed_job_ids"], [claimed[0].id])
+            self.assertNotIn("gating", payload["progress"]["completed_phases"])
+            self.assertEqual(
+                payload["progress"]["current_gate"],
+                {
+                    "index": 2,
+                    "total": 2,
+                    "name": "diff-check",
+                    "state": "active",
+                    "command": "git diff --check ${integration_ref}..HEAD",
+                    "started_at": payload["progress"]["updated_at"],
+                },
+            )
+            self.assertEqual(
+                [gate["state"] for gate in payload["progress"]["gates"]],
+                ["success", "active"],
+            )
             self.assertEqual(payload["lock"]["owner"], f"local:{os.getpid()}")
             self.assertIn("heartbeat_at", payload["lock"])
             self.assertNotIn("worktree_path", payload["jobs"][0])
@@ -68,7 +100,7 @@ class DashboardTests(unittest.TestCase):
     def test_http_server_serves_read_only_api_and_static_assets(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             config = self.make_config(Path(td))
-            server = create_server(config, host="127.0.0.1", port=0)
+            server = create_server(config, host="127.0.0.1", port=0, preview=True)
             worker = threading.Thread(target=server.serve_forever, daemon=True)
             worker.start()
             host, port = server.server_address
@@ -79,6 +111,7 @@ class DashboardTests(unittest.TestCase):
                 payload = json.loads(response.read())
                 self.assertEqual(response.status, 200)
                 self.assertTrue(payload["ok"])
+                self.assertTrue(payload["project"]["preview"])
                 self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
                 self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
                 connection.close()

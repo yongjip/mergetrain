@@ -56,7 +56,7 @@ def _safe_static_path(raw_path: str) -> Path | None:
     return candidate
 
 
-def make_handler(config: MergetrainConfig) -> type[BaseHTTPRequestHandler]:
+def make_handler(config: MergetrainConfig, *, preview: bool = False) -> type[BaseHTTPRequestHandler]:
     class DashboardHandler(BaseHTTPRequestHandler):
         server_version = "mergetrain-dashboard"
         sys_version = ""
@@ -106,10 +106,10 @@ def make_handler(config: MergetrainConfig) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             path = urlsplit(self.path).path
             if path == "/api/health":
-                self._send_json({"ok": True, "mode": "read-only"})
+                self._send_json({"ok": True, "mode": "read-only", "preview": preview})
                 return
             if path == "/api/snapshot":
-                self._send_json(build_dashboard_snapshot(config))
+                self._send_json(build_dashboard_snapshot(config, preview=preview))
                 return
             if path == "/api/events":
                 self._serve_events()
@@ -144,7 +144,7 @@ def make_handler(config: MergetrainConfig) -> type[BaseHTTPRequestHandler]:
             last_body = b""
             try:
                 while True:
-                    body = _json_bytes(build_dashboard_snapshot(config))
+                    body = _json_bytes(build_dashboard_snapshot(config, preview=preview))
                     if body != last_body:
                         self.wfile.write(b"event: snapshot\n")
                         self.wfile.write(b"data: " + body + b"\n\n")
@@ -162,10 +162,11 @@ def create_server(
     *,
     host: str = "127.0.0.1",
     port: int = 8765,
+    preview: bool = False,
 ) -> DashboardHTTPServer:
     if not STATIC_ROOT.joinpath("index.html").is_file():
         raise FileNotFoundError("dashboard assets are missing from this installation")
-    return DashboardHTTPServer((host, port), make_handler(config))
+    return DashboardHTTPServer((host, port), make_handler(config, preview=preview))
 
 
 def serve_dashboard(
@@ -173,9 +174,10 @@ def serve_dashboard(
     *,
     host: str = "127.0.0.1",
     port: int = 8765,
+    preview: bool = False,
     ready: Callable[[str], None] | None = None,
 ) -> None:
-    server = create_server(config, host=host, port=port)
+    server = create_server(config, host=host, port=port, preview=preview)
     actual_port = int(server.server_address[1])
     url = f"http://{host}:{actual_port}/"
     if ready:

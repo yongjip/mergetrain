@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .config import MergetrainConfig
@@ -27,6 +28,8 @@ PHASES = (
     "verifying",
     "complete",
 )
+
+GATE_EVENT = re.compile(r"^(?:Running|Passed) gate (\d+)/(\d+): (.+)$")
 
 
 def next_action(payload: dict[str, Any]) -> str:
@@ -88,7 +91,12 @@ def _selected_jobs(conn) -> tuple[list[Job], str]:
     return [], "idle"
 
 
-def _progress(selected_jobs: list[Job], events, selection: str) -> dict[str, Any]:
+def _progress(
+    selected_jobs: list[Job],
+    events,
+    selection: str,
+    gate_names: tuple[str, ...],
+) -> dict[str, Any]:
     token = next((job.claim_token for job in selected_jobs if job.claim_token), "")
     run_events = [event for event in events if token and event.claim_token == token]
     latest = run_events[-1] if run_events else None
@@ -112,8 +120,30 @@ def _progress(selected_jobs: list[Job], events, selection: str) -> dict[str, Any
 
     completed: list[str] = []
     completed_job_ids: list[int] = []
+    gate_events: dict[int, dict[str, Any]] = {}
+    latest_gate: dict[str, Any] | None = None
+    all_gates_passed = False
     for event in run_events:
-        if event.state == "success" and event.phase in PHASES and event.phase not in completed:
+        gate_match = GATE_EVENT.match(event.message)
+        if gate_match:
+            gate_index = int(gate_match.group(1))
+            latest_gate = {
+                "index": gate_index,
+                "total": int(gate_match.group(2)),
+                "name": gate_match.group(3),
+                "state": event.state,
+                "command": event.detail,
+                "started_at": event.created_at,
+            }
+            gate_events[gate_index] = latest_gate
+        if event.phase == "gating" and event.state == "success" and event.message == "All train gates passed":
+            all_gates_passed = True
+        phase_completed = event.state == "success" and event.phase in PHASES
+        if event.phase == "gating" and not all_gates_passed:
+            phase_completed = False
+        if event.phase == "assembling" and event.job_id is not None and len(selected_jobs) > 1:
+            phase_completed = False
+        if phase_completed and event.phase not in completed:
             completed.append(event.phase)
         if (
             event.state == "success"
@@ -122,16 +152,44 @@ def _progress(selected_jobs: list[Job], events, selection: str) -> dict[str, Any
             and event.job_id not in completed_job_ids
         ):
             completed_job_ids.append(event.job_id)
+    gate_progress: list[dict[str, Any]] = []
+    for index, name in enumerate(gate_names, start=1):
+        observed = gate_events.get(index)
+        if all_gates_passed:
+            gate_state = "success"
+        elif observed:
+            gate_state = observed["state"]
+        elif latest_gate and index < latest_gate["index"]:
+            gate_state = "success"
+        else:
+            gate_state = "waiting"
+        gate_progress.append(
+            {
+                "index": index,
+                "total": len(gate_names),
+                "name": name,
+                "state": gate_state,
+                "command": observed["command"] if observed else "",
+            }
+        )
+
+    current_gate = None
+    if latest and latest.phase == "gating" and latest.message != "All train gates passed":
+        current_gate = latest_gate
+
     started_at = next((job.started_at for job in selected_jobs if job.started_at), "")
     return {
         "phase": phase,
         "state": state,
         "message": message,
+        "detail": latest.detail if latest else "",
         "job_id": latest.job_id if latest else None,
         "started_at": started_at,
         "updated_at": updated_at,
         "completed_phases": completed,
         "completed_job_ids": completed_job_ids,
+        "gates": gate_progress,
+        "current_gate": current_gate,
     }
 
 
@@ -140,6 +198,7 @@ def build_dashboard_snapshot(
     *,
     job_limit: int = 50,
     event_limit: int = 40,
+    preview: bool = False,
 ) -> dict[str, Any]:
     """Build one stable, read-only payload for the browser."""
 
@@ -149,6 +208,7 @@ def build_dashboard_snapshot(
         selected_jobs, selection = _selected_jobs(conn)
         raw_events = list_run_events(conn, limit=event_limit)
         lock = _public_lock(get_lock(conn))
+        gate_names = ("diff-check", *(gate.name for gate in config.gates))
         payload: dict[str, Any] = {
             "ok": True,
             "generated_at": utc_now(),
@@ -156,7 +216,12 @@ def build_dashboard_snapshot(
                 "name": config.project.name,
                 "integration_ref": config.git.integration_ref,
                 "config_exists": config.config_exists,
-                "gate_count": 1 + len(config.gates),
+                "preview": preview,
+                "gate_count": len(gate_names),
+                "gates": [
+                    {"index": index, "name": name, "kind": "built-in" if index == 1 else "configured"}
+                    for index, name in enumerate(gate_names, start=1)
+                ],
                 "verify_count": len(config.deploy.verify),
             },
             "counts": counts(conn),
@@ -169,7 +234,7 @@ def build_dashboard_snapshot(
             "events": [event.to_dict() for event in raw_events],
             "validated_trains": validated_train_summaries(conn),
         }
-        payload["progress"] = _progress(selected_jobs, raw_events, selection)
+        payload["progress"] = _progress(selected_jobs, raw_events, selection, gate_names)
         payload["next_action"] = next_action(payload)
         return payload
     finally:

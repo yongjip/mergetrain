@@ -72,7 +72,9 @@ mergetrain run-batch --deploy
 
 The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
 runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
-and the next safe action. It has no mutation endpoints or deploy controls.
+the exact current gate and command template, and the next safe action. `CONNECTED`
+describes the browser's data stream; `RUNNER ACTIVE` separately describes the
+process that owns the train. It has no mutation endpoints or deploy controls.
 
 Validation records an exact train identity, including every task HEAD and the
 integration base used for the check. The later deploy reassembles that same

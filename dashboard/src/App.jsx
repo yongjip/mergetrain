@@ -9,10 +9,13 @@ import {
   GitBranch,
   Heartbeat,
   HourglassHigh,
+  Info,
+  ListChecks,
   Pulse,
   ShieldCheck,
   SpinnerGap,
   StackSimple,
+  TerminalWindow,
   Timer,
   WarningCircle,
   WifiHigh,
@@ -40,6 +43,51 @@ const ACTIONS = {
   gc_available: ["Clean up completed worktrees.", "Review the dry run before applying cleanup."],
   enqueue_clean_branch: ["Enqueue a committed task branch.", "The queue is ready for the next clean job."],
 };
+
+const STATE_LABELS = {
+  active: "RUNNING",
+  success: "COMPLETE",
+  done: "COMPLETE",
+  warning: "ATTENTION",
+  error: "FAILED",
+  failed: "FAILED",
+  queued: "WAITING",
+  waiting: "WAITING",
+  started: "STARTED",
+  idle: "IDLE",
+};
+
+const PHASE_LABELS = Object.fromEntries(PHASES.map(([key, label]) => [key, label.toUpperCase()]));
+
+function gateDescription(name = "") {
+  const normalized = name.toLowerCase();
+  if (normalized === "diff-check") return "Checks the assembled Git diff for whitespace errors and conflict markers.";
+  if (normalized.includes("e2e") || normalized.includes("integration")) return "Exercises the installed CLI across real validation, merge, deploy, and recovery workflows.";
+  if (normalized.includes("unit") || normalized === "test" || normalized === "tests") return "Runs the project's fast automated tests against the assembled train.";
+  if (normalized.includes("package") || normalized.includes("build")) return "Confirms the project can be built and packaged from the assembled train.";
+  if (normalized.includes("lint") || normalized.includes("format")) return "Checks source consistency before this train can move forward.";
+  if (normalized.includes("security") || normalized.includes("audit")) return "Checks the assembled train for configured security policy violations.";
+  return "Runs a project-defined safety check against the entire assembled train.";
+}
+
+function eventDescription(event, jobCount) {
+  if (event.phase === "claiming") return `Reserved ${jobCount || "the selected"} job${jobCount === 1 ? "" : "s"} for one runner so no second process can deploy the same work.`;
+  if (event.phase === "fetching") return "Refreshed the integration baseline and prepared an isolated worktree for this run.";
+  if (event.phase === "assembling") return event.state === "success"
+    ? `Merged the selected branches into one isolated ${jobCount ? `${jobCount}-job` : "multi-job"} train.`
+    : event.state === "started"
+      ? "Started combining the selected branches in queue order before any gate ran."
+      : "Combining the selected branches in queue order before any gate runs.";
+  if (event.phase === "gating") {
+    const gateName = event.message.match(/gate \d+\/\d+: (.+)$/)?.[1] || "";
+    return gateDescription(gateName);
+  }
+  if (event.phase === "ready") return "The exact train identity is validated and waiting for explicit deploy approval.";
+  if (event.phase === "pushing") return "Atomically updating the configured remote refs with the validated train.";
+  if (event.phase === "verifying") return "Checking the deployed refs after the atomic push completed.";
+  if (event.phase === "complete") return "The runner finished this train and released its lease.";
+  return "A structured milestone emitted by the local mergetrain runner.";
+}
 
 function parseTime(value) {
   const time = value ? Date.parse(value) : Number.NaN;
@@ -106,9 +154,13 @@ function phaseState(key, index, snapshot) {
     if (snapshot.train.selection === "queued") return "active";
     return snapshot.train.jobs.length ? "done" : "waiting";
   }
-  if (progress.completed_phases?.includes(key)) return "done";
   if (index < current) return "done";
-  if (index === current) return progress.state === "queued" ? "waiting" : "active";
+  if (index === current) {
+    if (key === "gating" && progress.gates?.some((gate) => gate.state !== "success")) return "active";
+    if (progress.state === "success") return "done";
+    return progress.state === "queued" || progress.state === "idle" ? "waiting" : "active";
+  }
+  if (progress.completed_phases?.includes(key)) return "done";
   return "waiting";
 }
 
@@ -122,18 +174,29 @@ function StatusIcon({ state, size = 22 }) {
 
 function Header({ snapshot, connection, now }) {
   const generated = relative(snapshot.generated_at, now);
-  const connectionLabel = connection === "live" ? "LIVE" : connection === "offline" ? "OFFLINE" : "POLLING";
+  const connectionLabel = connection === "live" ? "CONNECTED" : connection === "offline" ? "DISCONNECTED" : "POLLING";
   return (
     <header className="topbar">
       <div className="brand"><StackSimple size={34} weight="bold" /><strong>mergetrain</strong></div>
       <div className="context"><FileCode size={19} /><span>{snapshot.project.name}</span></div>
       <div className="context"><GitBranch size={19} /><span>{snapshot.project.integration_ref}</span></div>
       <span className="local-badge">LOCAL</span>
+      {snapshot.project.preview && <span className="preview-badge">PREVIEW</span>}
       <div className="topbar-spacer" />
       <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
       <div className="context divider"><Clock size={19} /><span>{clockTime(now)}</span></div>
       <div className="context divider"><CalendarBlank size={19} /><span>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(now)}</span></div>
     </header>
+  );
+}
+
+function PreviewBanner() {
+  return (
+    <div className="preview-banner" role="status">
+      <Info size={18} weight="fill" />
+      <strong>Preview data</strong>
+      <span>Synthetic runner events for UI review. No gate command shown here is actually executing.</span>
+    </div>
   );
 }
 
@@ -179,6 +242,55 @@ function PhaseRail({ snapshot }) {
   );
 }
 
+function CurrentWork({ snapshot, now }) {
+  if (snapshot.train.selection !== "running") return null;
+  const progress = snapshot.progress;
+  const gate = progress.current_gate;
+  const state = gate?.state || progress.state;
+  const title = gate
+    ? `Gate ${gate.index} of ${gate.total} · ${gate.name}`
+    : progress.message;
+  const description = gate
+    ? gateDescription(gate.name)
+    : eventDescription({ phase: progress.phase, state: progress.state, message: progress.message }, snapshot.train.jobs.length);
+  const command = gate?.command || progress.detail;
+  const stepStarted = parseTime(gate?.started_at || progress.updated_at);
+  const elapsed = stepStarted ? duration((now - stepStarted) / 1000) : "—";
+  const scope = progress.job_id ? `Job #${progress.job_id}` : `Entire train · ${snapshot.train.jobs.length} jobs`;
+
+  return (
+    <section className="current-work" aria-labelledby="current-work-title">
+      <div className="current-work-heading">
+        <span className="eyebrow"><TerminalWindow size={18} />Current check</span>
+        <span className={`state-pill ${state}`}>{STATE_LABELS[state] || state.toUpperCase()}</span>
+      </div>
+      <div className="current-work-summary">
+        <div>
+          <h2 id="current-work-title">{title}</h2>
+          <p>{description}</p>
+        </div>
+        <dl>
+          <div><dt>Scope</dt><dd>{scope}</dd></div>
+          <div><dt>Elapsed</dt><dd>{elapsed}</dd></div>
+        </dl>
+      </div>
+      {command && <div className="current-command"><TerminalWindow size={17} /><code>{command}</code></div>}
+      {!!progress.gates?.length && (
+        <ol className="gate-list" aria-label="Configured gates">
+          {progress.gates.map((item) => (
+            <li className={item.state} key={item.index}>
+              <StatusIcon state={item.state} size={18} />
+              <span>{item.index}</span>
+              <strong>{item.name}</strong>
+              <small>{STATE_LABELS[item.state] || "WAITING"}</small>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function JobCards({ snapshot }) {
   const jobs = snapshot.train.jobs;
   if (!jobs.length) {
@@ -208,7 +320,7 @@ function JobCards({ snapshot }) {
   );
 }
 
-function Activity({ events }) {
+function Activity({ events, jobCount }) {
   const hasTrainAssembly = events.some((event) => event.phase === "assembling" && event.job_id === null);
   const visible = events
     .filter((event) => !(hasTrainAssembly && event.phase === "assembling" && event.job_id !== null))
@@ -216,16 +328,39 @@ function Activity({ events }) {
     .reverse();
   return (
     <section className="activity">
-      <h2>Activity</h2>
+      <div className="activity-heading">
+        <h2>Activity</h2>
+        <span>Newest first · runner milestones</span>
+      </div>
       {!visible.length && <p className="empty-copy">Runner events will appear here as the train moves.</p>}
       <div className="activity-list">
-        {visible.map((event) => (
-          <article className={`activity-row ${event.state}`} key={event.id}>
+        {visible.map((event) => {
+          const resolved = event.state === "active" && events.some((later) => (
+            later.id > event.id
+            && later.phase === event.phase
+            && later.job_id === event.job_id
+            && ["success", "warning", "error"].includes(later.state)
+          ));
+          const displayState = resolved ? "started" : event.state;
+          const displayEvent = { ...event, state: displayState };
+          return (
+          <article className={`activity-row ${displayState}`} key={event.id}>
             <time>{clockTime(event.created_at)}</time>
-            <span className="event-icon"><StatusIcon state={event.state === "success" ? "done" : event.state} size={19} /></span>
-            <div><strong>{event.message}</strong>{event.detail && <small>{event.detail}</small>}</div>
+            <span className="event-icon"><StatusIcon state={displayState === "success" ? "done" : displayState} size={19} /></span>
+            <div className="event-copy">
+              <div className="event-labels">
+                <span className="phase-pill">{PHASE_LABELS[event.phase] || event.phase.toUpperCase()}</span>
+                <span className={`state-pill ${displayState}`}>{STATE_LABELS[displayState] || displayState.toUpperCase()}</span>
+              </div>
+              <strong>{event.message}</strong>
+              <p>{eventDescription(displayEvent, jobCount)}</p>
+              {event.detail && (event.phase === "gating"
+                ? <div className="event-command"><TerminalWindow size={15} /><code>{event.detail}</code></div>
+                : <div className="event-detail"><span>DETAIL</span><code>{event.detail}</code></div>)}
+            </div>
           </article>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -236,8 +371,9 @@ function RunnerPanel({ snapshot, now }) {
   const alive = lock?.liveness === "alive";
   return (
     <section className="rail-section runner-section">
-      <div className="rail-heading"><h2>Runner</h2><span className={alive ? "healthy" : "muted"}><i />{lock?.owner || "idle"}</span></div>
+      <div className="rail-heading"><h2>Runner</h2><span className={`state-pill ${alive ? "active" : "idle"}`}>{alive ? "ACTIVE" : "IDLE"}</span></div>
       <dl>
+        <div><dt><ListChecks size={22} />Owner</dt><dd><code>{lock?.owner || "—"}</code></dd></div>
         <div><dt><Heartbeat size={22} />Health</dt><dd className={alive ? "healthy" : "muted"}>{alive ? "Healthy" : "Idle"}</dd></div>
         <div><dt><Pulse size={22} />Heartbeat</dt><dd className={alive ? "healthy" : "muted"}>{lock ? relative(lock.heartbeat_at, now) : "—"}</dd></div>
         <div><dt><Timer size={22} />Lease expires</dt><dd className="attention">{lock ? relative(lock.expires_at, now) : "—"}</dd></div>
@@ -329,12 +465,14 @@ export function App() {
   return (
     <div className="app-shell">
       <Header snapshot={snapshot} connection={connection} now={now} />
+      {snapshot.project.preview && <PreviewBanner />}
       <div className="dashboard-grid">
         <main className="main-column">
           <Hero snapshot={snapshot} now={now} />
           <PhaseRail snapshot={snapshot} />
+          <CurrentWork snapshot={snapshot} now={now} />
           <JobCards snapshot={snapshot} />
-          <Activity events={snapshot.events} />
+          <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} />
         </main>
         <aside className="side-rail">
           <RunnerPanel snapshot={snapshot} now={now} />

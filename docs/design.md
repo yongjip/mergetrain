@@ -193,6 +193,12 @@ latter is an SSE stream of complete snapshots, so reconnects do not require
 client-side event reconciliation. A polling fallback preserves freshness when
 SSE is unavailable.
 
+The header reports browser connectivity (`CONNECTED`, `POLLING`, or
+`DISCONNECTED`) independently from runner ownership (`ACTIVE` or `IDLE`). During
+gates, the snapshot exposes structured gate position and a redacted command
+template so the current-check panel and Activity timeline can explain what is
+running instead of only repeating a log message.
+
 The dashboard has no write endpoint, form, cancel, retry, validate, deploy, or
 shell-execution control. It is single-repository and desktop-first in v0.1. The
 default bind address is loopback, and non-loopback binding requires explicit

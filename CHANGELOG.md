@@ -11,6 +11,7 @@
 - Return truthful JSON outcomes and non-zero exit codes for blocked/failed jobs.
 - Version SQLite migrations with `PRAGMA user_version`.
 - Add a loopback-first, read-only live dashboard with SSE and polling fallback.
+- Distinguish browser connectivity from runner activity and explain the current gate, command, scope, and Activity milestones.
 - Record structured runner phases and explicit lock heartbeat timestamps.
 - Redact lease tokens and local filesystem paths from dashboard payloads.
 

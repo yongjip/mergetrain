@@ -23,7 +23,7 @@ mergetrain agent-contract [--json]
 mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain status [--json] [--limit N]
 mergetrain doctor [--json]
-mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote]
+mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
 mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
 mergetrain daemon [--interval SECONDS] [--once] [--keep-worktree]
@@ -124,13 +124,16 @@ The UI is deliberately read-only. It shows queue order, the active runner phase,
 heartbeat and lease freshness, recent structured events, blocked history, and the
 same advisory next action used by `doctor`. Server-sent events deliver live
 snapshots; the client falls back to two-second polling if the stream is
-interrupted.
+interrupted. The connection indicator is distinct from runner ownership, and the
+current-check panel explains the active gate, scope, command template, and elapsed
+time.
 
 | Option | Meaning |
 |---|---|
 | `--host` | Bind host (default `127.0.0.1`). |
 | `--port` | Bind port (default `8765`; `0` selects an available port). |
 | `--allow-remote` | Required acknowledgement when binding outside `127.0.0.1`, `localhost`, or `::1`. |
+| `--preview` | Label the connected database as synthetic preview data. This does not generate fixtures. |
 
 Remote binding expands access to queue metadata and status notes. Prefer the
 loopback default; there are no authentication or TLS layers in this local tool.

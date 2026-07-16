@@ -491,7 +491,7 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
         print(f"mergetrain dashboard: {url}", flush=True)
         print("read-only · press Ctrl-C to stop", flush=True)
 
-    serve_dashboard(config, host=host, port=args.port, ready=announce)
+    serve_dashboard(config, host=host, port=args.port, preview=args.preview, ready=announce)
     return 0
 
 
@@ -579,6 +579,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-remote",
         action="store_true",
         help="Explicitly allow binding outside the loopback interface",
+    )
+    p_dashboard.add_argument(
+        "--preview",
+        action="store_true",
+        help="Label the connected database as preview data",
     )
     p_dashboard.set_defaults(func=cmd_dashboard)
     return parser
