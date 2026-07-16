@@ -1,4 +1,4 @@
-"""mergetrain: LLM-friendly local deploy train for coding-agent worktrees."""
+"""mergetrain: a local-first merge-and-deploy queue for coding-agent worktrees."""
 
 from __future__ import annotations
 

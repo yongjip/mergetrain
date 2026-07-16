@@ -1,8 +1,15 @@
 # mergetrain
 
-**An LLM-friendly local deploy train for coding-agent worktrees.**
+**A local-first merge-and-deploy queue for coding-agent worktrees.**
 
-mergetrain takes the committed branches that your AI coding agents produce — each in its own local worktree — and runs them down a single track: one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon. It turns "several agents all trying to ship at once" into a safe, serialized, machine-readable pipeline.
+mergetrain keeps its queue, coordination, merge assembly, and gate execution on
+your machine. Coding agents commit in separate worktrees; one local runner
+serializes their branches, validates the exact train, and pushes only after
+explicit approval. No hosted merge-queue service or CI provider is required.
+
+> **Local-first, not local-only.** Queue state, locking, train assembly, and
+> gates stay local. Configured Git remotes and post-deploy verification may
+> still use external services.
 
 > Status: alpha (`v0.1.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
 
