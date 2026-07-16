@@ -23,9 +23,10 @@ from .errors import (
     MergetrainError,
 )
 from .models import Job
-from .store import get_job, mark_job, refresh_runner_lock, utc_now
+from .store import get_job, mark_job, record_run_event, refresh_runner_lock, utc_now
 
 Pulse = Callable[[], None]
+GateProgress = Callable[[str, str, int, int], None]
 
 
 def _render_command(command: Sequence[str] | str) -> str:
@@ -329,11 +330,32 @@ class GitRunner:
             **values,
         )
 
+    def _event(
+        self,
+        conn,
+        *,
+        lease_token: str,
+        phase: str,
+        state: str,
+        message: str,
+        job_id: int | None = None,
+        detail: str = "",
+    ) -> None:
+        record_run_event(
+            conn,
+            claim_token=lease_token,
+            job_id=job_id,
+            phase=phase,
+            state=state,
+            message=message,
+            detail=detail,
+        )
+
     def _finish_job(self, conn, job_id: int, *, lease_token: str, **values) -> Job:
         try:
-            return self._mark_job(conn, job_id, lease_token=lease_token, **values)
+            result = self._mark_job(conn, job_id, lease_token=lease_token, **values)
         except CancellationRequested:
-            return self._mark_job(
+            result = self._mark_job(
                 conn,
                 job_id,
                 lease_token=lease_token,
@@ -341,6 +363,26 @@ class GitRunner:
                 log_path=str(values.get("log_path", "")),
                 note="canceled by user while the train was running",
             )
+        event_map = {
+            "validated": ("ready", "success", f"Job #{job_id} validated"),
+            "deployed": ("complete", "success", f"Job #{job_id} deployed"),
+            "blocked": ("blocked", "error", f"Job #{job_id} blocked"),
+            "failed": ("failed", "error", f"Job #{job_id} failed"),
+            "canceled": ("canceled", "warning", f"Job #{job_id} canceled"),
+        }
+        event = event_map.get(result.status)
+        if event:
+            phase, state, message = event
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=job_id,
+                phase=phase,
+                state=state,
+                message=message,
+                detail=result.note,
+            )
+        return result
 
     def _log_path(self, prefix: str, first_job_id: int) -> Path:
         stamp = utc_now().replace(":", "").replace("-", "").replace("Z", "")
@@ -385,7 +427,17 @@ class GitRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
 
-    def _run_gates(self, *, worktree: Path, log: IO[str], pulse: Pulse | None) -> None:
+    def _run_gates(
+        self,
+        *,
+        worktree: Path,
+        log: IO[str],
+        pulse: Pulse | None,
+        on_gate: GateProgress | None = None,
+    ) -> None:
+        total = 1 + len(self.config.gates)
+        if on_gate:
+            on_gate("diff-check", "active", 1, total)
         run_command(
             ["git", "diff", "--check", f"{self.config.git.integration_ref}..HEAD"],
             cwd=worktree,
@@ -394,8 +446,14 @@ class GitRunner:
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
-        for gate in self.config.gates:
+        if on_gate:
+            on_gate("diff-check", "success", 1, total)
+        for index, gate in enumerate(self.config.gates, start=2):
+            if on_gate:
+                on_gate(gate.name, "active", index, total)
             self._run_gate(gate, worktree=worktree, log=log, pulse=pulse)
+            if on_gate:
+                on_gate(gate.name, "success", index, total)
 
     def _run_verify_hooks(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None
@@ -506,17 +564,53 @@ class GitRunner:
 
         normal_pulse = lambda: pulse(check_cancel=True)
         ownership_pulse = lambda: pulse(check_cancel=False)
+
+        def gate_progress(name: str, state: str, index: int, total: int) -> None:
+            verb = "Running" if state == "active" else "Passed"
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=job.id,
+                phase="gating",
+                state=state,
+                message=f"{verb} gate {index}/{total}: {name}",
+            )
+
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain job {job.id}: {job.task}\n")
             log.write(f"branch: {job.branch}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    job_id=job.id,
+                    phase="fetching",
+                    state="active",
+                    message=f"Fetching {self.config.git.integration_ref}",
+                )
                 self._prepare_worktree(worktree=worktree, log=log, pulse=normal_pulse)
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    job_id=job.id,
+                    phase="fetching",
+                    state="success",
+                    message="Integration worktree prepared",
+                )
                 integration_base_sha = git_rev_parse(worktree, "HEAD")
                 if deploying_validated and job.validation_base_sha != integration_base_sha:
                     log.write(
                         "\nintegration ref moved since validation; "
                         "reassembling the train and rerunning gates\n"
                     )
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    job_id=job.id,
+                    phase="assembling",
+                    state="active",
+                    message=f"Merging {job.branch}",
+                )
                 merge_sha = self._merge_sha_for_job(job, deploying_validated=deploying_validated)
                 merge = run_command(
                     ["git", "merge", "--no-edit", merge_sha],
@@ -531,18 +625,88 @@ class GitRunner:
                     raise MergeBlocked(merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}")
                 if not git_worktree_clean(worktree):
                     raise MergeBlocked("integration worktree is dirty after merge")
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    job_id=job.id,
+                    phase="assembling",
+                    state="success",
+                    message=f"Merged {job.branch}",
+                )
                 deploy_sha = git_rev_parse(worktree, "HEAD")
                 normal_pulse()
-                self._run_gates(worktree=worktree, log=log, pulse=normal_pulse)
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    job_id=job.id,
+                    phase="gating",
+                    state="active",
+                    message="Running train gates",
+                )
+                self._run_gates(
+                    worktree=worktree,
+                    log=log,
+                    pulse=normal_pulse,
+                    on_gate=gate_progress,
+                )
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    job_id=job.id,
+                    phase="gating",
+                    state="success",
+                    message="All train gates passed",
+                )
                 verify_warning = ""
                 if deploy:
                     normal_pulse()
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        job_id=job.id,
+                        phase="pushing",
+                        state="active",
+                        message="Pushing verified HEAD atomically",
+                    )
                     self.push_verified_head(worktree=worktree, log=log, pulse=ownership_pulse)
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        job_id=job.id,
+                        phase="pushing",
+                        state="success",
+                        message="Atomic push completed",
+                    )
                     try:
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            job_id=job.id,
+                            phase="verifying",
+                            state="active",
+                            message="Running post-push verification",
+                        )
                         self._run_verify_hooks(worktree=worktree, log=log, pulse=ownership_pulse)
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            job_id=job.id,
+                            phase="verifying",
+                            state="success",
+                            message="Post-push verification passed",
+                        )
                     except CommandFailed as exc:
                         verify_warning = f"post-push verify warning: {exc}"
                         log.write(f"\nWARNING: {verify_warning}\n")
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            job_id=job.id,
+                            phase="verifying",
+                            state="warning",
+                            message="Post-push verification needs attention",
+                            detail=verify_warning,
+                        )
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or "ok"
                 validation_fields = {}
@@ -629,6 +793,16 @@ class GitRunner:
         normal_pulse = lambda: pulse(check_cancel=True)
         ownership_pulse = lambda: pulse(check_cancel=False)
 
+        def gate_progress(name: str, state: str, index: int, total: int) -> None:
+            verb = "Running" if state == "active" else "Passed"
+            self._event(
+                conn,
+                lease_token=lease_token,
+                phase="gating",
+                state=state,
+                message=f"{verb} gate {index}/{total}: {name}",
+            )
+
         def finish(item: Job, **values) -> Job:
             return self._finish_job(
                 conn, item.id, lease_token=lease_token, **values
@@ -665,7 +839,21 @@ class GitRunner:
                         finish(job, status="blocked", log_path=str(log_path), note=note)
                         for job in jobs
                     ]
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    phase="fetching",
+                    state="active",
+                    message=f"Fetching {self.config.git.integration_ref}",
+                )
                 self._prepare_worktree(worktree=worktree, log=log, pulse=normal_pulse)
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    phase="fetching",
+                    state="success",
+                    message="Integration worktree prepared",
+                )
                 integration_base_sha = git_rev_parse(worktree, "HEAD")
                 if deploying_validated:
                     validation_bases = {job.validation_base_sha for job in jobs}
@@ -685,6 +873,13 @@ class GitRunner:
                             finish(job, status="blocked", log_path=str(log_path), note=note)
                             for job in jobs
                         ]
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    phase="assembling",
+                    state="active",
+                    message=f"Assembling train with {len(jobs)} job(s)",
+                )
                 for job in jobs:
                     log.write(f"\n## merge job {job.id}: {job.branch}\n")
                     normal_pulse()
@@ -738,10 +933,36 @@ class GitRunner:
                 if not merged_jobs:
                     log.write("\nno jobs were merged\n")
                     return results
+                self._event(
+                    conn,
+                    lease_token=lease_token,
+                    phase="assembling",
+                    state="success",
+                    message=f"Assembled {len(merged_jobs)} job(s)",
+                )
                 deploy_sha = git_rev_parse(worktree, "HEAD")
                 normal_pulse()
                 try:
-                    self._run_gates(worktree=worktree, log=log, pulse=normal_pulse)
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        phase="gating",
+                        state="active",
+                        message="Running train gates",
+                    )
+                    self._run_gates(
+                        worktree=worktree,
+                        log=log,
+                        pulse=normal_pulse,
+                        on_gate=gate_progress,
+                    )
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        phase="gating",
+                        state="success",
+                        message="All train gates passed",
+                    )
                 except CommandFailed as exc:
                     if deploying_validated:
                         note = f"validated train gate failed after reassembly: {exc}"
@@ -756,6 +977,14 @@ class GitRunner:
                             for job in jobs
                         ]
                     log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        phase="gating",
+                        state="warning",
+                        message="Train gate failed; isolating jobs",
+                        detail=str(exc),
+                    )
                     self._cleanup_worktree(worktree, log=log, keep_worktree=False)
                     for job in merged_jobs:
                         results.append(
@@ -772,12 +1001,48 @@ class GitRunner:
                 verify_warning = ""
                 if deploy:
                     normal_pulse()
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        phase="pushing",
+                        state="active",
+                        message="Pushing verified HEAD atomically",
+                    )
                     self.push_verified_head(worktree=worktree, log=log, pulse=ownership_pulse)
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        phase="pushing",
+                        state="success",
+                        message="Atomic push completed",
+                    )
                     try:
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            phase="verifying",
+                            state="active",
+                            message="Running post-push verification",
+                        )
                         self._run_verify_hooks(worktree=worktree, log=log, pulse=ownership_pulse)
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            phase="verifying",
+                            state="success",
+                            message="Post-push verification passed",
+                        )
                     except CommandFailed as exc:
                         verify_warning = f"post-push verify warning: {exc}"
                         log.write(f"\nWARNING: {verify_warning}\n")
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            phase="verifying",
+                            state="warning",
+                            message="Post-push verification needs attention",
+                            detail=verify_warning,
+                        )
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or f"batch ok; merged {len(merged_jobs)} job(s)"
                 train_id = uuid.uuid4().hex if not deploy else ""

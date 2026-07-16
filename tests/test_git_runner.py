@@ -20,6 +20,7 @@ from mergetrain.store import (
     enqueue_job,
     get_job,
     get_lock,
+    list_run_events,
     release_runner_lock,
 )
 
@@ -110,6 +111,7 @@ class GitRunnerTests(unittest.TestCase):
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 results = GitRunner(config).process_batch(conn, [job], deploy=False)
                 stored = get_job(conn, job.id)
+                events = list_run_events(conn)
             finally:
                 conn.close()
             self.assertEqual([result.status for result in results], ["validated"])
@@ -121,6 +123,7 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(stored.validation_sha, stored.deploy_sha)
             self.assertEqual(stored.validated_head_sha, git(repo, "rev-parse", "feature/a"))
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            self.assertIn("Running gate 2/2: marker", [event.message for event in events])
 
     def test_validated_batch_deploys_after_integration_ref_moves(self) -> None:
         with tempfile.TemporaryDirectory() as td:

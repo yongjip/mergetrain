@@ -14,8 +14,12 @@ mergetrain/
     daemon.py          # auto-only daemon loop
     errors.py          # MergetrainError hierarchy
     git_runner.py      # worktree merge train, gates, atomic push, verify, gc
-    models.py          # Job and RunnerLock dataclasses, status sets
-    store.py           # SQLite schema, queue ops, runner lock
+    dashboard.py       # stdlib read-only HTTP/SSE server
+    snapshot.py        # privacy-conscious dashboard read model
+    dashboard_dist/    # packaged production dashboard assets
+    models.py          # Job, RunnerLock, and RunEvent dataclasses
+    store.py           # SQLite schema, queue ops, runner lock, events
+  dashboard/           # React/Vite dashboard source
   docs/                # this documentation set
   examples/            # example .mergetrain.yaml and agent metadata
   integrations/        # thin service wrapper examples
@@ -49,10 +53,25 @@ The suite covers the behaviors that make the queue safe:
 - **store** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; orphan recovery; and versioned legacy-DB migrations.
 - **daemon** — `--once` processes only auto jobs and leaves manual jobs queued; repeated DB connections do not leak file descriptors; a tick exception releases the lock and leaves the job queued.
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
-- **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, `doctor` next actions, global option normalization, and init output.
+- **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
+- **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.
 - **config** — built-in YAML parsing, fail-closed deploy refs, positive queue timing, unique gate names, defaults, and path resolution.
 
 When adding behavior, add or extend the matching `tests/test_*.py` module.
+
+## Dashboard authoring
+
+The published wheel does not need Node at runtime; it serves committed assets
+from `src/mergetrain/dashboard_dist`. Node is only needed when editing the UI:
+
+```sh
+cd dashboard
+npm install
+npm run build
+```
+
+Commit both the source and rebuilt `dashboard_dist` output. The UI uses bundled
+fonts and icons and makes no external runtime requests.
 
 ## Packaging
 

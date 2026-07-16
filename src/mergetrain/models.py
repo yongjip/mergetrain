@@ -76,6 +76,7 @@ class RunnerLock:
     worktree_path: str = ""
     head_sha: str = ""
     acquired_at: str = ""
+    heartbeat_at: str = ""
     expires_at: str = ""
     token: str = ""
     liveness: str = "unknown"
@@ -88,6 +89,7 @@ class RunnerLock:
             worktree_path=str(row["worktree_path"] or ""),
             head_sha=str(row["head_sha"] or ""),
             acquired_at=str(row["acquired_at"] or ""),
+            heartbeat_at=str(row["heartbeat_at"] or row["acquired_at"] or ""),
             expires_at=str(row["expires_at"] or ""),
             token=str(row["token"] or ""),
             liveness=liveness,
@@ -96,4 +98,36 @@ class RunnerLock:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("token", None)
+        return data
+
+
+@dataclass(slots=True)
+class RunEvent:
+    """A structured, append-only observation of runner progress."""
+
+    id: int
+    phase: str
+    state: str
+    message: str
+    created_at: str
+    job_id: int | None = None
+    detail: str = ""
+    claim_token: str = ""
+
+    @classmethod
+    def from_row(cls, row: Any) -> "RunEvent":
+        return cls(
+            id=int(row["id"]),
+            phase=str(row["phase"]),
+            state=str(row["state"]),
+            message=str(row["message"]),
+            created_at=str(row["created_at"]),
+            job_id=int(row["job_id"]) if row["job_id"] is not None else None,
+            detail=str(row["detail"] or ""),
+            claim_token=str(row["claim_token"] or ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data.pop("claim_token", None)
         return data

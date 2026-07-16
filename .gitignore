@@ -22,6 +22,10 @@ env/
 .coverage
 htmlcov/
 
+# Dashboard authoring dependencies and cache
+dashboard/node_modules/
+dashboard/.npm-cache/
+
 # IDE / editor
 .idea/
 .vscode/

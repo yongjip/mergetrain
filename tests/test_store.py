@@ -16,6 +16,7 @@ from mergetrain.store import (
     enqueue_job,
     get_job,
     get_lock,
+    list_run_events,
     mark_job,
     refresh_runner_lock,
     release_runner_lock,
@@ -72,7 +73,14 @@ class StoreTests(unittest.TestCase):
         self.assertIn("claim_token", columns)
         migrated_db = sqlite3.connect(db)
         try:
-            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 3)
+            event_columns = {
+                row[1] for row in migrated_db.execute("PRAGMA table_info(run_events)")
+            }
+            self.assertIn("phase", event_columns)
+            self.assertIn("heartbeat_at", {
+                row[1] for row in migrated_db.execute("PRAGMA table_info(locks)")
+            })
         finally:
             migrated_db.close()
 
@@ -98,6 +106,16 @@ class StoreTests(unittest.TestCase):
         mark_job(conn, first.id, status="deployed")
         second = enqueue_job(conn, task="again", branch="feature/a")
         self.assertEqual(second.id, 2)
+
+    def test_claim_records_structured_event_without_exposing_token(self) -> None:
+        conn = self.make_conn()
+        enqueue_job(conn, task="a", branch="feature/a")
+        claimed = claim_all_queued(conn, owner=f"owner:{os.getpid()}")
+        events = list_run_events(conn)
+        self.assertEqual(events[-1].phase, "claiming")
+        self.assertEqual(events[-1].state, "active")
+        self.assertEqual(events[-1].claim_token, claimed[0].claim_token)
+        self.assertNotIn("claim_token", events[-1].to_dict())
 
     def test_validated_train_is_claimed_without_new_queued_jobs(self) -> None:
         conn = self.make_conn()

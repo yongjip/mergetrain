@@ -10,6 +10,9 @@
 - Reject explicitly empty deploy refs and invalid queue timing at config load.
 - Return truthful JSON outcomes and non-zero exit codes for blocked/failed jobs.
 - Version SQLite migrations with `PRAGMA user_version`.
+- Add a loopback-first, read-only live dashboard with SSE and polling fallback.
+- Record structured runner phases and explicit lock heartbeat timestamps.
+- Redact lease tokens and local filesystem paths from dashboard payloads.
 
 ## 0.1.0
 

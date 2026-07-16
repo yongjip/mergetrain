@@ -27,6 +27,7 @@ from .git_runner import (
     git_worktree_clean,
 )
 from .models import Job
+from .snapshot import next_action as _doctor_next_action
 from .store import (
     cancel_job,
     claim_all_queued,
@@ -231,26 +232,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         for job in payload["jobs"]:
             print(f"#{job['id']} {job['status']} {job['branch']} - {job['task']}")
     return 0
-
-
-def _doctor_next_action(payload: dict[str, Any]) -> str:
-    lock = payload.get("lock")
-    count_data = payload.get("counts") or {}
-    if lock and lock.get("liveness") == "alive":
-        return "wait_for_runner"
-    if count_data.get("blocked", 0) or count_data.get("failed", 0):
-        return "fix_blocked_job"
-    if payload.get("validated_trains"):
-        if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
-            return "deploy_validated_train_when_approved"
-        return "cancel_and_reenqueue_legacy_validated_jobs"
-    if count_data.get("auto_queued", 0):
-        return "run_daemon_or_run_batch_deploy_when_approved"
-    if count_data.get("queued", 0):
-        return "run_batch_validate"
-    if payload.get("gc", {}).get("worktree_candidates"):
-        return "gc_available"
-    return "enqueue_clean_branch"
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -493,6 +474,27 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    from .dashboard import serve_dashboard
+
+    host = str(args.host).strip()
+    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host not in loopback_hosts and not args.allow_remote:
+        raise QueueError(
+            "dashboard binds to loopback by default; pass --allow-remote to expose it"
+        )
+    if not 0 <= args.port <= 65535:
+        raise QueueError("dashboard port must be between 0 and 65535")
+    config = config_from_args(args)
+
+    def announce(url: str) -> None:
+        print(f"mergetrain dashboard: {url}", flush=True)
+        print("read-only · press Ctrl-C to stop", flush=True)
+
+    serve_dashboard(config, host=host, port=args.port, ready=announce)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mergetrain")
     parser.add_argument("--version", action="version", version=f"mergetrain {__version__}")
@@ -567,6 +569,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_cancel.add_argument("--note", default="")
     p_cancel.add_argument("--json", action="store_true")
     p_cancel.set_defaults(func=cmd_cancel)
+
+    p_dashboard = subparsers.add_parser(
+        "dashboard", help="Serve the local read-only live dashboard"
+    )
+    p_dashboard.add_argument("--host", default="127.0.0.1")
+    p_dashboard.add_argument("--port", type=int, default=8765)
+    p_dashboard.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Explicitly allow binding outside the loopback interface",
+    )
+    p_dashboard.set_defaults(func=cmd_dashboard)
     return parser
 
 

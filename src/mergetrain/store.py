@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .errors import CancellationRequested, LockHeld, LostLease, QueueError
-from .models import ACTIVE_STATUSES, ALL_STATUSES, Job, RunnerLock, TERMINAL_STATUSES
+from .models import ACTIVE_STATUSES, ALL_STATUSES, Job, RunEvent, RunnerLock, TERMINAL_STATUSES
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Liveness:
@@ -117,10 +117,32 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           worktree_path TEXT NOT NULL DEFAULT '',
           head_sha TEXT NOT NULL DEFAULT '',
           acquired_at TEXT NOT NULL,
+          heartbeat_at TEXT NOT NULL DEFAULT '',
           expires_at TEXT NOT NULL,
           token TEXT NOT NULL DEFAULT ''
         )
         """
+        )
+        conn.execute(
+            """
+        CREATE TABLE IF NOT EXISTS run_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          claim_token TEXT NOT NULL DEFAULT '',
+          job_id INTEGER,
+          phase TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'info',
+          message TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(job_id) REFERENCES deploy_queue(id)
+        )
+        """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS run_events_created_at_idx ON run_events(created_at, id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS run_events_claim_idx ON run_events(claim_token, id)"
         )
 
         migrations = {
@@ -137,6 +159,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ("deploy_queue", "claim_token", "TEXT NOT NULL DEFAULT ''"),
                 ("deploy_queue", "cancel_requested_at", "TEXT NOT NULL DEFAULT ''"),
                 ("locks", "token", "TEXT NOT NULL DEFAULT ''"),
+            ),
+            3: (
+                ("locks", "heartbeat_at", "TEXT NOT NULL DEFAULT ''"),
             ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
@@ -344,10 +369,12 @@ def _acquire_runner_lock(
         _requeue_orphans(conn)
     conn.execute(
         """
-        INSERT INTO locks (name, owner, worktree_path, head_sha, acquired_at, expires_at, token)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO locks (
+          name, owner, worktree_path, head_sha, acquired_at, heartbeat_at, expires_at, token
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, owner, worktree_path, head_sha, now, expires, token),
+        (name, owner, worktree_path, head_sha, now, now, expires, token),
     )
     row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
     lock = RunnerLock.from_row(row, liveness=owner_liveness(owner)) if row is not None else None
@@ -392,10 +419,10 @@ def refresh_runner_lock(
         cur = conn.execute(
             """
             UPDATE locks
-            SET expires_at = ?, worktree_path = ?, head_sha = ?
+            SET heartbeat_at = ?, expires_at = ?, worktree_path = ?, head_sha = ?
             WHERE name = ? AND owner = ? AND token = ?
             """,
-            (_plus_minutes(ttl_minutes), worktree_path, head_sha, name, owner, token),
+            (utc_now(), _plus_minutes(ttl_minutes), worktree_path, head_sha, name, owner, token),
         )
         if cur.rowcount != 1:
             raise LostLease(f"runner lease is no longer owned by {owner}")
@@ -460,6 +487,14 @@ def claim_next_job(
             """,
             (utc_now(), "claimed by mergetrain runner", lock.token, job_id),
         )
+        _record_run_event(
+            conn,
+            claim_token=lock.token,
+            job_id=job_id,
+            phase="claiming",
+            state="active",
+            message="Runner claimed 1 job",
+        )
     return get_job(conn, job_id)
 
 
@@ -497,6 +532,13 @@ def claim_all_queued(
             WHERE id IN ({placeholders}) AND status = 'queued'
             """,
             (utc_now(), "claimed by mergetrain batch runner", lock.token, *job_ids),
+        )
+        _record_run_event(
+            conn,
+            claim_token=lock.token,
+            phase="claiming",
+            state="active",
+            message=f"Runner claimed {len(job_ids)} job(s)",
         )
     return [get_job(conn, job_id) for job_id in job_ids]
 
@@ -615,7 +657,96 @@ def claim_deploy_batch(
         )
         if cur.rowcount != len(job_ids):
             raise QueueError("validated train changed while it was being claimed")
+        _record_run_event(
+            conn,
+            claim_token=lock.token,
+            phase="claiming",
+            state="active",
+            message=f"Deploy runner claimed {len(job_ids)} job(s)",
+        )
     return [get_job(conn, job_id) for job_id in job_ids]
+
+
+def _record_run_event(
+    conn: sqlite3.Connection,
+    *,
+    phase: str,
+    state: str,
+    message: str,
+    claim_token: str = "",
+    job_id: int | None = None,
+    detail: str = "",
+) -> RunEvent:
+    cur = conn.execute(
+        """
+        INSERT INTO run_events (
+          claim_token, job_id, phase, state, message, detail, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (claim_token, job_id, phase, state, message, detail, utc_now()),
+    )
+    conn.execute(
+        """
+        DELETE FROM run_events
+        WHERE id <= (SELECT COALESCE(MAX(id), 0) - 5000 FROM run_events)
+        """
+    )
+    row = conn.execute("SELECT * FROM run_events WHERE id = ?", (cur.lastrowid,)).fetchone()
+    assert row is not None
+    return RunEvent.from_row(row)
+
+
+def record_run_event(
+    conn: sqlite3.Connection,
+    *,
+    phase: str,
+    state: str,
+    message: str,
+    claim_token: str = "",
+    job_id: int | None = None,
+    detail: str = "",
+) -> RunEvent:
+    """Append a structured runner event without exposing the lease token."""
+
+    if conn.in_transaction:
+        return _record_run_event(
+            conn,
+            phase=phase,
+            state=state,
+            message=message,
+            claim_token=claim_token,
+            job_id=job_id,
+            detail=detail,
+        )
+    with immediate(conn):
+        return _record_run_event(
+            conn,
+            phase=phase,
+            state=state,
+            message=message,
+            claim_token=claim_token,
+            job_id=job_id,
+            detail=detail,
+        )
+
+
+def list_run_events(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 40,
+    claim_token: str | None = None,
+) -> list[RunEvent]:
+    limit = max(1, min(int(limit), 200))
+    if claim_token is None:
+        rows = conn.execute(
+            "SELECT * FROM run_events ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM run_events WHERE claim_token = ? ORDER BY id DESC LIMIT ?",
+            (claim_token, limit),
+        ).fetchall()
+    return [RunEvent.from_row(row) for row in reversed(rows)]
 
 
 def mark_job(

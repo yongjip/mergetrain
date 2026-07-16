@@ -60,12 +60,19 @@ mergetrain enqueue --task "add health check" --branch agent/health --capture-sha
 # 3. See the queue and lock state (machine-readable)
 mergetrain status --json
 
-# 4. Validate the whole train without shipping
+# 4. Watch the queue and runner locally (read-only)
+mergetrain dashboard
+
+# 5. Validate the whole train without shipping
 mergetrain run-batch --validate-only
 
-# 5. Ship — explicit, never implicit
+# 6. Ship — explicit, never implicit
 mergetrain run-batch --deploy
 ```
+
+The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
+runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
+and the next safe action. It has no mutation endpoints or deploy controls.
 
 Validation records an exact train identity, including every task HEAD and the
 integration base used for the check. The later deploy reassembles that same
@@ -154,7 +161,7 @@ mergetrain is designed so an agent can operate it from a short contract and JSON
 
 ## Status
 
-`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, and JSON `doctor`/`status` — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
+`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
 
 ## License
 
