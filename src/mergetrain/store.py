@@ -8,7 +8,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .errors import LockHeld, QueueError
 from .models import ACTIVE_STATUSES, ALL_STATUSES, Job, RunnerLock, TERMINAL_STATUSES
@@ -82,7 +82,13 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           finished_at TEXT NOT NULL DEFAULT '',
           log_path TEXT NOT NULL DEFAULT '',
           note TEXT NOT NULL DEFAULT '',
-          auto_deploy INTEGER NOT NULL DEFAULT 0
+          auto_deploy INTEGER NOT NULL DEFAULT 0,
+          train_id TEXT NOT NULL DEFAULT '',
+          train_size INTEGER NOT NULL DEFAULT 0,
+          validated_at TEXT NOT NULL DEFAULT '',
+          validation_base_sha TEXT NOT NULL DEFAULT '',
+          validation_sha TEXT NOT NULL DEFAULT '',
+          validated_head_sha TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS locks (
@@ -95,10 +101,21 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    try:
-        conn.execute("ALTER TABLE deploy_queue ADD COLUMN auto_deploy INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
+    migrations = (
+        "ALTER TABLE deploy_queue ADD COLUMN auto_deploy INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE deploy_queue ADD COLUMN train_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE deploy_queue ADD COLUMN train_size INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE deploy_queue ADD COLUMN validated_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE deploy_queue ADD COLUMN validation_base_sha TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE deploy_queue ADD COLUMN validation_sha TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE deploy_queue ADD COLUMN validated_head_sha TEXT NOT NULL DEFAULT ''",
+    )
+    for migration in migrations:
+        try:
+            conn.execute(migration)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     conn.commit()
 
 
@@ -379,6 +396,102 @@ def claim_all_queued(
     return jobs
 
 
+def validated_train_summaries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Describe pending validated trains and whether their identity is complete."""
+
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue WHERE status = 'validated' ORDER BY id ASC"
+    ).fetchall()
+    groups: dict[str, list[Job]] = {}
+    for row in rows:
+        job = Job.from_row(row)
+        key = job.train_id or f"legacy-job-{job.id}"
+        groups.setdefault(key, []).append(job)
+
+    summaries: list[dict[str, Any]] = []
+    for jobs in groups.values():
+        first = jobs[0]
+        train_sizes = {job.train_size for job in jobs}
+        validated_times = {job.validated_at for job in jobs}
+        base_shas = {job.validation_base_sha for job in jobs}
+        validation_shas = {job.validation_sha for job in jobs}
+        expected_size = first.train_size
+        complete = bool(
+            first.train_id
+            and expected_size == len(jobs)
+            and len(train_sizes) == 1
+            and len(validated_times) == 1
+            and len(base_shas) == 1
+            and len(validation_shas) == 1
+            and first.validated_at
+            and first.validation_base_sha
+            and first.validation_sha
+            and all(job.validated_head_sha for job in jobs)
+        )
+        summaries.append(
+            {
+                "train_id": first.train_id or None,
+                "train_size": expected_size,
+                "job_ids": [job.id for job in jobs],
+                "branches": [
+                    {
+                        "job_id": job.id,
+                        "branch": job.branch,
+                        "validated_head_sha": job.validated_head_sha,
+                    }
+                    for job in jobs
+                ],
+                "validated_at": first.validated_at,
+                "validation_base_sha": first.validation_base_sha,
+                "validation_sha": first.validation_sha,
+                "deploy_eligible": complete,
+            }
+        )
+    return summaries
+
+
+def claim_deploy_batch(
+    conn: sqlite3.Connection,
+    *,
+    owner: str | None = None,
+    ttl_minutes: int = 30,
+    train_id: str = "",
+) -> list[Job]:
+    """Claim one exact validated train, or queued jobs when none is pending."""
+
+    owner = owner or default_owner()
+    acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+    try:
+        summaries = validated_train_summaries(conn)
+        if train_id:
+            matches = [summary for summary in summaries if summary["train_id"] == train_id]
+            if not matches:
+                raise QueueError(f"validated train not found: {train_id}")
+            selected = matches[0]
+        else:
+            deployable = [summary for summary in summaries if summary["deploy_eligible"]]
+            if len(deployable) > 1:
+                ids = ", ".join(str(summary["train_id"]) for summary in deployable)
+                raise QueueError(f"multiple validated trains are ready; pass --train-id with one of: {ids}")
+            selected = deployable[0] if deployable else None
+            if selected is None and summaries:
+                raise QueueError("validated jobs lack complete train identity; cancel and enqueue a fresh train")
+
+        if selected is not None:
+            if not selected["deploy_eligible"]:
+                raise QueueError(f"validated train has incomplete identity: {selected['train_id']}")
+            jobs = list_jobs_fifo(conn, status="validated")
+            jobs = [job for job in jobs if job.train_id == selected["train_id"]]
+        else:
+            jobs = list_jobs_fifo(conn, status="queued")
+        if not jobs:
+            release_runner_lock(conn, owner=owner)
+        return jobs
+    except Exception:
+        release_runner_lock(conn, owner=owner)
+        raise
+
+
 def mark_job(
     conn: sqlite3.Connection,
     job_id: int,
@@ -387,6 +500,12 @@ def mark_job(
     deploy_sha: str = "",
     log_path: str = "",
     note: str = "",
+    train_id: str = "",
+    train_size: int = 0,
+    validated_at: str = "",
+    validation_base_sha: str = "",
+    validation_sha: str = "",
+    validated_head_sha: str = "",
 ) -> Job:
     if status not in ALL_STATUSES:
         raise QueueError(f"unknown job status: {status}")
@@ -396,10 +515,29 @@ def mark_job(
             """
             UPDATE deploy_queue
             SET status = ?, deploy_sha = COALESCE(NULLIF(?, ''), deploy_sha),
-                log_path = COALESCE(NULLIF(?, ''), log_path), note = ?, finished_at = ?
+                log_path = COALESCE(NULLIF(?, ''), log_path), note = ?, finished_at = ?,
+                train_id = COALESCE(NULLIF(?, ''), train_id),
+                train_size = COALESCE(NULLIF(?, 0), train_size),
+                validated_at = COALESCE(NULLIF(?, ''), validated_at),
+                validation_base_sha = COALESCE(NULLIF(?, ''), validation_base_sha),
+                validation_sha = COALESCE(NULLIF(?, ''), validation_sha),
+                validated_head_sha = COALESCE(NULLIF(?, ''), validated_head_sha)
             WHERE id = ?
             """,
-            (status, deploy_sha, log_path, note, finished_at, job_id),
+            (
+                status,
+                deploy_sha,
+                log_path,
+                note,
+                finished_at,
+                train_id,
+                train_size,
+                validated_at,
+                validation_base_sha,
+                validation_sha,
+                validated_head_sha,
+                job_id,
+            ),
         )
     return get_job(conn, job_id)
 
@@ -408,19 +546,43 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
     job = get_job(conn, job_id)
     if job.status in TERMINAL_STATUSES:
         raise QueueError(f"terminal job cannot be canceled: {job_id}")
+    if job.status == "validated" and job.train_id:
+        cancel_note = note or f"validated train {job.train_id} canceled by user"
+        with immediate(conn):
+            conn.execute(
+                """
+                UPDATE deploy_queue
+                SET status = 'canceled', note = ?, finished_at = ?
+                WHERE status = 'validated' AND train_id = ?
+                """,
+                (cancel_note, utc_now(), job.train_id),
+            )
+        return get_job(conn, job_id)
     return mark_job(conn, job_id, status="canceled", note=note or "canceled by user")
 
 
 def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, str]]:
-    placeholders = _status_placeholders(TERMINAL_STATUSES)
+    terminal_placeholders = _status_placeholders(TERMINAL_STATUSES)
+    active_placeholders = _status_placeholders(ACTIVE_STATUSES)
     rows = conn.execute(
         f"""
-        SELECT branch, MAX(id) AS job_id, MAX(status) AS status
-        FROM deploy_queue
-        WHERE status IN ({placeholders})
-        GROUP BY branch
-        ORDER BY MAX(id) ASC
+        SELECT terminal.branch, terminal.id AS job_id, terminal.status
+        FROM deploy_queue AS terminal
+        WHERE terminal.status IN ({terminal_placeholders})
+          AND terminal.id = (
+            SELECT MAX(latest.id)
+            FROM deploy_queue AS latest
+            WHERE latest.branch = terminal.branch
+              AND latest.status IN ({terminal_placeholders})
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM deploy_queue AS active
+            WHERE active.branch = terminal.branch
+              AND active.status IN ({active_placeholders})
+          )
+        ORDER BY terminal.id ASC
         """,
-        TERMINAL_STATUSES,
+        (*TERMINAL_STATUSES, *TERMINAL_STATUSES, *ACTIVE_STATUSES),
     ).fetchall()
     return [{"branch": str(row["branch"]), "job_id": str(row["job_id"]), "status": str(row["status"])} for row in rows]

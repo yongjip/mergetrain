@@ -27,6 +27,8 @@ The JSON payload includes `name`, `purpose`, `rules`, and `boundary`.
 `mergetrain doctor --json` returns `next_action` values:
 
 - `wait_for_runner`
+- `deploy_validated_train_when_approved`
+- `cancel_and_reenqueue_legacy_validated_jobs`
 - `run_daemon_or_run_batch_deploy_when_approved`
 - `run_batch_validate`
 - `fix_blocked_job`
@@ -35,3 +37,7 @@ The JSON payload includes `name`, `purpose`, `rules`, and `boundary`.
 
 `next_action` is advisory. It does not replace user approval for deploy,
 unattended auto deploy, or destructive cleanup.
+
+When `validated_trains` is non-empty, approval applies to the displayed train
+identity and member HEADs. A later deploy must not silently include newer
+queued jobs. Validated-but-not-deployed branches are not GC deletion candidates.

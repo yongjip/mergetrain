@@ -29,6 +29,7 @@ from .models import Job
 from .store import (
     cancel_job,
     claim_all_queued,
+    claim_deploy_batch,
     claim_next_job,
     connect,
     counts,
@@ -38,6 +39,7 @@ from .store import (
     list_jobs,
     release_runner_lock,
     terminal_branch_candidates,
+    validated_train_summaries,
 )
 
 GLOBAL_OPTIONS_WITH_VALUES = {"--config", "--repo", "--db"}
@@ -98,6 +100,7 @@ def agent_contract_payload() -> dict[str, Any]:
         "boundary": {
             "deploy_requires": "run-next --deploy or run-batch --deploy",
             "validate_requires": "run-next --validate-only or run-batch --validate-only",
+            "validated_train_deploy": "run-batch --deploy claims one exact validated train",
             "daemon_processes_only": "jobs enqueued with --auto",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
         },
@@ -119,6 +122,7 @@ Purpose: {payload['purpose']}
 
 - Deploy requires `run-next --deploy` or `run-batch --deploy`.
 - Validation requires `run-next --validate-only` or `run-batch --validate-only`.
+- A validated train is deployed as one exact identity by `run-batch --deploy`.
 - The daemon processes only jobs enqueued with `--auto`.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
 """
@@ -207,11 +211,13 @@ def cmd_status(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         lock = get_lock(conn)
+        validated_trains = validated_train_summaries(conn)
         payload = {
             "ok": True,
             "db": str(config.state.db),
             "lock": lock.to_dict() if lock else None,
             "jobs": [job.to_dict() for job in list_jobs(conn, limit=args.limit)],
+            "validated_trains": validated_trains,
         }
     finally:
         conn.close()
@@ -233,6 +239,10 @@ def _doctor_next_action(payload: dict[str, Any]) -> str:
         return "wait_for_runner"
     if count_data.get("blocked", 0) or count_data.get("failed", 0):
         return "fix_blocked_job"
+    if payload.get("validated_trains"):
+        if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
+            return "deploy_validated_train_when_approved"
+        return "cancel_and_reenqueue_legacy_validated_jobs"
     if count_data.get("auto_queued", 0):
         return "run_daemon_or_run_batch_deploy_when_approved"
     if count_data.get("queued", 0):
@@ -249,6 +259,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     try:
         lock = get_lock(conn)
         count_data = counts(conn)
+        validated_trains = validated_train_summaries(conn)
     finally:
         conn.close()
     remote_url = git_remote_url(config.repo, config.git.remote)
@@ -274,6 +285,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         },
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
+        "validated_trains": validated_trains,
         "gc": {"worktree_candidates": find_worktree_gc_candidates(config)},
     }
     payload["ok"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
@@ -334,11 +346,21 @@ def cmd_run_next(args: argparse.Namespace) -> int:
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
+    if args.train_id and not deploy:
+        raise QueueError("--train-id requires --deploy")
     config = config_from_args(args)
     owner = default_owner()
     conn = connect(config.state.db)
     try:
-        jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
+        if deploy:
+            jobs = claim_deploy_batch(
+                conn,
+                owner=owner,
+                ttl_minutes=config.queue.lock_ttl_minutes,
+                train_id=args.train_id or "",
+            )
+        else:
+            jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if not jobs:
             payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
         else:
@@ -494,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     for name, func, help_text in [
         ("run-next", cmd_run_next, "Process one queued job"),
-        ("run-batch", cmd_run_batch, "Process all queued jobs as one merge train"),
+        ("run-batch", cmd_run_batch, "Validate queued jobs or deploy an exact validated train"),
     ]:
         p_run = subparsers.add_parser(name, help=help_text)
         mode = p_run.add_mutually_exclusive_group(required=True)
@@ -502,6 +524,8 @@ def build_parser() -> argparse.ArgumentParser:
         mode.add_argument("--deploy", action="store_true")
         p_run.add_argument("--keep-worktree", action="store_true")
         p_run.add_argument("--json", action="store_true")
+        if name == "run-batch":
+            p_run.add_argument("--train-id", help="Deploy one exact validated train")
         p_run.set_defaults(func=func)
 
     p_daemon = subparsers.add_parser("daemon", help="Run foreground auto-only daemon")

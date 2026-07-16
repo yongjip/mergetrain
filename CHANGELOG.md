@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Preserve exact validated train identity for a later approval-gated deploy.
+- Rebuild validated trains on the current integration ref and reject changed task HEADs.
+- Exclude validated-but-not-deployed branches from destructive GC.
+
 ## 0.1.0
 
 Initial public package scaffold.

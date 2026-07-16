@@ -19,4 +19,7 @@ for j in jobs:
     note = (j.get('note') or '').splitlines()
     note = note[0] if note else ''
     print(f"#{j['id']} {j['status']:<11} {j['branch']}" + (f"  - {note}" if note else ""))
+train_ids = sorted({j.get('train_id') for j in jobs if j.get('train_id')})
+for train_id in train_ids:
+    print(f"validated train: {train_id}")
 PY

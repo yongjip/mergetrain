@@ -78,7 +78,64 @@ class GitRunnerTests(unittest.TestCase):
                 conn.close()
             self.assertEqual([result.status for result in results], ["validated"])
             self.assertEqual(stored.status, "validated")
+            self.assertTrue(stored.train_id)
+            self.assertEqual(stored.train_size, 1)
+            self.assertTrue(stored.validated_at)
+            self.assertTrue(stored.validation_base_sha)
+            self.assertEqual(stored.validation_sha, stored.deploy_sha)
+            self.assertEqual(stored.validated_head_sha, git(repo, "rev-parse", "feature/a"))
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+
+    def test_validated_batch_deploys_after_integration_ref_moves(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(
+                    conn,
+                    task="a",
+                    branch="feature/a",
+                    base_sha=git(repo, "rev-parse", "origin/main"),
+                    head_sha=git(repo, "rev-parse", "feature/a"),
+                )
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                (repo / "base-moved.txt").write_text("moved\n", encoding="utf-8")
+                git(repo, "add", "base-moved.txt")
+                git(repo, "commit", "-m", "move integration")
+                git(repo, "push", "origin", "main")
+                deployed = GitRunner(config).process_batch(conn, [validated], deploy=True)[0]
+            finally:
+                conn.close()
+            self.assertEqual(deployed.status, "deployed")
+            self.assertNotEqual(deployed.validation_base_sha, deployed.deploy_sha)
+            self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+            self.assertEqual(git(root / "remote.git", "show", "main:base-moved.txt"), "moved")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "xx")
+
+    def test_changed_branch_head_blocks_validated_train(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                git(repo, "switch", "feature/a")
+                (repo / "changed.txt").write_text("changed\n", encoding="utf-8")
+                git(repo, "add", "changed.txt")
+                git(repo, "commit", "-m", "change after validation")
+                git(repo, "switch", "main")
+                result = GitRunner(config).process_batch(conn, [validated], deploy=True)[0]
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "blocked")
+            self.assertIn("HEAD changed since validation", result.note)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            with self.assertRaises(AssertionError):
+                git(root / "remote.git", "show", "main:a.txt")
 
     def test_batch_refreshes_lease_while_holding_lock(self) -> None:
         with tempfile.TemporaryDirectory() as td:

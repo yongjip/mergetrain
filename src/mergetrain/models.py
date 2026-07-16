@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed")
-TERMINAL_STATUSES = ("deployed", "canceled", "validated")
+ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated")
+TERMINAL_STATUSES = ("deployed", "canceled")
 ALL_STATUSES = ACTIVE_STATUSES + TERMINAL_STATUSES
 
 
@@ -26,6 +26,12 @@ class Job:
     log_path: str = ""
     note: str = ""
     auto_deploy: bool = False
+    train_id: str = ""
+    train_size: int = 0
+    validated_at: str = ""
+    validation_base_sha: str = ""
+    validation_sha: str = ""
+    validated_head_sha: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> "Job":
@@ -44,6 +50,12 @@ class Job:
             log_path=str(row["log_path"] or ""),
             note=str(row["note"] or ""),
             auto_deploy=bool(row["auto_deploy"]),
+            train_id=str(row["train_id"] or ""),
+            train_size=int(row["train_size"] or 0),
+            validated_at=str(row["validated_at"] or ""),
+            validation_base_sha=str(row["validation_base_sha"] or ""),
+            validation_sha=str(row["validation_sha"] or ""),
+            validated_head_sha=str(row["validated_head_sha"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:

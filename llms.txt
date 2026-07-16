@@ -10,6 +10,7 @@ Rules:
 - Prefer `mergetrain doctor --json` and `mergetrain status --json`.
 - Use `--auto` only after explicit unattended-deploy approval.
 - Use `run-batch --validate-only` for validation and `run-batch --deploy` for deployment.
+- After validation, deploy the exact `validated_trains` entry shown by status; do not assume newer queued jobs are included.
 
 Core commands:
 - `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`

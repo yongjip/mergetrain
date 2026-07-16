@@ -24,7 +24,7 @@ mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain status [--json] [--limit N]
 mergetrain doctor [--json]
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
-mergetrain run-batch (--validate-only | --deploy) [--keep-worktree] [--json]
+mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
 mergetrain daemon [--interval SECONDS] [--once] [--keep-worktree]
 mergetrain gc [--json] [--apply] [--delete-branches]
 mergetrain cancel JOB_ID [--note NOTE] [--json]
@@ -95,12 +95,14 @@ Diagnose config, queue, Git remote, integration ref, GC candidates, and the next
 mergetrain doctor --json
 ```
 
-Key JSON fields: `ok`, `version`, `config`, `config_exists`, `db`, `db_existed_before`, `state.logs`, `state.worktree_root`, `git.repo_root`, `git.current_branch`, `git.worktree_clean`, `git.remote_url`, `git.remote_exists`, `git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`, `gc.worktree_candidates`, and `next_action`.
+Key JSON fields: `ok`, `version`, `config`, `config_exists`, `db`, `db_existed_before`, `state.logs`, `state.worktree_root`, `git.repo_root`, `git.current_branch`, `git.worktree_clean`, `git.remote_url`, `git.remote_exists`, `git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`, `validated_trains`, `gc.worktree_candidates`, and `next_action`.
 
 `next_action` is one of:
 
 - `wait_for_runner` — a live runner already holds the lock.
 - `fix_blocked_job` — there are `blocked`/`failed` jobs to resolve first.
+- `deploy_validated_train_when_approved` — an exact validated train is waiting for explicit deploy approval.
+- `cancel_and_reenqueue_legacy_validated_jobs` — pre-migration validated jobs lack safe train identity.
 - `run_daemon_or_run_batch_deploy_when_approved` — auto-approved jobs are queued.
 - `run_batch_validate` — manual jobs are queued; validate them.
 - `gc_available` — only cleanup remains.
@@ -118,17 +120,27 @@ mergetrain run-next --deploy
 ```
 
 `--keep-worktree` leaves the temporary integration worktree in place for inspection. See [Design → Runner behavior](design.md#runner-behavior).
+Validated jobs are deployed through `run-batch --deploy` so train identity is
+preserved, including when the train contains only one job.
 
 ## `run-batch`
 
-Process all currently queued jobs as one merge train. Requires `--validate-only` or `--deploy`.
+Validate all currently queued jobs as one merge train, or deploy an exact
+validated train. Requires `--validate-only` or `--deploy`.
 
 ```sh
 mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
+mergetrain run-batch --deploy --train-id <id>
 ```
 
-This is the primary command for shipping several agent commits in sequence. Conflicts block only the offending job; a train gate failure isolates merged jobs one-by-one. See [Design → Batch](design.md#batch--merge-train-run-batch).
+After validation, plain `--deploy` selects the only pending validated train and
+leaves newer queued jobs untouched. If more than one train is pending, deployment
+fails safely until `--train-id` selects one. The runner verifies every validated
+task HEAD, rebuilds on the current integration ref, and reruns gates before push.
+Changed task HEADs block the whole validated train. During initial validation,
+conflicts still block only the offending job and a train gate failure still
+isolates merged jobs one-by-one. See [Design → Batch](design.md#batch--merge-train-run-batch).
 
 ## `daemon`
 
@@ -151,7 +163,9 @@ mergetrain gc --apply --json                      # remove temp worktrees
 mergetrain gc --apply --delete-branches --json    # also delete terminal branches
 ```
 
-Branch deletion only targets branches of `deployed`/`validated`/`canceled` jobs and never deletes a protected ref (`push_refs`, the integration branch) or the currently checked-out branch.
+Branch deletion only targets branches of `deployed`/`canceled` jobs and never
+deletes a validated-but-not-deployed branch or a protected ref (`push_refs`, the
+integration branch, or the currently checked-out branch).
 
 ## `cancel`
 
@@ -160,6 +174,9 @@ Cancel a non-terminal queue item. Terminal items cannot be cancelled.
 ```sh
 mergetrain cancel 12 --note "replaced by rebased branch"
 ```
+
+Canceling one member of a validated train cancels every still-validated member
+of that train so a partial copy of the approved train cannot later deploy.
 
 ## Exit codes
 

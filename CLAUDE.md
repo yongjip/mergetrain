@@ -20,9 +20,9 @@ This repository ships **mergetrain**, a local deploy train for coding-agent work
 A deploy ships code. **Never deploy as a side effect of another request.** Before any deploy:
 
 1. Run `doctor --json` and `status --json`.
-2. Post a short summary of exactly what will ship: the queued job IDs and branches, the integration ref, the doctor `next_action`, and anything `blocked`/`failed`.
+2. Post a short summary of exactly what will ship: the pending validated `train_id`, its job IDs, branches, recorded HEADs, the integration ref, the doctor `next_action`, and anything `blocked`/`failed`. If no validated train exists, summarize the queued jobs that a direct deploy would claim.
 3. **Wait for the user's explicit confirmation in the thread** (e.g. "deploy", "yes ship it", "go"). A vague or general instruction is not confirmation.
-4. Only then run `mergetrain run-batch --deploy` (or `scripts/ty-deploy.sh --confirm`).
+4. Only then run `mergetrain run-batch --deploy` (or `scripts/ty-deploy.sh --confirm`). If multiple validated trains are pending, select the approved one with `--train-id`.
 5. Report the outcome: which jobs are now `deployed`, the `deploy_sha`, and any post-push verify warning recorded in the note.
 
 ## Do NOT do these unless explicitly told

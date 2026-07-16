@@ -46,10 +46,10 @@ python -m unittest discover -s tests
 
 The suite covers the behaviors that make the queue safe:
 
-- **store** — increasing enqueue IDs; duplicate active-branch rejection; re-enqueue allowed after a terminal state; the runner lock blocks concurrent claims; a blocked head job does not block claiming the next queued job; orphan `in_progress` jobs are re-queued then reclaimed; dead-owner locks are reclaimed immediately; an unknown owner with `in_progress` work is not auto-reclaimed; a live-owner lock survives past TTL; `claim_all_queued` returns queued jobs FIFO and takes the lock; blocked jobs are excluded from a batch claim; the `auto` flag persists and `auto_only` claims work; cancelling a terminal item is rejected; a legacy DB migrates the `auto_deploy` column.
+- **store** — increasing enqueue IDs; duplicate active-branch rejection; validated-train identity and exact deploy claims; validated branches excluded from GC; re-enqueue allowed after a terminal state; the runner lock blocks concurrent claims; orphan `in_progress` jobs are re-queued then reclaimed; stale-lock behavior; `auto_only` claims; whole-train cancellation; and additive legacy-DB migrations.
 - **daemon** — `--once` processes only auto jobs and leaves manual jobs queued; repeated DB connections do not leak file descriptors; a tick exception releases the lock and leaves the job queued.
-- **git_runner** — `push_verified_head` uses the configured atomic refs; a batch merges several jobs, runs gates once, and pushes once; a merge conflict blocks only the offending job; a batch gate failure isolates merged jobs into individual processing.
-- **cli** — `agent-contract --json` emits a machine-readable payload; `doctor --json` returns the correct `next_action`; global options work after the subcommand; `init --write` creates the generic files.
+- **git_runner** — `push_verified_head` uses the configured atomic refs; validation records an exact train; validated deploys rebuild safely after integration movement; changed task HEADs block deployment; initial batch failures still isolate individual jobs.
+- **cli** — `agent-contract --json` emits a machine-readable payload; status exposes validated train identity; `doctor --json` returns the correct `next_action`; global options work after the subcommand; `init --write` creates the generic files.
 - **config** — the built-in YAML subset parser reads the default config without PyYAML; defaults and path resolution work.
 
 When adding behavior, add or extend the matching `tests/test_*.py` module.
