@@ -12,7 +12,7 @@ import {
   Pulse,
   ShieldCheck,
   SpinnerGap,
-  Stack,
+  StackSimple,
   Timer,
   WarningCircle,
   WifiHigh,
@@ -76,6 +76,20 @@ function clockTime(value) {
   }).format(time);
 }
 
+function dateTime(value) {
+  const time = parseTime(value);
+  if (!time) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(time);
+}
+
 function shortSha(value) {
   return value ? value.slice(0, 7) : "pending";
 }
@@ -111,7 +125,7 @@ function Header({ snapshot, connection, now }) {
   const connectionLabel = connection === "live" ? "LIVE" : connection === "offline" ? "OFFLINE" : "POLLING";
   return (
     <header className="topbar">
-      <div className="brand"><Stack size={34} weight="bold" /><strong>mergetrain</strong></div>
+      <div className="brand"><StackSimple size={34} weight="bold" /><strong>mergetrain</strong></div>
       <div className="context"><FileCode size={19} /><span>{snapshot.project.name}</span></div>
       <div className="context"><GitBranch size={19} /><span>{snapshot.project.integration_ref}</span></div>
       <span className="local-badge">LOCAL</span>
@@ -173,8 +187,14 @@ function JobCards({ snapshot }) {
   return (
     <section className="job-track" aria-label="Jobs in selected train">
       {jobs.map((job, index) => {
-        const active = snapshot.progress.job_id === job.id || (snapshot.train.selection === "running" && !snapshot.progress.job_id && index === 0);
-        const state = ["validated", "deployed"].includes(job.status) ? "done" : ["blocked", "failed"].includes(job.status) ? "error" : active ? "active" : "waiting";
+        const active = snapshot.progress.job_id === job.id || (
+          snapshot.train.selection === "running"
+          && !snapshot.progress.job_id
+          && phaseIndex(snapshot.progress.phase) <= phaseIndex("assembling")
+          && index === 0
+        );
+        const assembled = snapshot.progress.completed_job_ids?.includes(job.id) || phaseIndex(snapshot.progress.phase) > phaseIndex("assembling");
+        const state = ["validated", "deployed"].includes(job.status) ? "done" : ["blocked", "failed"].includes(job.status) ? "error" : active ? "active" : assembled ? "done" : "waiting";
         return (
           <article className={`job-card ${state}`} key={job.id}>
             <div className="job-card-head"><strong>#{job.id}</strong><StatusIcon state={state} size={21} /></div>
@@ -189,7 +209,11 @@ function JobCards({ snapshot }) {
 }
 
 function Activity({ events }) {
-  const visible = [...events].slice(-5).reverse();
+  const hasTrainAssembly = events.some((event) => event.phase === "assembling" && event.job_id === null);
+  const visible = events
+    .filter((event) => !(hasTrainAssembly && event.phase === "assembling" && event.job_id !== null))
+    .slice(-5)
+    .reverse();
   return (
     <section className="activity">
       <h2>Activity</h2>
@@ -230,7 +254,7 @@ function BlockedPanel({ jobs }) {
       {job ? (
         <div className="blocked-item">
           <div className="blocked-title"><XCircle size={24} weight="fill" /><strong>#{job.id}</strong><span>{job.task}</span></div>
-          <div className="blocked-detail"><small>Reason</small><p>{job.note || "No reason recorded"}</p><small>Occurred</small><code>{job.finished_at || job.requested_at}</code></div>
+          <div className="blocked-detail"><small>Reason</small><p>{job.note || "No reason recorded"}</p><small>Occurred</small><code>{dateTime(job.finished_at || job.requested_at)}</code></div>
         </div>
       ) : (
         <div className="clear-history"><CheckCircle size={24} weight="fill" /><span>No blocked jobs in recent history.</span></div>

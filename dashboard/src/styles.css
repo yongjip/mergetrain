@@ -158,7 +158,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   display: flex;
   gap: 28px;
   position: relative;
-  padding: 0 92px 40px;
+  padding: 0 56px 40px;
   overflow-x: auto;
   scrollbar-color: #b8c2d1 transparent;
 }
@@ -262,6 +262,10 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 15px; color: var(--blue); }
 .spin { animation: spin 1.15s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+}
 
 @media (max-width: 1120px) {
   .topbar { gap: 20px; padding-inline: 24px; }

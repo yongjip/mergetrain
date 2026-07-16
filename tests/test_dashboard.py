@@ -11,7 +11,13 @@ from pathlib import Path
 from mergetrain.config import load_config
 from mergetrain.dashboard import create_server
 from mergetrain.snapshot import build_dashboard_snapshot
-from mergetrain.store import claim_all_queued, connect, enqueue_job, release_runner_lock
+from mergetrain.store import (
+    claim_all_queued,
+    connect,
+    enqueue_job,
+    record_run_event,
+    release_runner_lock,
+)
 
 
 class DashboardTests(unittest.TestCase):
@@ -32,12 +38,21 @@ class DashboardTests(unittest.TestCase):
                     worktree_path="/private/sensitive/worktree",
                 )
                 claimed = claim_all_queued(conn, owner=owner)
+                record_run_event(
+                    conn,
+                    claim_token=claimed[0].claim_token,
+                    job_id=claimed[0].id,
+                    phase="assembling",
+                    state="success",
+                    message=f"Merged {claimed[0].branch}",
+                )
             finally:
                 conn.close()
 
             payload = build_dashboard_snapshot(config)
             self.assertEqual(payload["train"]["selection"], "running")
-            self.assertEqual(payload["progress"]["phase"], "claiming")
+            self.assertEqual(payload["progress"]["phase"], "assembling")
+            self.assertEqual(payload["progress"]["completed_job_ids"], [claimed[0].id])
             self.assertEqual(payload["lock"]["owner"], f"local:{os.getpid()}")
             self.assertIn("heartbeat_at", payload["lock"])
             self.assertNotIn("worktree_path", payload["jobs"][0])

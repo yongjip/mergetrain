@@ -17,5 +17,6 @@ export default defineConfig({
   build: {
     outDir: "../src/mergetrain/dashboard_dist",
     emptyOutDir: true,
+    assetsInlineLimit: 0,
   },
 });

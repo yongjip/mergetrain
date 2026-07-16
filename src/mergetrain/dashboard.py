@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import sys
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,12 @@ SECURITY_HEADERS = {
 class DashboardHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def _json_bytes(payload: object) -> bytes:

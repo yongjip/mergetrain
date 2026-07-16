@@ -883,6 +883,14 @@ class GitRunner:
                 for job in jobs:
                     log.write(f"\n## merge job {job.id}: {job.branch}\n")
                     normal_pulse()
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        job_id=job.id,
+                        phase="assembling",
+                        state="active",
+                        message=f"Merging {job.branch}",
+                    )
                     if not deploying_validated:
                         try:
                             merge_shas[job.id] = self._merge_sha_for_job(job, deploying_validated=False)
@@ -930,6 +938,14 @@ class GitRunner:
                         run_command(["git", "reset", "--hard", "HEAD"], cwd=worktree, log=log, check=False)
                         continue
                     merged_jobs.append(job)
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        job_id=job.id,
+                        phase="assembling",
+                        state="success",
+                        message=f"Merged {job.branch}",
+                    )
                 if not merged_jobs:
                     log.write("\nno jobs were merged\n")
                     return results

@@ -123,6 +123,7 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(stored.validation_sha, stored.deploy_sha)
             self.assertEqual(stored.validated_head_sha, git(repo, "rev-parse", "feature/a"))
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            self.assertIn("Merged feature/a", [event.message for event in events])
             self.assertIn("Running gate 2/2: marker", [event.message for event in events])
 
     def test_validated_batch_deploys_after_integration_ref_moves(self) -> None:

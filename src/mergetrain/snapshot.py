@@ -111,9 +111,17 @@ def _progress(selected_jobs: list[Job], events, selection: str) -> dict[str, Any
         updated_at = ""
 
     completed: list[str] = []
+    completed_job_ids: list[int] = []
     for event in run_events:
         if event.state == "success" and event.phase in PHASES and event.phase not in completed:
             completed.append(event.phase)
+        if (
+            event.state == "success"
+            and event.phase == "assembling"
+            and event.job_id is not None
+            and event.job_id not in completed_job_ids
+        ):
+            completed_job_ids.append(event.job_id)
     started_at = next((job.started_at for job in selected_jobs if job.started_at), "")
     return {
         "phase": phase,
@@ -123,6 +131,7 @@ def _progress(selected_jobs: list[Job], events, selection: str) -> dict[str, Any
         "started_at": started_at,
         "updated_at": updated_at,
         "completed_phases": completed,
+        "completed_job_ids": completed_job_ids,
     }
 
 
