@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -26,6 +27,7 @@ from .git_runner import (
     git_worktree_clean,
 )
 from .models import Job
+from .snapshot import next_action as _doctor_next_action
 from .store import (
     cancel_job,
     claim_all_queued,
@@ -232,26 +234,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _doctor_next_action(payload: dict[str, Any]) -> str:
-    lock = payload.get("lock")
-    count_data = payload.get("counts") or {}
-    if lock and lock.get("liveness") == "alive":
-        return "wait_for_runner"
-    if count_data.get("blocked", 0) or count_data.get("failed", 0):
-        return "fix_blocked_job"
-    if payload.get("validated_trains"):
-        if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
-            return "deploy_validated_train_when_approved"
-        return "cancel_and_reenqueue_legacy_validated_jobs"
-    if count_data.get("auto_queued", 0):
-        return "run_daemon_or_run_batch_deploy_when_approved"
-    if count_data.get("queued", 0):
-        return "run_batch_validate"
-    if payload.get("gc", {}).get("worktree_candidates"):
-        return "gc_available"
-    return "enqueue_clean_branch"
-
-
 def cmd_doctor(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     db_existed_before = config.state.db.exists()
@@ -308,19 +290,35 @@ def _mode_from_args(args: argparse.Namespace) -> bool:
 
 
 def _results_payload(results: list[Job]) -> dict[str, Any]:
-    return {"ok": True, "jobs": [job.to_dict() for job in results]}
+    status_counts = Counter(job.status for job in results)
+    successful = sum(status_counts[status] for status in ("validated", "deployed"))
+    ok = successful == len(results)
+    if ok:
+        result = "success"
+    elif successful:
+        result = "partial"
+    else:
+        result = "failed"
+    return {
+        "ok": ok,
+        "result": result,
+        "counts": dict(sorted(status_counts.items())),
+        "jobs": [job.to_dict() for job in results],
+    }
 
 
 def cmd_run_next(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
     config = config_from_args(args)
     owner = default_owner()
+    lease_token = ""
     conn = connect(config.state.db)
     try:
         job = claim_next_job(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if job is None:
-            payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
+            payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
+            lease_token = job.claim_token
             result = GitRunner(config).process_one(
                 conn,
                 job,
@@ -331,7 +329,8 @@ def cmd_run_next(args: argparse.Namespace) -> int:
             )
             payload = _results_payload([result])
     finally:
-        release_runner_lock(conn, owner=owner)
+        if lease_token:
+            release_runner_lock(conn, owner=owner, token=lease_token)
         conn.close()
     if args.json:
         dump_json(payload)
@@ -341,7 +340,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
                 print(f"#{job_data['id']} {job_data['status']}: {job_data['branch']}")
         else:
             print(payload.get("note", "done"))
-    return 0
+    return 0 if payload["ok"] else 1
 
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
@@ -350,6 +349,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         raise QueueError("--train-id requires --deploy")
     config = config_from_args(args)
     owner = default_owner()
+    lease_token = ""
     conn = connect(config.state.db)
     try:
         if deploy:
@@ -362,8 +362,9 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if not jobs:
-            payload = {"ok": True, "jobs": [], "note": "no queued jobs"}
+            payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
+            lease_token = jobs[0].claim_token
             results = GitRunner(config).process_batch(
                 conn,
                 jobs,
@@ -374,7 +375,8 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             )
             payload = _results_payload(results)
     finally:
-        release_runner_lock(conn, owner=owner)
+        if lease_token:
+            release_runner_lock(conn, owner=owner, token=lease_token)
         conn.close()
     if args.json:
         dump_json(payload)
@@ -384,7 +386,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 print(f"#{job_data['id']} {job_data['status']}: {job_data['branch']}")
         else:
             print(payload.get("note", "done"))
-    return 0
+    return 0 if payload["ok"] else 1
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:
@@ -467,7 +469,29 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     if args.json:
         dump_json({"ok": True, "job": job.to_dict()})
     else:
-        print(f"canceled job {job.id}: {job.branch}")
+        action = "cancellation requested for" if job.cancel_requested_at else "canceled"
+        print(f"{action} job {job.id}: {job.branch}")
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    from .dashboard import serve_dashboard
+
+    host = str(args.host).strip()
+    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host not in loopback_hosts and not args.allow_remote:
+        raise QueueError(
+            "dashboard binds to loopback by default; pass --allow-remote to expose it"
+        )
+    if not 0 <= args.port <= 65535:
+        raise QueueError("dashboard port must be between 0 and 65535")
+    config = config_from_args(args)
+
+    def announce(url: str) -> None:
+        print(f"mergetrain dashboard: {url}", flush=True)
+        print("read-only · press Ctrl-C to stop", flush=True)
+
+    serve_dashboard(config, host=host, port=args.port, preview=args.preview, ready=announce)
     return 0
 
 
@@ -545,6 +569,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_cancel.add_argument("--note", default="")
     p_cancel.add_argument("--json", action="store_true")
     p_cancel.set_defaults(func=cmd_cancel)
+
+    p_dashboard = subparsers.add_parser(
+        "dashboard", help="Serve the local read-only live dashboard"
+    )
+    p_dashboard.add_argument("--host", default="127.0.0.1")
+    p_dashboard.add_argument("--port", type=int, default=8765)
+    p_dashboard.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Explicitly allow binding outside the loopback interface",
+    )
+    p_dashboard.add_argument(
+        "--preview",
+        action="store_true",
+        help="Label the connected database as preview data",
+    )
+    p_dashboard.set_defaults(func=cmd_dashboard)
     return parser
 
 
@@ -558,10 +599,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except KeyboardInterrupt:
-        print("mergetrain: interrupted", file=sys.stderr)
+        if getattr(args, "json", False):
+            dump_json({"ok": False, "error": {"code": "interrupted", "message": "interrupted"}})
+        else:
+            print("mergetrain: interrupted", file=sys.stderr)
         return 130
     except (MergetrainError, CommandFailed, ConfigError, QueueError) as exc:
-        print(f"mergetrain: error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            code = "".join(
+                [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]
+            ).lstrip("_")
+            dump_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": code,
+                        "message": str(exc),
+                        "retryable": type(exc).__name__ in {"LockHeld", "LostLease"},
+                    },
+                }
+            )
+        else:
+            print(f"mergetrain: error: {exc}", file=sys.stderr)
         return 1
 
 

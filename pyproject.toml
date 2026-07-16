@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mergetrain"
 version = "0.1.0"
-description = "LLM-friendly local deploy train for coding-agent worktrees"
+description = "A local-first merge-and-deploy queue for coding-agent worktrees"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -19,9 +19,12 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Version Control :: Git",
   "Topic :: Software Development :: Build Tools",
 ]
@@ -38,6 +41,7 @@ mergetrain = "mergetrain.cli:main"
 Homepage = "https://github.com/yongjip/mergetrain"
 Documentation = "https://github.com/yongjip/mergetrain/tree/main/docs"
 Issues = "https://github.com/yongjip/mergetrain/issues"
+Changelog = "https://github.com/yongjip/mergetrain/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mergetrain"]
@@ -47,6 +51,7 @@ include = [
   "/src",
   "/tests",
   "/docs",
+  "/dashboard",
   "/examples",
   "/README.md",
   "/LICENSE",

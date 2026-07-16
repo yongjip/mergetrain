@@ -18,6 +18,22 @@
 `deploy.verify` hooks can run arbitrary network commands. Review verify hooks
 before enabling unattended daemon deployment.
 
+## Dashboard exposure
+
+`mergetrain dashboard` binds to `127.0.0.1:8765` by default and has no action
+endpoints. Its payload omits lease tokens, local worktree paths, log paths, and
+the username portion of the runner owner. Status notes and Git branch names are
+still visible to anyone who can reach the server. Active gate events also include
+the configured command template; obvious token/password assignments and flags are
+masked, but command authors should never embed credentials directly in gate
+configuration.
+
+Binding to a non-loopback host requires `--allow-remote`. That flag is an
+acknowledgement, not an authentication or encryption layer. Put a separately
+reviewed authenticated reverse proxy in front of the dashboard if it must be
+reachable beyond the local machine. Do not expose it directly to an untrusted
+network.
+
 ## Examples
 
 Secret-scan examples are intentionally generic. They are not a replacement for a

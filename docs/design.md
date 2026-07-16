@@ -29,7 +29,14 @@ member stores the shared `train_id`, expected `train_size`, `validated_at`,
 `validated_head_sha`. This makes the approval target machine-readable and lets
 the deploy runner reject partial or changed trains.
 
-**Runner lock** — a single `runner` row in the `locks` table that guarantees exactly one runner processes the queue at a time. Liveness is derived from the owner's PID, so a dead runner is reclaimed while a live one is never stolen (see [Safety & liveness](#safety--liveness)).
+**Runner lock** — a single `runner` row in the `locks` table with an owner,
+last heartbeat, expiry, and unique lease token. Claimed jobs carry the same token, so a stale
+runner cannot refresh the lease or overwrite results after ownership changes.
+
+**Run event** — an append-only, structured progress record for claiming,
+fetching, assembly, gates, readiness, push, verification, and terminal outcomes.
+The local dashboard uses these records rather than parsing logs or guessing from
+process output.
 
 **Integration worktree** — a disposable, detached Git worktree created under `state.worktree_root`, named `{project.name}-mergetrain-{job_id}-{random8}`, starting from the integration ref. The runner merges here, so agents never check out or push the deploy branch.
 
@@ -68,7 +75,9 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   validated_at  TEXT NOT NULL DEFAULT '',
   validation_base_sha TEXT NOT NULL DEFAULT '',
   validation_sha TEXT NOT NULL DEFAULT '',
-  validated_head_sha TEXT NOT NULL DEFAULT ''
+  validated_head_sha TEXT NOT NULL DEFAULT '',
+  claim_token   TEXT NOT NULL DEFAULT '',
+  cancel_requested_at TEXT NOT NULL DEFAULT ''
 );
 ```
 
@@ -81,13 +90,34 @@ CREATE TABLE IF NOT EXISTS locks (
   worktree_path TEXT NOT NULL DEFAULT '',
   head_sha      TEXT NOT NULL DEFAULT '',
   acquired_at   TEXT NOT NULL,
-  expires_at    TEXT NOT NULL
+  heartbeat_at  TEXT NOT NULL DEFAULT '',
+  expires_at    TEXT NOT NULL,
+  token         TEXT NOT NULL DEFAULT ''
 );
 ```
 
+### `run_events`
+
+```sql
+CREATE TABLE IF NOT EXISTS run_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  claim_token TEXT NOT NULL DEFAULT '',
+  job_id      INTEGER,
+  phase       TEXT NOT NULL,
+  state       TEXT NOT NULL DEFAULT 'info',
+  message     TEXT NOT NULL,
+  detail      TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+```
+
+Lease tokens remain internal. `RunEvent.to_dict()` removes `claim_token`, as do
+the public job and lock models. The browser payload also omits local worktree
+and log paths and reduces the owner identity to `local:<pid>`.
+
 ### Connection policy
 
-`connect()` creates the parent directory, sets the row factory to `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE` transactions to take an early lock and reduce queue-state conflicts under concurrent writers. For forward compatibility with older databases, connect applies additive `ALTER TABLE` migrations for `auto_deploy` and the validation-train columns, ignoring only duplicate-column errors.
+`connect()` creates the parent directory, sets the row factory to `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE` transactions to take an early lock and reduce queue-state conflicts under concurrent writers. Schema upgrades run once per `PRAGMA user_version` in the same transaction; databases newer than the running binary fail closed.
 
 ## Job lifecycle
 
@@ -97,7 +127,7 @@ CREATE TABLE IF NOT EXISTS locks (
 | State | Meaning |
 |---|---|
 | `queued` | Waiting to be processed. |
-| `in_progress` | Claimed by a single-job runner. |
+| `in_progress` | Claimed by a runner with a unique lease token. |
 | `blocked` | Merge conflict or a policy situation needing human action. |
 | `failed` | Command failure or unexpected error. |
 | `validated` | A `--validate-only` run succeeded; the exact train remains deployable and nothing was pushed. |
@@ -106,13 +136,17 @@ CREATE TABLE IF NOT EXISTS locks (
 
 A branch may only re-enter the queue once its previous job is terminal.
 
-**Claim semantics differ by mode.** A single-job claim (`run-next`) flips that job's row to `in_progress` at claim time. Validation and daemon batch claims take all matching queued jobs FIFO. A manual batch deploy first claims the only complete validated train, leaving newer queued jobs untouched; if multiple validated trains exist, `--train-id` is required. Only when no validated train is pending does batch deploy claim queued jobs directly. Batch claims do **not** flip rows to `in_progress` up front; the runner lock owns the whole selected set while row status reflects outcomes.
+**All claims are atomic.** Lock acquisition, job selection, and the transition to
+`in_progress` occur in one `BEGIN IMMEDIATE` transaction. Every selected row
+receives the lock's unique claim token. A manual batch deploy claims the only
+complete validated train and leaves newer queued jobs untouched; if multiple
+validated trains exist, `--train-id` is required.
 
 ## Runner behavior
 
 ### Single job (`run-next`)
 
-The runner creates the log directory and a unique integration worktree path, then: `git fetch <remote>` → `git worktree add --detach <path> <integration_ref>` → `git merge --no-edit <branch>` → clean-worktree check → record `deploy_sha` → `git diff --check` → run gates → (deploy mode) atomic push → (deploy mode) verify hooks → remove the temp worktree (unless `--keep-worktree`) → record final status. A `CommandFailed` marks the job `failed`; a merge/domain problem marks it `blocked`; an unexpected exception marks it `failed`. The runner lock is always released.
+The runner creates the log directory and a unique integration worktree path, then: `git fetch <remote>` → `git worktree add --detach <path> <integration_ref>` → `git merge --no-edit <branch>` → clean-worktree check → record `deploy_sha` → `git diff --check` → run gates → (deploy mode) atomic push → (deploy mode) verify hooks → remove the temp worktree (unless `--keep-worktree`) → record final status. Subprocess output streams to the job log while a polling loop renews the lease, checks cancellation, and enforces `command_timeout_seconds`. Losing the token stops the process group and prevents stale state writes.
 
 ### Batch / merge train (`run-batch`)
 
@@ -140,7 +174,8 @@ Deploy mode pushes the verified `HEAD` to every ref in `git.push_refs` atomicall
 git push --atomic <remote> HEAD:<ref1> HEAD:<ref2> ...
 ```
 
-If `push_refs` is empty, deploy fails by design. See [config reference → git](config.md#git).
+An explicitly empty `push_refs` value is rejected while loading config; only an
+omitted field defaults to the integration branch.
 
 ### Post-push verify policy
 
@@ -148,7 +183,29 @@ Because a push already updates the remote, a verify-hook failure after push does
 
 ## Daemon model
 
-The daemon is a foreground, auto-only worker. Each tick it checks for `queued` jobs with `auto_deploy = 1`; only if any exist does it claim them and run the batch. It never touches manual jobs, catches and logs tick exceptions (attempting an owner-guarded lock release), and finishes the current tick before exiting on `SIGINT`/`SIGTERM`. "Auto" is determined solely by the `auto_deploy` field, never by daemon judgment. Operational detail and supervisor recipes are in the [daemon guide](daemon.md).
+The daemon is a foreground, auto-only worker. Each tick it checks for `queued` jobs with `auto_deploy = 1`; only if any exist does it claim them and run the batch. It never touches manual jobs, releases only the exact lease token it acquired, and finishes the current tick before exiting on `SIGINT`/`SIGTERM`. "Auto" is determined solely by the `auto_deploy` field, never by daemon judgment. Operational detail and supervisor recipes are in the [daemon guide](daemon.md).
+
+## Local dashboard
+
+`mergetrain dashboard` runs a small Python standard-library HTTP server. The
+bundled React UI reads `/api/snapshot` and subscribes to `/api/events`; the
+latter is an SSE stream of complete snapshots, so reconnects do not require
+client-side event reconciliation. A polling fallback preserves freshness when
+SSE is unavailable.
+
+The header reports browser connectivity (`CONNECTED`, `POLLING`, or
+`DISCONNECTED`) independently from runner ownership (`ACTIVE` or `IDLE`). During
+gates, the snapshot exposes structured gate position and a redacted command
+template so the current-check panel and Activity timeline can explain what is
+running instead of only repeating a log message.
+
+The dashboard has no write endpoint, form, cancel, retry, validate, deploy, or
+shell-execution control. It is single-repository and desktop-first in v0.1. The
+default bind address is loopback, and non-loopback binding requires explicit
+`--allow-remote` acknowledgement.
+
+Structured events are capped at the newest 5,000 rows to keep observability
+bounded without requiring a separate maintenance process.
 
 ## Safety & liveness
 
@@ -181,7 +238,7 @@ On success every merged job shares that `deploy_sha`. A conflicting branch becom
 mergetrain is built so an LLM agent can operate it reliably:
 
 - **Non-interactive.** Every agent-facing command is non-interactive; ambiguous intent fails. A bare `run-batch` is rejected — `--validate-only` or `--deploy` is required.
-- **JSON-first.** `doctor`, `status`, `agent-contract`, and `gc` all emit machine-readable JSON for deciding the next step.
+- **JSON-first.** JSON mode returns structured success, partial failure, and error payloads; job failures return exit code `1` instead of `ok: true`.
 - **Next safe action.** `doctor --json` emits a `next_action` so an agent does not have to infer one.
 - **Explicit consent.** Deploy needs `--deploy`; validation needs `--validate-only`; unattended eligibility needs `--auto`; destructive cleanup needs `gc --apply`; branch deletion needs `gc --delete-branches`.
 
@@ -195,8 +252,8 @@ The core ships no provider APIs for Kubernetes, AWS, Argo, Vercel, GitHub, GitLa
 
 `0.1.0` ships the core: SQLite-backed queue, PID-aware runner lock, Git worktree merge trains, configurable gates and atomic push refs, the auto-only daemon, and JSON-first `doctor`/`status`/`agent-contract`/`gc`. Candidate next steps:
 
-- `mergetrain config validate`, plus clearer errors for a missing remote/integration ref, gate-name uniqueness, and an empty-`push_refs` warning surfaced in `doctor`.
-- Observability: `mergetrain logs <job_id>`, `mergetrain inspect <job_id> --json`, machine-readable failure categories, optional metrics export.
+- `mergetrain config validate` as a standalone preflight command (runtime loading already rejects blank refs, duplicate gate names, invalid queue timing, and empty `push_refs`).
+- Observability follow-ups: `mergetrain logs <job_id>`, `mergetrain inspect <job_id> --json`, machine-readable failure categories, optional metrics export.
 - Daemon operations: recommended log rotation, a stale-lock inspection command, and a health-check pattern.
 - A protected-branch guard list and documented branch-naming conventions for `gc --delete-branches`.
 - Packaging/release hardening: classifiers, a release workflow, and editable-install / old-pip fallbacks.

@@ -1,8 +1,15 @@
 # mergetrain
 
-**An LLM-friendly local deploy train for coding-agent worktrees.**
+**A local-first merge-and-deploy queue for coding-agent worktrees.**
 
-mergetrain takes the committed branches that your AI coding agents produce — each in its own local worktree — and runs them down a single track: one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon. It turns "several agents all trying to ship at once" into a safe, serialized, machine-readable pipeline.
+mergetrain keeps its queue, coordination, merge assembly, and gate execution on
+your machine. Coding agents commit in separate worktrees; one local runner
+serializes their branches, validates the exact train, and pushes only after
+explicit approval. No hosted merge-queue service or CI provider is required.
+
+> **Local-first, not local-only.** Queue state, locking, train assembly, and
+> gates stay local. Configured Git remotes and post-deploy verification may
+> still use external services.
 
 > Status: alpha (`v0.1.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
 
@@ -41,8 +48,8 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 ## Quickstart
 
 ```bash
-# Install from source (not yet on PyPI)
-python -m pip install -e .
+# Install the public alpha
+python -m pip install mergetrain
 
 # 1. Scaffold config + agent docs in your repo
 mergetrain init --project my-app --write
@@ -53,12 +60,23 @@ mergetrain enqueue --task "add health check" --branch agent/health --capture-sha
 # 3. See the queue and lock state (machine-readable)
 mergetrain status --json
 
-# 4. Validate the whole train without shipping
+# 4. Watch the queue and runner locally (read-only)
+mergetrain dashboard
+
+# 5. Validate the whole train without shipping
 mergetrain run-batch --validate-only
 
-# 5. Ship — explicit, never implicit
+# 6. Ship — explicit, never implicit
 mergetrain run-batch --deploy
 ```
+
+For an unreleased source checkout, use `python -m pip install -e .` instead.
+
+The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
+runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
+the exact current gate and command template, and the next safe action. `CONNECTED`
+describes the browser's data stream; `RUNNER ACTIVE` separately describes the
+process that owns the train. It has no mutation endpoints or deploy controls.
 
 Validation records an exact train identity, including every task HEAD and the
 integration base used for the check. The later deploy reassembles that same
@@ -71,7 +89,7 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 
 - **Job** — one task branch waiting in the queue, with the SHAs captured at enqueue time.
 - **Validated train** — an exact, deployable group of jobs that passed gates together and is waiting for explicit deploy approval.
-- **Runner lock** — guarantees exactly one runner processes the queue at a time, with PID-liveness checks so a dead runner is reclaimed but a live one is never stolen from.
+- **Runner lock** — gives every claim a unique lease token, heartbeats through long-running commands, and prevents a stale runner from overwriting a newer owner.
 - **Integration worktree** — a disposable, detached Git worktree built on your integration ref. The runner merges here, so agents never checkout or push the deploy branch.
 - **Gate** — a verification command (diff-check, tests, secret-scan…) run once over the assembled train *before* push. A gate failure means nothing ships.
 - **Verify hook** — a command run *after* push to confirm the deploy is live.
@@ -100,6 +118,11 @@ git:
   remote: origin
   integration_branch: main
   push_refs: [main]          # atomic push targets on deploy
+
+queue:
+  lock_ttl_minutes: 30
+  heartbeat_interval_seconds: 10
+  command_timeout_seconds: 3600
 
 gates:
   - name: diff-check
@@ -142,7 +165,7 @@ mergetrain is designed so an agent can operate it from a short contract and JSON
 
 ## Status
 
-`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, and JSON `doctor`/`status` — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
+`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
 
 ## License
 

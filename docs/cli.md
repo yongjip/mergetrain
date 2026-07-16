@@ -23,6 +23,7 @@ mergetrain agent-contract [--json]
 mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain status [--json] [--limit N]
 mergetrain doctor [--json]
+mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
 mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
 mergetrain daemon [--interval SECONDS] [--once] [--keep-worktree]
@@ -110,6 +111,33 @@ Key JSON fields: `ok`, `version`, `config`, `config_exists`, `db`, `db_existed_b
 
 `next_action` is **advisory**; it never substitutes for a destructive action or deploy consent.
 
+## `dashboard`
+
+Serve the single-repository live status dashboard:
+
+```sh
+mergetrain dashboard
+# http://127.0.0.1:8765/
+```
+
+The UI is deliberately read-only. It shows queue order, the active runner phase,
+heartbeat and lease freshness, recent structured events, blocked history, and the
+same advisory next action used by `doctor`. Server-sent events deliver live
+snapshots; the client falls back to two-second polling if the stream is
+interrupted. The connection indicator is distinct from runner ownership, and the
+current-check panel explains the active gate, scope, command template, and elapsed
+time.
+
+| Option | Meaning |
+|---|---|
+| `--host` | Bind host (default `127.0.0.1`). |
+| `--port` | Bind port (default `8765`; `0` selects an available port). |
+| `--allow-remote` | Required acknowledgement when binding outside `127.0.0.1`, `localhost`, or `::1`. |
+| `--preview` | Label the connected database as synthetic preview data. This does not generate fixtures. |
+
+Remote binding expands access to queue metadata and status notes. Prefer the
+loopback default; there are no authentication or TLS layers in this local tool.
+
 ## `run-next`
 
 Process exactly one queued job. Requires `--validate-only` or `--deploy`.
@@ -176,8 +204,15 @@ mergetrain cancel 12 --note "replaced by rebased branch"
 ```
 
 Canceling one member of a validated train cancels every still-validated member
-of that train so a partial copy of the approved train cannot later deploy.
+of that train so a partial copy of the approved train cannot later deploy. For
+an `in_progress` train, cancel records `cancel_requested_at` for every job with
+the same claim token. The runner notices the request during its heartbeat,
+terminates the active subprocess group, and records the final `canceled` state.
 
 ## Exit codes
 
-`0` success · `1` an expected error (config, queue, command failure) · `2` usage error (no subcommand) · `130` interrupted (`Ctrl-C`).
+`0` all requested jobs succeeded · `1` a job blocked/failed or an expected
+config/queue/command error · `2` usage error · `130` interrupted (`Ctrl-C`).
+In JSON mode, run results include `ok`, `result` (`success`, `partial`, or
+`failed`), per-status `counts`, and `jobs`. Expected exceptions are emitted as
+`{"ok": false, "error": {"code", "message", "retryable"}}`.

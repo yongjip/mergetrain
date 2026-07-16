@@ -6,14 +6,17 @@ set -eo pipefail
 TY="${MERGETRAIN_BIN:-mergetrain}"
 
 echo "Validating queued train (no push)…"
+set +e
 res="$($TY run-batch --validate-only --json "$@")"
+rc=$?
+set -e
 
 TY_RES="$res" python3 <<'PY'
 import json, os
 d = json.loads(os.environ["TY_RES"])
 jobs = d.get("jobs", [])
 if not jobs:
-    print(d.get("note", "no queued jobs"))
+    print(d.get("error", {}).get("message") or d.get("note", "no queued jobs"))
     raise SystemExit
 for j in jobs:
     note = (j.get('note') or '').splitlines()
@@ -23,3 +26,4 @@ train_ids = sorted({j.get('train_id') for j in jobs if j.get('train_id')})
 for train_id in train_ids:
     print(f"validated train: {train_id}")
 PY
+exit "$rc"

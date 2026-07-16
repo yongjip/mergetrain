@@ -33,8 +33,9 @@ marked `deployed` with a warning note instead of `failed`.
 
 ## Stale lock
 
-The runner lock records an owner and a lease expiry. A running runner refreshes
-its lease throughout a job, so an active runner's lease is always valid.
+The runner lock records an owner, unique token, and lease expiry. Claimed jobs
+store the same token. Managed subprocesses renew the lease periodically, and a
+refresh or state update with a stale token fails immediately.
 
 Reclaim rules when another runner tries to acquire:
 
@@ -63,6 +64,23 @@ re-queues them with this note:
 ```text
 re-queued by mergetrain (previous runner gone)
 ```
+
+If an orphan already had `cancel_requested_at`, recovery finalizes it as
+`canceled` instead of re-queueing it.
+
+## Cancellation while running
+
+Cancellation is cooperative until atomic push begins. `cancel` records a
+request for the whole active claim; the runner heartbeat terminates the process
+group and records `canceled`. Once push begins, the runner continues to renew
+ownership without interrupting the irreversible remote update and records the
+actual deployed result.
+
+## Command timeout
+
+Git operations, gates, and verify hooks are bounded by
+`queue.command_timeout_seconds`. A timeout terminates the process group and is
+reported as a command failure; pre-push timeouts leave deploy refs unchanged.
 
 ## Temporary worktrees
 

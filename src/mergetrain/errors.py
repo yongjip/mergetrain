@@ -22,6 +22,14 @@ class LockHeld(QueueError):
     """Raised when another runner owns the queue lock."""
 
 
+class LostLease(QueueError):
+    """Raised when a runner no longer owns the lease it was given."""
+
+
+class CancellationRequested(MergetrainError):
+    """Raised when the active train has been asked to stop."""
+
+
 class MergeBlocked(MergetrainError):
     """Raised when a task branch cannot be merged into the integration train."""
 
