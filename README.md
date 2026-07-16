@@ -60,11 +60,17 @@ mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
 ```
 
+Validation records an exact train identity, including every task HEAD and the
+integration base used for the check. The later deploy reassembles that same
+train on the current integration ref, reruns all gates, and refuses changed
+task branches. Newly queued work is not silently added to the approved train.
+
 Every agent-facing command is non-interactive and requires explicit intent: `--validate-only` or `--deploy`, never a bare `run-batch`.
 
 ## Core concepts
 
 - **Job** — one task branch waiting in the queue, with the SHAs captured at enqueue time.
+- **Validated train** — an exact, deployable group of jobs that passed gates together and is waiting for explicit deploy approval.
 - **Runner lock** — guarantees exactly one runner processes the queue at a time, with PID-liveness checks so a dead runner is reclaimed but a live one is never stolen from.
 - **Integration worktree** — a disposable, detached Git worktree built on your integration ref. The runner merges here, so agents never checkout or push the deploy branch.
 - **Gate** — a verification command (diff-check, tests, secret-scan…) run once over the assembled train *before* push. A gate failure means nothing ships.

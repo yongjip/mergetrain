@@ -21,7 +21,7 @@ Agents should:
 - `in_progress`: claimed by a single-job runner.
 - `blocked`: merge conflict or user action needed.
 - `failed`: gate or command failure.
-- `validated`: validation succeeded without push.
+- `validated`: validation succeeded without push; the exact train remains deployable after approval.
 - `deployed`: deploy push succeeded; note may include post-push verify warning.
 - `canceled`: user canceled the item.
 
@@ -45,3 +45,10 @@ mergetrain gc --apply --delete-branches
 
 Do not infer consent from context. Require explicit user/operator approval for
 unattended deploy and deploy execution.
+
+After `run-batch --validate-only`, read `status --json.validated_trains` to
+identify the approved `train_id`, member branches, and recorded HEADs. A later
+`run-batch --deploy` rebuilds that train on the current integration ref and
+reruns gates. If several validated trains are pending, pass `--train-id`.
+Validated-but-not-deployed branches are never branch-deletion candidates for
+`gc --delete-branches`.

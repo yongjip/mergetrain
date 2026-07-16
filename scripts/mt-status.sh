@@ -17,10 +17,14 @@ print(f"repo: {g.get('repo_root') or '?'}")
 print(f"integration: {g.get('integration_ref')} (exists={g.get('integration_ref_exists')}) | "
       f"config: {'found' if d.get('config_exists') else 'default'}")
 print(f"lock: {lock['owner'] + ' [' + lock['liveness'] + ']' if lock else 'none'}")
-order = ['queued', 'in_progress', 'blocked', 'failed', 'deployed', 'validated', 'canceled']
+order = ['queued', 'validated', 'in_progress', 'blocked', 'failed', 'deployed', 'canceled']
 cs = " ".join(f"{k}={c[k]}" for k in order if c.get(k))
 print(f"counts: {cs or 'empty'}" + (f" | auto-queued={c['auto_queued']}" if c.get('auto_queued') else ""))
 print(f"next_action: {d.get('next_action')}")
+for train in s.get('validated_trains', []):
+    state = "deployable" if train.get('deploy_eligible') else "incomplete"
+    print(f"validated train: {train.get('train_id') or 'legacy'} "
+          f"jobs={train.get('train_size')} [{state}]")
 jobs = s.get("jobs", [])[:10]
 if jobs:
     print("recent jobs:")

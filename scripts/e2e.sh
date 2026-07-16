@@ -212,6 +212,38 @@ rb=$("$MT" --repo "$R" run-batch --validate-only --json)
 [ "$(cat "$(dirname "$R")/gate.marker" 2>/dev/null)" = "x" ] && ok "gate ran exactly once" || no "gate marker wrong"
 [ -f "$(dirname "$R")/verify.marker" ] && no "verify ran on validate" || ok "verify skipped on validate"
 
+section "S4b  validate -> approve -> deploy exact train after integration movement"
+R=$(setup s4b); D=$(dirname "$R")
+make_branch "$R" feature/a a.txt aaa; make_branch "$R" feature/b b.txt bbb
+enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
+enq "$R" --task b --branch feature/b $ENQ >/dev/null 2>&1
+vr=$("$MT" --repo "$R" run-batch --validate-only --json)
+tid=$(echo "$vr" | jget jobs.0.train_id)
+[ -n "$tid" ] && [ "$tid" = "$(echo "$vr" | jget jobs.1.train_id)" ] && ok "validation records one shared train_id" || no "missing/mismatched train_id"
+[ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "deploy_validated_train_when_approved" ] && ok "doctor points to approved-train deploy" || no "doctor next_action wrong after validate"
+[ "$("$MT" --repo "$R" gc --json | "$VPY" -c "import sys,json; print(len(json.load(sys.stdin)['branch_candidates']))")" = "0" ] && ok "validated branches excluded from GC" || no "validated branch appeared in GC"
+make_branch "$R" feature/later later.txt later
+enq "$R" --task later --branch feature/later $ENQ >/dev/null 2>&1
+printf 'integration moved\n' > "$R/base-moved.txt"; gitq "$R" add base-moved.txt; gitq "$R" commit -q -m "move integration"; gitq "$R" push -q origin main
+rb=$("$MT" --repo "$R" run-batch --deploy --json)
+stj=$("$MT" --repo "$R" status --json)
+{ [ "$(echo "$stj" | job_field feature/a status)" = deployed ] && [ "$(echo "$stj" | job_field feature/b status)" = deployed ]; } && ok "validated train deployed" || no "validated jobs not deployed"
+[ "$(echo "$stj" | job_field feature/later status)" = queued ] && ok "newer queued job excluded from approved train" || no "new queued job was consumed"
+[ "$(git -C "$D/remote.git" show main:base-moved.txt 2>/dev/null)" = "integration moved" ] && ok "integration movement preserved" || no "moved integration content missing"
+git -C "$D/remote.git" show main:later.txt >/dev/null 2>&1 && no "new queued content leaked" || ok "new queued content not deployed"
+[ "$(cat "$D/gate.marker" 2>/dev/null)" = "xx" ] && ok "gates reran before validated deploy" || no "validated deploy did not rerun gates"
+
+section "S4c  changed task HEAD blocks validated deploy"
+R=$(setup s4c); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
+enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
+"$MT" --repo "$R" run-batch --validate-only --json >/dev/null
+before=$(remote_main "$D")
+gitq "$R" switch -q feature/a; printf 'changed\n' > "$R/changed.txt"; gitq "$R" add changed.txt; gitq "$R" commit -q -m "change after validation"; gitq "$R" switch -q main
+rb=$("$MT" --repo "$R" run-batch --deploy --json)
+[ "$(echo "$rb" | jget jobs.0.status)" = "blocked" ] && ok "changed validated HEAD blocked" || no "changed HEAD was not blocked: $rb"
+[ "$before" = "$(remote_main "$D")" ] && ok "remote unchanged after identity failure" || no "remote changed after identity failure"
+[ "$(cat "$D/gate.marker" 2>/dev/null)" = "x" ] && ok "deploy gates skipped after identity failure" || no "gate unexpectedly reran"
+
 section "S5  run-batch --deploy  (atomic push updates remote; verify runs)"
 R=$(setup s5); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1

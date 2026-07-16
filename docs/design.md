@@ -21,7 +21,13 @@ Agents never push deploy refs themselves; they enqueue and read JSON. One runner
 
 ## Concepts
 
-**Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
+**Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
+
+**Validated train** — the exact group of jobs that passed a validation run. Each
+member stores the shared `train_id`, expected `train_size`, `validated_at`,
+`validation_base_sha`, and `validation_sha`, plus its own
+`validated_head_sha`. This makes the approval target machine-readable and lets
+the deploy runner reject partial or changed trains.
 
 **Runner lock** — a single `runner` row in the `locks` table that guarantees exactly one runner processes the queue at a time. Liveness is derived from the owner's PID, so a dead runner is reclaimed while a live one is never stolen (see [Safety & liveness](#safety--liveness)).
 
@@ -56,7 +62,13 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   finished_at   TEXT NOT NULL DEFAULT '',
   log_path      TEXT NOT NULL DEFAULT '',
   note          TEXT NOT NULL DEFAULT '',
-  auto_deploy   INTEGER NOT NULL DEFAULT 0
+  auto_deploy   INTEGER NOT NULL DEFAULT 0,
+  train_id      TEXT NOT NULL DEFAULT '',
+  train_size    INTEGER NOT NULL DEFAULT 0,
+  validated_at  TEXT NOT NULL DEFAULT '',
+  validation_base_sha TEXT NOT NULL DEFAULT '',
+  validation_sha TEXT NOT NULL DEFAULT '',
+  validated_head_sha TEXT NOT NULL DEFAULT ''
 );
 ```
 
@@ -75,12 +87,12 @@ CREATE TABLE IF NOT EXISTS locks (
 
 ### Connection policy
 
-`connect()` creates the parent directory, sets the row factory to `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE` transactions to take an early lock and reduce queue-state conflicts under concurrent writers. For forward compatibility with older databases, connect attempts an additive `ALTER TABLE deploy_queue ADD COLUMN auto_deploy …` migration and ignores the `OperationalError` if the column already exists.
+`connect()` creates the parent directory, sets the row factory to `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE` transactions to take an early lock and reduce queue-state conflicts under concurrent writers. For forward compatibility with older databases, connect applies additive `ALTER TABLE` migrations for `auto_deploy` and the validation-train columns, ignoring only duplicate-column errors.
 
 ## Job lifecycle
 
-**Active states:** `queued`, `in_progress`, `blocked`, `failed`.
-**Terminal states:** `deployed`, `validated`, `canceled`.
+**Active states:** `queued`, `in_progress`, `blocked`, `failed`, `validated`.
+**Terminal states:** `deployed`, `canceled`.
 
 | State | Meaning |
 |---|---|
@@ -88,13 +100,13 @@ CREATE TABLE IF NOT EXISTS locks (
 | `in_progress` | Claimed by a single-job runner. |
 | `blocked` | Merge conflict or a policy situation needing human action. |
 | `failed` | Command failure or unexpected error. |
-| `validated` | A `--validate-only` run succeeded; nothing was pushed. |
+| `validated` | A `--validate-only` run succeeded; the exact train remains deployable and nothing was pushed. |
 | `deployed` | A `--deploy` push succeeded (the note may carry a post-push verify warning). |
 | `canceled` | Cancelled by a user. |
 
 A branch may only re-enter the queue once its previous job is terminal.
 
-**Claim semantics differ by mode.** A single-job claim (`run-next`) flips that job's row to `in_progress` at claim time. A batch claim (`run-batch`, the daemon) takes the runner lock and returns all queued jobs FIFO, but does **not** flip rows to `in_progress` up front; each row transitions to its terminal/blocked/failed state as processing produces a result. In other words, a batch claim means "this runner holds the whole queue," and row status reflects per-job outcomes.
+**Claim semantics differ by mode.** A single-job claim (`run-next`) flips that job's row to `in_progress` at claim time. Validation and daemon batch claims take all matching queued jobs FIFO. A manual batch deploy first claims the only complete validated train, leaving newer queued jobs untouched; if multiple validated trains exist, `--train-id` is required. Only when no validated train is pending does batch deploy claim queued jobs directly. Batch claims do **not** flip rows to `in_progress` up front; the runner lock owns the whole selected set while row status reflects outcomes.
 
 ## Runner behavior
 
@@ -104,7 +116,21 @@ The runner creates the log directory and a unique integration worktree path, the
 
 ### Batch / merge train (`run-batch`)
 
-The runner merges all queued jobs into one integration worktree in order. A branch that conflicts is marked `blocked`, `git merge --abort` is attempted, and the remaining jobs are still tried. Gates then run **once** over the whole train. If a pre-push gate fails for the train, the train is torn down and each merged job is re-processed individually via the single-job path, so one offending job is isolated while the others can still succeed. On success, every merged job is marked with the same `deploy_sha`.
+During validation, the runner merges all queued jobs into one integration
+worktree in order. A branch that conflicts is marked `blocked`, `git merge
+--abort` is attempted, and the remaining jobs are still tried. Gates then run
+**once** over the whole train. If a pre-push gate fails, the train is torn down
+and each merged job is re-processed individually, so an offending job is
+isolated. Successful jobs receive a shared train identity and validation SHA.
+
+During a later validated deploy, the selected train is atomic: every current
+task branch must still resolve to its recorded `validated_head_sha`, and the
+stored member count and shared metadata must be complete. The runner starts
+from the current integration ref, merges the recorded commits, and reruns all
+gates. Integration movement is therefore safe, but an identity mismatch,
+merge conflict, or gate failure blocks/fails the whole approved train rather
+than shipping a subset. On success, every member is marked `deployed` with the
+new shared `deploy_sha`.
 
 ### Atomic push
 

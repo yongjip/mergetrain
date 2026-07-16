@@ -240,6 +240,29 @@ class GitRunner:
             log=log,
         )
 
+    def _merge_sha_for_job(self, job: Job, *, deploying_validated: bool) -> str:
+        """Resolve and verify the exact task commit that may be merged."""
+
+        try:
+            current_sha = git_rev_parse(self.repo, job.branch)
+        except CommandFailed as exc:
+            raise MergeBlocked(f"task branch cannot be resolved: {job.branch}") from exc
+        expected_ref = job.validated_head_sha if deploying_validated else job.head_sha
+        if not expected_ref:
+            return current_sha
+        try:
+            expected_sha = git_rev_parse(self.repo, expected_ref)
+        except CommandFailed as exc:
+            checkpoint = "validation" if deploying_validated else "enqueue"
+            raise MergeBlocked(f"recorded {checkpoint} HEAD cannot be resolved for {job.branch}") from exc
+        if current_sha != expected_sha:
+            checkpoint = "validation" if deploying_validated else "enqueue"
+            raise MergeBlocked(
+                f"branch HEAD changed since {checkpoint}: {job.branch} "
+                f"(expected {expected_sha}, found {current_sha}); enqueue a fresh job"
+            )
+        return expected_sha
+
     def process_one(
         self,
         conn,
@@ -254,13 +277,23 @@ class GitRunner:
         log_path = self._log_path("job", job.id)
         worktree = self._worktree_path(job.id)
         deploy_sha = ""
+        integration_base_sha = ""
+        merge_sha = ""
+        deploying_validated = deploy and bool(job.train_id)
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain job {job.id}: {job.task}\n")
             log.write(f"branch: {job.branch}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
                 self._prepare_worktree(worktree=worktree, log=log)
                 self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree)
-                merge = run_command(["git", "merge", "--no-edit", job.branch], cwd=worktree, log=log, check=False)
+                integration_base_sha = git_rev_parse(worktree, "HEAD")
+                if deploying_validated and job.validation_base_sha != integration_base_sha:
+                    log.write(
+                        "\nintegration ref moved since validation; "
+                        "reassembling the train and rerunning gates\n"
+                    )
+                merge_sha = self._merge_sha_for_job(job, deploying_validated=deploying_validated)
+                merge = run_command(["git", "merge", "--no-edit", merge_sha], cwd=worktree, log=log, check=False)
                 if merge.returncode != 0:
                     raise MergeBlocked(merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}")
                 if not git_worktree_clean(worktree):
@@ -278,7 +311,25 @@ class GitRunner:
                         log.write(f"\nWARNING: {verify_warning}\n")
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or "ok"
-                return mark_job(conn, job.id, status=status, deploy_sha=deploy_sha, log_path=str(log_path), note=note)
+                validation_fields = {}
+                if not deploy:
+                    validation_fields = {
+                        "train_id": uuid.uuid4().hex,
+                        "train_size": 1,
+                        "validated_at": utc_now(),
+                        "validation_base_sha": integration_base_sha,
+                        "validation_sha": deploy_sha,
+                        "validated_head_sha": merge_sha,
+                    }
+                return mark_job(
+                    conn,
+                    job.id,
+                    status=status,
+                    deploy_sha=deploy_sha,
+                    log_path=str(log_path),
+                    note=note,
+                    **validation_fields,
+                )
             except MergeBlocked as exc:
                 return mark_job(conn, job.id, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
             except CommandFailed as exc:
@@ -303,28 +354,87 @@ class GitRunner:
         jobs = list(jobs)
         if not jobs:
             return []
+        validated_train_ids = {job.train_id for job in jobs if job.train_id}
+        deploying_validated = deploy and bool(validated_train_ids)
         self._ensure_state_dirs()
         log_path = self._log_path("batch", jobs[0].id)
         worktree = self._worktree_path(jobs[0].id)
         merged_jobs: list[Job] = []
         results: list[Job] = []
+        merge_shas: dict[int, str] = {}
         deploy_sha = ""
+        integration_base_sha = ""
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
             log.write(f"jobs: {[job.id for job in jobs]}\nmode: {'deploy' if deploy else 'validate'}\n")
             try:
+                if deploying_validated and (
+                    len(validated_train_ids) != 1
+                    or any(not job.train_id for job in jobs)
+                    or {job.train_size for job in jobs} != {len(jobs)}
+                ):
+                    note = "validated train identity is incomplete or mixes multiple trains; enqueue a fresh train"
+                    return [
+                        mark_job(conn, job.id, status="blocked", log_path=str(log_path), note=note)
+                        for job in jobs
+                    ]
                 self._prepare_worktree(worktree=worktree, log=log)
                 self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree)
+                integration_base_sha = git_rev_parse(worktree, "HEAD")
+                if deploying_validated:
+                    validation_bases = {job.validation_base_sha for job in jobs}
+                    if validation_bases != {integration_base_sha}:
+                        log.write(
+                            "\nintegration ref moved since validation; "
+                            "reassembling the exact train and rerunning gates\n"
+                        )
+                    try:
+                        merge_shas = {
+                            job.id: self._merge_sha_for_job(job, deploying_validated=True)
+                            for job in jobs
+                        }
+                    except MergeBlocked as exc:
+                        note = f"validated train identity check failed: {exc}"
+                        return [
+                            mark_job(conn, job.id, status="blocked", log_path=str(log_path), note=note)
+                            for job in jobs
+                        ]
                 for job in jobs:
                     log.write(f"\n## merge job {job.id}: {job.branch}\n")
                     self._refresh_lease(conn, owner=owner, ttl_minutes=ttl_minutes, worktree=worktree)
-                    merge = run_command(["git", "merge", "--no-edit", job.branch], cwd=worktree, log=log, check=False)
+                    if not deploying_validated:
+                        try:
+                            merge_shas[job.id] = self._merge_sha_for_job(job, deploying_validated=False)
+                        except MergeBlocked as exc:
+                            results.append(
+                                mark_job(conn, job.id, status="blocked", log_path=str(log_path), note=str(exc))
+                            )
+                            continue
+                    merge = run_command(
+                        ["git", "merge", "--no-edit", merge_shas[job.id]],
+                        cwd=worktree,
+                        log=log,
+                        check=False,
+                    )
                     if merge.returncode != 0:
                         note = merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}"
+                        if deploying_validated:
+                            run_command(["git", "merge", "--abort"], cwd=worktree, log=log, check=False)
+                            note = f"validated train could not be reassembled: {note}"
+                            return [
+                                mark_job(conn, item.id, status="blocked", log_path=str(log_path), note=note)
+                                for item in jobs
+                            ]
                         results.append(mark_job(conn, job.id, status="blocked", log_path=str(log_path), note=note))
                         run_command(["git", "merge", "--abort"], cwd=worktree, log=log, check=False)
                         continue
                     if not git_worktree_clean(worktree):
+                        if deploying_validated:
+                            note = "validated train produced a dirty integration worktree after reassembly"
+                            return [
+                                mark_job(conn, item.id, status="blocked", log_path=str(log_path), note=note)
+                                for item in jobs
+                            ]
                         results.append(
                             mark_job(
                                 conn,
@@ -345,6 +455,19 @@ class GitRunner:
                 try:
                     self._run_gates(worktree=worktree, log=log)
                 except CommandFailed as exc:
+                    if deploying_validated:
+                        note = f"validated train gate failed after reassembly: {exc}"
+                        return [
+                            mark_job(
+                                conn,
+                                job.id,
+                                status="failed",
+                                deploy_sha=deploy_sha,
+                                log_path=str(log_path),
+                                note=note,
+                            )
+                            for job in jobs
+                        ]
                     log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
                     self._cleanup_worktree(worktree, log=log, keep_worktree=False)
                     for job in merged_jobs:
@@ -369,19 +492,44 @@ class GitRunner:
                         log.write(f"\nWARNING: {verify_warning}\n")
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or f"batch ok; merged {len(merged_jobs)} job(s)"
+                train_id = uuid.uuid4().hex if not deploy else ""
+                validated_at = utc_now() if not deploy else ""
                 for job in merged_jobs:
-                    results.append(mark_job(conn, job.id, status=status, deploy_sha=deploy_sha, log_path=str(log_path), note=note))
+                    validation_fields = {}
+                    if not deploy:
+                        validation_fields = {
+                            "train_id": train_id,
+                            "train_size": len(merged_jobs),
+                            "validated_at": validated_at,
+                            "validation_base_sha": integration_base_sha,
+                            "validation_sha": deploy_sha,
+                            "validated_head_sha": merge_shas[job.id],
+                        }
+                    results.append(
+                        mark_job(
+                            conn,
+                            job.id,
+                            status=status,
+                            deploy_sha=deploy_sha,
+                            log_path=str(log_path),
+                            note=note,
+                            **validation_fields,
+                        )
+                    )
                 return results
             except CommandFailed as exc:
-                for job in merged_jobs or jobs:
+                affected_jobs = jobs if deploying_validated else merged_jobs or jobs
+                for job in affected_jobs:
                     results.append(mark_job(conn, job.id, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc)))
                 return results
             except MergetrainError as exc:
-                for job in merged_jobs or jobs:
+                affected_jobs = jobs if deploying_validated else merged_jobs or jobs
+                for job in affected_jobs:
                     results.append(mark_job(conn, job.id, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc)))
                 return results
             except Exception as exc:  # pragma: no cover - defensive boundary
-                for job in merged_jobs or jobs:
+                affected_jobs = jobs if deploying_validated else merged_jobs or jobs
+                for job in affected_jobs:
                     results.append(mark_job(conn, job.id, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=f"unexpected error: {exc}"))
                 return results
             finally:

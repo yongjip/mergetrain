@@ -34,7 +34,9 @@ mergetrain status --json
 mergetrain run-batch --validate-only
 ```
 
-A successful validation marks merged jobs as `validated` and does not push.
+A successful validation marks merged jobs as `validated`, records a shared
+`train_id` plus the integration and task SHAs, and does not push. Inspect
+`status --json` before approval to see the exact deployable train.
 
 ## 5. Deploy
 
@@ -45,7 +47,11 @@ mergetrain run-batch --deploy
 ```
 
 Deploy mode runs gates first, then performs an atomic push to configured
-`git.push_refs`, then runs `deploy.verify` hooks.
+`git.push_refs`, then runs `deploy.verify` hooks. If a validated train is
+pending, only that exact train is rebuilt and deployed; newly queued jobs wait
+for a later validation. Integration-ref movement is allowed because the train
+is rebuilt and gated again, but a changed task branch is blocked and must be
+enqueued fresh.
 
 ## 6. Auto-only daemon
 
