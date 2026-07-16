@@ -21,7 +21,7 @@ jobs:
           PYTHONPATH=src python -m unittest discover -s tests
           python -m build
           python -m twine check --strict dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: test-python-package-distributions
           path: dist/
@@ -33,7 +33,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: test-python-package-distributions
           path: dist/
