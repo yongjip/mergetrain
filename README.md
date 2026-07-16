@@ -48,8 +48,8 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 ## Quickstart
 
 ```bash
-# Install from source (not yet on PyPI)
-python -m pip install -e .
+# Install the public alpha
+python -m pip install mergetrain
 
 # 1. Scaffold config + agent docs in your repo
 mergetrain init --project my-app --write
@@ -69,6 +69,8 @@ mergetrain run-batch --validate-only
 # 6. Ship — explicit, never implicit
 mergetrain run-batch --deploy
 ```
+
+For an unreleased source checkout, use `python -m pip install -e .` instead.
 
 The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
 runner phases, heartbeat freshness, job order, blocked reasons, recent activity,

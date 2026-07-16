@@ -29,7 +29,9 @@ class StoreTests(unittest.TestCase):
     def make_conn(self):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
-        return connect(Path(td.name) / "queue.sqlite")
+        conn = connect(Path(td.name) / "queue.sqlite")
+        self.addCleanup(conn.close)
+        return conn
 
     def test_legacy_database_migrates_validation_train_columns(self) -> None:
         td = tempfile.TemporaryDirectory()

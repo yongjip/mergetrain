@@ -1,5 +1,11 @@
 # Install
 
+## From PyPI
+
+```sh
+python -m pip install mergetrain
+```
+
 ## Local editable install
 
 ```sh
@@ -12,8 +18,11 @@ python -m pip install -e .
 instead of the built-in generated-config subset parser:
 
 ```sh
-python -m pip install -e '.[yaml]'
+python -m pip install 'mergetrain[yaml]'
 ```
+
+For an editable checkout with the same extra, use
+`python -m pip install -e '.[yaml]'`.
 
 ## Verify installation
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-07-17
+
+First public alpha release.
+
 - Preserve exact validated train identity for a later approval-gated deploy.
 - Rebuild validated trains on the current integration ref and reject changed task HEADs.
 - Exclude validated-but-not-deployed branches from destructive GC.
@@ -14,11 +18,6 @@
 - Distinguish browser connectivity from runner activity and explain the current gate, command, scope, and Activity milestones.
 - Record structured runner phases and explicit lock heartbeat timestamps.
 - Redact lease tokens and local filesystem paths from dashboard payloads.
-
-## 0.1.0
-
-Initial public package scaffold.
-
 - SQLite-backed local deploy queue.
 - Runner lock with PID liveness checks.
 - Git worktree merge train execution.

@@ -83,7 +83,8 @@ python -m pip install dist/*.whl
 mergetrain --version
 ```
 
-Supported Python: 3.10+. See the [release checklist](release.md) for the full publish flow.
+Supported and tested Python: 3.10 through 3.14. See the
+[release checklist](release.md) for the full publish flow.
 
 ## Conventions
 
