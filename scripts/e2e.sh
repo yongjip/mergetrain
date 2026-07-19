@@ -165,7 +165,7 @@ ENQ="--capture-sha --allow-branch-mismatch"
 section(){ echo; echo "=== $1 ==="; }
 
 section "S0  Packaging smoke (installed console script)"
-[ "$("$MT" --version)" = "mergetrain 0.2.0" ] && ok "version" || no "version=$("$MT" --version)"
+[ "$("$MT" --version)" = "mergetrain 0.3.0" ] && ok "version" || no "version=$("$MT" --version)"
 "$MT" --help >/dev/null 2>&1 && ok "--help exit 0" || no "--help nonzero"
 [ "$("$MT" agent-contract --json | jget boundary.deploy_requires)" = "run-next --deploy or run-batch --deploy" ] && ok "agent-contract well-formed (nested leaf)" || no "agent-contract"
 "$VPY" -c "import mergetrain, mergetrain.cli, mergetrain.store, mergetrain.git_runner, mergetrain.daemon, mergetrain.dashboard, mergetrain.snapshot" 2>/dev/null && ok "imports" || no "imports"
