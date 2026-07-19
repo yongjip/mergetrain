@@ -12,10 +12,19 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .errors import CancellationRequested, LockHeld, LostLease, QueueError
-from .models import ACTIVE_STATUSES, ALL_STATUSES, Job, RunEvent, RunnerLock, TERMINAL_STATUSES
+from .models import (
+    ACTIVE_STATUSES,
+    ALL_STATUSES,
+    PUSH_STATUSES,
+    TERMINAL_STATUSES,
+    VERIFY_STATUSES,
+    Job,
+    RunEvent,
+    RunnerLock,
+)
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Liveness:
@@ -97,6 +106,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           finished_at TEXT NOT NULL DEFAULT '',
           log_path TEXT NOT NULL DEFAULT '',
           note TEXT NOT NULL DEFAULT '',
+          push_status TEXT NOT NULL DEFAULT 'not_run',
+          verify_status TEXT NOT NULL DEFAULT 'not_run',
           auto_deploy INTEGER NOT NULL DEFAULT 0,
           train_id TEXT NOT NULL DEFAULT '',
           train_size INTEGER NOT NULL DEFAULT 0,
@@ -163,6 +174,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             3: (
                 ("locks", "heartbeat_at", "TEXT NOT NULL DEFAULT ''"),
             ),
+            4: (
+                ("deploy_queue", "push_status", "TEXT NOT NULL DEFAULT 'not_run'"),
+                ("deploy_queue", "verify_status", "TEXT NOT NULL DEFAULT 'not_run'"),
+            ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:
@@ -171,6 +186,17 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 }
                 if column not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            if next_version == 4:
+                conn.execute(
+                    "UPDATE deploy_queue SET push_status = 'succeeded' WHERE status = 'deployed'"
+                )
+                conn.execute(
+                    """
+                    UPDATE deploy_queue
+                    SET verify_status = 'failed'
+                    WHERE status = 'deployed' AND note LIKE 'post-push verify warning:%'
+                    """
+                )
             conn.execute(f"PRAGMA user_version = {next_version}")
 
 
@@ -757,6 +783,8 @@ def mark_job(
     deploy_sha: str = "",
     log_path: str = "",
     note: str = "",
+    push_status: str = "",
+    verify_status: str = "",
     train_id: str = "",
     train_size: int = 0,
     validated_at: str = "",
@@ -767,6 +795,10 @@ def mark_job(
 ) -> Job:
     if status not in ALL_STATUSES:
         raise QueueError(f"unknown job status: {status}")
+    if push_status and push_status not in PUSH_STATUSES:
+        raise QueueError(f"unknown push status: {push_status}")
+    if verify_status and verify_status not in VERIFY_STATUSES:
+        raise QueueError(f"unknown verify status: {verify_status}")
     finished_at = utc_now() if status in TERMINAL_STATUSES or status in {"blocked", "failed"} else ""
     where = "id = ?"
     where_values: list[Any] = [job_id]
@@ -783,6 +815,8 @@ def mark_job(
             UPDATE deploy_queue
             SET status = ?, deploy_sha = COALESCE(NULLIF(?, ''), deploy_sha),
                 log_path = COALESCE(NULLIF(?, ''), log_path), note = ?, finished_at = ?,
+                push_status = COALESCE(NULLIF(?, ''), push_status),
+                verify_status = COALESCE(NULLIF(?, ''), verify_status),
                 train_id = COALESCE(NULLIF(?, ''), train_id),
                 train_size = COALESCE(NULLIF(?, 0), train_size),
                 validated_at = COALESCE(NULLIF(?, ''), validated_at),
@@ -802,6 +836,8 @@ def mark_job(
                 log_path,
                 note,
                 finished_at,
+                push_status,
+                verify_status,
                 train_id,
                 train_size,
                 validated_at,

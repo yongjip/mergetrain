@@ -21,7 +21,7 @@ Agents never push deploy refs themselves; they enqueue and read JSON. One runner
 
 ## Concepts
 
-**Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
+**Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, separate `push_status` and `verify_status` outcomes, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
 
 **Validated train** — the exact group of jobs that passed a validation run. Each
 member stores the shared `train_id`, expected `train_size`, `validated_at`,
@@ -131,7 +131,7 @@ and log paths and reduces the owner identity to `local:<pid>`.
 | `blocked` | Merge conflict or a policy situation needing human action. |
 | `failed` | Command failure or unexpected error. |
 | `validated` | A `--validate-only` run succeeded; the exact train remains deployable and nothing was pushed. |
-| `deployed` | A `--deploy` push succeeded (the note may carry a post-push verify warning). |
+| `deployed` | A `--deploy` push succeeded; inspect `verify_status` for the independent post-push outcome. |
 | `canceled` | Cancelled by a user. |
 
 A branch may only re-enter the queue once its previous job is terminal.
@@ -179,7 +179,15 @@ omitted field defaults to the integration branch.
 
 ### Post-push verify policy
 
-Because a push already updates the remote, a verify-hook failure after push does **not** mark jobs `failed`. The jobs stay `deployed` and the failure is recorded as a warning in the note. Marking them failed would make queue state disagree with the actual remote state. See [failure modes](failure-modes.md#post-push-verify-failure).
+Because a push already updates the remote, a verify-hook failure after push does
+**not** mark jobs `failed`. The jobs stay `deployed` with
+`push_status=succeeded` and `verify_status=failed`. CLI results use
+`result=warning`/`ok=false`, and the terminal completion event stays in warning
+state so it cannot visually erase the unresolved verification result. A schema
+v4 migration backfills legacy `deployed` rows as pushed and recognizes the
+canonical warning-note prefix when available; otherwise historical verification
+remains `not_run` because no stronger fact was persisted. See [failure
+modes](failure-modes.md#post-push-verify-failure).
 
 ## Daemon model
 

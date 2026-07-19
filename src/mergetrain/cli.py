@@ -248,7 +248,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"db: {payload['db']}")
         print(f"lock: {lock_text}")
         for job in payload["jobs"]:
-            print(f"#{job['id']} {job['status']} {job['branch']} - {job['task']}")
+            print(f"{_job_result_line(job)} - {job['task']}")
     return 0
 
 
@@ -316,20 +316,48 @@ def _mode_from_args(args: argparse.Namespace) -> bool:
 
 def _results_payload(results: list[Job]) -> dict[str, Any]:
     status_counts = Counter(job.status for job in results)
+    push_counts = Counter(job.push_status for job in results)
+    verify_counts = Counter(job.verify_status for job in results)
     successful = sum(status_counts[status] for status in ("validated", "deployed"))
-    ok = successful == len(results)
-    if ok:
+    warnings = sum(
+        job.status == "deployed" and job.verify_status == "failed" for job in results
+    )
+    if successful == len(results) and warnings:
+        result = "warning"
+    elif successful == len(results):
         result = "success"
     elif successful:
         result = "partial"
     else:
         result = "failed"
     return {
-        "ok": ok,
+        "ok": result == "success",
         "result": result,
         "counts": dict(sorted(status_counts.items())),
+        "push_counts": dict(sorted(push_counts.items())),
+        "verify_counts": dict(sorted(verify_counts.items())),
         "jobs": [job.to_dict() for job in results],
     }
+
+
+def _job_result_line(job: dict[str, Any]) -> str:
+    outcomes: list[str] = []
+    if job.get("push_status", "not_run") != "not_run":
+        outcomes.append(f"push={job['push_status']}")
+    if job.get("verify_status", "not_run") != "not_run":
+        outcomes.append(f"verify={job['verify_status']}")
+    outcome_text = f" ({', '.join(outcomes)})" if outcomes else ""
+    return f"#{job['id']} {job['status']}{outcome_text}: {job['branch']}"
+
+
+def _print_run_payload(payload: dict[str, Any]) -> None:
+    if payload.get("jobs"):
+        for job_data in payload["jobs"]:
+            print(_job_result_line(job_data))
+        if payload.get("result") != "success":
+            print(f"result: {payload['result']}")
+    else:
+        print(payload.get("note", "done"))
 
 
 def cmd_run_next(args: argparse.Namespace) -> int:
@@ -360,11 +388,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
-        if payload.get("jobs"):
-            for job_data in payload["jobs"]:
-                print(f"#{job_data['id']} {job_data['status']}: {job_data['branch']}")
-        else:
-            print(payload.get("note", "done"))
+        _print_run_payload(payload)
     return 0 if payload["ok"] else 1
 
 
@@ -406,11 +430,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
-        if payload.get("jobs"):
-            for job_data in payload["jobs"]:
-                print(f"#{job_data['id']} {job_data['status']}: {job_data['branch']}")
-        else:
-            print(payload.get("note", "done"))
+        _print_run_payload(payload)
     return 0 if payload["ok"] else 1
 
 

@@ -15,6 +15,7 @@ from mergetrain.store import (
     claim_all_queued,
     connect,
     enqueue_job,
+    mark_job,
     record_run_event,
     release_runner_lock,
 )
@@ -143,6 +144,38 @@ class DashboardTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 worker.join(timeout=3)
+
+    def test_snapshot_exposes_deployed_verification_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="deploy", branch="codex/deploy")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="failed",
+                    note="post-push verify warning: health check failed",
+                )
+                record_run_event(
+                    conn,
+                    job_id=job.id,
+                    phase="complete",
+                    state="warning",
+                    message=f"Job #{job.id} deployed; verification needs attention",
+                    detail="post-push verify warning: health check failed",
+                )
+            finally:
+                conn.close()
+
+            payload = build_dashboard_snapshot(config)
+            self.assertEqual(payload["jobs"][0]["status"], "deployed")
+            self.assertEqual(payload["jobs"][0]["push_status"], "succeeded")
+            self.assertEqual(payload["jobs"][0]["verify_status"], "failed")
+            self.assertEqual(payload["events"][-1]["state"], "warning")
 
 
 if __name__ == "__main__":

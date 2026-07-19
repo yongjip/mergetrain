@@ -382,11 +382,23 @@ class GitRunner:
             )
         event_map = {
             "validated": ("ready", "success", f"Job #{job_id} validated"),
-            "deployed": ("complete", "success", f"Job #{job_id} deployed"),
             "blocked": ("blocked", "error", f"Job #{job_id} blocked"),
             "failed": ("failed", "error", f"Job #{job_id} failed"),
             "canceled": ("canceled", "warning", f"Job #{job_id} canceled"),
         }
+        if result.status == "deployed":
+            if result.verify_status == "failed":
+                event_map["deployed"] = (
+                    "complete",
+                    "warning",
+                    f"Job #{job_id} deployed; verification needs attention",
+                )
+            else:
+                event_map["deployed"] = (
+                    "complete",
+                    "success",
+                    f"Job #{job_id} deployed",
+                )
         event = event_map.get(result.status)
         if event:
             phase, state, message = event
@@ -567,6 +579,8 @@ class GitRunner:
         deploy_sha = ""
         integration_base_sha = ""
         merge_sha = ""
+        push_status = "not_run"
+        verify_status = "not_run"
         deploying_validated = deploy and bool(job.train_id)
 
         def pulse(*, check_cancel: bool = True) -> None:
@@ -593,6 +607,25 @@ class GitRunner:
                 state=state,
                 message=f"{verb} gate {index}/{total}: {name}",
                 detail=command,
+            )
+
+        def finish_after_error(*, status: str, note: str) -> Job:
+            if push_status == "succeeded":
+                status = "deployed"
+                note = f"post-push completion warning: {note}"
+                post_push_verify_status = "failed"
+            else:
+                post_push_verify_status = verify_status
+            return self._finish_job(
+                conn,
+                job.id,
+                lease_token=lease_token,
+                status=status,
+                deploy_sha=deploy_sha,
+                log_path=str(log_path),
+                note=note,
+                push_status=push_status,
+                verify_status=post_push_verify_status,
             )
 
         with log_path.open("w", encoding="utf-8") as log:
@@ -687,7 +720,23 @@ class GitRunner:
                         state="active",
                         message="Pushing verified HEAD atomically",
                     )
-                    self.push_verified_head(worktree=worktree, log=log, pulse=ownership_pulse)
+                    try:
+                        self.push_verified_head(
+                            worktree=worktree, log=log, pulse=ownership_pulse
+                        )
+                    except CommandFailed as exc:
+                        push_status = "failed"
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            job_id=job.id,
+                            phase="pushing",
+                            state="error",
+                            message="Atomic push failed",
+                            detail=str(exc),
+                        )
+                        raise
+                    push_status = "succeeded"
                     self._event(
                         conn,
                         lease_token=lease_token,
@@ -696,36 +745,51 @@ class GitRunner:
                         state="success",
                         message="Atomic push completed",
                     )
-                    try:
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            job_id=job.id,
-                            phase="verifying",
-                            state="active",
-                            message="Running post-push verification",
-                        )
-                        self._run_verify_hooks(worktree=worktree, log=log, pulse=ownership_pulse)
+                    if not self.config.deploy.verify:
+                        verify_status = "not_configured"
                         self._event(
                             conn,
                             lease_token=lease_token,
                             job_id=job.id,
                             phase="verifying",
                             state="success",
-                            message="Post-push verification passed",
+                            message="No post-push verification configured",
                         )
-                    except CommandFailed as exc:
-                        verify_warning = f"post-push verify warning: {exc}"
-                        log.write(f"\nWARNING: {verify_warning}\n")
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            job_id=job.id,
-                            phase="verifying",
-                            state="warning",
-                            message="Post-push verification needs attention",
-                            detail=verify_warning,
-                        )
+                    else:
+                        try:
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                job_id=job.id,
+                                phase="verifying",
+                                state="active",
+                                message="Running post-push verification",
+                            )
+                            self._run_verify_hooks(
+                                worktree=worktree, log=log, pulse=ownership_pulse
+                            )
+                            verify_status = "succeeded"
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                job_id=job.id,
+                                phase="verifying",
+                                state="success",
+                                message="Post-push verification passed",
+                            )
+                        except CommandFailed as exc:
+                            verify_status = "failed"
+                            verify_warning = f"post-push verify warning: {exc}"
+                            log.write(f"\nWARNING: {verify_warning}\n")
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                job_id=job.id,
+                                phase="verifying",
+                                state="warning",
+                                message="Post-push verification needs attention",
+                                detail=verify_warning,
+                            )
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or "ok"
                 validation_fields = {}
@@ -746,27 +810,25 @@ class GitRunner:
                     deploy_sha=deploy_sha,
                     log_path=str(log_path),
                     note=note,
+                    push_status=push_status,
+                    verify_status=verify_status,
                     **validation_fields,
                 )
             except LostLease:
                 raise
             except CancellationRequested:
-                return self._finish_job(
-                    conn,
-                    job.id,
-                    lease_token=lease_token,
+                return finish_after_error(
                     status="canceled",
-                    log_path=str(log_path),
                     note="canceled by user while the train was running",
                 )
             except MergeBlocked as exc:
-                return self._finish_job(conn, job.id, lease_token=lease_token, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
+                return finish_after_error(status="blocked", note=str(exc))
             except CommandFailed as exc:
-                return self._finish_job(conn, job.id, lease_token=lease_token, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
+                return finish_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
-                return self._finish_job(conn, job.id, lease_token=lease_token, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc))
+                return finish_after_error(status="blocked", note=str(exc))
             except Exception as exc:  # pragma: no cover - defensive boundary
-                return self._finish_job(conn, job.id, lease_token=lease_token, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=f"unexpected error: {exc}")
+                return finish_after_error(status="failed", note=f"unexpected error: {exc}")
             finally:
                 self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
 
@@ -797,6 +859,8 @@ class GitRunner:
         merge_shas: dict[int, str] = {}
         deploy_sha = ""
         integration_base_sha = ""
+        push_status = "not_run"
+        verify_status = "not_run"
 
         def pulse(*, check_cancel: bool = True) -> None:
             self._refresh_lease(
@@ -844,6 +908,30 @@ class GitRunner:
                 else:
                     canceled.append(current)
             return canceled
+
+        def finish_active_after_error(*, status: str, note: str) -> list[Job]:
+            affected_jobs = jobs if deploying_validated else merged_jobs or jobs
+            if push_status == "succeeded":
+                status = "deployed"
+                note = f"post-push completion warning: {note}"
+                post_push_verify_status = "failed"
+            else:
+                post_push_verify_status = verify_status
+            for item in affected_jobs:
+                current = get_job(conn, item.id)
+                if current.status == "in_progress" and current.claim_token == lease_token:
+                    results.append(
+                        finish(
+                            item,
+                            status=status,
+                            deploy_sha=deploy_sha,
+                            log_path=str(log_path),
+                            note=note,
+                            push_status=push_status,
+                            verify_status=post_push_verify_status,
+                        )
+                    )
+            return results
 
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
@@ -1044,7 +1132,22 @@ class GitRunner:
                         state="active",
                         message="Pushing verified HEAD atomically",
                     )
-                    self.push_verified_head(worktree=worktree, log=log, pulse=ownership_pulse)
+                    try:
+                        self.push_verified_head(
+                            worktree=worktree, log=log, pulse=ownership_pulse
+                        )
+                    except CommandFailed as exc:
+                        push_status = "failed"
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            phase="pushing",
+                            state="error",
+                            message="Atomic push failed",
+                            detail=str(exc),
+                        )
+                        raise
+                    push_status = "succeeded"
                     self._event(
                         conn,
                         lease_token=lease_token,
@@ -1052,33 +1155,47 @@ class GitRunner:
                         state="success",
                         message="Atomic push completed",
                     )
-                    try:
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            phase="verifying",
-                            state="active",
-                            message="Running post-push verification",
-                        )
-                        self._run_verify_hooks(worktree=worktree, log=log, pulse=ownership_pulse)
+                    if not self.config.deploy.verify:
+                        verify_status = "not_configured"
                         self._event(
                             conn,
                             lease_token=lease_token,
                             phase="verifying",
                             state="success",
-                            message="Post-push verification passed",
+                            message="No post-push verification configured",
                         )
-                    except CommandFailed as exc:
-                        verify_warning = f"post-push verify warning: {exc}"
-                        log.write(f"\nWARNING: {verify_warning}\n")
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            phase="verifying",
-                            state="warning",
-                            message="Post-push verification needs attention",
-                            detail=verify_warning,
-                        )
+                    else:
+                        try:
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                phase="verifying",
+                                state="active",
+                                message="Running post-push verification",
+                            )
+                            self._run_verify_hooks(
+                                worktree=worktree, log=log, pulse=ownership_pulse
+                            )
+                            verify_status = "succeeded"
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                phase="verifying",
+                                state="success",
+                                message="Post-push verification passed",
+                            )
+                        except CommandFailed as exc:
+                            verify_status = "failed"
+                            verify_warning = f"post-push verify warning: {exc}"
+                            log.write(f"\nWARNING: {verify_warning}\n")
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                phase="verifying",
+                                state="warning",
+                                message="Post-push verification needs attention",
+                                detail=verify_warning,
+                            )
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or f"batch ok; merged {len(merged_jobs)} job(s)"
                 train_id = uuid.uuid4().hex if not deploy else ""
@@ -1101,6 +1218,8 @@ class GitRunner:
                             deploy_sha=deploy_sha,
                             log_path=str(log_path),
                             note=note,
+                            push_status=push_status,
+                            verify_status=verify_status,
                             **validation_fields,
                         )
                     )
@@ -1108,28 +1227,20 @@ class GitRunner:
             except LostLease:
                 raise
             except CancellationRequested:
+                if push_status == "succeeded":
+                    return finish_active_after_error(
+                        status="canceled",
+                        note="canceled by user while the train was running",
+                    )
                 return cancel_active_jobs()
             except CommandFailed as exc:
-                affected_jobs = jobs if deploying_validated else merged_jobs or jobs
-                for job in affected_jobs:
-                    current = get_job(conn, job.id)
-                    if current.status == "in_progress" and current.claim_token == lease_token:
-                        results.append(finish(job, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc)))
-                return results
+                return finish_active_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
-                affected_jobs = jobs if deploying_validated else merged_jobs or jobs
-                for job in affected_jobs:
-                    current = get_job(conn, job.id)
-                    if current.status == "in_progress" and current.claim_token == lease_token:
-                        results.append(finish(job, status="blocked", deploy_sha=deploy_sha, log_path=str(log_path), note=str(exc)))
-                return results
+                return finish_active_after_error(status="blocked", note=str(exc))
             except Exception as exc:  # pragma: no cover - defensive boundary
-                affected_jobs = jobs if deploying_validated else merged_jobs or jobs
-                for job in affected_jobs:
-                    current = get_job(conn, job.id)
-                    if current.status == "in_progress" and current.claim_token == lease_token:
-                        results.append(finish(job, status="failed", deploy_sha=deploy_sha, log_path=str(log_path), note=f"unexpected error: {exc}"))
-                return results
+                return finish_active_after_error(
+                    status="failed", note=f"unexpected error: {exc}"
+                )
             finally:
                 self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
 

@@ -22,7 +22,8 @@ Agents should:
 - `blocked`: merge conflict or user action needed.
 - `failed`: gate or command failure.
 - `validated`: validation succeeded without push; the exact train remains deployable after approval.
-- `deployed`: deploy push succeeded; note may include post-push verify warning.
+- `deployed`: deploy push succeeded; inspect `push_status` and `verify_status`
+  for the independent push and post-push verification outcomes.
 - `canceled`: user canceled the item.
 
 ## Safe commands
@@ -52,3 +53,8 @@ identify the approved `train_id`, member branches, and recorded HEADs. A later
 reruns gates. If several validated trains are pending, pass `--train-id`.
 Validated-but-not-deployed branches are never branch-deletion candidates for
 `gc --delete-branches`.
+
+Run JSON distinguishes `result=warning` from full success. In particular,
+`status=deployed`, `push_status=succeeded`, and `verify_status=failed` means the
+remote ref changed successfully but post-push verification still needs
+attention; do not report that outcome as a failed push or a full success.
