@@ -61,6 +61,17 @@ After explicit approval:
 mergetrain run-batch --deploy
 ```
 
+If “deploy” means a later provider release in this repository, configure:
+
+```yaml
+terminology:
+  git_operation: integrate
+```
+
+Then use `mergetrain run-batch --integrate`. It performs the same atomic Git
+push; only human vocabulary changes. `--deploy` and the machine status
+`deployed` remain compatible. A provider release after this push is separate.
+
 Deploy mode runs gates first, then performs an atomic push to configured
 `git.push_refs`, then runs `deploy.verify` hooks. If a validated train is
 pending, only that exact train is rebuilt and deployed; newly queued jobs wait

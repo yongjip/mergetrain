@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import __version__
-from .config import MergetrainConfig, load_config, render_default_config
+from .config import MergetrainConfig, TerminologyConfig, load_config, render_default_config
 from .daemon import daemon_loop
 from .errors import CommandFailed, ConfigError, QueueError, MergetrainError
 from .git_runner import (
@@ -98,16 +98,19 @@ def config_from_args(args: argparse.Namespace) -> MergetrainConfig:
     return load_config(config_path=args.config, repo=args.repo, db_override=args.db)
 
 
-def agent_contract_payload() -> dict[str, Any]:
+def agent_contract_payload(
+    terminology: TerminologyConfig | None = None,
+) -> dict[str, Any]:
+    words = terminology or TerminologyConfig()
     return {
         "name": "mergetrain agent contract",
         "purpose": "Serialize committed local task branches through one merge/test/push/verify runner.",
         "rules": [
             "Work on a task-specific branch and worktree.",
             "Commit all changes before enqueueing.",
-            "Do not push deploy refs directly; enqueue the branch instead.",
+            "Do not push configured Git refs directly; enqueue the branch instead.",
             "Read doctor --json or status --json before deciding the next action.",
-            "Use --auto only after explicit unattended-deploy approval from the user/operator.",
+            f"Use --auto only after explicit unattended-{words.noun} approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
             "Fix blocked or failed work in the owning branch, commit a clean result, then enqueue a new job.",
@@ -121,11 +124,20 @@ def agent_contract_payload() -> dict[str, Any]:
             "daemon_processes_only": "jobs enqueued with --auto",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
         },
+        "human_vocabulary": {
+            **words.to_dict(),
+            "cli_flag": f"--{words.action}",
+            "canonical_cli_flag": "--deploy",
+            "machine_status": "deployed",
+            "machine_fields": ["deploy_sha", "push_status", "verify_status"],
+            "scope": "atomic Git ref push only; provider release is a separate post-push action",
+        },
     }
 
 
-def render_agent_contract() -> str:
-    payload = agent_contract_payload()
+def render_agent_contract(terminology: TerminologyConfig | None = None) -> str:
+    words = terminology or TerminologyConfig()
+    payload = agent_contract_payload(words)
     rules = "\n".join(f"{i}. {rule}" for i, rule in enumerate(payload["rules"], start=1))
     return f"""# mergetrain agent contract
 
@@ -137,13 +149,19 @@ Purpose: {payload['purpose']}
 
 ## Safety boundary
 
-- Deploy requires `run-next --deploy` or `run-batch --deploy`.
+- Git {words.noun} requires `run-next --{words.action}` or `run-batch --{words.action}`; `--deploy` remains the canonical compatibility flag.
 - Validation requires `run-next --validate-only` or `run-batch --validate-only`.
-- A validated train is deployed as one exact identity by `run-batch --deploy`.
+- A validated train is {words.completed} as one exact identity by `run-batch --{words.action}`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The daemon processes only jobs enqueued with `--auto`.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
+
+## Stable machine contract
+
+- Human output says `{words.action}`, `{words.in_progress}`, and `{words.completed}`.
+- JSON/SQLite continue to use `status=deployed`, `deploy_sha`, `push_status`, and `verify_status`.
+- This operation is an atomic Git ref push. Configured `deploy.verify` hooks report an independent post-push outcome; a provider release is separate and requires its own authorization.
 """
 
 
@@ -170,10 +188,11 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_contract(args: argparse.Namespace) -> int:
+    terminology = config_from_args(args).terminology
     if args.json:
-        dump_json(agent_contract_payload())
+        dump_json(agent_contract_payload(terminology))
     else:
-        print(render_agent_contract(), end="")
+        print(render_agent_contract(terminology), end="")
     return 0
 
 
@@ -264,7 +283,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"db: {payload['db']}")
         print(f"lock: {lock_text}")
         for job in payload["jobs"]:
-            print(f"{_job_result_line(job)} - {job['task']}")
+            print(f"{_job_result_line(job, config.terminology)} - {job['task']}")
     return 0
 
 
@@ -395,8 +414,9 @@ def cmd_events(args: argparse.Namespace) -> int:
 def cmd_inspect(args: argparse.Namespace) -> int:
     if not 1 <= args.event_limit <= 200:
         raise QueueError("--event-limit must be between 1 and 200")
+    config = config_from_args(args)
     payload = inspect_job_payload(
-        config_from_args(args),
+        config,
         args.job_id,
         event_limit=args.event_limit,
     )
@@ -408,7 +428,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         gate_text = (
             f" · gate {gate['index']}/{gate['total']} {gate['name']}" if gate else ""
         )
-        print(_job_result_line(payload["job"]))
+        print(_job_result_line(payload["job"], config.terminology))
         print(
             f"phase: {progress['phase']} · {progress['state']}{gate_text} · "
             f"elapsed {progress['elapsed_seconds']}s"
@@ -419,7 +439,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         )
         print(
             f"outcome: {payload['outcome']['severity']} / "
-            f"{payload['outcome']['category']}"
+            f"{_human_category(payload['outcome']['category'], config.terminology)}"
         )
     return 0
 
@@ -545,14 +565,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             f"{runtime['install_mode']} · {runtime['source_commit'] or 'unknown'} · "
             f"{runtime['package_path']}"
         )
-        print(f"next action: {payload['next_action']}")
+        print(
+            "next action: "
+            f"{_human_next_action(payload['next_action'], config.terminology)}"
+        )
     return 0
 
 
 def _mode_from_args(args: argparse.Namespace) -> bool:
     if args.deploy == args.validate_only:
-        raise QueueError("choose exactly one: --validate-only or --deploy")
+        raise QueueError("choose exactly one: --validate-only, --deploy, --integrate, or --push")
     return bool(args.deploy)
+
+
+def _human_next_action(action: str, terminology: TerminologyConfig) -> str:
+    return {
+        "deploy_validated_train_when_approved": (
+            f"{terminology.action}_validated_train_when_approved"
+        ),
+        "run_daemon_or_run_batch_deploy_when_approved": (
+            f"run_daemon_or_run_batch_{terminology.action}_when_approved"
+        ),
+    }.get(action, action)
 
 
 def _results_payload(results: list[Job]) -> dict[str, Any]:
@@ -585,7 +619,15 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
     }
 
 
-def _job_result_line(job: dict[str, Any]) -> str:
+def _human_category(category: str, terminology: TerminologyConfig) -> str:
+    return terminology.completed if category == "deployed" else category
+
+
+def _job_result_line(
+    job: dict[str, Any],
+    terminology: TerminologyConfig | None = None,
+) -> str:
+    words = terminology or TerminologyConfig()
     outcomes: list[str] = []
     if job.get("push_status", "not_run") != "not_run":
         outcomes.append(f"push={job['push_status']}")
@@ -594,13 +636,17 @@ def _job_result_line(job: dict[str, Any]) -> str:
     if job.get("reused_validation_sha"):
         outcomes.append(f"reused={job['reused_validation_sha']}")
     outcome_text = f" ({', '.join(outcomes)})" if outcomes else ""
-    return f"#{job['id']} {job['status']}{outcome_text}: {job['branch']}"
+    status = words.completed if job["status"] == "deployed" else job["status"]
+    return f"#{job['id']} {status}{outcome_text}: {job['branch']}"
 
 
-def _print_run_payload(payload: dict[str, Any]) -> None:
+def _print_run_payload(
+    payload: dict[str, Any],
+    terminology: TerminologyConfig | None = None,
+) -> None:
     if payload.get("jobs"):
         for job_data in payload["jobs"]:
-            print(_job_result_line(job_data))
+            print(_job_result_line(job_data, terminology))
         if payload.get("result") != "success":
             print(f"result: {payload['result']}")
     else:
@@ -635,18 +681,18 @@ def cmd_run_next(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
-        _print_run_payload(payload)
+        _print_run_payload(payload, config.terminology)
     return 0 if payload["ok"] else 1
 
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
     if args.train_id and not deploy:
-        raise QueueError("--train-id requires --deploy")
+        raise QueueError("--train-id requires --deploy, --integrate, or --push")
     if args.reuse_validated and not deploy:
-        raise QueueError("--reuse-validated requires --deploy")
+        raise QueueError("--reuse-validated requires --deploy, --integrate, or --push")
     if args.preview and not deploy:
-        raise QueueError("--preview requires --deploy")
+        raise QueueError("--preview requires --deploy, --integrate, or --push")
     config = config_from_args(args)
     if args.preview:
         conn = connect(config.state.db)
@@ -666,6 +712,15 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             "ok": True,
             "preview": True,
             "mode": "deploy",
+            "terminology": config.terminology.to_dict(),
+            "push_plan": {
+                "atomic": True,
+                "remote": config.git.remote,
+                "refs": [
+                    {"source": "HEAD", "target": ref, "spec": f"HEAD:{ref}"}
+                    for ref in config.git.push_refs
+                ],
+            },
             "train_id": selected["train_id"],
             "reuse": decision.to_dict(),
             "jobs": [job.to_dict() for job in jobs],
@@ -673,12 +728,20 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         if args.json:
             dump_json(payload)
         else:
+            targets = ", ".join(
+                f"HEAD:{ref}" for ref in config.git.push_refs
+            )
             if decision.eligible:
-                print(f"preview: reuse validated commit {decision.reused_validation_sha}")
+                print(
+                    f"preview: {config.terminology.action} validated commit "
+                    f"{decision.reused_validation_sha} by atomic push to "
+                    f"{config.git.remote}: {targets}"
+                )
             else:
                 print(
-                    f"preview: {decision.action} full gates - "
-                    f"{'; '.join(decision.reasons)}"
+                    f"preview: {decision.action} full gates, then "
+                    f"{config.terminology.action} by atomic push to "
+                    f"{config.git.remote}: {targets} - {'; '.join(decision.reasons)}"
                 )
         return 0
     owner = default_owner()
@@ -691,6 +754,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
                 train_id=args.train_id or "",
+                operation_label=config.terminology.action,
             )
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
@@ -715,7 +779,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
-        _print_run_payload(payload)
+        _print_run_payload(payload, config.terminology)
     return 0 if payload["ok"] else 1
 
 
@@ -847,7 +911,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_version.add_argument("--json", action="store_true")
     p_version.set_defaults(func=cmd_version)
 
-    p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the deploy queue")
+    p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the integration queue")
     p_enqueue.add_argument("--task", required=True)
     p_enqueue.add_argument("--branch", required=True)
     p_enqueue.add_argument("--worktree")
@@ -906,16 +970,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     for name, func, help_text in [
         ("run-next", cmd_run_next, "Process one queued job"),
-        ("run-batch", cmd_run_batch, "Validate queued jobs or deploy an exact validated train"),
+        ("run-batch", cmd_run_batch, "Validate queued jobs or push an exact validated train"),
     ]:
         p_run = subparsers.add_parser(name, help=help_text)
         mode = p_run.add_mutually_exclusive_group(required=True)
         mode.add_argument("--validate-only", action="store_true")
         mode.add_argument("--deploy", action="store_true")
+        mode.add_argument("--integrate", dest="deploy", action="store_true")
+        mode.add_argument("--push", dest="deploy", action="store_true")
         p_run.add_argument("--keep-worktree", action="store_true")
         p_run.add_argument("--json", action="store_true")
         if name == "run-batch":
-            p_run.add_argument("--train-id", help="Deploy one exact validated train")
+            p_run.add_argument("--train-id", help="Push one exact validated train")
             p_run.add_argument(
                 "--reuse-validated",
                 action="store_true",
@@ -924,7 +990,7 @@ def build_parser() -> argparse.ArgumentParser:
             p_run.add_argument(
                 "--preview",
                 action="store_true",
-                help="Evaluate a validated deploy and reuse decision without claiming or pushing",
+                help="Evaluate a validated train and reuse decision without claiming or pushing",
             )
         p_run.set_defaults(func=func)
 

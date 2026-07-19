@@ -5,10 +5,11 @@ commands:
   doctor_json: mergetrain doctor --json
   enqueue: mergetrain enqueue --task "<task>" --branch "<branch>" --capture-sha
   validate_batch: mergetrain run-batch --validate-only
-  deploy_batch: mergetrain run-batch --deploy
+  integrate_batch: mergetrain run-batch --integrate
   daemon_once: mergetrain daemon --once
 rules:
   - commit before enqueue
-  - do not push deploy refs directly
+  - do not push configured Git refs directly
   - prefer JSON output
-  - use --auto only after explicit unattended-deploy approval
+  - use --auto only after explicit unattended-integration approval
+  - provider releases after the Git push require separate authorization

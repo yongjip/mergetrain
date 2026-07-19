@@ -55,6 +55,50 @@ class AgentConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TerminologyConfig:
+    """Human-facing words for the provider-neutral Git push operation."""
+
+    git_operation: str = "deploy"
+
+    @property
+    def action(self) -> str:
+        return self.git_operation
+
+    @property
+    def in_progress(self) -> str:
+        return {
+            "deploy": "deploying",
+            "integrate": "integrating",
+            "push": "pushing",
+        }[self.git_operation]
+
+    @property
+    def completed(self) -> str:
+        return {
+            "deploy": "deployed",
+            "integrate": "integrated",
+            "push": "pushed",
+        }[self.git_operation]
+
+    @property
+    def noun(self) -> str:
+        return {
+            "deploy": "deployment",
+            "integrate": "integration",
+            "push": "push",
+        }[self.git_operation]
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "git_operation": self.git_operation,
+            "action": self.action,
+            "in_progress": self.in_progress,
+            "completed": self.completed,
+            "noun": self.noun,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class GateConfig:
     name: str
     run: str
@@ -82,6 +126,7 @@ class MergetrainConfig:
     git: GitConfig
     queue: QueueConfig
     agent: AgentConfig
+    terminology: TerminologyConfig
     gates: tuple[GateConfig, ...]
     deploy: DeployConfig
     repo: Path
@@ -94,6 +139,7 @@ class MergetrainConfig:
         data["repo"] = str(self.repo)
         data["config_path"] = str(self.config_path)
         data["git"]["integration_ref"] = self.git.integration_ref
+        data["terminology"] = self.terminology.to_dict()
         return data
 
 
@@ -236,6 +282,7 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "require_explicit_auto_approval": True,
             "prefer_json_status": True,
         },
+        "terminology": {"git_operation": "deploy"},
         "gates": [{"name": "diff-check", "run": "git diff --check ${integration_ref}..HEAD"}],
         "deploy": {"verify": []},
     }
@@ -266,6 +313,10 @@ agent:
   require_clean_worktree_before_enqueue: true
   require_explicit_auto_approval: true
   prefer_json_status: true
+
+terminology:
+  # Human-facing label only. Machine status remains `deployed`.
+  git_operation: deploy
 
 gates:
   - name: diff-check
@@ -449,6 +500,17 @@ def load_config(
         prefer_json_status=bool(agent_data.get("prefer_json_status", True)),
     )
 
+    terminology_data = _as_mapping(data, "terminology")
+    git_operation = _nonempty_string(
+        terminology_data.get("git_operation", "deploy"),
+        key="terminology.git_operation",
+    )
+    if git_operation not in {"deploy", "integrate", "push"}:
+        raise ConfigError(
+            "terminology.git_operation must be 'deploy', 'integrate', or 'push'"
+        )
+    terminology = TerminologyConfig(git_operation=git_operation)
+
     deploy_data = _as_mapping(data, "deploy")
     reuse_value = deploy_data.get("reuse", {})
     if reuse_value is None:
@@ -495,6 +557,7 @@ def load_config(
         git=git,
         queue=queue,
         agent=agent,
+        terminology=terminology,
         gates=gates,
         deploy=deploy,
         repo=repo_path,

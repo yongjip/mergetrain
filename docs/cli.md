@@ -231,11 +231,13 @@ loopback default; there are no authentication or TLS layers in this local tool.
 
 ## `run-next`
 
-Process exactly one queued job. Requires `--validate-only` or `--deploy`.
+Process exactly one queued job. Requires `--validate-only` or one Git push mode:
+`--deploy`, `--integrate`, or `--push`.
 
 ```sh
 mergetrain run-next --validate-only
 mergetrain run-next --deploy
+mergetrain run-next --integrate
 ```
 
 `--keep-worktree` leaves the temporary integration worktree in place for inspection. See [Design → Runner behavior](design.md#runner-behavior).
@@ -245,11 +247,13 @@ preserved, including when the train contains only one job.
 ## `run-batch`
 
 Validate all currently queued jobs as one merge train, or deploy an exact
-validated train. Requires `--validate-only` or `--deploy`.
+validated train. Requires `--validate-only` or `--deploy`; `--integrate` and
+`--push` are aliases for the identical atomic Git operation.
 
 ```sh
 mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
+mergetrain run-batch --integrate
 mergetrain run-batch --deploy --train-id <id>
 mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
 mergetrain run-batch --deploy --train-id <id> --reuse-validated
@@ -271,6 +275,9 @@ Its JSON `reuse` object reports `authorized`, `eligible`, `action`, mismatch
 `reasons`, `validation_sha`, and the exact `reused_validation_sha` when safe.
 Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
 `reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
+Preview JSON includes `push_plan.remote` and each exact `HEAD:<ref>` refspec.
+`terminology.git_operation` changes only human wording and the preferred alias;
+machine JSON continues to report `mode=deploy` and `status=deployed`.
 
 ## `daemon`
 

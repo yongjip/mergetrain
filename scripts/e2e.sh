@@ -101,6 +101,7 @@ write_config(){ # $1=repo $2=mode
   gate="$VPY -c \"from pathlib import Path; p=Path('$marker'); p.write_text((p.read_text() if p.exists() else '')+'x')\""
   verify="$VPY -c \"from pathlib import Path; Path('$vmarker').write_text('ok')\""
   pushrefs="    - main"
+  terminology=""
   case "$mode" in
     normal) ;;
     gatefail)     gate="$VPY -c \"import sys; sys.exit(1)\"";;
@@ -108,6 +109,7 @@ write_config(){ # $1=repo $2=mode
     verifyfail)   verify="$VPY -c \"import sys; sys.exit(3)\"";;
     combinedfail) gate="$VPY -c \"import os, sys; sys.exit(1 if os.path.exists('b.txt') else 0)\"";;
     multiref)     pushrefs=$'    - main\n    - release';;
+    integrate)    terminology=$'terminology:\n  git_operation: integrate';;
   esac
   cat > "$repo/.mergetrain.yaml" <<YAML
 project:
@@ -121,6 +123,7 @@ git:
   integration_branch: main
   push_refs:
 $pushrefs
+$terminology
 gates:
   - name: marker
     run: $gate
@@ -266,6 +269,18 @@ after=$(remote_main "$(dirname "$R")")
 [ "$after" = "$dsha" ] && ok "remote main == deploy_sha (atomic push landed)" || no "remote!=deploy_sha"
 [ "$(git -C "$(dirname "$R")/remote.git" show main:a.txt 2>/dev/null)" = "aaa" ] && ok "feature content on remote" || no "feature content missing"
 [ "$(cat "$(dirname "$R")/verify.marker" 2>/dev/null)" = "ok" ] && ok "verify hook ran on deploy" || no "verify hook missing"
+
+section "S5a  run-batch --integrate uses the same atomic push contract"
+R=$(setup s5a integrate); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
+enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
+before=$(remote_main "$D")
+rb=$("$MT" --repo "$R" run-batch --integrate --json)
+dsha=$(echo "$rb" | jget jobs.0.deploy_sha)
+[ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "--integrate keeps machine status=deployed" || no "integrate status changed: $rb"
+after=$(remote_main "$D")
+{ [ "$before" != "$after" ] && [ "$after" = "$dsha" ]; } && ok "--integrate atomically updated the configured ref" || no "--integrate did not update remote"
+[ "$("$MT" --repo "$R" doctor --json | jget config.terminology.completed)" = "integrated" ] && ok "doctor exposes configured human vocabulary" || no "doctor terminology missing"
+"$MT" --repo "$R" status | grep -q " integrated " && ok "human status says integrated" || no "human status did not use integration vocabulary"
 
 section "S5b  post-push verify FAILURE -> deployed + warning note (not failed)"
 R=$(setup s5b verifyfail); make_branch "$R" feature/a a.txt aaa

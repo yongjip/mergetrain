@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add opt-in `integrate`/`push` human vocabulary and CLI aliases while keeping
+  the `--deploy`, `deployed`, `deploy_sha`, database, and JSON contracts stable.
+- Show exact atomic push refspecs in previews and distinguish Git completion
+  from downstream provider verification or release.
 - Add resumable `events --follow --jsonl` progress with heartbeat and terminal frames.
 - Add structured job/train `inspect --json` outcomes and confined `logs --follow` access.
 - Keep subprocess output out of structured events while publishing active log paths early.

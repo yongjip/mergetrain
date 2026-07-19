@@ -6,7 +6,7 @@ Agents interacting with mergetrain must follow this contract.
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
-3. Do not push deploy refs directly.
+3. Do not push configured Git refs directly.
 4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
    the next action.
 5. Use `--auto` only after explicit unattended-deploy approval.
@@ -22,7 +22,15 @@ Agents interacting with mergetrain must follow this contract.
 mergetrain agent-contract --json
 ```
 
-The JSON payload includes `name`, `purpose`, `rules`, and `boundary`.
+The JSON payload includes `name`, `purpose`, `rules`, `boundary`, and
+`human_vocabulary`. The latter reflects `terminology.git_operation` while
+documenting the stable `deployed`/`deploy_sha` machine contract.
+
+With `terminology.git_operation: integrate`, generated
+`AGENTS.mergetrain.md`/`CLAUDE.mergetrain.md`, the dashboard, and human CLI
+output call the atomic Git ref update “integration.” That approval does not
+authorize a downstream provider release; provider verification/release remains
+a separate action.
 
 ## Next-action guidance
 

@@ -13,6 +13,7 @@ class ConfigTests(unittest.TestCase):
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")
         self.assertEqual(data["git"]["push_refs"], ["main"])
+        self.assertEqual(data["terminology"]["git_operation"], "deploy")
         self.assertEqual(data["gates"][0]["name"], "diff-check")
 
     def test_relative_paths_resolve_from_repo(self) -> None:
@@ -25,6 +26,37 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.project.name, "demo")
             self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
             self.assertEqual(config.git.integration_ref, "origin/main")
+            self.assertEqual(config.terminology.completed, "deployed")
+
+    def test_integration_terminology_has_derived_human_words(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "terminology:\n  git_operation: integrate\n",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+            self.assertEqual(
+                config.terminology.to_dict(),
+                {
+                    "git_operation": "integrate",
+                    "action": "integrate",
+                    "in_progress": "integrating",
+                    "completed": "integrated",
+                    "noun": "integration",
+                },
+            )
+            self.assertEqual(config.to_dict()["terminology"]["completed"], "integrated")
+
+    def test_invalid_git_operation_terminology_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "terminology:\n  git_operation: release\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "deploy.*integrate.*push"):
+                load_config(repo=repo)
 
 
     def test_malformed_yaml_raises_config_error(self) -> None:

@@ -96,6 +96,7 @@ def _progress(
     events,
     selection: str,
     gate_names: tuple[str, ...],
+    git_noun: str,
 ) -> dict[str, Any]:
     token = next((job.claim_token for job in selected_jobs if job.claim_token), "")
     run_events = [event for event in events if token and event.claim_token == token]
@@ -107,7 +108,7 @@ def _progress(
         updated_at = latest.created_at
     elif selection == "validated":
         phase, state = "ready", "success"
-        message = "Validated train is waiting for deploy approval"
+        message = f"Validated train is waiting for {git_noun} approval"
         updated_at = selected_jobs[0].validated_at if selected_jobs else ""
     elif selection == "queued":
         phase, state = "claiming", "queued"
@@ -215,6 +216,10 @@ def build_dashboard_snapshot(
             "project": {
                 "name": config.project.name,
                 "integration_ref": config.git.integration_ref,
+                "remote": config.git.remote,
+                "push_refs": list(config.git.push_refs),
+                "push_specs": [f"HEAD:{ref}" for ref in config.git.push_refs],
+                "terminology": config.terminology.to_dict(),
                 "config_exists": config.config_exists,
                 "preview": preview,
                 "gate_count": len(gate_names),
@@ -245,7 +250,13 @@ def build_dashboard_snapshot(
             "events": [event.to_dict() for event in raw_events],
             "validated_trains": validated_train_summaries(conn),
         }
-        payload["progress"] = _progress(selected_jobs, raw_events, selection, gate_names)
+        payload["progress"] = _progress(
+            selected_jobs,
+            raw_events,
+            selection,
+            gate_names,
+            config.terminology.noun,
+        )
         payload["next_action"] = next_action(payload)
         return payload
     finally:
