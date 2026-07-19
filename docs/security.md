@@ -28,6 +28,11 @@ the configured command template; obvious token/password assignments and flags ar
 masked, but command authors should never embed credentials directly in gate
 configuration.
 
+Runtime provenance from `version` and `doctor` is intentionally CLI-only because
+it can include an imported package path, editable source path, and source-control
+state. The dashboard snapshot and remotely bindable dashboard API do not include
+that provenance object.
+
 Binding to a non-loopback host requires `--allow-remote`. That flag is an
 acknowledgement, not an authentication or encryption layer. Put a separately
 reviewed authenticated reverse proxy in front of the dashboard if it must be

@@ -15,11 +15,15 @@ mergetrain --repo /path/to/repo doctor --json
 | `--db` | Override the SQLite DB path from config. |
 | `--version` | Print the version and exit. |
 
+`--version` keeps its stable one-line output (`mergetrain X.Y.Z`). Use the
+`version` command when you also need to identify the code that was imported.
+
 Command summary:
 
 ```text
 mergetrain init [--project NAME] [--write] [--force]
 mergetrain agent-contract [--json]
+mergetrain version [--json]
 mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain status [--json] [--limit N]
 mergetrain doctor [--json]
@@ -52,6 +56,24 @@ mergetrain agent-contract --json
 ```
 
 `--json` emits `name`, `purpose`, `rules`, and `boundary`. See [agent contract](agent-contract.md).
+
+## `version`
+
+Show the semantic version plus installed-package provenance:
+
+```sh
+mergetrain version
+mergetrain version --json
+```
+
+The structured `runtime` object contains `distribution_version`, the actual
+`package_path`, `install_mode` (`wheel`, `editable`, or `unknown`), optional
+`source_path`, optional `source_commit`, and optional `source_dirty`. Editable
+mode is identified from the installed distribution's PEP 610 `direct_url.json`;
+paths are not classified by naming convention. A VCS install can report the
+commit recorded by PEP 610 even when the installed wheel has no Git checkout.
+Unavailable metadata is returned as `null` or `unknown`, never as a command
+failure.
 
 ## `enqueue`
 
@@ -96,7 +118,7 @@ Diagnose config, queue, Git remote, integration ref, GC candidates, and the next
 mergetrain doctor --json
 ```
 
-Key JSON fields: `ok`, `version`, `config`, `config_exists`, `db`, `db_existed_before`, `state.logs`, `state.worktree_root`, `git.repo_root`, `git.current_branch`, `git.worktree_clean`, `git.remote_url`, `git.remote_exists`, `git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`, `validated_trains`, `gc.worktree_candidates`, and `next_action`.
+Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `db_existed_before`, `state.logs`, `state.worktree_root`, `git.repo_root`, `git.current_branch`, `git.worktree_clean`, `git.remote_url`, `git.remote_exists`, `git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`, `validated_trains`, `gc.worktree_candidates`, and `next_action`. `runtime` has the same provenance contract as `version --json`.
 
 `next_action` is one of:
 

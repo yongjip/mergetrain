@@ -8,6 +8,20 @@ This repository ships **mergetrain**, a local deploy train for coding-agent work
 - **Always read state first:** run `mergetrain doctor --json` and `mergetrain status --json` before acting, and decide from that JSON — never from assumptions.
 - Every command is non-interactive and JSON-first. Prefer `--json`, then summarize. Don't paste raw JSON unless asked.
 
+## GitHub CLI authentication
+
+- The Codex sandbox may not be able to read `gh` credentials stored in the
+  macOS Keychain. Do not interpret a sandboxed `gh auth status` or `gh auth
+  token` failure as proof that the user must log in again.
+- Before requesting `gh auth login`, run the credential and API checks outside
+  the sandbox: `gh auth token -h github.com >/dev/null` and `gh api user --jq
+  .login`. Never display or log the token.
+- Reuse the existing login when those external checks pass. Ask for a new login
+  only when they also fail outside the sandbox.
+- The Codex GitHub connector is authenticated separately from local `gh`.
+  Prefer the connector when it supports the operation, and fall back to an
+  externally run `gh` command if the connector lacks repository permission.
+
 ## You may do these without asking
 
 - `mergetrain status --json` and `mergetrain doctor --json` — inspect the queue, lock, and `next_action`.
