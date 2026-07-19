@@ -11,7 +11,7 @@ explicit approval. No hosted merge-queue service or CI provider is required.
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: alpha (`v0.1.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
+> Status: alpha (`v0.2.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
 
 ---
 
@@ -194,7 +194,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 
 ## Status
 
-`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, resumable CLI events/inspection/log following, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
+`v0.2.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, resumable CLI events/inspection/log following, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
 
 ## License
 
