@@ -352,7 +352,35 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
             "SELECT COUNT(*) AS n FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 0"
         ).fetchone()["n"]
     )
+    # Marker/verify-derived signals for doctor next_action (0.3.0 Phase 2, DB-only).
+    result["in_progress_with_marker"] = int(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM deploy_queue "
+            "WHERE status = 'in_progress' AND pending_deploy_sha != ''"
+        ).fetchone()["n"]
+    )
+    result["blocked_with_marker"] = int(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM deploy_queue "
+            "WHERE status = 'blocked' AND pending_deploy_sha != ''"
+        ).fetchone()["n"]
+    )
+    result["deployed_verify_unknown"] = int(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM deploy_queue "
+            "WHERE status = 'deployed' AND verify_status = 'unknown'"
+        ).fetchone()["n"]
+    )
     return result
+
+
+def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:
+    """Count jobs that make a deploy unsafe: parked reconciles plus not-yet-split
+    marker-bearing orphans. A deploy targets the same push refs, so every deploy
+    entrypoint (``run-batch``, ``run-next``, and the daemon) must refuse while
+    this is non-zero (0.3.0 Phase 2, decision Q4)."""
+    data = counts(conn)
+    return data.get("needs_reconcile", 0) + data.get("in_progress_with_marker", 0)
 
 
 def has_queued_auto(conn: sqlite3.Connection) -> bool:
@@ -381,15 +409,40 @@ def _in_progress_count(conn: sqlite3.Connection) -> int:
 
 
 def _requeue_orphans(conn: sqlite3.Connection) -> None:
+    """Recover a previous runner's orphaned ``in_progress`` jobs, marker-aware.
+
+    Three mutually exclusive buckets, ordered so an earlier statement never
+    claims a row a later one owns (0.3.0 Phase 2, RFC §4):
+
+    1. cancel requested **and no pending marker** — nothing was ever pushed, so
+       the cancel is honored offline → ``canceled``.
+    2. a pending-deploy marker is present (a push may have landed, incl. the
+       cancel-raced P6 case) — the remote alone can tell truth, so the job is
+       **parked** in ``needs_reconcile`` with ``pending_deploy_sha`` *and*
+       ``cancel_requested_at`` preserved. It is never blindly re-pushed.
+    3. everything else (clean orphan, no marker) — today's fast path →
+       ``queued``.
+
+    Runs inside the caller's IMMEDIATE transaction (never opens its own), and
+    never touches the remote, so it is safe on the lock-acquisition path.
+    """
     now = utc_now()
     conn.execute(
         """
         UPDATE deploy_queue
         SET status = 'canceled', finished_at = ?, claim_token = '',
             note = CASE WHEN note = '' THEN 'canceled after previous runner stopped' ELSE note END
-        WHERE status = 'in_progress' AND cancel_requested_at != ''
+        WHERE status = 'in_progress' AND cancel_requested_at != '' AND pending_deploy_sha = ''
         """,
         (now,),
+    )
+    conn.execute(
+        """
+        UPDATE deploy_queue
+        SET status = 'needs_reconcile', claim_token = '',
+            note = 'parked for reconcile after previous runner stopped'
+        WHERE status = 'in_progress' AND pending_deploy_sha != ''
+        """
     )
     conn.execute(
         """
@@ -522,6 +575,41 @@ def release_runner_lock(
         else:
             raise LostLease("runner lease token is required for owner-guarded release")
     return cur.rowcount > 0
+
+
+def force_clear_lock_and_split(
+    conn: sqlite3.Connection,
+    *,
+    owner: str | None = None,
+    token: str | None = None,
+    name: str = RUNNER_LOCK_NAME,
+) -> bool:
+    """Delete the runner lock and run the marker-aware orphan split, atomically.
+
+    Used by ``unlock`` once it has decided the lock may be cleared (a dead/absent
+    owner, or an operator-forced steal that has already confirmed the remote is
+    reachable). It never itself writes ``deployed``/``failed`` — marker-bearing
+    orphans are only parked in ``needs_reconcile`` here; the remote verdict comes
+    from the subsequent ``reconcile`` (0.3.0 Phase 2).
+
+    When ``owner`` and ``token`` are given the delete is **scoped** to that exact
+    lock: if it matches nothing (the lock changed while unlock was probing the
+    remote — e.g. the wedged runner finished and a fresh runner acquired it), the
+    split is skipped and ``False`` is returned, so a healthy in-flight runner is
+    never clobbered. Returns ``True`` when the lock was cleared and orphans split.
+    """
+    with immediate(conn):
+        if owner is not None and token is not None:
+            cur = conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (name, owner, token),
+            )
+            if cur.rowcount == 0:
+                return False
+        else:
+            _delete_lock(conn, name=name)
+        _requeue_orphans(conn)
+        return True
 
 
 def claim_next_job(

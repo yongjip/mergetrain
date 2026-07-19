@@ -292,6 +292,32 @@ def git_tree_sha(path: str | Path, ref: str) -> str:
     return git_output(["rev-parse", f"{ref}^{{tree}}"], cwd=path)
 
 
+PENDING_REF_PREFIX = "refs/mergetrain/pending/"
+
+
+def pending_ref_name(job_id: int) -> str:
+    """The pin ref that keeps a job's pending deploy sha resolvable across a gc."""
+    return f"{PENDING_REF_PREFIX}{job_id}"
+
+
+def resolve_pending_ref(path: str | Path, job_id: int) -> str:
+    """Return the commit the pin ref points at, or '' if it is gone/pruned."""
+    return git_output_or_empty(
+        ["rev-parse", f"{pending_ref_name(job_id)}^{{commit}}"], cwd=path
+    )
+
+
+def delete_pending_ref(
+    path: str | Path, job_id: int, *, log: IO[str] | None = None
+) -> None:
+    run_command(
+        ["git", "update-ref", "-d", pending_ref_name(job_id)],
+        cwd=path,
+        log=log,
+        check=False,
+    )
+
+
 def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) -> str:
     replacements = {
         "${integration_ref}": config.git.integration_ref,
@@ -776,7 +802,7 @@ class GitRunner:
         )
 
     def _pending_ref(self, job_id: int) -> str:
-        return f"refs/mergetrain/pending/{job_id}"
+        return pending_ref_name(job_id)
 
     def _push_with_marker(
         self,
@@ -813,12 +839,7 @@ class GitRunner:
         self, job_ids: list[int], *, log: IO[str] | None = None
     ) -> None:
         for job_id in job_ids:
-            run_command(
-                ["git", "update-ref", "-d", self._pending_ref(job_id)],
-                cwd=self.repo,
-                log=log,
-                check=False,
-            )
+            delete_pending_ref(self.repo, job_id, log=log)
 
     def _prepare_worktree(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None

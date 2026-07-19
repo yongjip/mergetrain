@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import MergetrainConfig
 from .models import Job, RunnerLock
 from .store import (
+    _parse_utc,
     connect,
     counts,
     get_lock,
@@ -32,13 +34,42 @@ PHASES = (
 GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
 
 
+def _lock_expired(lock: dict[str, Any] | None) -> bool:
+    if not lock or not lock.get("expires_at"):
+        return False
+    return _parse_utc(str(lock["expires_at"])) <= datetime.now(timezone.utc)
+
+
 def next_action(payload: dict[str, Any]) -> str:
     lock = payload.get("lock")
     count_data = payload.get("counts") or {}
-    if lock and lock.get("liveness") == "alive":
+    liveness = lock.get("liveness") if lock else None
+    expired = _lock_expired(lock)
+    in_progress = count_data.get("in_progress", 0)
+    # A wedge: the lease lapsed but the owner still looks alive/unknown and work
+    # is mid-flight. A healthy runner would have refreshed its lease; this one
+    # cannot be auto-stolen (it may still be pushing) — the operator must run
+    # `unlock --force` (0.3.0 Phase 2, RFC §7).
+    if lock and expired and liveness in {"alive", "unknown"} and in_progress > 0:
+        return "unlock_wedged_runner"
+    if lock and liveness == "alive" and not expired:
         return "wait_for_runner"
+    # A crash may have parked jobs (needs_reconcile), or left a marker-bearing
+    # orphan a dead/absent runner never got to reconcile. Deploy is hard-blocked
+    # until reconcile resolves it, so this dominates the deploy/validate tail.
+    if count_data.get("needs_reconcile", 0) or (
+        count_data.get("in_progress_with_marker", 0) and liveness != "alive"
+    ):
+        return "reconcile_pending_deploy"
+    # A blocked job that still carries its marker is a reconcile conflict needing
+    # git inspection, distinct from a plain gate/assembly failure.
+    if count_data.get("blocked_with_marker", 0):
+        return "reconcile_conflict_manual"
     if count_data.get("blocked", 0) or count_data.get("failed", 0):
         return "fix_blocked_job"
+    # A reconcile-finalized deploy whose post-push verify could not be proven.
+    if count_data.get("deployed_verify_unknown", 0):
+        return "verify_reconciled_deploy"
     if payload.get("validated_trains"):
         if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
             return "deploy_validated_train_when_approved"

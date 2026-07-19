@@ -8,7 +8,14 @@ from collections.abc import Callable
 from typing import Any
 
 from .models import Job
-from .store import claim_all_queued, connect, default_owner, has_queued_auto, release_runner_lock
+from .store import (
+    claim_all_queued,
+    connect,
+    default_owner,
+    deploy_reconcile_pending,
+    has_queued_auto,
+    release_runner_lock,
+)
 
 Say = Callable[[str], None]
 ProcessBatch = Callable[[Any, list[Job]], object]
@@ -52,7 +59,17 @@ def daemon_loop(
             try:
                 conn = connect(db_path)
                 try:
-                    if has_queued_auto(conn):
+                    pending = deploy_reconcile_pending(conn)
+                    if pending:
+                        # A crash left a possibly-landed push unresolved. The daemon
+                        # deploys to the same push refs, so it must not push over a
+                        # pending reconcile (0.3.0 Phase 2, decision Q4). Pause until
+                        # an operator runs `mergetrain reconcile --apply`.
+                        say(
+                            f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
+                            "deploy paused (run 'mergetrain reconcile --apply')"
+                        )
+                    elif has_queued_auto(conn):
                         jobs = claim_all_queued(
                             conn,
                             owner=actual_owner,

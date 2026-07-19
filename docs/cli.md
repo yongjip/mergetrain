@@ -191,8 +191,12 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 
 `next_action` is one of:
 
+- `unlock_wedged_runner` — an expired lease is held by an owner that still looks alive with in-progress work; run `unlock --force` (0.3.0).
 - `wait_for_runner` — a live runner already holds the lock.
+- `reconcile_pending_deploy` — a crash left jobs `needs_reconcile` (or a marker-bearing orphan); resolve with `reconcile` before deploying (0.3.0).
+- `reconcile_conflict_manual` — `reconcile` left a job `blocked` with its marker; git inspection is required (0.3.0).
 - `fix_blocked_job` — there are `blocked`/`failed` jobs to resolve first.
+- `verify_reconciled_deploy` — a reconciled deploy landed but its post-push verify could not be proven (`verify_status='unknown'`); re-run verification manually (0.3.0).
 - `deploy_validated_train_when_approved` — an exact validated train is waiting for explicit deploy approval.
 - `cancel_and_reenqueue_legacy_validated_jobs` — pre-migration validated jobs lack safe train identity.
 - `run_daemon_or_run_batch_deploy_when_approved` — auto-approved jobs are queued.
@@ -201,6 +205,10 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 - `enqueue_clean_branch` — the queue is empty.
 
 `next_action` is **advisory**; it never substitutes for a destructive action or deploy consent.
+
+The `counts` map also carries derived recovery signals — `needs_reconcile`,
+`in_progress_with_marker`, `blocked_with_marker`, and `deployed_verify_unknown`
+— all computed from local DB state (no remote call).
 
 ## `dashboard`
 
@@ -303,6 +311,61 @@ mergetrain gc --apply --delete-branches --json    # also delete terminal branche
 Branch deletion only targets branches of `deployed`/`canceled` jobs and never
 deletes a validated-but-not-deployed branch or a protected ref (`push_refs`, the
 integration branch, or the currently checked-out branch).
+
+`gc --apply` also sweeps stale `refs/mergetrain/pending/*` pin refs (0.3.0): a pin
+whose owning job is terminal/failed/missing is deleted (reported under
+`result.swept_pending_refs`), while a `blocked` (reconcile-conflict forensics) or
+`needs_reconcile` job keeps its pin.
+
+## `reconcile`
+
+Resolve every `needs_reconcile` job against the **remote** after a crash (0.3.0).
+Reads the durable per-job `pending_deploy_sha` marker written before the push,
+then asks the remote (`git fetch` + `ls-remote` + `merge-base --is-ancestor`)
+whether the deploy actually landed. **Never pushes.** Dry-run by default.
+
+```sh
+mergetrain reconcile --json           # dry run: classify, write nothing
+mergetrain reconcile --apply --json   # finalize the reconciled outcome
+```
+
+While any job is `needs_reconcile` (or a not-yet-split marker-bearing orphan
+exists), **all** deploy paths refuse — `run-batch --deploy`, `run-next --deploy`,
+and the `daemon` tick — since they target the same push refs.
+
+Per job: the deploy sha present on **every** push ref → `deployed`
+(`push_status=succeeded`, `verify_status=unknown` — the deploy is not re-pushed
+and verify is not re-run); present on **none** → `queued` (or `canceled` if a
+cancel had raced the push); present on **some** refs, or the sha is unresolvable
+→ `blocked` (human git inspection). Exit codes: `0` resolved/nothing to do · `2`
+usage/config · `3` lock held by a live runner (retryable) · `7` remote
+unreachable (nothing changed) · `10` ≥1 job left `blocked`.
+
+## `recover`
+
+One-button restart heal: split a previous runner's orphaned `in_progress` jobs
+(marker-aware) and then `reconcile --apply`. Never ships queued or validated work
+— there is no deploy as a side effect. Same exit codes as `reconcile`.
+
+```sh
+mergetrain recover --json          # split orphans + reconcile
+mergetrain recover --gc --json     # also remove crashed worktrees
+```
+
+## `unlock`
+
+Clear a wedged runner lock. Without `--force` only a dead/absent owner's lock is
+cleared. With `--force` the remote is confirmed reachable **first** (unreachable
+→ abort, change nothing), then the lock is deleted and orphans are split; it
+never itself writes `deployed`/`failed` and appends an append-only audit event.
+
+```sh
+mergetrain unlock --json           # clear a dead owner's lock
+mergetrain unlock --force --json   # steal a live/unknown owner's lock
+```
+
+Exit codes: `0` cleared · `2` usage/config · `4` refused (owner alive, no
+`--force`) · `5` no lock · `7` remote unreachable during the forced classify.
 
 ## `cancel`
 
