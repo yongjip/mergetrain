@@ -897,6 +897,38 @@ def list_run_events(
     return [RunEvent.from_row(row) for row in reversed(rows)]
 
 
+def record_pending_push(
+    conn: sqlite3.Connection,
+    *,
+    job_ids: Sequence[int],
+    deploy_sha: str,
+    claim_token: str,
+) -> None:
+    """Durably record intent to push ``deploy_sha`` before the remote is touched.
+
+    Writes ``pending_deploy_sha`` and ``push_status='pending'`` for exactly the
+    in-progress jobs this runner owns, in one IMMEDIATE transaction. With
+    ``PRAGMA synchronous=FULL`` the commit is fsync-durable before ``git push``,
+    so a later crash can prove a push was attempted for this sha (0.3.0 Phase 1;
+    see docs/proposals/0.3.0-recovery.md).
+    """
+    ids = [int(job_id) for job_id in job_ids]
+    if not ids or not deploy_sha or not claim_token:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with immediate(conn):
+        conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET pending_deploy_sha = ?, push_status = 'pending'
+            WHERE id IN ({placeholders})
+              AND status = 'in_progress'
+              AND claim_token = ?
+            """,
+            (deploy_sha, *ids, claim_token),
+        )
+
+
 def mark_job(
     conn: sqlite3.Connection,
     job_id: int,
@@ -959,6 +991,10 @@ def mark_job(
                 cancel_requested_at = CASE
                     WHEN ? IN ('in_progress', 'canceled') THEN cancel_requested_at
                     ELSE ''
+                END,
+                pending_deploy_sha = CASE
+                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
+                    ELSE pending_deploy_sha
                 END
             WHERE {where}
             """,
@@ -981,6 +1017,7 @@ def mark_job(
                 validation_environment_sha,
                 validation_train_sha,
                 reused_validation_sha,
+                status,
                 status,
                 status,
                 *where_values,
