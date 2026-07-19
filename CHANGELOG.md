@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-07-20
 
 - Add opt-in `integrate`/`push` human vocabulary and CLI aliases while keeping
   the `--deploy`, `deployed`, `deploy_sha`, database, and JSON contracts stable.
