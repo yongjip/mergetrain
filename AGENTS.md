@@ -23,6 +23,21 @@ PYTHONPATH=src python -m mergetrain agent-contract --json
 PYTHONPATH=src python -m mergetrain init --project demo
 ```
 
+## GitHub CLI authentication
+
+- The Codex sandbox may be unable to read `gh` credentials from the macOS
+  Keychain. A sandboxed `gh auth status` or `gh auth token` failure is not proof
+  that the stored token is invalid.
+- Before asking the user to run `gh auth login`, retry authentication outside
+  the sandbox and verify both credential access and the API, for example with
+  `gh auth token -h github.com >/dev/null` and `gh api user --jq .login`. Never
+  print or log the token.
+- If those external checks succeed, reuse the existing login. Request a new
+  login only when the same checks genuinely fail outside the sandbox.
+- The Codex GitHub connector and the local `gh` CLI use separate credentials.
+  Prefer the connector for supported GitHub reads/writes; use externally run
+  `gh` as the fallback when the connector lacks repository permission.
+
 ## Boundaries
 
 - Never add provider-specific credentials to examples or tests.
