@@ -18,6 +18,22 @@
 `deploy.verify` hooks can run arbitrary network commands. Review verify hooks
 before enabling unattended daemon deployment.
 
+## Validated-gate reuse fingerprints
+
+Gate command/config text is not a complete environment fingerprint. The same
+command can produce different results after an SDK update, compiler replacement,
+container image change, runner OS update, or external dependency movement.
+Environment-sensitive gates should configure `deploy.reuse.fingerprints` with
+adapter-owned commands that emit stable opaque identities for every required
+toolchain input, or be marked `always_rerun_on_deploy`. If a required identity
+cannot be represented reliably, leave reuse disabled.
+
+Fingerprint output is hashed before persistence and should never contain a
+credential. The command itself still runs as trusted `/bin/sh` code. A changed,
+missing, failed, multiline, or oversized fingerprint prevents reuse and follows
+the configured rerun/fail-closed policy. Fingerprint commands should be
+deterministic and side-effect-free because reuse preview executes them too.
+
 ## Dashboard exposure
 
 `mergetrain dashboard` binds to `127.0.0.1:8765` by default and has no action

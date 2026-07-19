@@ -29,7 +29,7 @@ PHASES = (
     "complete",
 )
 
-GATE_EVENT = re.compile(r"^(?:Running|Passed) gate (\d+)/(\d+): (.+)$")
+GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
 
 
 def next_action(payload: dict[str, Any]) -> str:
@@ -223,6 +223,17 @@ def build_dashboard_snapshot(
                     for index, name in enumerate(gate_names, start=1)
                 ],
                 "verify_count": len(config.deploy.verify),
+                "reuse": {
+                    "enabled": config.deploy.reuse.enabled,
+                    "max_age_minutes": config.deploy.reuse.max_age_minutes,
+                    "on_mismatch": config.deploy.reuse.on_mismatch,
+                    "fingerprint_count": len(config.deploy.reuse.fingerprints),
+                    "always_rerun_gates": [
+                        gate.name
+                        for gate in config.gates
+                        if gate.always_rerun_on_deploy
+                    ],
+                },
             },
             "counts": counts(conn),
             "lock": lock,

@@ -24,7 +24,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Liveness:
@@ -115,6 +115,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           validation_base_sha TEXT NOT NULL DEFAULT '',
           validation_sha TEXT NOT NULL DEFAULT '',
           validated_head_sha TEXT NOT NULL DEFAULT '',
+          validation_tree_sha TEXT NOT NULL DEFAULT '',
+          validation_gate_policy_sha TEXT NOT NULL DEFAULT '',
+          validation_environment_sha TEXT NOT NULL DEFAULT '',
+          validation_train_sha TEXT NOT NULL DEFAULT '',
+          reused_validation_sha TEXT NOT NULL DEFAULT '',
           claim_token TEXT NOT NULL DEFAULT '',
           cancel_requested_at TEXT NOT NULL DEFAULT ''
         )
@@ -177,6 +182,21 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             4: (
                 ("deploy_queue", "push_status", "TEXT NOT NULL DEFAULT 'not_run'"),
                 ("deploy_queue", "verify_status", "TEXT NOT NULL DEFAULT 'not_run'"),
+            ),
+            5: (
+                ("deploy_queue", "validation_tree_sha", "TEXT NOT NULL DEFAULT ''"),
+                (
+                    "deploy_queue",
+                    "validation_gate_policy_sha",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+                (
+                    "deploy_queue",
+                    "validation_environment_sha",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+                ("deploy_queue", "validation_train_sha", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "reused_validation_sha", "TEXT NOT NULL DEFAULT ''"),
             ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
@@ -588,6 +608,10 @@ def validated_train_summaries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         validated_times = {job.validated_at for job in jobs}
         base_shas = {job.validation_base_sha for job in jobs}
         validation_shas = {job.validation_sha for job in jobs}
+        validation_tree_shas = {job.validation_tree_sha for job in jobs}
+        gate_policy_shas = {job.validation_gate_policy_sha for job in jobs}
+        environment_shas = {job.validation_environment_sha for job in jobs}
+        train_identity_shas = {job.validation_train_sha for job in jobs}
         expected_size = first.train_size
         complete = bool(
             first.train_id
@@ -600,6 +624,17 @@ def validated_train_summaries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             and first.validation_base_sha
             and first.validation_sha
             and all(job.validated_head_sha for job in jobs)
+        )
+        reuse_identity_complete = bool(
+            complete
+            and len(validation_tree_shas) == 1
+            and len(gate_policy_shas) == 1
+            and len(environment_shas) == 1
+            and len(train_identity_shas) == 1
+            and first.validation_tree_sha
+            and first.validation_gate_policy_sha
+            and first.validation_environment_sha
+            and first.validation_train_sha
         )
         summaries.append(
             {
@@ -618,9 +653,49 @@ def validated_train_summaries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 "validation_base_sha": first.validation_base_sha,
                 "validation_sha": first.validation_sha,
                 "deploy_eligible": complete,
+                "reuse_identity_complete": reuse_identity_complete,
+                "validation_tree_sha": first.validation_tree_sha,
+                "validation_gate_policy_sha": first.validation_gate_policy_sha,
+                "validation_environment_sha": first.validation_environment_sha,
+                "validation_train_sha": first.validation_train_sha,
             }
         )
     return summaries
+
+
+def select_validated_train(
+    conn: sqlite3.Connection,
+    *,
+    train_id: str = "",
+) -> tuple[dict[str, Any] | None, list[Job]]:
+    """Select one complete validated train without claiming or mutating it."""
+
+    summaries = validated_train_summaries(conn)
+    if train_id:
+        matches = [summary for summary in summaries if summary["train_id"] == train_id]
+        if not matches:
+            raise QueueError(f"validated train not found: {train_id}")
+        selected = matches[0]
+    else:
+        deployable = [summary for summary in summaries if summary["deploy_eligible"]]
+        if len(deployable) > 1:
+            ids = ", ".join(str(summary["train_id"]) for summary in deployable)
+            raise QueueError(
+                f"multiple validated trains are ready; pass --train-id with one of: {ids}"
+            )
+        selected = deployable[0] if deployable else None
+        if selected is None and summaries:
+            raise QueueError(
+                "validated jobs lack complete train identity; cancel and enqueue a fresh train"
+            )
+    if selected is None:
+        return None, []
+    if not selected["deploy_eligible"]:
+        raise QueueError(
+            f"validated train has incomplete identity: {selected['train_id']}"
+        )
+    jobs = list_jobs_fifo(conn, status="validated")
+    return selected, [job for job in jobs if job.train_id == selected["train_id"]]
 
 
 def claim_deploy_batch(
@@ -635,26 +710,9 @@ def claim_deploy_batch(
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
-        summaries = validated_train_summaries(conn)
-        if train_id:
-            matches = [summary for summary in summaries if summary["train_id"] == train_id]
-            if not matches:
-                raise QueueError(f"validated train not found: {train_id}")
-            selected = matches[0]
-        else:
-            deployable = [summary for summary in summaries if summary["deploy_eligible"]]
-            if len(deployable) > 1:
-                ids = ", ".join(str(summary["train_id"]) for summary in deployable)
-                raise QueueError(f"multiple validated trains are ready; pass --train-id with one of: {ids}")
-            selected = deployable[0] if deployable else None
-            if selected is None and summaries:
-                raise QueueError("validated jobs lack complete train identity; cancel and enqueue a fresh train")
-
+        selected, validated_jobs = select_validated_train(conn, train_id=train_id)
         if selected is not None:
-            if not selected["deploy_eligible"]:
-                raise QueueError(f"validated train has incomplete identity: {selected['train_id']}")
-            jobs = list_jobs_fifo(conn, status="validated")
-            jobs = [job for job in jobs if job.train_id == selected["train_id"]]
+            jobs = validated_jobs
         else:
             jobs = list_jobs_fifo(conn, status="queued")
         if not jobs:
@@ -791,6 +849,11 @@ def mark_job(
     validation_base_sha: str = "",
     validation_sha: str = "",
     validated_head_sha: str = "",
+    validation_tree_sha: str = "",
+    validation_gate_policy_sha: str = "",
+    validation_environment_sha: str = "",
+    validation_train_sha: str = "",
+    reused_validation_sha: str = "",
     expected_claim_token: str | None = None,
 ) -> Job:
     if status not in ALL_STATUSES:
@@ -823,6 +886,11 @@ def mark_job(
                 validation_base_sha = COALESCE(NULLIF(?, ''), validation_base_sha),
                 validation_sha = COALESCE(NULLIF(?, ''), validation_sha),
                 validated_head_sha = COALESCE(NULLIF(?, ''), validated_head_sha),
+                validation_tree_sha = COALESCE(NULLIF(?, ''), validation_tree_sha),
+                validation_gate_policy_sha = COALESCE(NULLIF(?, ''), validation_gate_policy_sha),
+                validation_environment_sha = COALESCE(NULLIF(?, ''), validation_environment_sha),
+                validation_train_sha = COALESCE(NULLIF(?, ''), validation_train_sha),
+                reused_validation_sha = COALESCE(NULLIF(?, ''), reused_validation_sha),
                 claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
                 cancel_requested_at = CASE
                     WHEN ? IN ('in_progress', 'canceled') THEN cancel_requested_at
@@ -844,6 +912,11 @@ def mark_job(
                 validation_base_sha,
                 validation_sha,
                 validated_head_sha,
+                validation_tree_sha,
+                validation_gate_policy_sha,
+                validation_environment_sha,
+                validation_train_sha,
+                reused_validation_sha,
                 status,
                 status,
                 *where_values,

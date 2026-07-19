@@ -216,6 +216,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .state-pill.active { border-color: #8db7f5; color: var(--blue); background: #eef5ff; }
 .state-pill.success,
 .state-pill.done { border-color: #91cea4; color: var(--green); background: #effaf2; }
+.state-pill.reused { border-color: #a99bdd; color: #6246b5; background: #f4f1ff; }
 .state-pill.warning { border-color: #e2b276; color: var(--amber); background: #fff7e9; }
 .state-pill.error,
 .state-pill.failed { border-color: #e49a9d; color: var(--red); background: #fff1f1; }
@@ -246,6 +247,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .gate-list li { min-width: 0; display: grid; grid-template-columns: 19px 17px minmax(0, 1fr); align-items: center; gap: 6px; color: #748096; }
 .gate-list li.success { color: var(--green); }
+.gate-list li.reused { color: #6246b5; }
 .gate-list li.active { color: var(--blue); }
 .gate-list li > span { font-family: "JetBrains Mono Variable", monospace; font-size: 11px; font-weight: 700; }
 .gate-list li strong { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -318,6 +320,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .event-icon::after { content: ""; position: absolute; z-index: -1; top: 19px; bottom: -17px; left: 9px; width: 1px; background: var(--line); }
 .activity-row:last-child .event-icon::after { display: none; }
 .activity-row.success .event-icon { color: var(--green); }
+.activity-row.reused .event-icon { color: #6246b5; }
 .activity-row.active .event-icon { color: var(--blue); }
 .activity-row.warning .event-icon { color: var(--amber); }
 .activity-row.error .event-icon { color: var(--red); }

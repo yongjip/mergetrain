@@ -82,6 +82,9 @@ Validation records an exact train identity, including every task HEAD and the
 integration base used for the check. The later deploy reassembles that same
 train on the current integration ref, reruns all gates, and refuses changed
 task branches. Newly queued work is not silently added to the approved train.
+Expensive gates may be reused only through an explicit validated-reuse policy or
+`--reuse-validated`; a non-deploying `--preview --json` reports the exact reused SHA
+or why the full safe path will run.
 
 Every agent-facing command is non-interactive and requires explicit intent: `--validate-only` or `--deploy`, never a bare `run-batch`.
 

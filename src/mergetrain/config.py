@@ -58,11 +58,21 @@ class AgentConfig:
 class GateConfig:
     name: str
     run: str
+    always_rerun_on_deploy: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ReuseConfig:
+    enabled: bool = False
+    max_age_minutes: int = 60
+    on_mismatch: str = "rerun"
+    fingerprints: tuple[GateConfig, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class DeployConfig:
     verify: tuple[GateConfig, ...] = ()
+    reuse: ReuseConfig = ReuseConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +276,11 @@ gates:
 
 deploy:
   verify: []
+  reuse:
+    enabled: false
+    max_age_minutes: 60
+    on_mismatch: rerun
+    fingerprints: []
   # Add post-push checks here, for example:
   # verify:
   #   - name: live-health
@@ -299,7 +314,18 @@ def _as_gate_list(value: Any, *, key: str) -> tuple[GateConfig, ...]:
         run = run_value.strip()
         if not name or not run:
             raise ConfigError(f"{key}[{index}] requires name and run")
-        gates.append(GateConfig(name=name, run=run))
+        always_rerun = item.get("always_rerun_on_deploy", False)
+        if not isinstance(always_rerun, bool):
+            raise ConfigError(
+                f"{key}[{index}].always_rerun_on_deploy must be true or false"
+            )
+        gates.append(
+            GateConfig(
+                name=name,
+                run=run,
+                always_rerun_on_deploy=always_rerun,
+            )
+        )
     return tuple(gates)
 
 
@@ -333,6 +359,12 @@ def _positive_int(value: Any, *, key: str) -> int:
     if parsed <= 0:
         raise ConfigError(f"{key} must be a positive integer")
     return parsed
+
+
+def _boolean(value: Any, *, key: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{key} must be true or false")
+    return value
 
 
 def _resolve_path(repo: Path, value: Any, default: str) -> Path:
@@ -418,11 +450,44 @@ def load_config(
     )
 
     deploy_data = _as_mapping(data, "deploy")
-    deploy = DeployConfig(verify=_as_gate_list(deploy_data.get("verify", []), key="deploy.verify"))
+    reuse_value = deploy_data.get("reuse", {})
+    if reuse_value is None:
+        reuse_value = {}
+    if not isinstance(reuse_value, dict):
+        raise ConfigError("deploy.reuse must be a mapping")
+    on_mismatch = str(reuse_value.get("on_mismatch", "rerun")).strip()
+    if on_mismatch not in {"rerun", "fail"}:
+        raise ConfigError("deploy.reuse.on_mismatch must be 'rerun' or 'fail'")
+    fingerprints = _as_gate_list(
+        reuse_value.get("fingerprints", []), key="deploy.reuse.fingerprints"
+    )
+    if any(item.always_rerun_on_deploy for item in fingerprints):
+        raise ConfigError(
+            "deploy.reuse.fingerprints do not support always_rerun_on_deploy"
+        )
+    deploy = DeployConfig(
+        verify=_as_gate_list(deploy_data.get("verify", []), key="deploy.verify"),
+        reuse=ReuseConfig(
+            enabled=_boolean(
+                reuse_value.get("enabled", False), key="deploy.reuse.enabled"
+            ),
+            max_age_minutes=_positive_int(
+                reuse_value.get("max_age_minutes", 60),
+                key="deploy.reuse.max_age_minutes",
+            ),
+            on_mismatch=on_mismatch,
+            fingerprints=fingerprints,
+        ),
+    )
     gates = _as_gate_list(data.get("gates", []), key="gates")
-    gate_names = [gate.name for gate in (*gates, *deploy.verify)]
+    gate_names = [
+        gate.name
+        for gate in (*gates, *deploy.verify, *deploy.reuse.fingerprints)
+    ]
     if len(set(gate_names)) != len(gate_names):
-        raise ConfigError("gate and deploy.verify names must be unique")
+        raise ConfigError(
+            "gate, deploy.verify, and deploy.reuse.fingerprint names must be unique"
+        )
 
     return MergetrainConfig(
         project=ProjectConfig(name=project_name),

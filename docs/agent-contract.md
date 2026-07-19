@@ -10,8 +10,10 @@ Agents interacting with mergetrain must follow this contract.
 4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
    the next action.
 5. Use `--auto` only after explicit unattended-deploy approval.
-6. Let one runner or daemon own merge, test, push, and verify.
-7. Fix blocked or failed work in the owning branch, commit a clean result, then
+6. Reuse validated gates only after explicit config or `--reuse-validated`
+   authorization.
+7. Let one runner or daemon own merge, test, push, and verify.
+8. Fix blocked or failed work in the owning branch, commit a clean result, then
    enqueue a new job.
 
 ## Machine-readable contract
@@ -41,3 +43,5 @@ unattended auto deploy, or destructive cleanup.
 When `validated_trains` is non-empty, approval applies to the displayed train
 identity and member HEADs. A later deploy must not silently include newer
 queued jobs. Validated-but-not-deployed branches are not GC deletion candidates.
+Deploy approval by itself does not authorize gate reuse; that is a separate,
+explicit policy decision.

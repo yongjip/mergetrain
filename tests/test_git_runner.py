@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -8,15 +9,18 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from mergetrain.config import load_config
+from mergetrain.cli import main
 from mergetrain.errors import CommandFailed
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.store import (
     cancel_job,
     claim_all_queued,
+    claim_deploy_batch,
     connect,
     enqueue_job,
     get_job,
@@ -38,6 +42,11 @@ def make_demo_repo(
     *,
     gate_command: str = "",
     verify_command: str | None = None,
+    reuse_enabled: bool = False,
+    reuse_max_age_minutes: int = 60,
+    reuse_on_mismatch: str = "rerun",
+    always_rerun_on_deploy: bool = False,
+    fingerprint_command: str | None = None,
 ) -> tuple[Path, Path]:
     """Create a remote+clone with a ``feature/a`` branch and return (repo, marker).
 
@@ -70,6 +79,14 @@ def make_demo_repo(
         verify_config = f"""  verify:
     - name: live-check
       run: {verify_command}"""
+    fingerprint_config = "    fingerprints: []"
+    if fingerprint_command is not None:
+        fingerprint_config = f"""    fingerprints:
+      - name: toolchain
+        run: {fingerprint_command}"""
+    always_rerun_config = (
+        "\n    always_rerun_on_deploy: true" if always_rerun_on_deploy else ""
+    )
     config_text = f"""project:
   name: demo
 state:
@@ -88,15 +105,149 @@ queue:
   command_timeout_seconds: 30
 gates:
   - name: marker
-    run: {gate_command}
+    run: {gate_command}{always_rerun_config}
 deploy:
 {verify_config}
+  reuse:
+    enabled: {str(reuse_enabled).lower()}
+    max_age_minutes: {reuse_max_age_minutes}
+    on_mismatch: {reuse_on_mismatch}
+{fingerprint_config}
 """
     (repo / ".mergetrain.yaml").write_text(config_text, encoding="utf-8")
     return repo, marker
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_unchanged_validated_train_reuses_gates_and_still_verifies(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            verify_marker = root / "verify.txt"
+            verify = f'{sys.executable} -c "from pathlib import Path; Path(\'{verify_marker}\').write_text(\'verified\')"'
+            repo, marker = make_demo_repo(root, verify_command=verify)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                validated = runner.process_batch(conn, [job], deploy=False)[0]
+                deployed = runner.process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(deployed.status, "deployed")
+            self.assertEqual(deployed.deploy_sha, validated.validation_sha)
+            self.assertEqual(deployed.reused_validation_sha, validated.validation_sha)
+            self.assertTrue(validated.validation_tree_sha)
+            self.assertTrue(validated.validation_gate_policy_sha)
+            self.assertTrue(validated.validation_environment_sha)
+            self.assertTrue(validated.validation_train_sha)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            self.assertEqual(verify_marker.read_text(encoding="utf-8"), "verified")
+            reused = [event for event in events if event.state == "reused"]
+            self.assertEqual(
+                [event.message for event in reused],
+                ["Reused gate 1/2: diff-check", "Reused gate 2/2: marker"],
+            )
+
+    def test_reuse_preview_json_names_exact_validation_sha_without_claiming(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+            finally:
+                conn.close()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(config.state.db),
+                        "run-batch",
+                        "--deploy",
+                        "--train-id",
+                        validated.train_id,
+                        "--reuse-validated",
+                        "--preview",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["preview"])
+            self.assertTrue(payload["reuse"]["eligible"])
+            self.assertEqual(
+                payload["reuse"]["reused_validation_sha"],
+                validated.validation_sha,
+            )
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            with self.assertRaises(AssertionError):
+                git(root / "remote.git", "show", "main:a.txt")
+
+    def test_config_authorization_reuses_but_required_gate_reruns(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(
+                root,
+                reuse_enabled=True,
+                always_rerun_on_deploy=True,
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                validated = runner.process_batch(conn, [job], deploy=False)[0]
+                deployed = runner.process_batch(conn, [validated], deploy=True)[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(deployed.reused_validation_sha, validated.validation_sha)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "xx")
+            self.assertIn("Reused gate 1/2: diff-check", [event.message for event in events])
+            self.assertIn("Running gate 2/2: marker", [event.message for event in events])
+
+    def test_environment_fingerprint_change_falls_back_to_full_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fingerprint = root / "toolchain.txt"
+            fingerprint.write_text("tool-a\n", encoding="utf-8")
+            repo, marker = make_demo_repo(
+                root,
+                reuse_enabled=True,
+                fingerprint_command=f"cat {fingerprint}",
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                validated = runner.process_batch(conn, [job], deploy=False)[0]
+                fingerprint.write_text("tool-b\n", encoding="utf-8")
+                deployed = runner.process_batch(conn, [validated], deploy=True)[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(deployed.reused_validation_sha, "")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "xx")
+            fallback = next(
+                event
+                for event in events
+                if event.message == "Validated gates were not reused; rerunning all gates"
+            )
+            self.assertIn("environment or toolchain fingerprint changed", fallback.detail)
+
     def test_push_failure_is_not_reported_as_deployed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -264,16 +415,29 @@ class GitRunnerTests(unittest.TestCase):
                 git(repo, "add", "base-moved.txt")
                 git(repo, "commit", "-m", "move integration")
                 git(repo, "push", "origin", "main")
-                deployed = GitRunner(config).process_batch(conn, [validated], deploy=True)[0]
+                deployed = GitRunner(config).process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
+                events = list_run_events(conn)
             finally:
                 conn.close()
             self.assertEqual(deployed.status, "deployed")
             self.assertEqual(deployed.push_status, "succeeded")
             self.assertEqual(deployed.verify_status, "not_configured")
+            self.assertEqual(deployed.reused_validation_sha, "")
             self.assertNotEqual(deployed.validation_base_sha, deployed.deploy_sha)
             self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
             self.assertEqual(git(root / "remote.git", "show", "main:base-moved.txt"), "moved")
             self.assertEqual(marker.read_text(encoding="utf-8"), "xx")
+            fallback = next(
+                event
+                for event in events
+                if event.message == "Validated gates were not reused; rerunning all gates"
+            )
+            self.assertIn("integration ref moved", fallback.detail)
 
     def test_changed_branch_head_blocks_validated_train(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -289,11 +453,164 @@ class GitRunnerTests(unittest.TestCase):
                 git(repo, "add", "changed.txt")
                 git(repo, "commit", "-m", "change after validation")
                 git(repo, "switch", "main")
-                result = GitRunner(config).process_batch(conn, [validated], deploy=True)[0]
+                result = GitRunner(config).process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
             finally:
                 conn.close()
             self.assertEqual(result.status, "blocked")
             self.assertIn("HEAD changed since validation", result.note)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            with self.assertRaises(AssertionError):
+                git(root / "remote.git", "show", "main:a.txt")
+
+    def test_changed_gate_policy_falls_back_to_full_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first_marker = root / "first-gate.txt"
+            second_marker = root / "second-gate.txt"
+            first_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{first_marker}\').write_text(\'x\')"'
+            second_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{second_marker}\').write_text(\'y\')"'
+            repo, _marker = make_demo_repo(root, gate_command=first_gate)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                config.config_path.write_text(
+                    config.config_path.read_text(encoding="utf-8").replace(
+                        first_gate, second_gate
+                    ),
+                    encoding="utf-8",
+                )
+                changed_config = load_config(repo=repo)
+                deployed = GitRunner(changed_config).process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(deployed.reused_validation_sha, "")
+            self.assertEqual(first_marker.read_text(encoding="utf-8"), "x")
+            self.assertEqual(second_marker.read_text(encoding="utf-8"), "y")
+            fallback = next(
+                event
+                for event in events
+                if event.message == "Validated gates were not reused; rerunning all gates"
+            )
+            self.assertIn("gate or fingerprint policy changed", fallback.detail)
+
+    def test_missing_validation_commit_falls_back_to_full_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                conn.execute(
+                    "UPDATE deploy_queue SET validation_sha = ? WHERE id = ?",
+                    ("f" * 40, validated.id),
+                )
+                conn.commit()
+                validated = get_job(conn, validated.id)
+                deployed = GitRunner(config).process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(deployed.reused_validation_sha, "")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "xx")
+            fallback = next(
+                event
+                for event in events
+                if event.message == "Validated gates were not reused; rerunning all gates"
+            )
+            self.assertIn("validation commit is missing", fallback.detail)
+
+    def test_stale_validation_falls_back_to_full_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, reuse_max_age_minutes=1)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                conn.execute(
+                    "UPDATE deploy_queue SET validated_at = ? WHERE id = ?",
+                    ("2000-01-01T00:00:00Z", validated.id),
+                )
+                conn.commit()
+                validated = get_job(conn, validated.id)
+                deployed = GitRunner(config).process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(deployed.reused_validation_sha, "")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "xx")
+            fallback = next(
+                event
+                for event in events
+                if event.message == "Validated gates were not reused; rerunning all gates"
+            )
+            self.assertIn("older than the configured reuse age", fallback.detail)
+
+    def test_mismatch_policy_can_fail_closed_without_rerunning_or_pushing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(
+                root,
+                reuse_max_age_minutes=1,
+                reuse_on_mismatch="fail",
+            )
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            token = ""
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                conn.execute(
+                    "UPDATE deploy_queue SET validated_at = ? WHERE id = ?",
+                    ("2000-01-01T00:00:00Z", validated.id),
+                )
+                conn.commit()
+                claimed = claim_deploy_batch(
+                    conn,
+                    owner=owner,
+                    train_id=validated.train_id,
+                )
+                token = claimed[0].claim_token
+                result = GitRunner(config).process_batch(
+                    conn,
+                    claimed,
+                    deploy=True,
+                    owner=owner,
+                    reuse_validated=True,
+                )[0]
+            finally:
+                if token:
+                    release_runner_lock(conn, owner=owner, token=token)
+                conn.close()
+            self.assertEqual(result.status, "blocked")
+            self.assertIn("failed closed", result.note)
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")

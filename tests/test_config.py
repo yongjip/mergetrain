@@ -70,6 +70,49 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "must be unique"):
                 load_config(repo=repo)
 
+    def test_validated_reuse_policy_parses_explicit_safety_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: tests
+    run: make test
+    always_rerun_on_deploy: true
+deploy:
+  reuse:
+    enabled: true
+    max_age_minutes: 15
+    on_mismatch: fail
+    fingerprints:
+      - name: toolchain
+        run: scripts/toolchain-id
+""",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+            self.assertTrue(config.deploy.reuse.enabled)
+            self.assertEqual(config.deploy.reuse.max_age_minutes, 15)
+            self.assertEqual(config.deploy.reuse.on_mismatch, "fail")
+            self.assertEqual(config.deploy.reuse.fingerprints[0].name, "toolchain")
+            self.assertTrue(config.gates[0].always_rerun_on_deploy)
+
+    def test_invalid_validated_reuse_policy_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            invalid_values = [
+                ("enabled: 1", "true or false"),
+                ("max_age_minutes: 0", "positive integer"),
+                ("on_mismatch: skip", "rerun.*fail"),
+            ]
+            for value, message in invalid_values:
+                with self.subTest(value=value):
+                    (repo / ".mergetrain.yaml").write_text(
+                        f"deploy:\n  reuse:\n    {value}\n",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ConfigError, message):
+                        load_config(repo=repo)
+
 
 if __name__ == "__main__":
     unittest.main()

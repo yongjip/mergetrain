@@ -26,6 +26,15 @@ still validate/deploy.
 Push failures mark jobs as `failed` with `push_status=failed` and
 `verify_status=not_run`. Inspect the job log path from `mergetrain status --json`.
 
+## Validated-gate reuse declined
+
+Reuse is an opt-in optimization, not a deploy prerequisite. If the integration
+ref, task head, train membership, validation commit/tree, gate policy,
+environment fingerprint, or age differs, `on_mismatch: rerun` records a warning
+event and performs the full reassembly and gate run. `on_mismatch: fail` blocks
+before push. A missing or changed task head remains fail-closed even when the
+general mismatch policy is rerun.
+
 ## Post-push verify failure
 
 Verify hooks run after push. The remote ref is already updated, so jobs remain
