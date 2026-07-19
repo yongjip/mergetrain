@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mergetrain.config import load_config
 from mergetrain.errors import CommandFailed
@@ -32,7 +33,12 @@ def git(cwd: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def make_demo_repo(root: Path, *, gate_command: str = "") -> tuple[Path, Path]:
+def make_demo_repo(
+    root: Path,
+    *,
+    gate_command: str = "",
+    verify_command: str | None = None,
+) -> tuple[Path, Path]:
     """Create a remote+clone with a ``feature/a`` branch and return (repo, marker).
 
     The gate appends to ``marker`` once per gate run so tests can assert the train
@@ -59,6 +65,11 @@ def make_demo_repo(root: Path, *, gate_command: str = "") -> tuple[Path, Path]:
         f"{sys.executable} -c \"from pathlib import Path; p=Path('{marker}'); "
         "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
     )
+    verify_config = "  verify: []"
+    if verify_command is not None:
+        verify_config = f"""  verify:
+    - name: live-check
+      run: {verify_command}"""
     config_text = f"""project:
   name: demo
 state:
@@ -79,13 +90,110 @@ gates:
   - name: marker
     run: {gate_command}
 deploy:
-  verify: []
+{verify_config}
 """
     (repo / ".mergetrain.yaml").write_text(config_text, encoding="utf-8")
     return repo, marker
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_push_failure_is_not_reported_as_deployed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                failure = CommandFailed(
+                    ["git", "push"], 1, stderr="remote rejected the update"
+                )
+                with patch.object(runner, "push_verified_head", side_effect=failure):
+                    result = runner.process_one(conn, job, deploy=True)
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.push_status, "failed")
+            self.assertEqual(result.verify_status, "not_run")
+            with self.assertRaises(AssertionError):
+                git(root / "remote.git", "show", "main:a.txt")
+
+    def test_unexpected_post_push_error_preserves_deployed_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            verify = f'{sys.executable} -c "import sys; sys.exit(0)"'
+            repo, _marker = make_demo_repo(root, verify_command=verify)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                with patch.object(
+                    runner,
+                    "_run_verify_hooks",
+                    side_effect=RuntimeError("verification crashed"),
+                ):
+                    result = runner.process_one(conn, job, deploy=True)
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "deployed")
+            self.assertEqual(result.push_status, "succeeded")
+            self.assertEqual(result.verify_status, "failed")
+            self.assertIn("post-push completion warning", result.note)
+            self.assertEqual(events[-1].phase, "complete")
+            self.assertEqual(events[-1].state, "warning")
+            self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+
+    def test_single_deploy_records_verify_success_and_failure(self) -> None:
+        for returncode, expected_verify, expected_event_state in [
+            (0, "succeeded", "success"),
+            (7, "failed", "warning"),
+        ]:
+            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                verify = f'{sys.executable} -c "import sys; sys.exit({returncode})"'
+                repo, _marker = make_demo_repo(root, verify_command=verify)
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    job = enqueue_job(conn, task="a", branch="feature/a")
+                    result = GitRunner(config).process_one(conn, job, deploy=True)
+                    events = list_run_events(conn)
+                finally:
+                    conn.close()
+                self.assertEqual(result.status, "deployed")
+                self.assertEqual(result.push_status, "succeeded")
+                self.assertEqual(result.verify_status, expected_verify)
+                self.assertEqual(events[-1].phase, "complete")
+                self.assertEqual(events[-1].state, expected_event_state)
+                if returncode:
+                    self.assertIn("verification needs attention", events[-1].message)
+
+    def test_batch_deploy_records_verify_success_and_failure(self) -> None:
+        for returncode, expected_verify, expected_event_state in [
+            (0, "succeeded", "success"),
+            (9, "failed", "warning"),
+        ]:
+            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                verify = f'{sys.executable} -c "import sys; sys.exit({returncode})"'
+                repo, _marker = make_demo_repo(root, verify_command=verify)
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    job = enqueue_job(conn, task="a", branch="feature/a")
+                    result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+                    events = list_run_events(conn)
+                finally:
+                    conn.close()
+                self.assertEqual(result.status, "deployed")
+                self.assertEqual(result.push_status, "succeeded")
+                self.assertEqual(result.verify_status, expected_verify)
+                self.assertEqual(events[-1].phase, "complete")
+                self.assertEqual(events[-1].state, expected_event_state)
+
     def test_dashboard_command_masks_obvious_secret_values(self) -> None:
         rendered = _dashboard_command(
             "TEST_TOKEN=fixture-value run-check --password fixture-password"
@@ -160,6 +268,8 @@ class GitRunnerTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(deployed.status, "deployed")
+            self.assertEqual(deployed.push_status, "succeeded")
+            self.assertEqual(deployed.verify_status, "not_configured")
             self.assertNotEqual(deployed.validation_base_sha, deployed.deploy_sha)
             self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
             self.assertEqual(git(root / "remote.git", "show", "main:base-moved.txt"), "moved")

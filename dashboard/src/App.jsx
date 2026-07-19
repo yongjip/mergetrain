@@ -85,7 +85,9 @@ function eventDescription(event, jobCount) {
   if (event.phase === "ready") return "The exact train identity is validated and waiting for explicit deploy approval.";
   if (event.phase === "pushing") return "Atomically updating the configured remote refs with the validated train.";
   if (event.phase === "verifying") return "Checking the deployed refs after the atomic push completed.";
-  if (event.phase === "complete") return "The runner finished this train and released its lease.";
+  if (event.phase === "complete") return event.state === "warning"
+    ? "The remote refs were pushed, but post-push verification still needs attention."
+    : "The runner finished this train and released its lease.";
   return "A structured milestone emitted by the local mergetrain runner.";
 }
 
@@ -158,6 +160,7 @@ function phaseState(key, index, snapshot) {
   if (index === current) {
     if (key === "gating" && progress.gates?.some((gate) => gate.state !== "success")) return "active";
     if (progress.state === "success") return "done";
+    if (progress.state === "warning") return "warning";
     return progress.state === "queued" || progress.state === "idle" ? "waiting" : "active";
   }
   if (progress.completed_phases?.includes(key)) return "done";
@@ -306,7 +309,17 @@ function JobCards({ snapshot }) {
           && index === 0
         );
         const assembled = snapshot.progress.completed_job_ids?.includes(job.id) || phaseIndex(snapshot.progress.phase) > phaseIndex("assembling");
-        const state = ["validated", "deployed"].includes(job.status) ? "done" : ["blocked", "failed"].includes(job.status) ? "error" : active ? "active" : assembled ? "done" : "waiting";
+        const state = job.status === "deployed" && job.verify_status === "failed"
+          ? "warning"
+          : ["validated", "deployed"].includes(job.status)
+            ? "done"
+            : ["blocked", "failed"].includes(job.status)
+              ? "error"
+              : active
+                ? "active"
+                : assembled
+                  ? "done"
+                  : "waiting";
         return (
           <article className={`job-card ${state}`} key={job.id}>
             <div className="job-card-head"><strong>#{job.id}</strong><StatusIcon state={state} size={21} /></div>
@@ -382,18 +395,28 @@ function RunnerPanel({ snapshot, now }) {
   );
 }
 
-function BlockedPanel({ jobs }) {
-  const job = jobs.find((item) => item.status === "blocked" || item.status === "failed");
+function AttentionPanel({ jobs }) {
+  const job = jobs.find((item) => (
+    item.status === "blocked"
+    || item.status === "failed"
+    || (item.status === "deployed" && item.verify_status === "failed")
+  ));
+  const verifyWarning = job?.status === "deployed" && job.verify_status === "failed";
   return (
     <section className="rail-section blocked-section">
-      <h2>Blocked <small>(history)</small></h2>
+      <h2>Attention <small>(history)</small></h2>
       {job ? (
         <div className="blocked-item">
-          <div className="blocked-title"><XCircle size={24} weight="fill" /><strong>#{job.id}</strong><span>{job.task}</span></div>
+          <div className={`blocked-title ${verifyWarning ? "warning" : "error"}`}>
+            {verifyWarning
+              ? <WarningCircle size={24} weight="fill" />
+              : <XCircle size={24} weight="fill" />}
+            <strong>#{job.id}</strong><span>{job.task}</span>
+          </div>
           <div className="blocked-detail"><small>Reason</small><p>{job.note || "No reason recorded"}</p><small>Occurred</small><code>{dateTime(job.finished_at || job.requested_at)}</code></div>
         </div>
       ) : (
-        <div className="clear-history"><CheckCircle size={24} weight="fill" /><span>No blocked jobs in recent history.</span></div>
+        <div className="clear-history"><CheckCircle size={24} weight="fill" /><span>No jobs need attention in recent history.</span></div>
       )}
     </section>
   );
@@ -476,7 +499,7 @@ export function App() {
         </main>
         <aside className="side-rail">
           <RunnerPanel snapshot={snapshot} now={now} />
-          <BlockedPanel jobs={recentJobs} />
+          <AttentionPanel jobs={recentJobs} />
           <NextAction value={snapshot.next_action} />
         </aside>
       </div>

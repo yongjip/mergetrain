@@ -23,13 +23,16 @@ still validate/deploy.
 
 ## Push failure
 
-Push failures mark jobs as `failed`. Inspect the job log path from
-`mergetrain status --json`.
+Push failures mark jobs as `failed` with `push_status=failed` and
+`verify_status=not_run`. Inspect the job log path from `mergetrain status --json`.
 
 ## Post-push verify failure
 
-Verify hooks run after push. The remote ref may already be updated, so jobs are
-marked `deployed` with a warning note instead of `failed`.
+Verify hooks run after push. The remote ref is already updated, so jobs remain
+`deployed` with `push_status=succeeded` and `verify_status=failed` instead of
+being rewritten as a pre-push failure. Run JSON returns `result=warning` and
+`ok=false`, human output names both outcomes, the final completion event remains
+a warning, and the dashboard keeps the job in its Attention history.
 
 ## Stale lock
 

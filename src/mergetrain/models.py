@@ -8,6 +8,8 @@ from typing import Any
 ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated")
 TERMINAL_STATUSES = ("deployed", "canceled")
 ALL_STATUSES = ACTIVE_STATUSES + TERMINAL_STATUSES
+PUSH_STATUSES = ("not_run", "succeeded", "failed")
+VERIFY_STATUSES = ("not_run", "not_configured", "succeeded", "failed")
 
 
 @dataclass(slots=True)
@@ -25,6 +27,8 @@ class Job:
     finished_at: str = ""
     log_path: str = ""
     note: str = ""
+    push_status: str = "not_run"
+    verify_status: str = "not_run"
     auto_deploy: bool = False
     train_id: str = ""
     train_size: int = 0
@@ -51,6 +55,8 @@ class Job:
             finished_at=str(row["finished_at"] or ""),
             log_path=str(row["log_path"] or ""),
             note=str(row["note"] or ""),
+            push_status=str(row["push_status"] or "not_run"),
+            verify_status=str(row["verify_status"] or "not_run"),
             auto_deploy=bool(row["auto_deploy"]),
             train_id=str(row["train_id"] or ""),
             train_size=int(row["train_size"] or 0),

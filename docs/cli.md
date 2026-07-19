@@ -211,8 +211,14 @@ terminates the active subprocess group, and records the final `canceled` state.
 
 ## Exit codes
 
-`0` all requested jobs succeeded · `1` a job blocked/failed or an expected
-config/queue/command error · `2` usage error · `130` interrupted (`Ctrl-C`).
-In JSON mode, run results include `ok`, `result` (`success`, `partial`, or
-`failed`), per-status `counts`, and `jobs`. Expected exceptions are emitted as
+`0` all requested jobs succeeded · `1` a job blocked/failed, post-push verify
+warning, or an expected config/queue/command error · `2` usage error · `130`
+interrupted (`Ctrl-C`). In JSON mode, run results include `ok`, `result`
+(`success`, `warning`, `partial`, or `failed`), per-status `counts`,
+`push_counts`, `verify_counts`, and `jobs`. Each job exposes `push_status`
+(`not_run`, `succeeded`, or `failed`) and `verify_status` (`not_run`,
+`not_configured`, `succeeded`, or `failed`). A successful push followed by a
+failed verify keeps `status=deployed` but returns `result=warning` and `ok=false`.
+Human output prints the same push/verify facts next to each affected job.
+Expected exceptions are emitted as
 `{"ok": false, "error": {"code", "message", "retryable"}}`.

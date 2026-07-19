@@ -117,8 +117,11 @@ deploy:
       run: curl -fsS https://example.invalid/health
 ```
 
-Verify hooks run after push. A verify failure may mean the remote ref was already
-updated; mergetrain marks jobs as `deployed` and records a warning note.
+Verify hooks run after push. A verify failure means the remote ref was already
+updated, so mergetrain keeps `status=deployed` while recording
+`push_status=succeeded`, `verify_status=failed`, and a warning note. Runs with no
+hooks record `verify_status=not_configured`; configured hooks that all pass record
+`verify_status=succeeded`.
 
 ## Placeholders and environment
 

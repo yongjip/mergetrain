@@ -7,12 +7,32 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from mergetrain.cli import _results_payload, main, normalize_global_options
+from mergetrain.cli import _job_result_line, _results_payload, main, normalize_global_options
 from mergetrain.models import Job
 from mergetrain.store import connect, enqueue_job, mark_job
 
 
 class CliTests(unittest.TestCase):
+    def test_results_payload_reports_post_push_verify_warning(self) -> None:
+        job = Job(
+            id=1,
+            task="a",
+            branch="feature/a",
+            status="deployed",
+            push_status="succeeded",
+            verify_status="failed",
+        )
+        payload = _results_payload([job])
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["result"], "warning")
+        self.assertEqual(payload["push_counts"], {"succeeded": 1})
+        self.assertEqual(payload["verify_counts"], {"failed": 1})
+        self.assertEqual(payload["jobs"][0]["status"], "deployed")
+        self.assertEqual(
+            _job_result_line(payload["jobs"][0]),
+            "#1 deployed (push=succeeded, verify=failed): feature/a",
+        )
+
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
         failed = _results_payload([Job(id=1, task="a", branch="a", status="failed")])
         self.assertFalse(failed["ok"])

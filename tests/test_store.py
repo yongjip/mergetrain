@@ -58,7 +58,13 @@ class StoreTests(unittest.TestCase):
             """
         )
         legacy.execute(
-            "INSERT INTO deploy_queue (task, branch, requested_at) VALUES ('old', 'feature/old', 'now')"
+            """
+            INSERT INTO deploy_queue (task, branch, status, requested_at, note)
+            VALUES (
+              'old', 'feature/old', 'deployed', 'now',
+              'post-push verify warning: legacy failure'
+            )
+            """
         )
         legacy.commit()
         legacy.close()
@@ -71,11 +77,15 @@ class StoreTests(unittest.TestCase):
             conn.close()
         self.assertEqual(migrated.train_id, "")
         self.assertEqual(migrated.train_size, 0)
+        self.assertEqual(migrated.push_status, "succeeded")
+        self.assertEqual(migrated.verify_status, "failed")
         self.assertIn("validated_head_sha", columns)
         self.assertIn("claim_token", columns)
+        self.assertIn("push_status", columns)
+        self.assertIn("verify_status", columns)
         migrated_db = sqlite3.connect(db)
         try:
-            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 4)
             event_columns = {
                 row[1] for row in migrated_db.execute("PRAGMA table_info(run_events)")
             }

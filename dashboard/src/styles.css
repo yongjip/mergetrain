@@ -130,6 +130,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   color: var(--blue);
 }
 .hero-icon.success { border-color: var(--green); color: var(--green); }
+.hero-icon.warning { border-color: var(--amber); color: var(--amber); }
 .hero-icon.error { border-color: var(--red); color: var(--red); }
 .hero h1 { margin: 0; font-size: clamp(34px, 3.2vw, 47px); line-height: 1.08; letter-spacing: -0.045em; }
 .hero p { margin: 9px 0 0; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 20px; }
@@ -151,6 +152,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .phase:last-child::after { display: none; }
 .phase.done::after { background: var(--green); }
 .phase.active::after { background: linear-gradient(90deg, var(--blue), #c9d0db); }
+.phase.warning::after { background: linear-gradient(90deg, var(--amber), #c9d0db); }
 .phase-label { display: block; margin-bottom: 16px; font-size: 14px; font-weight: 680; }
 .phase-track {
   width: 30px;
@@ -165,6 +167,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .phase.done .phase-track { color: var(--green); }
 .phase.active .phase-track { color: var(--blue); }
+.phase.warning .phase-track { color: var(--amber); }
 .gate-count {
   position: absolute;
   top: 0;
@@ -271,9 +274,11 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .job-card::after { content: ""; position: absolute; top: 83px; left: 100%; width: 29px; height: 3px; background: var(--blue); }
 .job-card:last-child::after { display: none; }
 .job-card.active { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(8, 103, 237, 0.11); }
+.job-card.warning { border-color: var(--amber); }
 .job-card.error { border-color: var(--red); }
 .job-card-head { display: flex; justify-content: space-between; align-items: center; color: var(--blue); }
 .job-card.done .job-card-head svg { color: var(--green); }
+.job-card.warning .job-card-head { color: var(--amber); }
 .job-card.error .job-card-head { color: var(--red); }
 .job-card h3 { margin: 13px 0 10px; min-height: 43px; font-size: 17px; line-height: 1.25; letter-spacing: -0.02em; }
 .job-card code {
@@ -343,10 +348,12 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .runner-section dd code { color: #43516a; font-size: 11px; }
 .rail-section h2 small { color: var(--muted); font-size: 16px; font-weight: 480; }
 .blocked-title { gap: 9px; color: var(--red); }
+.blocked-title.warning { color: var(--amber); }
 .blocked-title span { min-width: 0; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
 .blocked-detail { margin: 17px 0 0 10px; padding-left: 25px; border-left: 1px solid var(--line); }
 .blocked-detail small { display: block; color: var(--muted); font-size: 12px; }
 .blocked-detail p { margin: 5px 0 17px; color: var(--red); font-size: 14px; line-height: 1.45; }
+.blocked-title.warning + .blocked-detail p { color: var(--amber); }
 .blocked-detail code { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 .clear-history { gap: 10px; color: var(--green); font-size: 14px; }
 .action-title { align-items: flex-start; gap: 12px; color: var(--amber); line-height: 1.35; }
