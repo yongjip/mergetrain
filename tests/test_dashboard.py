@@ -94,12 +94,34 @@ class DashboardTests(unittest.TestCase):
             self.assertNotIn("log_path", payload["jobs"][0])
             self.assertNotIn("claim_token", payload["events"][0])
             self.assertNotIn("runtime", payload)
+            self.assertEqual(payload["project"]["terminology"]["completed"], "deployed")
+            self.assertEqual(payload["project"]["push_specs"], ["HEAD:main"])
 
             cleanup = connect(config.state.db)
             try:
                 release_runner_lock(cleanup, owner=owner, token=claimed[0].claim_token)
             finally:
                 cleanup.close()
+
+    def test_snapshot_exposes_configured_integration_vocabulary(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                """git:
+  remote: upstream
+  integration_branch: main
+  push_refs:
+    - main
+    - release
+terminology:
+  git_operation: integrate
+""",
+                encoding="utf-8",
+            )
+            payload = build_dashboard_snapshot(self.make_config(root))
+            self.assertEqual(payload["project"]["terminology"]["in_progress"], "integrating")
+            self.assertEqual(payload["project"]["remote"], "upstream")
+            self.assertEqual(payload["project"]["push_specs"], ["HEAD:main", "HEAD:release"])
 
     def test_http_server_serves_read_only_api_and_static_assets(self) -> None:
         with tempfile.TemporaryDirectory() as td:

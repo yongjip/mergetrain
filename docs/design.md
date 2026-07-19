@@ -197,6 +197,12 @@ git push --atomic <remote> HEAD:<ref1> HEAD:<ref2> ...
 An explicitly empty `push_refs` value is rejected while loading config; only an
 omitted field defaults to the integration branch.
 
+`terminology.git_operation` may present this operation as `deploy`, `integrate`,
+or `push` in human-facing surfaces. The aliases converge on this exact code
+path. Machine state deliberately remains `deployed`/`deploy_sha`, so existing
+databases and JSON consumers do not need migration. Completion proves the Git
+ref update only; it does not by itself prove or authorize a provider release.
+
 ### Post-push verify policy
 
 Because a push already updates the remote, a verify-hook failure after push does

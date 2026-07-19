@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from mergetrain.cli import _job_result_line, _results_payload, main, normalize_global_options
 from mergetrain.models import Job
+from mergetrain.reuse import ReuseDecision
 from mergetrain.store import (
     claim_next_job,
     connect,
@@ -156,6 +157,121 @@ class CliTests(unittest.TestCase):
         self.assertIn("exact validated train", payload["boundary"]["validated_train_deploy"])
         self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
         self.assertIn("read-only", payload["boundary"]["progress_observation"])
+
+    def test_configured_agent_contract_uses_integration_vocabulary(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "terminology:\n  git_operation: integrate\n",
+                encoding="utf-8",
+            )
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "agent-contract", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["human_vocabulary"]["completed"], "integrated")
+            self.assertEqual(payload["human_vocabulary"]["cli_flag"], "--integrate")
+            self.assertEqual(payload["human_vocabulary"]["machine_status"], "deployed")
+            self.assertEqual(payload["boundary"]["deploy_requires"], "run-next --deploy or run-batch --deploy")
+
+    def test_integration_human_status_preserves_json_machine_status(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            (repo / ".mergetrain.yaml").write_text(
+                "terminology:\n  git_operation: integrate\n",
+                encoding="utf-8",
+            )
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                mark_job(conn, job.id, status="deployed", push_status="succeeded")
+            finally:
+                conn.close()
+
+            human = io.StringIO()
+            with redirect_stdout(human):
+                self.assertEqual(
+                    main(["--repo", str(repo), "--db", str(db), "status"]),
+                    0,
+                )
+            self.assertIn("integrated", human.getvalue())
+            self.assertNotIn(" deployed", human.getvalue())
+
+            machine = io.StringIO()
+            with redirect_stdout(machine):
+                self.assertEqual(
+                    main(["--repo", str(repo), "--db", str(db), "status", "--json"]),
+                    0,
+                )
+            self.assertEqual(json.loads(machine.getvalue())["jobs"][0]["status"], "deployed")
+
+    def test_integrate_preview_lists_exact_atomic_push_refspecs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            (repo / ".mergetrain.yaml").write_text(
+                """git:
+  remote: upstream
+  integration_branch: main
+  push_refs:
+    - main
+    - release
+terminology:
+  git_operation: integrate
+""",
+                encoding="utf-8",
+            )
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="validated",
+                    train_id="train-1",
+                    train_size=1,
+                    validated_at="2026-07-19T00:00:00Z",
+                    validation_base_sha="a" * 40,
+                    validation_sha="b" * 40,
+                    validated_head_sha="c" * 40,
+                )
+            finally:
+                conn.close()
+            decision = ReuseDecision(
+                authorized=False,
+                eligible=False,
+                action="rerun",
+                validation_sha="b" * 40,
+                reasons=("reuse not authorized",),
+            )
+            out = io.StringIO()
+            with patch(
+                "mergetrain.cli.GitRunner.preview_validated_reuse",
+                return_value=decision,
+            ), redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "run-batch",
+                        "--integrate",
+                        "--preview",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["mode"], "deploy")
+            self.assertEqual(payload["terminology"]["completed"], "integrated")
+            self.assertEqual(payload["push_plan"]["remote"], "upstream")
+            self.assertEqual(
+                [item["spec"] for item in payload["push_plan"]["refs"]],
+                ["HEAD:main", "HEAD:release"],
+            )
 
     def test_init_write_creates_generic_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:

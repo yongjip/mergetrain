@@ -1,6 +1,6 @@
 # mergetrain full LLM operating guide
 
-mergetrain is a local deploy train for coding-agent worktrees. It is not a
+mergetrain is a local Git integration train for coding-agent worktrees. It is not a
 background job queue, cloud CI provider, deploy provider wrapper, or PR-first
 merge queue.
 
@@ -11,7 +11,7 @@ Agents should:
 2. Commit a clean result before enqueueing.
 3. Run `mergetrain doctor --json` before deciding the next queue action.
 4. Enqueue with `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`.
-5. Never push configured deploy refs directly.
+5. Never push configured Git refs directly.
 6. Leave merge/test/push/verify to one runner or daemon.
 7. Use `--auto` only after explicit unattended-deploy approval.
 
@@ -57,6 +57,13 @@ mergetrain gc --apply --delete-branches
 
 Do not infer consent from context. Require explicit user/operator approval for
 unattended deploy and deploy execution.
+
+Repositories may configure `terminology.git_operation: integrate` or `push`.
+Human output and the preferred `--integrate`/`--push` alias follow that setting,
+but the JSON/SQLite contract remains `status=deployed`, `deploy_sha`, and
+`deploy.*`. Completion proves the configured Git refs were atomically updated;
+`deploy.verify` reports an independent post-push outcome, and a provider release
+remains a separately labeled and authorized action.
 
 After `run-batch --validate-only`, read `status --json.validated_trains` to
 identify the approved `train_id`, member branches, and recorded HEADs. A later

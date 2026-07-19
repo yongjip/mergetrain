@@ -1,6 +1,6 @@
 # mergetrain
 
-**A local-first merge-and-deploy queue for coding-agent worktrees.**
+**A local-first merge-and-push queue for coding-agent worktrees.**
 
 mergetrain keeps its queue, coordination, merge assembly, and gate execution on
 your machine. Coding agents commit in separate worktrees; one local runner
@@ -38,7 +38,7 @@ Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, 
                                           │
                             gates (diff-check, tests, scans…)
                                           │
-                              git push --atomic  →  deploy refs
+                              git push --atomic  →  configured refs
                                           │
                                   post-push verify hooks
 ```
@@ -69,6 +69,13 @@ mergetrain run-batch --validate-only
 # 6. Ship — explicit, never implicit
 mergetrain run-batch --deploy
 ```
+
+Here `deploy` is the backward-compatible name for the atomic Git ref update,
+not necessarily a provider release. Repositories that reserve “deploy” for
+TestFlight, Play, App Store, Kubernetes, or another downstream system can set
+`terminology.git_operation: integrate` and use `run-batch --integrate`. This
+changes human CLI, dashboard, wrapper, and generated-agent wording only;
+SQLite/JSON keep the stable `deployed` status and `deploy_sha` field.
 
 For an unreleased source checkout, use `python -m pip install -e .` instead.
 
@@ -134,6 +141,9 @@ git:
   remote: origin
   integration_branch: main
   push_refs: [main]          # atomic push targets on deploy
+
+terminology:
+  git_operation: integrate  # deploy (default), integrate, or push
 
 queue:
   lock_ttl_minutes: 30

@@ -33,16 +33,30 @@ const PHASES = [
   ["verifying", "Verify"],
 ];
 
-const ACTIONS = {
-  wait_for_runner: ["Wait for the current phase to finish.", "The runner will continue automatically."],
-  fix_blocked_job: ["Fix the blocked branch and enqueue again.", "Commit a clean result in the owning branch first."],
-  deploy_validated_train_when_approved: ["Approve the exact validated train.", "Deployment remains an explicit CLI action."],
-  cancel_and_reenqueue_legacy_validated_jobs: ["Re-enqueue the legacy validated jobs.", "A fresh train identity is required before deploy."],
-  run_daemon_or_run_batch_deploy_when_approved: ["Start the approved deploy runner.", "Only auto-approved jobs are eligible for the daemon."],
-  run_batch_validate: ["Start a validation run when ready.", "Nothing will be pushed in validate-only mode."],
-  gc_available: ["Clean up completed worktrees.", "Review the dry run before applying cleanup."],
-  enqueue_clean_branch: ["Enqueue a committed task branch.", "The queue is ready for the next clean job."],
+const DEFAULT_TERMINOLOGY = {
+  action: "deploy",
+  in_progress: "deploying",
+  completed: "deployed",
+  noun: "deployment",
 };
+
+function terminology(snapshot) {
+  return snapshot.project.terminology || DEFAULT_TERMINOLOGY;
+}
+
+function actionCopy(value, words) {
+  const actions = {
+    wait_for_runner: ["Wait for the current phase to finish.", "The runner will continue automatically."],
+    fix_blocked_job: ["Fix the blocked branch and enqueue again.", "Commit a clean result in the owning branch first."],
+    deploy_validated_train_when_approved: [`Approve the exact validated train to ${words.action}.`, `Git ${words.noun} remains an explicit CLI action.`],
+    cancel_and_reenqueue_legacy_validated_jobs: ["Re-enqueue the legacy validated jobs.", `A fresh train identity is required before ${words.noun}.`],
+    run_daemon_or_run_batch_deploy_when_approved: [`Start the approved ${words.action} runner.`, "Only auto-approved jobs are eligible for the daemon."],
+    run_batch_validate: ["Start a validation run when ready.", "Nothing will be pushed in validate-only mode."],
+    gc_available: ["Clean up completed worktrees.", "Review the dry run before applying cleanup."],
+    enqueue_clean_branch: ["Enqueue a committed task branch.", "The queue is ready for the next clean job."],
+  };
+  return actions[value] || actions.enqueue_clean_branch;
+}
 
 const STATE_LABELS = {
   active: "RUNNING",
@@ -60,10 +74,10 @@ const STATE_LABELS = {
 
 const PHASE_LABELS = Object.fromEntries(PHASES.map(([key, label]) => [key, label.toUpperCase()]));
 
-function gateDescription(name = "") {
+function gateDescription(name = "", words = DEFAULT_TERMINOLOGY) {
   const normalized = name.toLowerCase();
   if (normalized === "diff-check") return "Checks the assembled Git diff for whitespace errors and conflict markers.";
-  if (normalized.includes("e2e") || normalized.includes("integration")) return "Exercises the installed CLI across real validation, merge, deploy, and recovery workflows.";
+  if (normalized.includes("e2e") || normalized.includes("integration")) return `Exercises the installed CLI across real validation, merge, Git ${words.noun}, and recovery workflows.`;
   if (normalized.includes("unit") || normalized === "test" || normalized === "tests") return "Runs the project's fast automated tests against the assembled train.";
   if (normalized.includes("package") || normalized.includes("build")) return "Confirms the project can be built and packaged from the assembled train.";
   if (normalized.includes("lint") || normalized.includes("format")) return "Checks source consistency before this train can move forward.";
@@ -71,8 +85,8 @@ function gateDescription(name = "") {
   return "Runs a project-defined safety check against the entire assembled train.";
 }
 
-function eventDescription(event, jobCount) {
-  if (event.phase === "claiming") return `Reserved ${jobCount || "the selected"} job${jobCount === 1 ? "" : "s"} for one runner so no second process can deploy the same work.`;
+function eventDescription(event, jobCount, words = DEFAULT_TERMINOLOGY) {
+  if (event.phase === "claiming") return `Reserved ${jobCount || "the selected"} job${jobCount === 1 ? "" : "s"} for one runner so no second process can ${words.action} the same work.`;
   if (event.phase === "fetching") return "Refreshed the integration baseline and prepared an isolated worktree for this run.";
   if (event.phase === "assembling") return event.state === "success"
     ? `Merged the selected branches into one isolated ${jobCount ? `${jobCount}-job` : "multi-job"} train.`
@@ -81,11 +95,11 @@ function eventDescription(event, jobCount) {
       : "Combining the selected branches in queue order before any gate runs.";
   if (event.phase === "gating") {
     const gateName = event.message.match(/gate \d+\/\d+: (.+)$/)?.[1] || "";
-    return gateDescription(gateName);
+    return gateDescription(gateName, words);
   }
-  if (event.phase === "ready") return "The exact train identity is validated and waiting for explicit deploy approval.";
+  if (event.phase === "ready") return `The exact train identity is validated and waiting for explicit ${words.noun} approval.`;
   if (event.phase === "pushing") return "Atomically updating the configured remote refs with the validated train.";
-  if (event.phase === "verifying") return "Checking the deployed refs after the atomic push completed.";
+  if (event.phase === "verifying") return `Checking the ${words.completed} refs after the atomic push completed.`;
   if (event.phase === "complete") return event.state === "warning"
     ? "The remote refs were pushed, but post-push verification still needs attention."
     : "The runner finished this train and released its lease.";
@@ -208,8 +222,10 @@ function Hero({ snapshot, now }) {
   const jobs = snapshot.train.jobs;
   const selection = snapshot.train.selection;
   const deploying = jobs.some((job) => job.status === "in_progress" && job.train_id);
+  const words = terminology(snapshot);
+  const operation = words.in_progress.charAt(0).toUpperCase() + words.in_progress.slice(1);
   const title = selection === "running"
-    ? `${deploying ? "Deploying" : "Validating"} train · ${jobs.length} job${jobs.length === 1 ? "" : "s"}`
+    ? `${deploying ? operation : "Validating"} train · ${jobs.length} job${jobs.length === 1 ? "" : "s"}`
     : selection === "validated"
       ? `Train ready · ${jobs.length} job${jobs.length === 1 ? "" : "s"}`
       : selection === "queued"
@@ -249,14 +265,15 @@ function PhaseRail({ snapshot }) {
 function CurrentWork({ snapshot, now }) {
   if (snapshot.train.selection !== "running") return null;
   const progress = snapshot.progress;
+  const words = terminology(snapshot);
   const gate = progress.current_gate;
   const state = gate?.state || progress.state;
   const title = gate
     ? `Gate ${gate.index} of ${gate.total} · ${gate.name}`
     : progress.message;
   const description = gate
-    ? gateDescription(gate.name)
-    : eventDescription({ phase: progress.phase, state: progress.state, message: progress.message }, snapshot.train.jobs.length);
+    ? gateDescription(gate.name, words)
+    : eventDescription({ phase: progress.phase, state: progress.state, message: progress.message }, snapshot.train.jobs.length, words);
   const command = gate?.command || progress.detail;
   const stepStarted = parseTime(gate?.started_at || progress.updated_at);
   const elapsed = stepStarted ? duration((now - stepStarted) / 1000) : "—";
@@ -334,7 +351,7 @@ function JobCards({ snapshot }) {
   );
 }
 
-function Activity({ events, jobCount }) {
+function Activity({ events, jobCount, words }) {
   const hasTrainAssembly = events.some((event) => event.phase === "assembling" && event.job_id === null);
   const visible = events
     .filter((event) => !(hasTrainAssembly && event.phase === "assembling" && event.job_id !== null))
@@ -367,7 +384,7 @@ function Activity({ events, jobCount }) {
                 <span className={`state-pill ${displayState}`}>{STATE_LABELS[displayState] || displayState.toUpperCase()}</span>
               </div>
               <strong>{event.message}</strong>
-              <p>{eventDescription(displayEvent, jobCount)}</p>
+              <p>{eventDescription(displayEvent, jobCount, words)}</p>
               {event.detail && (event.phase === "gating"
                 ? <div className="event-command"><TerminalWindow size={15} /><code>{event.detail}</code></div>
                 : <div className="event-detail"><span>DETAIL</span><code>{event.detail}</code></div>)}
@@ -423,13 +440,16 @@ function AttentionPanel({ jobs }) {
   );
 }
 
-function NextAction({ value }) {
-  const [title, detail] = ACTIONS[value] || ACTIONS.enqueue_clean_branch;
+function NextAction({ snapshot }) {
+  const words = terminology(snapshot);
+  const [title, detail] = actionCopy(snapshot.next_action, words);
+  const targets = (snapshot.project.push_specs || []).join(", ");
   return (
     <section className="rail-section action-section">
       <h2>Next safe action</h2>
       <div className="action-title"><HourglassHigh size={29} weight="duotone" /><strong>{title}</strong></div>
       <p>{detail}</p>
+      {targets && <p><code>{snapshot.project.remote}: {targets}</code></p>}
     </section>
   );
 }
@@ -496,12 +516,12 @@ export function App() {
           <PhaseRail snapshot={snapshot} />
           <CurrentWork snapshot={snapshot} now={now} />
           <JobCards snapshot={snapshot} />
-          <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} />
+          <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={terminology(snapshot)} />
         </main>
         <aside className="side-rail">
           <RunnerPanel snapshot={snapshot} now={now} />
           <AttentionPanel jobs={recentJobs} />
-          <NextAction value={snapshot.next_action} />
+          <NextAction snapshot={snapshot} />
         </aside>
       </div>
       <footer className="page-footer"><WifiHigh size={18} /><span>Read-only local view</span><i>·</i><span>All actions are performed by mergetrain.</span></footer>

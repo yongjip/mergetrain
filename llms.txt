@@ -6,7 +6,7 @@ single Git worktree runner.
 Rules:
 - Work on a task branch/worktree.
 - Commit before enqueueing.
-- Do not push deploy refs directly.
+- Do not push configured Git refs directly.
 - Prefer `mergetrain doctor --json` and `mergetrain status --json`.
 - Use `--auto` only after explicit unattended-deploy approval.
 - Use `run-batch --validate-only` for validation and `run-batch --deploy` for deployment.
@@ -22,3 +22,10 @@ Core commands:
 - `mergetrain run-batch --validate-only`
 - `mergetrain run-batch --deploy`
 - `mergetrain daemon --once`
+
+Vocabulary compatibility:
+- `terminology.git_operation: integrate` makes human output prefer `--integrate`;
+  `push` similarly prefers `--push`. Both are aliases of `--deploy`.
+- Machine state stays `status=deployed` with `deploy_sha` for compatibility.
+- Completion means configured Git refs were atomically pushed, not that a
+  downstream provider release completed or was authorized.

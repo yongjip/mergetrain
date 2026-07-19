@@ -186,9 +186,19 @@ def inspect_job_payload(
     elif job.status == "queued":
         phase, state, message, updated_at = "claiming", "queued", "Waiting for a runner", job.requested_at
     elif job.status == "validated":
-        phase, state, message, updated_at = "ready", "success", "Waiting for deploy approval", job.validated_at
+        phase, state, message, updated_at = (
+            "ready",
+            "success",
+            f"Waiting for {config.terminology.noun} approval",
+            job.validated_at,
+        )
     elif job.status == "deployed":
-        phase, state, message, updated_at = "complete", "success", "Deployment complete", job.finished_at
+        phase, state, message, updated_at = (
+            "complete",
+            "success",
+            f"Git {config.terminology.noun} complete",
+            job.finished_at,
+        )
     else:
         phase, state, message, updated_at = job.status, job.status, job.note or job.status, job.finished_at
 
@@ -228,6 +238,7 @@ def inspect_job_payload(
         }
     return {
         "ok": True,
+        "terminology": config.terminology.to_dict(),
         "job": job.to_dict(),
         "outcome": job_outcome(job),
         "progress": progress,

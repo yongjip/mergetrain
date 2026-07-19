@@ -399,17 +399,18 @@ class GitRunner:
             "canceled": ("canceled", "warning", f"Job #{job_id} canceled"),
         }
         if result.status == "deployed":
+            completed = self.config.terminology.completed
             if result.verify_status == "failed":
                 event_map["deployed"] = (
                     "complete",
                     "warning",
-                    f"Job #{job_id} deployed; verification needs attention",
+                    f"Job #{job_id} {completed}; verification needs attention",
                 )
             else:
                 event_map["deployed"] = (
                     "complete",
                     "success",
-                    f"Job #{job_id} deployed",
+                    f"Job #{job_id} {completed}",
                 )
         event = event_map.get(result.status)
         if event:
@@ -752,7 +753,10 @@ class GitRunner:
         self, *, worktree: Path, log: IO[str] | None = None, pulse: Pulse | None = None
     ) -> None:
         if not self.config.git.push_refs:
-            raise MergetrainError("git.push_refs must not be empty for deploy mode")
+            raise MergetrainError(
+                "git.push_refs must not be empty for "
+                f"{self.config.terminology.action} mode"
+            )
         push_args = ["git", "push", "--atomic", self.config.git.remote]
         push_args.extend(f"HEAD:{ref}" for ref in self.config.git.push_refs)
         run_command(
@@ -878,7 +882,8 @@ class GitRunner:
 
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain job {job.id}: {job.task}\n")
-            log.write(f"branch: {job.branch}\nmode: {'deploy' if deploy else 'validate'}\n")
+            mode = self.config.terminology.action if deploy else "validate"
+            log.write(f"branch: {job.branch}\nmode: {mode}\n")
             log.flush()
             try:
                 self._mark_job(
@@ -1210,7 +1215,8 @@ class GitRunner:
 
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
-            log.write(f"jobs: {[job.id for job in jobs]}\nmode: {'deploy' if deploy else 'validate'}\n")
+            mode = self.config.terminology.action if deploy else "validate"
+            log.write(f"jobs: {[job.id for job in jobs]}\nmode: {mode}\n")
             log.flush()
             try:
                 for job in jobs:

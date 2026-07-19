@@ -69,6 +69,26 @@ If `push_refs` is omitted it defaults to `integration_branch`. An explicitly
 empty list, null value, blank ref, or duplicate ref is a configuration error;
 deploy targets never fail open to `main`.
 
+## `terminology`
+
+```yaml
+terminology:
+  git_operation: integrate
+```
+
+`git_operation` controls human-facing vocabulary for the atomic Git push. Its
+allowed values are `deploy` (default), `integrate`, and `push`. For example,
+`integrate` makes the CLI, dashboard, guarded wrapper, runner events, and
+generated agent contract say `integrate` / `integrating` / `integrated`.
+`push` similarly selects `push` / `pushing` / `pushed`. The `--integrate` and
+`--push` aliases are always accepted; this setting selects the preferred words.
+
+This setting does not rename machine contracts. Existing `--deploy` commands,
+`status=deployed`, `deploy_sha`, SQLite databases, `deploy.*` config keys, and
+JSON `next_action` values remain stable. The configured word names the atomic
+Git ref update. `deploy.verify` records an independent post-push outcome, while
+a provider release is a separate action that Git completion does not imply.
+
 ## `queue`
 
 ```yaml
