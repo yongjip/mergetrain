@@ -421,7 +421,7 @@ class GitRunner:
                 phase=phase,
                 state=state,
                 message=message,
-                detail=result.note,
+                detail="",
             )
         return result
 
@@ -879,7 +879,16 @@ class GitRunner:
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain job {job.id}: {job.task}\n")
             log.write(f"branch: {job.branch}\nmode: {'deploy' if deploy else 'validate'}\n")
+            log.flush()
             try:
+                self._mark_job(
+                    conn,
+                    job.id,
+                    lease_token=lease_token,
+                    status="in_progress",
+                    log_path=str(log_path),
+                    note=job.note,
+                )
                 self._event(
                     conn,
                     lease_token=lease_token,
@@ -981,7 +990,7 @@ class GitRunner:
                             phase="pushing",
                             state="error",
                             message="Atomic push failed",
-                            detail=str(exc),
+                            detail=f"exit_code={exc.returncode}",
                         )
                         raise
                     push_status = "succeeded"
@@ -1036,7 +1045,7 @@ class GitRunner:
                                 phase="verifying",
                                 state="warning",
                                 message="Post-push verification needs attention",
-                                detail=verify_warning,
+                                detail=f"exit_code={exc.returncode}",
                             )
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or "ok"
@@ -1202,7 +1211,17 @@ class GitRunner:
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
             log.write(f"jobs: {[job.id for job in jobs]}\nmode: {'deploy' if deploy else 'validate'}\n")
+            log.flush()
             try:
+                for job in jobs:
+                    self._mark_job(
+                        conn,
+                        job.id,
+                        lease_token=lease_token,
+                        status="in_progress",
+                        log_path=str(log_path),
+                        note=job.note,
+                    )
                 if deploying_validated and (
                     len(validated_train_ids) != 1
                     or any(not job.train_id for job in jobs)
@@ -1452,7 +1471,7 @@ class GitRunner:
                         phase="gating",
                         state="warning",
                         message="Train gate failed; isolating jobs",
-                        detail=str(exc),
+                        detail=f"exit_code={exc.returncode}",
                     )
                     self._cleanup_worktree(worktree, log=log, keep_worktree=False)
                     for job in merged_jobs:
@@ -1489,7 +1508,7 @@ class GitRunner:
                             phase="pushing",
                             state="error",
                             message="Atomic push failed",
-                            detail=str(exc),
+                            detail=f"exit_code={exc.returncode}",
                         )
                         raise
                     push_status = "succeeded"
@@ -1539,7 +1558,7 @@ class GitRunner:
                                 phase="verifying",
                                 state="warning",
                                 message="Post-push verification needs attention",
-                                detail=verify_warning,
+                                detail=f"exit_code={exc.returncode}",
                             )
                 status = "deployed" if deploy else "validated"
                 note = verify_warning or (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -11,7 +12,14 @@ from unittest.mock import patch
 
 from mergetrain.cli import _job_result_line, _results_payload, main, normalize_global_options
 from mergetrain.models import Job
-from mergetrain.store import connect, enqueue_job, mark_job
+from mergetrain.store import (
+    claim_next_job,
+    connect,
+    enqueue_job,
+    mark_job,
+    record_run_event,
+    release_runner_lock,
+)
 
 
 class CliTests(unittest.TestCase):
@@ -147,6 +155,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["boundary"]["daemon_processes_only"], "jobs enqueued with --auto")
         self.assertIn("exact validated train", payload["boundary"]["validated_train_deploy"])
         self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
+        self.assertIn("read-only", payload["boundary"]["progress_observation"])
 
     def test_init_write_creates_generic_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -185,6 +194,249 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(payload["validated_trains"][0]["train_id"], "train-1")
             self.assertTrue(payload["validated_trains"][0]["deploy_eligible"])
+
+    def test_inspect_json_exposes_gate_elapsed_and_heartbeat(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            owner = f"owner:{os.getpid()}"
+            try:
+                queued = enqueue_job(conn, task="a", branch="feature/a")
+                claimed = claim_next_job(conn, owner=owner)
+                assert claimed is not None
+                record_run_event(
+                    conn,
+                    claim_token=claimed.claim_token,
+                    job_id=queued.id,
+                    phase="gating",
+                    state="active",
+                    message="Running gate 2/3: unit-tests",
+                    detail="pytest -q",
+                )
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main(
+                        [
+                            "--repo",
+                            str(repo),
+                            "--db",
+                            str(db),
+                            "inspect",
+                            str(queued.id),
+                            "--json",
+                        ]
+                    )
+                payload = json.loads(out.getvalue())
+                self.assertEqual(code, 0)
+                self.assertEqual(payload["progress"]["phase"], "gating")
+                self.assertEqual(payload["progress"]["gate"]["index"], 2)
+                self.assertEqual(payload["progress"]["gate"]["name"], "unit-tests")
+                self.assertIsNotNone(payload["progress"]["elapsed_seconds"])
+                self.assertTrue(payload["progress"]["heartbeat_at"])
+                self.assertEqual(payload["progress"]["lease_liveness"], "alive")
+                self.assertNotIn("claim_token", payload["events"][-1])
+            finally:
+                current = claimed if "claimed" in locals() else None
+                if current is not None:
+                    mark_job(
+                        conn,
+                        queued.id,
+                        status="canceled",
+                        note="test cleanup",
+                        expected_claim_token=current.claim_token,
+                    )
+                    release_runner_lock(conn, owner=owner, token=current.claim_token)
+                conn.close()
+
+    def test_inspect_train_has_structured_failure_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                first = enqueue_job(conn, task="a", branch="feature/a")
+                second = enqueue_job(conn, task="b", branch="feature/b")
+                for job in (first, second):
+                    mark_job(
+                        conn,
+                        job.id,
+                        status="validated",
+                        train_id="train-1",
+                        train_size=2,
+                    )
+                mark_job(
+                    conn,
+                    second.id,
+                    status="failed",
+                    note="gate command failed",
+                )
+            finally:
+                conn.close()
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "inspect",
+                        str(first.id),
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["train"]["outcome"]["severity"], "failure")
+            self.assertEqual(
+                payload["train"]["outcome"]["failure_categories"],
+                ["gate_failed"],
+            )
+
+    def test_events_jsonl_resume_and_terminal_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            owner = f"owner:{os.getpid()}"
+            try:
+                queued = enqueue_job(conn, task="a", branch="feature/a")
+                claimed = claim_next_job(conn, owner=owner)
+                assert claimed is not None
+                event = record_run_event(
+                    conn,
+                    claim_token=claimed.claim_token,
+                    job_id=queued.id,
+                    phase="gating",
+                    state="active",
+                    message="Running gate 1/1: tests",
+                )
+                mark_job(
+                    conn,
+                    queued.id,
+                    status="validated",
+                    note="ok",
+                    expected_claim_token=claimed.claim_token,
+                )
+                release_runner_lock(conn, owner=owner, token=claimed.claim_token)
+            finally:
+                conn.close()
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "events",
+                        "--job",
+                        str(queued.id),
+                        "--after",
+                        str(event.id - 1),
+                        "--follow",
+                        "--jsonl",
+                    ]
+                )
+            records = [json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(code, 0)
+            self.assertEqual(records[0]["id"], event.id)
+            self.assertEqual(records[0]["type"], "event")
+            self.assertNotIn("claim_token", records[0])
+            self.assertEqual(records[-1]["type"], "stream_end")
+            self.assertEqual(records[-1]["reason"], "success")
+
+    def test_events_follow_reports_lost_lease_and_interrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                lost = enqueue_job(conn, task="lost", branch="feature/lost")
+                mark_job(conn, lost.id, status="in_progress", note="orphan")
+                queued = enqueue_job(conn, task="queued", branch="feature/queued")
+            finally:
+                conn.close()
+
+            lost_out = io.StringIO()
+            with redirect_stdout(lost_out):
+                lost_code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "events",
+                        "--job",
+                        str(lost.id),
+                        "--follow",
+                        "--jsonl",
+                    ]
+                )
+            self.assertEqual(lost_code, 1)
+            self.assertEqual(
+                json.loads(lost_out.getvalue().splitlines()[-1])["reason"],
+                "lost_lease",
+            )
+
+            interrupted = io.StringIO()
+            with patch("mergetrain.cli.time.sleep", side_effect=KeyboardInterrupt), redirect_stdout(interrupted):
+                interrupted_code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "events",
+                        "--job",
+                        str(queued.id),
+                        "--follow",
+                        "--jsonl",
+                    ]
+                )
+            self.assertEqual(interrupted_code, 130)
+            self.assertEqual(
+                json.loads(interrupted.getvalue().splitlines()[-1])["reason"],
+                "interrupted",
+            )
+
+    def test_logs_tail_reads_only_configured_log_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            logs = repo / ".mergetrain" / "logs"
+            logs.mkdir(parents=True)
+            log_path = logs / "job-1.log"
+            log_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="failed",
+                    log_path=str(log_path),
+                    note="gate failed",
+                )
+            finally:
+                conn.close()
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "logs",
+                        str(job.id),
+                        "--tail",
+                        "2",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(out.getvalue(), "two\nthree\n")
 
 
 if __name__ == "__main__":

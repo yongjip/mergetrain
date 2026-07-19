@@ -213,6 +213,33 @@ modes](failure-modes.md#post-push-verify-failure).
 
 The daemon is a foreground, auto-only worker. Each tick it checks for `queued` jobs with `auto_deploy = 1`; only if any exist does it claim them and run the batch. It never touches manual jobs, releases only the exact lease token it acquired, and finishes the current tick before exiting on `SIGINT`/`SIGTERM`. "Auto" is determined solely by the `auto_deploy` field, never by daemon judgment. Operational detail and supervisor recipes are in the [daemon guide](daemon.md).
 
+## Agent CLI observability
+
+The SQLite `run_events` table is the durable progress journal. `events --jsonl`
+reads it with an exclusive integer event cursor and adds follow-only heartbeat
+frames from the current runner lock. Persisted event IDs are resumable; heartbeat
+frames are ephemeral because the lock already stores only the latest heartbeat.
+The table retains the newest 5,000 events, so callers that reconnect beyond that
+window start from the oldest retained row.
+
+Job filtering reconstructs a run from the job's current claim token and tokens
+on prior job-specific events. Shared batch events have no job ID but carry the
+same internal token, so `events --job` can include fetching/gating while excluding
+other jobs' individual merge/completion records. Tokens remain internal and are
+removed from every CLI payload.
+
+`inspect` combines the latest run events, job timestamps, runner lock heartbeat,
+and persisted push/verify outcomes into one snapshot. It provides stable outcome
+categories for jobs and trains instead of requiring callers to parse notes.
+`logs` deliberately remains separate: the runner publishes the confined log path
+when processing starts, and the command follows raw output only after an explicit
+job-ID request. Structured events contain redacted command templates or safe
+return-code summaries, never subprocess output.
+
+Scoped followers terminate after draining events when all selected jobs validate
+or deploy, fail/block, cancel, or lose the matching lease. Unscoped follow is an
+operator-wide feed and continues until interrupted.
+
 ## Local dashboard
 
 `mergetrain dashboard` runs a small Python standard-library HTTP server. The

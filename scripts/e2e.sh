@@ -358,7 +358,7 @@ echo "$(echo "$rb" | jget jobs.0.note)" | grep -Eqi 'command failed|push|reject|
 
 section "S10  lock: concurrent run rejected while a runner holds it"
 R=$(setup s10 sleep); make_branch "$R" feature/a a.txt aaa
-enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
+jid=$(enq "$R" --task a --branch feature/a $ENQ --json | jget job.id)
 "$MT" --repo "$R" run-batch --validate-only --json >/dev/null 2>&1 &
 BG=$!
 held=no
@@ -373,7 +373,58 @@ if [ "$held" = yes ]; then
 else
   no "lock never became alive within timeout"
 fi
+
+phase=""
+gate_name=""
+for i in $(seq 1 50); do
+  inspection=$("$MT" --repo "$R" inspect "$jid" --json 2>/dev/null) || true
+  phase=$(echo "$inspection" | jget progress.phase 2>/dev/null || true)
+  gate_name=$(echo "$inspection" | jget progress.gate.name 2>/dev/null || true)
+  { [ "$phase" = "gating" ] && [ "$gate_name" = "marker" ]; } && break
+  sleep 0.05
+done
+{ [ "$phase" = "gating" ] && [ -n "$(echo "$inspection" | jget progress.heartbeat_at 2>/dev/null)" ] && [ "$gate_name" = "marker" ]; } \
+  && ok "inspect exposes active gate and latest heartbeat" || no "inspect did not expose long gate: $inspection"
+
+live_log="$WORK/s10-live.log"
+event_stream="$WORK/s10-events.jsonl"
+"$MT" --repo "$R" logs "$jid" --follow --tail 200 --poll-interval 0.05 >"$live_log" 2>&1 &
+LOG_FOLLOWER=$!
+"$MT" --repo "$R" events --job "$jid" --after 0 --follow --jsonl --poll-interval 0.05 >"$event_stream"
+event_rc=$?
 wait $BG 2>/dev/null
+wait $LOG_FOLLOWER 2>/dev/null; log_rc=$?
+"$VPY" -c '
+import json, sys
+rows=[json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+assert any(row.get("type") == "event" and row.get("phase") == "gating" and (row.get("gate") or {}).get("name") == "marker" for row in rows)
+assert rows[-1]["type"] == "stream_end" and rows[-1]["reason"] == "success"
+' "$event_stream" 2>/dev/null && [ "$event_rc" = 0 ] \
+  && ok "events --follow JSONL frames long gate through clean success" || no "event follower failed rc=$event_rc: $(cat "$event_stream")"
+{ [ "$log_rc" = 0 ] && grep -q 'gate: marker' "$live_log"; } \
+  && ok "logs --follow streams the active runner log" || no "log follower failed rc=$log_rc: $(cat "$live_log")"
+
+section "S10a  interrupted event follower exits 130 with a final frame"
+R=$(setup s10a); make_branch "$R" feature/a a.txt aaa
+jid=$(enq "$R" --task a --branch feature/a $ENQ --json | jget job.id)
+interrupt_stream="$WORK/s10a-events.jsonl"
+"$VPY" -c '
+import json, signal, subprocess, sys, time
+with open(sys.argv[4], "w", encoding="utf-8") as output:
+    process = subprocess.Popen(
+        [sys.argv[1], "--repo", sys.argv[2], "events", "--job", sys.argv[3], "--follow", "--jsonl", "--poll-interval", "0.05"],
+        stdout=output,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    time.sleep(0.25)
+    process.send_signal(signal.SIGINT)
+    _, stderr = process.communicate(timeout=5)
+rows=[json.loads(line) for line in open(sys.argv[4], encoding="utf-8") if line.strip()]
+assert process.returncode == 130, (process.returncode, stderr)
+assert rows[-1]["type"] == "stream_end" and rows[-1]["reason"] == "interrupted"
+' "$MT" "$R" "$jid" "$interrupt_stream" 2>/dev/null \
+  && ok "interrupted follower terminates cleanly" || no "interrupted follower contract failed: $(cat "$interrupt_stream")"
 
 section "S10b  crash recovery: orphan in_progress reclaimed; live+expired held back"
 # (A) No lock + orphan in_progress -> next runner requeues and deploys it.

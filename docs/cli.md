@@ -26,6 +26,9 @@ mergetrain agent-contract [--json]
 mergetrain version [--json]
 mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain status [--json] [--limit N]
+mergetrain events [--job ID | --train-id ID] [--after EVENT_ID] [--follow] [--jsonl]
+mergetrain inspect JOB_ID [--event-limit N] [--json]
+mergetrain logs JOB_ID [--follow] [--tail N]
 mergetrain doctor [--json]
 mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
@@ -109,6 +112,72 @@ mergetrain status --json --limit 50
 ```
 
 `--json` returns `ok`, `db`, `lock`, and `jobs`. `--limit` caps the job list (default 50).
+
+## `events`
+
+Read the retained structured runner events once, or follow a job/train without
+polling process lists:
+
+```sh
+mergetrain events --job 42 --after 0 --follow --jsonl
+mergetrain events --train-id <id> --after 183 --follow --jsonl
+```
+
+`--job` includes that job's own events plus shared batch phases such as fetch and
+gating. `--train-id` includes the full train. Without a scope, one-shot mode
+shows recent repository events and follow mode continues until interrupted.
+
+The `--jsonl` framing contract is one compact JSON object followed by one newline:
+
+- `type=event` is a persisted event. Its integer `id` is the resume cursor. It
+  includes phase/state, optional job and gate index/name, elapsed seconds, and
+  the latest lease heartbeat visible when read.
+- `type=heartbeat` is an ephemeral follow-only liveness frame emitted when the
+  persisted runner heartbeat advances during a long command. It does not consume
+  an event ID.
+- `type=stream_end` is the final scoped-follow frame. `reason` is `success`,
+  `failure`, `canceled`, `lost_lease`, or `interrupted`.
+
+`--after N` is exclusive. `--after 0` starts at the oldest retained event;
+reconnect with the last `type=event.id` already processed. Events are bounded to
+the newest 5,000 database rows. Without `--after`, the command returns the latest
+`--limit` rows (default/max 200). Heartbeat frames are intentionally not replayed.
+
+A scoped follower exits `0` on validation/deploy success, `1` on failure,
+cancellation, or lost lease, and `130` after an interrupt. It drains persisted
+events before the final frame. Existing `run-batch --json` remains a single final
+JSON document; JSONL progress is a separate command and never shares that stdout.
+
+## `inspect`
+
+Return one stable snapshot for a job and its train:
+
+```sh
+mergetrain inspect 42 --json
+```
+
+The JSON contains `job`, `progress`, `outcome`, `train`, and recent `events`.
+`progress` names the current phase, gate index/total/name, elapsed time, latest
+heartbeat, lease liveness, and lost-lease state. `outcome` has a stable severity,
+category, nullable `failure_category`, and `warning_categories`. A train snapshot
+aggregates status counts and per-job failure/warning categories, so callers do
+not need to classify free-text notes.
+
+## `logs`
+
+Read the explicit local runner log for one job:
+
+```sh
+mergetrain logs 42 --tail 200
+mergetrain logs 42 --follow --tail 20
+```
+
+The default is the latest 200 existing lines. `--tail 0` prints no existing
+lines before following. The runner stores `log_path` as soon as processing starts,
+so a follower can attach during a long gate. Follow ends with the same success/
+failure/cancellation/lost-lease exit policy as `events`. Log paths are confined
+to configured `state.logs`; this command never reads an arbitrary path from a
+modified queue database.
 
 ## `doctor`
 

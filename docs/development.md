@@ -14,6 +14,7 @@ mergetrain/
     daemon.py          # auto-only daemon loop
     errors.py          # MergetrainError hierarchy
     git_runner.py      # worktree merge train, gates, atomic push, verify, gc
+    observability.py   # job/train outcomes and event/heartbeat read models
     dashboard.py       # stdlib read-only HTTP/SSE server
     snapshot.py        # privacy-conscious dashboard read model
     dashboard_dist/    # packaged production dashboard assets
@@ -50,10 +51,10 @@ python -m unittest discover -s tests
 
 The suite covers the behaviors that make the queue safe:
 
-- **store** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; orphan recovery; and versioned legacy-DB migrations.
+- **store** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; resumable/scoped events; orphan recovery; and versioned legacy-DB migrations.
 - **daemon** — `--once` processes only auto jobs and leaves manual jobs queued; repeated DB connections do not leak file descriptors; a tick exception releases the lock and leaves the job queued.
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
-- **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
+- **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, resumable JSONL events, inspect/log follow termination, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
 - **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.
 - **config** — built-in YAML parsing, fail-closed deploy refs, positive queue timing, unique gate names, defaults, and path resolution.
 

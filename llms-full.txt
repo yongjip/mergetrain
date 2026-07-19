@@ -32,8 +32,19 @@ Agents should:
 mergetrain status --json
 mergetrain doctor --json
 mergetrain agent-contract --json
+mergetrain inspect JOB_ID --json
+mergetrain events --job JOB_ID --after EVENT_ID --follow --jsonl
+mergetrain logs JOB_ID --tail 200
 mergetrain gc --json
 ```
+
+For long runs, prefer `inspect` or scoped `events --follow` over OS process
+inspection. JSONL is one object per line: persisted `type=event` rows have the
+resume ID, ephemeral `type=heartbeat` rows report lease progress, and the final
+`type=stream_end` row reports success, failure, cancellation, lost lease, or
+interruption. Reconnect after the last persisted event ID, not a heartbeat.
+`logs` explicitly exposes raw local command output and may contain secrets;
+structured events do not copy subprocess output.
 
 ## Consent-sensitive commands
 

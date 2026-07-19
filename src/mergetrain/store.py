@@ -9,7 +9,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 from .errors import CancellationRequested, LockHeld, LostLease, QueueError
 from .models import (
@@ -300,6 +300,16 @@ def list_jobs(conn: sqlite3.Connection, *, limit: int = 50) -> list[Job]:
     rows = conn.execute(
         "SELECT * FROM deploy_queue ORDER BY id DESC LIMIT ?",
         (int(limit),),
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
+
+
+def list_train_jobs(conn: sqlite3.Connection, train_id: str) -> list[Job]:
+    if not train_id:
+        return []
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue WHERE train_id = ? ORDER BY id ASC",
+        (train_id,),
     ).fetchall()
     return [Job.from_row(row) for row in rows]
 
@@ -819,17 +829,61 @@ def list_run_events(
     *,
     limit: int = 40,
     claim_token: str | None = None,
+    after_id: int | None = None,
+    job_ids: Sequence[int] | None = None,
 ) -> list[RunEvent]:
     limit = max(1, min(int(limit), 200))
-    if claim_token is None:
-        rows = conn.execute(
-            "SELECT * FROM run_events ORDER BY id DESC LIMIT ?", (limit,)
+    resume_requested = after_id is not None
+    after_id = max(0, int(after_id or 0))
+    if claim_token is not None and job_ids is not None:
+        raise QueueError("claim_token and job_ids event filters are mutually exclusive")
+
+    conditions: list[str] = []
+    values: list[Any] = []
+    if resume_requested:
+        conditions.append("id > ?")
+        values.append(after_id)
+    if claim_token is not None:
+        conditions.append("claim_token = ?")
+        values.append(claim_token)
+    elif job_ids is not None:
+        normalized_ids = tuple(dict.fromkeys(int(job_id) for job_id in job_ids))
+        if not normalized_ids:
+            return []
+        id_placeholders = ",".join("?" for _ in normalized_ids)
+        token_rows = conn.execute(
+            f"""
+            SELECT DISTINCT claim_token FROM run_events
+            WHERE job_id IN ({id_placeholders}) AND claim_token != ''
+            UNION
+            SELECT DISTINCT claim_token FROM deploy_queue
+            WHERE id IN ({id_placeholders}) AND claim_token != ''
+            """,
+            (*normalized_ids, *normalized_ids),
         ).fetchall()
-    else:
+        tokens = tuple(str(row["claim_token"]) for row in token_rows)
+        scope = [f"job_id IN ({id_placeholders})"]
+        scope_values: list[Any] = list(normalized_ids)
+        if tokens:
+            token_placeholders = ",".join("?" for _ in tokens)
+            scope.append(
+                f"(job_id IS NULL AND claim_token IN ({token_placeholders}))"
+            )
+            scope_values.extend(tokens)
+        conditions.append(f"({' OR '.join(scope)})")
+        values.extend(scope_values)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    if resume_requested:
         rows = conn.execute(
-            "SELECT * FROM run_events WHERE claim_token = ? ORDER BY id DESC LIMIT ?",
-            (claim_token, limit),
+            f"SELECT * FROM run_events {where} ORDER BY id ASC LIMIT ?",
+            (*values, limit),
         ).fetchall()
+        return [RunEvent.from_row(row) for row in rows]
+    rows = conn.execute(
+        f"SELECT * FROM run_events {where} ORDER BY id DESC LIMIT ?",
+        (*values, limit),
+    ).fetchall()
     return [RunEvent.from_row(row) for row in reversed(rows)]
 
 
