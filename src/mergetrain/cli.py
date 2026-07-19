@@ -13,7 +13,14 @@ from typing import Any, Sequence
 from . import __version__
 from .config import MergetrainConfig, TerminologyConfig, load_config, render_default_config
 from .daemon import daemon_loop
-from .errors import CommandFailed, ConfigError, QueueError, MergetrainError
+from .errors import (
+    CommandFailed,
+    ConfigError,
+    LockHeld,
+    MergetrainError,
+    QueueError,
+    RemoteUnreachable,
+)
 from .git_runner import (
     GitRunner,
     apply_gc,
@@ -34,6 +41,7 @@ from .observability import (
     inspect_job_payload,
     stream_terminal,
 )
+from .recovery import force_unlock, recover, reconcile, sweep_pending_refs
 from .runtime import runtime_provenance
 from .snapshot import next_action as _doctor_next_action
 from .store import (
@@ -44,6 +52,7 @@ from .store import (
     connect,
     counts,
     default_owner,
+    deploy_reconcile_pending,
     enqueue_job,
     get_job,
     get_lock,
@@ -114,6 +123,7 @@ def agent_contract_payload(
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
             "Fix blocked or failed work in the owning branch, commit a clean result, then enqueue a new job.",
+            "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
         ],
         "boundary": {
             "deploy_requires": "run-next --deploy or run-batch --deploy",
@@ -123,6 +133,7 @@ def agent_contract_payload(
             "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
             "daemon_processes_only": "jobs enqueued with --auto",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
+            "recovery_after_crash": "reconcile / recover / unlock resolve crash state against the remote; run-batch --deploy is refused while any job is needs_reconcile",
         },
         "human_vocabulary": {
             **words.to_dict(),
@@ -156,6 +167,7 @@ Purpose: {payload['purpose']}
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The daemon processes only jobs enqueued with `--auto`.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
+- After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the remote; `run-batch --{words.action}` is refused while any job is `needs_reconcile`. `unlock --force` clears a wedged lock (remote-reachable first).
 
 ## Stable machine contract
 
@@ -578,6 +590,27 @@ def _mode_from_args(args: argparse.Namespace) -> bool:
     return bool(args.deploy)
 
 
+def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
+    note = (
+        f"deploy hard-blocked: {pending} job(s) pending reconcile — run "
+        "'mergetrain reconcile --apply' first"
+    )
+    if args.json:
+        dump_json(
+            {
+                "ok": False,
+                "result": "blocked",
+                "blocked_reason": "reconcile_pending_deploy",
+                "needs_reconcile": pending,
+                "next_action": "reconcile_pending_deploy",
+                "note": note,
+            }
+        )
+    else:
+        print(note, file=sys.stderr)
+    return 1
+
+
 def _human_next_action(action: str, terminology: TerminologyConfig) -> str:
     return {
         "deploy_validated_train_when_approved": (
@@ -660,6 +693,10 @@ def cmd_run_next(args: argparse.Namespace) -> int:
     lease_token = ""
     conn = connect(config.state.db)
     try:
+        if deploy:
+            pending = deploy_reconcile_pending(conn)
+            if pending:
+                return _emit_deploy_reconcile_block(args, pending)
         job = claim_next_job(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if job is None:
             payload = {**_results_payload([]), "note": "no queued jobs"}
@@ -749,6 +786,9 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         if deploy:
+            pending = deploy_reconcile_pending(conn)
+            if pending:
+                return _emit_deploy_reconcile_block(args, pending)
             jobs = claim_deploy_batch(
                 conn,
                 owner=owner,
@@ -837,20 +877,170 @@ def cmd_gc(args: argparse.Namespace) -> int:
         "result": None,
     }
     if args.apply:
-        payload["result"] = apply_gc(
+        result = apply_gc(
             config,
             delete_branches=delete_branch_names if args.delete_branches else (),
         )
+        conn = connect(config.state.db)
+        try:
+            result["swept_pending_refs"] = sweep_pending_refs(config, conn)
+        finally:
+            conn.close()
+        payload["result"] = result
     if args.json:
         dump_json(payload)
     else:
         print(f"worktree candidates: {len(payload['worktree_candidates'])}")
         print(f"branch candidates: {len(payload['branch_candidates'])}")
         if args.apply:
+            print(f"swept pending refs: {len(payload['result']['swept_pending_refs'])}")
+        if args.apply:
             print("applied")
         else:
             print("dry-run; pass --apply to remove candidates")
     return 0
+
+
+def _emit_recovery_error(
+    args: argparse.Namespace, message: str, exit_code: int, *, error_code: str
+) -> int:
+    if getattr(args, "json", False):
+        dump_json(
+            {
+                "ok": False,
+                "error": {
+                    "code": error_code,
+                    "message": message,
+                    "retryable": exit_code in (3, 7),
+                },
+            }
+        )
+    else:
+        print(f"mergetrain: {message}", file=sys.stderr)
+    return exit_code
+
+
+def _recovery_next_action(conn) -> str:
+    lock = get_lock(conn)
+    return _doctor_next_action(
+        {
+            "lock": lock.to_dict() if lock else None,
+            "counts": counts(conn),
+            "validated_trains": validated_train_summaries(conn),
+            "gc": {"worktree_candidates": []},
+        }
+    )
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    try:
+        config = config_from_args(args)
+    except ConfigError as exc:
+        return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
+    conn = connect(config.state.db)
+    try:
+        outcome = reconcile(config, conn, apply=args.apply)
+        next_action = _recovery_next_action(conn)
+    except LockHeld as exc:
+        return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
+    except RemoteUnreachable as exc:
+        return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
+    finally:
+        conn.close()
+    payload = {
+        "ok": outcome.exit_code == 0,
+        "applied": outcome.applied,
+        "jobs": outcome.jobs,
+        "summary": outcome.summary,
+        "next_action": next_action,
+    }
+    if args.json:
+        dump_json(payload)
+    else:
+        summary = outcome.summary
+        verb = "applied" if outcome.applied else "dry-run"
+        print(
+            f"reconcile ({verb}): {summary['reconciled_deployed']} deployed, "
+            f"{summary['requeued']} requeued, {summary['canceled']} canceled, "
+            f"{summary['conflicts']} conflict(s)"
+        )
+        for job in outcome.jobs:
+            print(f"  #{job['job_id']} {job['decision']}: {job['reason']}")
+        print(f"next action: {next_action}")
+    return outcome.exit_code
+
+
+def cmd_recover(args: argparse.Namespace) -> int:
+    try:
+        config = config_from_args(args)
+    except ConfigError as exc:
+        return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
+    conn = connect(config.state.db)
+    try:
+        outcome = recover(config, conn, gc=args.gc, apply=True)
+        next_action = _recovery_next_action(conn)
+    except LockHeld as exc:
+        return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
+    except RemoteUnreachable as exc:
+        return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
+    finally:
+        conn.close()
+    reconciled = outcome.reconcile
+    payload = {
+        "ok": outcome.exit_code == 0,
+        "reconcile": {
+            "applied": reconciled.applied,
+            "jobs": reconciled.jobs,
+            "summary": reconciled.summary,
+        },
+        "gc": outcome.gc,
+        "next_action": next_action,
+    }
+    if args.json:
+        dump_json(payload)
+    else:
+        summary = reconciled.summary
+        print(
+            f"recover: {summary['reconciled_deployed']} deployed, "
+            f"{summary['requeued']} requeued, {summary['canceled']} canceled, "
+            f"{summary['conflicts']} conflict(s)"
+        )
+        if outcome.gc is not None:
+            print(f"gc: removed {len(outcome.gc.get('removed_worktrees', []))} worktree(s)")
+        print(f"next action: {next_action}")
+    return outcome.exit_code
+
+
+def cmd_unlock(args: argparse.Namespace) -> int:
+    try:
+        config = config_from_args(args)
+    except ConfigError as exc:
+        return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
+    conn = connect(config.state.db)
+    try:
+        outcome = force_unlock(config, conn, force=args.force)
+        next_action = _recovery_next_action(conn)
+    except RemoteUnreachable as exc:
+        return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
+    finally:
+        conn.close()
+    payload = {
+        "ok": outcome.exit_code == 0,
+        "cleared": outcome.cleared,
+        "prior_owner": outcome.prior_owner,
+        "liveness": outcome.liveness,
+        "reason": outcome.reason,
+        "audit_event_id": outcome.audit_event_id,
+        "lock_context": outcome.context,
+        "next_action": next_action,
+    }
+    if args.json:
+        dump_json(payload)
+    else:
+        state = "cleared" if outcome.cleared else "unchanged"
+        print(f"unlock: {state} — {outcome.reason}")
+        print(f"next action: {next_action}")
+    return outcome.exit_code
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
@@ -1005,6 +1195,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_gc.add_argument("--apply", action="store_true")
     p_gc.add_argument("--delete-branches", action="store_true")
     p_gc.set_defaults(func=cmd_gc)
+
+    p_reconcile = subparsers.add_parser(
+        "reconcile",
+        help="Resolve crashed pending-deploy jobs against the remote (default: dry-run)",
+    )
+    p_reconcile.add_argument(
+        "--apply", action="store_true", help="Write the reconciled outcome"
+    )
+    p_reconcile.add_argument("--json", action="store_true")
+    p_reconcile.set_defaults(func=cmd_reconcile)
+
+    p_recover = subparsers.add_parser(
+        "recover", help="Restart heal: split orphans, then reconcile --apply"
+    )
+    p_recover.add_argument(
+        "--gc", action="store_true", help="Also remove crashed worktrees"
+    )
+    p_recover.add_argument("--json", action="store_true")
+    p_recover.set_defaults(func=cmd_recover)
+
+    p_unlock = subparsers.add_parser(
+        "unlock", help="Clear a wedged runner lock"
+    )
+    p_unlock.add_argument(
+        "--force",
+        action="store_true",
+        help="Steal an alive/unknown owner's lock after confirming the remote is reachable",
+    )
+    p_unlock.add_argument("--json", action="store_true")
+    p_unlock.set_defaults(func=cmd_unlock)
 
     p_cancel = subparsers.add_parser("cancel", help="Cancel a non-terminal queue item")
     p_cancel.add_argument("job_id", type=int)

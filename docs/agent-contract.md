@@ -36,17 +36,25 @@ a separate action.
 
 `mergetrain doctor --json` returns `next_action` values:
 
+- `unlock_wedged_runner`
 - `wait_for_runner`
+- `reconcile_pending_deploy`
+- `reconcile_conflict_manual`
+- `fix_blocked_job`
+- `verify_reconciled_deploy`
 - `deploy_validated_train_when_approved`
 - `cancel_and_reenqueue_legacy_validated_jobs`
 - `run_daemon_or_run_batch_deploy_when_approved`
 - `run_batch_validate`
-- `fix_blocked_job`
 - `gc_available`
 - `enqueue_clean_branch`
 
 `next_action` is advisory. It does not replace user approval for deploy,
 unattended auto deploy, or destructive cleanup.
+
+After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the
+remote (never re-pushing a landed deploy); `run-batch --deploy` is refused while
+any job is `needs_reconcile`. See the [failure modes guide](failure-modes.md).
 
 When `validated_trains` is non-empty, approval applies to the displayed train
 identity and member HEADs. A later deploy must not silently include newer

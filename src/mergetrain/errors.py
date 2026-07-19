@@ -26,6 +26,15 @@ class LostLease(QueueError):
     """Raised when a runner no longer owns the lease it was given."""
 
 
+class RemoteUnreachable(MergetrainError):
+    """Raised when reconcile cannot reach the remote to establish deploy truth.
+
+    Recovery treats this as a strict no-op: no job state is finalized so a later
+    reconcile against a reachable remote is still the only thing that writes
+    ``deployed``/``queued``/``blocked`` (0.3.0 Phase 2).
+    """
+
+
 class CancellationRequested(MergetrainError):
     """Raised when the active train has been asked to stop."""
 
