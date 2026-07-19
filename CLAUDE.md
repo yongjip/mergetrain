@@ -36,7 +36,7 @@ A deploy ships code. **Never deploy as a side effect of another request.** Befor
 1. Run `doctor --json` and `status --json`.
 2. Post a short summary of exactly what will ship: the pending validated `train_id`, its job IDs, branches, recorded HEADs, the integration ref, the doctor `next_action`, and anything `blocked`/`failed`. If no validated train exists, summarize the queued jobs that a direct deploy would claim.
 3. **Wait for the user's explicit confirmation in the thread** (e.g. "deploy", "yes ship it", "go"). A vague or general instruction is not confirmation.
-4. Only then run `mergetrain run-batch --deploy` (or `scripts/ty-deploy.sh --confirm`). If multiple validated trains are pending, select the approved one with `--train-id`.
+4. Only then run `mergetrain run-batch --deploy` (or `scripts/mt-deploy.sh --confirm`). If multiple validated trains are pending, select the approved one with `--train-id`.
 5. Report the outcome: which jobs are now `deployed`, the `deploy_sha`, and any post-push verify warning recorded in the note.
 
 ## Do NOT do these unless explicitly told
@@ -51,9 +51,9 @@ A deploy ships code. **Never deploy as a side effect of another request.** Befor
 
 ## Convenience scripts
 
-- `scripts/ty-status.sh` — one-glance status + doctor summary.
-- `scripts/ty-validate.sh` — validate the queued train (no push).
-- `scripts/ty-deploy.sh` — guarded deploy; prints what will ship and only deploys with `--confirm`.
+- `scripts/mt-status.sh` — one-glance status + doctor summary.
+- `scripts/mt-validate.sh` — validate the queued train (no push).
+- `scripts/mt-deploy.sh` — guarded deploy; prints what will ship and only deploys with `--confirm`.
 
 ## Reporting style (phone)
 

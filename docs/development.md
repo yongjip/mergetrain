@@ -34,6 +34,14 @@ mergetrain uses a `src/` layout and has **zero required runtime dependencies**. 
 
 ## Running tests
 
+mergetrain requires **Python 3.10+** (it uses `dataclass(slots=True)` and other
+3.10+ features). On macOS the built-in `/usr/bin/python3` is 3.9 and fails fast
+with `TypeError: dataclass() got an unexpected keyword argument 'slots'` — reach
+for an explicit newer interpreter (`python3.12`), a virtualenv, or pyenv. This
+repo pins `.python-version` to a 3.12 build so bare `python` resolves correctly
+under pyenv shims; note that a system `python3` earlier on your `PATH` can still
+shadow it, so prefer `python` or a versioned `python3.12` when in doubt.
+
 The suite is plain `unittest`. With the `src/` layout, put the package on the path:
 
 ```sh

@@ -45,3 +45,5 @@ PYTHONPATH=src python -m mergetrain init --project demo
   separate service repository.
 - Gate and verify commands run through `/bin/sh`; document new shell execution
   behavior clearly.
+
+## Imported Claude Cowork project instructions

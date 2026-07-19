@@ -15,6 +15,8 @@ git:
 queue:
   lock_ttl_minutes: 30
   daemon_interval_seconds: 15
+  heartbeat_interval_seconds: 10
+  command_timeout_seconds: 3600
 
 agent:
   require_clean_worktree_before_enqueue: true
@@ -33,3 +35,8 @@ gates:
 
 deploy:
   verify: []
+  reuse:
+    enabled: false
+    max_age_minutes: 60
+    on_mismatch: rerun
+    fingerprints: []

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-glance mergetrain status, formatted for phone / Dispatch use.
-# Usage: scripts/ty-status.sh [--repo PATH] [--config PATH]
+# Usage: scripts/mt-status.sh [--repo PATH] [--config PATH]
 # Override the binary for testing: MERGETRAIN_BIN="python3 -m mergetrain"
 set -eo pipefail
 TY="${MERGETRAIN_BIN:-mergetrain}"
