@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 - 2026-07-20
+
+- Crash-safe reconciliation and recovery: after any crash, reconcile local queue
+  state against the real remote git state and never mislabel a deploy. A durable
+  per-job pending-deploy marker (committed `synchronous=FULL` before every push)
+  plus a `refs/mergetrain/pending/<id>` pin ref let recovery ask the remote for
+  truth — never marking `deployed` unless a push ref carries the sha, never
+  re-pushing a landed deploy, never guessing when the remote is unreachable.
+- Add `reconcile`, `recover`, and `unlock` commands with a typed exit-code
+  contract; a marker-aware orphan split parks a possibly-landed push in the new
+  `needs_reconcile` state instead of blindly re-deploying it.
+- Hard-block deploy (`run-batch`, `run-next`, and the daemon) while any job
+  awaits reconcile; add DB-only `doctor` `next_action` guidance for the new
+  states and sweep stale `refs/mergetrain/pending/*` pins during `gc --apply`.
+
 ## 0.2.0 - 2026-07-20
 
 - Add opt-in `integrate`/`push` human vocabulary and CLI aliases while keeping
