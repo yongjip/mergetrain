@@ -28,8 +28,15 @@ For an editable checkout with the same extra, use
 
 ```sh
 mergetrain --version
+mergetrain version --json
 mergetrain agent-contract --json
 ```
+
+`--version` remains a stable one-line compatibility check. `version --json`
+also identifies the imported package path, wheel/editable install mode, and Git
+commit/dirty state when those facts can be discovered safely. This is useful for
+detecting a stale editable install that has the same semantic version as a
+released wheel.
 
 ## From source without installing
 

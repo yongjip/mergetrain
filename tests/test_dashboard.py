@@ -91,6 +91,7 @@ class DashboardTests(unittest.TestCase):
             self.assertNotIn("worktree_path", payload["jobs"][0])
             self.assertNotIn("log_path", payload["jobs"][0])
             self.assertNotIn("claim_token", payload["events"][0])
+            self.assertNotIn("runtime", payload)
 
             cleanup = connect(config.state.db)
             try:
