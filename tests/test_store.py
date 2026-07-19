@@ -19,6 +19,7 @@ from mergetrain.store import (
     list_run_events,
     list_train_jobs,
     mark_job,
+    record_pending_push,
     record_run_event,
     refresh_runner_lock,
     release_runner_lock,
@@ -34,6 +35,35 @@ class StoreTests(unittest.TestCase):
         conn = connect(Path(td.name) / "queue.sqlite")
         self.addCleanup(conn.close)
         return conn
+
+    def test_pending_marker_is_owned_scoped_and_clears_on_deploy(self) -> None:
+        conn = self.make_conn()
+        token = "runner:123"
+        a = enqueue_job(conn, task="a", branch="a")
+        b = enqueue_job(conn, task="b", branch="b")
+        other = enqueue_job(conn, task="c", branch="c")
+        # a, b are claimed by this runner; other is left queued (unowned).
+        conn.execute(
+            "UPDATE deploy_queue SET status='in_progress', claim_token=? WHERE id IN (?, ?)",
+            (token, a.id, b.id),
+        )
+        conn.commit()
+
+        record_pending_push(
+            conn, job_ids=[a.id, b.id, other.id], deploy_sha="deadbeef", claim_token=token
+        )
+        # Marker written only for the owned in-progress rows.
+        self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "deadbeef")
+        self.assertEqual(get_job(conn, a.id).push_status, "pending")
+        self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
+        self.assertEqual(get_job(conn, other.id).pending_deploy_sha, "")
+        self.assertEqual(get_job(conn, other.id).push_status, "not_run")
+
+        # A landed deploy clears the marker; a failure preserves it for forensics.
+        mark_job(conn, a.id, status="deployed", expected_claim_token=token)
+        mark_job(conn, b.id, status="failed", expected_claim_token=token)
+        self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
+        self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
 
     def test_legacy_database_migrates_validation_train_columns(self) -> None:
         td = tempfile.TemporaryDirectory()

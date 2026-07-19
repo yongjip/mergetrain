@@ -345,6 +345,24 @@ class GitRunnerTests(unittest.TestCase):
                 self.assertEqual(events[-1].phase, "complete")
                 self.assertEqual(events[-1].state, expected_event_state)
 
+    def test_deploy_clears_pending_marker_and_pin_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "deployed")
+            # The write-ahead marker is cleared once the deploy is finalized,
+            self.assertEqual(result.pending_deploy_sha, "")
+            # and a clean deploy leaves no pin ref behind.
+            pending = git(repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/")
+            self.assertEqual(pending, "")
+
     def test_dashboard_command_masks_obvious_secret_values(self) -> None:
         rendered = _dashboard_command(
             "TEST_TOKEN=fixture-value run-check --password fixture-password"

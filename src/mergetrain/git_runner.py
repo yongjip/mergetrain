@@ -32,7 +32,14 @@ from .reuse import (
     train_identity_sha,
     validation_age_minutes,
 )
-from .store import get_job, mark_job, record_run_event, refresh_runner_lock, utc_now
+from .store import (
+    get_job,
+    mark_job,
+    record_pending_push,
+    record_run_event,
+    refresh_runner_lock,
+    utc_now,
+)
 
 Pulse = Callable[[], None]
 GateProgress = Callable[[str, str, int, int, str], None]
@@ -768,6 +775,51 @@ class GitRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
 
+    def _pending_ref(self, job_id: int) -> str:
+        return f"refs/mergetrain/pending/{job_id}"
+
+    def _push_with_marker(
+        self,
+        conn,
+        *,
+        job_ids: list[int],
+        deploy_sha: str,
+        lease_token: str,
+        worktree: Path,
+        log: IO[str] | None,
+        pulse: Pulse | None,
+    ) -> None:
+        """Write-ahead the pending-deploy marker + pin ref, then push.
+
+        The marker commit is fsync-durable (synchronous=FULL) before the remote
+        is mutated, and the pin ref keeps deploy_sha resolvable for a later
+        reconcile even if git gc prunes a crashed worktree's objects. Both the
+        batch and the one-by-one isolation push go through here, so neither can
+        touch the remote without first recording intent (0.3.0 Phase 1).
+        """
+        record_pending_push(
+            conn, job_ids=job_ids, deploy_sha=deploy_sha, claim_token=lease_token
+        )
+        for job_id in job_ids:
+            run_command(
+                ["git", "update-ref", self._pending_ref(job_id), deploy_sha],
+                cwd=self.repo,
+                log=log,
+                check=False,
+            )
+        self.push_verified_head(worktree=worktree, log=log, pulse=pulse)
+
+    def _clear_pending_refs(
+        self, job_ids: list[int], *, log: IO[str] | None = None
+    ) -> None:
+        for job_id in job_ids:
+            run_command(
+                ["git", "update-ref", "-d", self._pending_ref(job_id)],
+                cwd=self.repo,
+                log=log,
+                check=False,
+            )
+
     def _prepare_worktree(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None
     ) -> None:
@@ -983,8 +1035,14 @@ class GitRunner:
                         message="Pushing verified HEAD atomically",
                     )
                     try:
-                        self.push_verified_head(
-                            worktree=worktree, log=log, pulse=ownership_pulse
+                        self._push_with_marker(
+                            conn,
+                            job_ids=[job.id],
+                            deploy_sha=deploy_sha,
+                            lease_token=lease_token,
+                            worktree=worktree,
+                            log=log,
+                            pulse=ownership_pulse,
                         )
                     except CommandFailed as exc:
                         push_status = "failed"
@@ -1074,7 +1132,7 @@ class GitRunner:
                             pulse=normal_pulse,
                         ),
                     }
-                return self._finish_job(
+                result = self._finish_job(
                     conn,
                     job.id,
                     lease_token=lease_token,
@@ -1086,6 +1144,9 @@ class GitRunner:
                     verify_status=verify_status,
                     **validation_fields,
                 )
+                if deploy and result.status == "deployed":
+                    self._clear_pending_refs([job.id], log=log)
+                return result
             except LostLease:
                 raise
             except CancellationRequested:
@@ -1503,8 +1564,14 @@ class GitRunner:
                         message="Pushing verified HEAD atomically",
                     )
                     try:
-                        self.push_verified_head(
-                            worktree=worktree, log=log, pulse=ownership_pulse
+                        self._push_with_marker(
+                            conn,
+                            job_ids=[job.id for job in merged_jobs],
+                            deploy_sha=deploy_sha,
+                            lease_token=lease_token,
+                            worktree=worktree,
+                            log=log,
+                            pulse=ownership_pulse,
                         )
                     except CommandFailed as exc:
                         push_status = "failed"
@@ -1609,6 +1676,10 @@ class GitRunner:
                             reused_validation_sha=reused_validation_sha,
                             **validation_fields,
                         )
+                    )
+                if deploy:
+                    self._clear_pending_refs(
+                        [job.id for job in merged_jobs], log=log
                     )
                 return results
             except LostLease:
