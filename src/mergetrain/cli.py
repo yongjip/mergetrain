@@ -27,6 +27,7 @@ from .git_runner import (
     git_worktree_clean,
 )
 from .models import Job
+from .runtime import runtime_provenance
 from .snapshot import next_action as _doctor_next_action
 from .store import (
     cancel_job,
@@ -160,6 +161,23 @@ def cmd_agent_contract(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_version(args: argparse.Namespace) -> int:
+    runtime = runtime_provenance()
+    if args.json:
+        dump_json({"ok": True, "version": __version__, "runtime": runtime})
+        return 0
+    print(f"mergetrain {__version__}")
+    print(f"distribution: {runtime['distribution_version'] or 'unknown'}")
+    print(f"install mode: {runtime['install_mode']}")
+    print(f"package: {runtime['package_path']}")
+    if runtime["source_path"]:
+        print(f"source: {runtime['source_path']}")
+    print(f"commit: {runtime['source_commit'] or 'unknown'}")
+    dirty = runtime["source_dirty"]
+    print(f"dirty: {'unknown' if dirty is None else str(dirty).lower()}")
+    return 0
+
+
 def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
     try:
         return git_rev_parse(path, ref)
@@ -248,6 +266,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     payload: dict[str, Any] = {
         "ok": True,
         "version": __version__,
+        "runtime": runtime_provenance(),
         "config": config.to_dict(),
         "config_exists": config.config_exists,
         "db": str(config.state.db),
@@ -279,6 +298,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"config: {payload['config']['config_path']} ({'found' if payload['config_exists'] else 'default'})")
         print(f"db: {payload['db']}")
         print(f"git repo: {payload['git']['repo_root'] or 'not found'}")
+        runtime = payload["runtime"]
+        print(
+            "runtime: "
+            f"{runtime['install_mode']} · {runtime['source_commit'] or 'unknown'} · "
+            f"{runtime['package_path']}"
+        )
         print(f"next action: {payload['next_action']}")
     return 0
 
@@ -512,6 +537,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_contract = subparsers.add_parser("agent-contract", help="Print agent operating contract")
     p_contract.add_argument("--json", action="store_true")
     p_contract.set_defaults(func=cmd_agent_contract)
+
+    p_version = subparsers.add_parser("version", help="Show version and installed package provenance")
+    p_version.add_argument("--json", action="store_true")
+    p_version.set_defaults(func=cmd_version)
 
     p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the deploy queue")
     p_enqueue.add_argument("--task", required=True)

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from mergetrain.cli import _results_payload, main, normalize_global_options
 from mergetrain.models import Job
@@ -13,6 +15,59 @@ from mergetrain.store import connect, enqueue_job, mark_job
 
 
 class CliTests(unittest.TestCase):
+    def test_legacy_version_output_remains_compatible(self) -> None:
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as raised, redirect_stdout(out):
+            main(["--version"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(out.getvalue(), "mergetrain 0.1.0\n")
+
+    def test_version_json_exposes_runtime_provenance(self) -> None:
+        runtime = {
+            "distribution_version": "0.1.0",
+            "package_path": "/tmp/site-packages/mergetrain",
+            "install_mode": "wheel",
+            "source_path": None,
+            "source_commit": "a" * 40,
+            "source_dirty": None,
+        }
+        out = io.StringIO()
+        with patch("mergetrain.cli.runtime_provenance", return_value=runtime), redirect_stdout(out):
+            code = main(["version", "--json"])
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["version"], "0.1.0")
+        self.assertEqual(payload["runtime"], runtime)
+
+    def test_doctor_json_includes_runtime_provenance(self) -> None:
+        runtime = {
+            "distribution_version": "0.1.0",
+            "package_path": "/tmp/checkout/src/mergetrain",
+            "install_mode": "editable",
+            "source_path": "/tmp/checkout",
+            "source_commit": "b" * 40,
+            "source_dirty": False,
+        }
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(["--repo", str(repo), "init", "--project", "demo", "--write"]),
+                    0,
+                )
+            subprocess.run(
+                ["git", "init", "--initial-branch=main", str(repo)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            out = io.StringIO()
+            with patch("mergetrain.cli.runtime_provenance", return_value=runtime), redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["runtime"], runtime)
+
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
         failed = _results_payload([Job(id=1, task="a", branch="a", status="failed")])
         self.assertFalse(failed["ok"])
