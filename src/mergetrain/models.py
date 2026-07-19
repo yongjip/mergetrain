@@ -36,6 +36,11 @@ class Job:
     validation_base_sha: str = ""
     validation_sha: str = ""
     validated_head_sha: str = ""
+    validation_tree_sha: str = ""
+    validation_gate_policy_sha: str = ""
+    validation_environment_sha: str = ""
+    validation_train_sha: str = ""
+    reused_validation_sha: str = ""
     claim_token: str = ""
     cancel_requested_at: str = ""
 
@@ -64,6 +69,15 @@ class Job:
             validation_base_sha=str(row["validation_base_sha"] or ""),
             validation_sha=str(row["validation_sha"] or ""),
             validated_head_sha=str(row["validated_head_sha"] or ""),
+            validation_tree_sha=str(row["validation_tree_sha"] or ""),
+            validation_gate_policy_sha=str(
+                row["validation_gate_policy_sha"] or ""
+            ),
+            validation_environment_sha=str(
+                row["validation_environment_sha"] or ""
+            ),
+            validation_train_sha=str(row["validation_train_sha"] or ""),
+            reused_validation_sha=str(row["reused_validation_sha"] or ""),
             claim_token=str(row["claim_token"] or ""),
             cancel_requested_at=str(row["cancel_requested_at"] or ""),
         )

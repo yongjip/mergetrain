@@ -54,6 +54,14 @@ reruns gates. If several validated trains are pending, pass `--train-id`.
 Validated-but-not-deployed branches are never branch-deletion candidates for
 `gc --delete-branches`.
 
+Validated-gate reuse is disabled by default. Use an explicit
+`deploy.reuse.enabled` policy or `run-batch --deploy --reuse-validated` only
+after inspecting `--preview --json`. Reuse requires an unchanged integration
+base, task heads, train membership, validation commit/tree, gate policy,
+environment fingerprints, and age; otherwise it reruns all gates or fails
+closed. The exact reused commit is `reused_validation_sha`. Post-push verify
+hooks always run.
+
 Run JSON distinguishes `result=warning` from full success. In particular,
 `status=deployed`, `push_status=succeeded`, and `verify_status=failed` means the
 remote ref changed successfully but post-push verification still needs

@@ -53,6 +53,18 @@ for a later validation. Integration-ref movement is allowed because the train
 is rebuilt and gated again, but a changed task branch is blocked and must be
 enqueued fresh.
 
+For an explicitly configured validated-gate reuse policy, preview the decision
+before deploying:
+
+```sh
+mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
+mergetrain run-batch --deploy --train-id <id> --reuse-validated
+```
+
+Only an unchanged safety identity reuses the exact validation SHA. Otherwise the
+normal full gate path runs (or the policy fails closed), and post-push verify
+hooks still run.
+
 ## 6. Auto-only daemon
 
 Use `--auto` only when unattended deploy is explicitly approved:

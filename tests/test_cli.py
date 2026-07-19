@@ -15,6 +15,21 @@ from mergetrain.store import connect, enqueue_job, mark_job
 
 
 class CliTests(unittest.TestCase):
+    def test_results_payload_exposes_exact_reused_validation_sha(self) -> None:
+        sha = "a" * 40
+        job = Job(
+            id=1,
+            task="a",
+            branch="feature/a",
+            status="deployed",
+            push_status="succeeded",
+            verify_status="succeeded",
+            reused_validation_sha=sha,
+        )
+        payload = _results_payload([job])
+        self.assertEqual(payload["reused_validation_shas"], [sha])
+        self.assertIn(f"reused={sha}", _job_result_line(payload["jobs"][0]))
+
     def test_results_payload_reports_post_push_verify_warning(self) -> None:
         job = Job(
             id=1,
@@ -131,6 +146,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("rules", payload)
         self.assertEqual(payload["boundary"]["daemon_processes_only"], "jobs enqueued with --auto")
         self.assertIn("exact validated train", payload["boundary"]["validated_train_deploy"])
+        self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
 
     def test_init_write_creates_generic_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:

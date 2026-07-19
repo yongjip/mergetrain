@@ -41,6 +41,7 @@ from .store import (
     get_lock,
     list_jobs,
     release_runner_lock,
+    select_validated_train,
     terminal_branch_candidates,
     validated_train_summaries,
 )
@@ -97,6 +98,7 @@ def agent_contract_payload() -> dict[str, Any]:
             "Do not push deploy refs directly; enqueue the branch instead.",
             "Read doctor --json or status --json before deciding the next action.",
             "Use --auto only after explicit unattended-deploy approval from the user/operator.",
+            "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
             "Fix blocked or failed work in the owning branch, commit a clean result, then enqueue a new job.",
         ],
@@ -104,6 +106,7 @@ def agent_contract_payload() -> dict[str, Any]:
             "deploy_requires": "run-next --deploy or run-batch --deploy",
             "validate_requires": "run-next --validate-only or run-batch --validate-only",
             "validated_train_deploy": "run-batch --deploy claims one exact validated train",
+            "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
             "daemon_processes_only": "jobs enqueued with --auto",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
         },
@@ -126,6 +129,7 @@ Purpose: {payload['purpose']}
 - Deploy requires `run-next --deploy` or `run-batch --deploy`.
 - Validation requires `run-next --validate-only` or `run-batch --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`.
+- Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - The daemon processes only jobs enqueued with `--auto`.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
 """
@@ -318,6 +322,9 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
     status_counts = Counter(job.status for job in results)
     push_counts = Counter(job.push_status for job in results)
     verify_counts = Counter(job.verify_status for job in results)
+    reused_validation_shas = sorted(
+        {job.reused_validation_sha for job in results if job.reused_validation_sha}
+    )
     successful = sum(status_counts[status] for status in ("validated", "deployed"))
     warnings = sum(
         job.status == "deployed" and job.verify_status == "failed" for job in results
@@ -336,6 +343,7 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
         "counts": dict(sorted(status_counts.items())),
         "push_counts": dict(sorted(push_counts.items())),
         "verify_counts": dict(sorted(verify_counts.items())),
+        "reused_validation_shas": reused_validation_shas,
         "jobs": [job.to_dict() for job in results],
     }
 
@@ -346,6 +354,8 @@ def _job_result_line(job: dict[str, Any]) -> str:
         outcomes.append(f"push={job['push_status']}")
     if job.get("verify_status", "not_run") != "not_run":
         outcomes.append(f"verify={job['verify_status']}")
+    if job.get("reused_validation_sha"):
+        outcomes.append(f"reused={job['reused_validation_sha']}")
     outcome_text = f" ({', '.join(outcomes)})" if outcomes else ""
     return f"#{job['id']} {job['status']}{outcome_text}: {job['branch']}"
 
@@ -396,7 +406,44 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
     if args.train_id and not deploy:
         raise QueueError("--train-id requires --deploy")
+    if args.reuse_validated and not deploy:
+        raise QueueError("--reuse-validated requires --deploy")
+    if args.preview and not deploy:
+        raise QueueError("--preview requires --deploy")
     config = config_from_args(args)
+    if args.preview:
+        conn = connect(config.state.db)
+        try:
+            selected, jobs = select_validated_train(
+                conn, train_id=args.train_id or ""
+            )
+        finally:
+            conn.close()
+        if selected is None or not jobs:
+            raise QueueError("no validated train is ready to preview")
+        decision = GitRunner(config).preview_validated_reuse(
+            jobs,
+            authorized=args.reuse_validated,
+        )
+        payload = {
+            "ok": True,
+            "preview": True,
+            "mode": "deploy",
+            "train_id": selected["train_id"],
+            "reuse": decision.to_dict(),
+            "jobs": [job.to_dict() for job in jobs],
+        }
+        if args.json:
+            dump_json(payload)
+        else:
+            if decision.eligible:
+                print(f"preview: reuse validated commit {decision.reused_validation_sha}")
+            else:
+                print(
+                    f"preview: {decision.action} full gates - "
+                    f"{'; '.join(decision.reasons)}"
+                )
+        return 0
     owner = default_owner()
     lease_token = ""
     conn = connect(config.state.db)
@@ -421,6 +468,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 keep_worktree=args.keep_worktree,
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
+                reuse_validated=args.reuse_validated,
             )
             payload = _results_payload(results)
     finally:
@@ -599,6 +647,16 @@ def build_parser() -> argparse.ArgumentParser:
         p_run.add_argument("--json", action="store_true")
         if name == "run-batch":
             p_run.add_argument("--train-id", help="Deploy one exact validated train")
+            p_run.add_argument(
+                "--reuse-validated",
+                action="store_true",
+                help="Explicitly authorize the configured validated-gate reuse policy",
+            )
+            p_run.add_argument(
+                "--preview",
+                action="store_true",
+                help="Evaluate a validated deploy and reuse decision without claiming or pushing",
+            )
         p_run.set_defaults(func=func)
 
     p_daemon = subparsers.add_parser("daemon", help="Run foreground auto-only daemon")

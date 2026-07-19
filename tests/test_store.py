@@ -83,9 +83,14 @@ class StoreTests(unittest.TestCase):
         self.assertIn("claim_token", columns)
         self.assertIn("push_status", columns)
         self.assertIn("verify_status", columns)
+        self.assertIn("validation_tree_sha", columns)
+        self.assertIn("validation_gate_policy_sha", columns)
+        self.assertIn("validation_environment_sha", columns)
+        self.assertIn("validation_train_sha", columns)
+        self.assertIn("reused_validation_sha", columns)
         migrated_db = sqlite3.connect(db)
         try:
-            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 5)
             event_columns = {
                 row[1] for row in migrated_db.execute("PRAGMA table_info(run_events)")
             }
@@ -144,12 +149,17 @@ class StoreTests(unittest.TestCase):
                 validation_base_sha="c" * 40,
                 validation_sha="d" * 40,
                 validated_head_sha=head,
+                validation_tree_sha="e" * 40,
+                validation_gate_policy_sha="f" * 64,
+                validation_environment_sha="a" * 64,
+                validation_train_sha="b" * 64,
             )
         queued = enqueue_job(conn, task="later", branch="feature/later")
 
         summaries = validated_train_summaries(conn)
         self.assertEqual(len(summaries), 1)
         self.assertTrue(summaries[0]["deploy_eligible"])
+        self.assertTrue(summaries[0]["reuse_identity_complete"])
         claimed = claim_deploy_batch(conn, owner=f"owner:{os.getpid()}")
         self.assertEqual([job.id for job in claimed], [first.id, second.id])
         self.assertEqual({job.status for job in claimed}, {"in_progress"})

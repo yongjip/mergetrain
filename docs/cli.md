@@ -182,6 +182,8 @@ validated train. Requires `--validate-only` or `--deploy`.
 mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
 mergetrain run-batch --deploy --train-id <id>
+mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
+mergetrain run-batch --deploy --train-id <id> --reuse-validated
 ```
 
 After validation, plain `--deploy` selects the only pending validated train and
@@ -191,6 +193,15 @@ task HEAD, rebuilds on the current integration ref, and reruns gates before push
 Changed task HEADs block the whole validated train. During initial validation,
 conflicts still block only the offending job and a train gate failure still
 isolates merged jobs one-by-one. See [Design → Batch](design.md#batch--merge-train-run-batch).
+
+Validated-gate reuse is disabled by default. `--reuse-validated` authorizes the
+configured policy for that command; `deploy.reuse.enabled: true` is the persistent
+alternative. `--preview` does not claim, gate, or push, but configured fingerprint
+commands still run so the decision matches a real deploy.
+Its JSON `reuse` object reports `authorized`, `eligible`, `action`, mismatch
+`reasons`, `validation_sha`, and the exact `reused_validation_sha` when safe.
+Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
+`reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
 
 ## `daemon`
 
@@ -237,7 +248,7 @@ terminates the active subprocess group, and records the final `canceled` state.
 warning, or an expected config/queue/command error · `2` usage error · `130`
 interrupted (`Ctrl-C`). In JSON mode, run results include `ok`, `result`
 (`success`, `warning`, `partial`, or `failed`), per-status `counts`,
-`push_counts`, `verify_counts`, and `jobs`. Each job exposes `push_status`
+`push_counts`, `verify_counts`, `reused_validation_shas`, and `jobs`. Each job exposes `push_status`
 (`not_run`, `succeeded`, or `failed`) and `verify_status` (`not_run`,
 `not_configured`, `succeeded`, or `failed`). A successful push followed by a
 failed verify keeps `status=deployed` but returns `result=warning` and `ok=false`.

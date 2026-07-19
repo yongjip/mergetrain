@@ -26,8 +26,10 @@ Agents never push deploy refs themselves; they enqueue and read JSON. One runner
 **Validated train** — the exact group of jobs that passed a validation run. Each
 member stores the shared `train_id`, expected `train_size`, `validated_at`,
 `validation_base_sha`, and `validation_sha`, plus its own
-`validated_head_sha`. This makes the approval target machine-readable and lets
-the deploy runner reject partial or changed trains.
+`validated_head_sha`. New validations also record the validation tree, gate
+policy, environment, and ordered train identity hashes. This makes the approval
+target machine-readable and lets the deploy runner reject partial or changed
+trains.
 
 **Runner lock** — a single `runner` row in the `locks` table with an owner,
 last heartbeat, expiry, and unique lease token. Claimed jobs carry the same token, so a stale
@@ -76,6 +78,11 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   validation_base_sha TEXT NOT NULL DEFAULT '',
   validation_sha TEXT NOT NULL DEFAULT '',
   validated_head_sha TEXT NOT NULL DEFAULT '',
+  validation_tree_sha TEXT NOT NULL DEFAULT '',
+  validation_gate_policy_sha TEXT NOT NULL DEFAULT '',
+  validation_environment_sha TEXT NOT NULL DEFAULT '',
+  validation_train_sha TEXT NOT NULL DEFAULT '',
+  reused_validation_sha TEXT NOT NULL DEFAULT '',
   claim_token   TEXT NOT NULL DEFAULT '',
   cancel_requested_at TEXT NOT NULL DEFAULT ''
 );
@@ -165,6 +172,19 @@ gates. Integration movement is therefore safe, but an identity mismatch,
 merge conflict, or gate failure blocks/fails the whole approved train rather
 than shipping a subset. On success, every member is marked `deployed` with the
 new shared `deploy_sha`.
+
+Validated-gate reuse is an explicit optimization layered on top of that safe
+default. Configuration (`deploy.reuse.enabled`) or the deploy command
+(`--reuse-validated`) must authorize it. The runner checks the exact integration
+base, current task heads, ordered train identity, validation commit and tree,
+semantic gate/fingerprint policy, adapter-provided environment hash, and age.
+Only the unchanged case restores and pushes the exact `validation_sha` while
+skipping reusable gates; gates marked `always_rerun_on_deploy` still execute.
+Any mismatch either falls back to the full path or fails closed according to
+policy, and events explicitly say whether each gate was reused or run.
+Schema v5 adds the reuse identity fields with empty defaults. Older validated
+rows remain deployable through the full gate path but cannot be reused because
+they do not claim an identity that was never recorded.
 
 ### Atomic push
 

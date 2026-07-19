@@ -104,9 +104,40 @@ gates:
     run: git diff --check ${integration_ref}..HEAD
   - name: tests
     run: python -m unittest discover -s tests
+  - name: deploy-policy
+    run: ./scripts/check-deploy-policy
+    always_rerun_on_deploy: true
 ```
 
-Gates run before push in the temporary integration worktree.
+Gates run before push in the temporary integration worktree. The optional
+`always_rerun_on_deploy` flag matters only when validated-gate reuse is accepted;
+that gate still runs against the exact restored validation commit.
+
+## `deploy.reuse`
+
+```yaml
+deploy:
+  reuse:
+    enabled: false
+    max_age_minutes: 60
+    on_mismatch: rerun # rerun | fail
+    fingerprints:
+      - name: toolchain
+        run: ./scripts/toolchain-fingerprint
+```
+
+Validated-gate reuse is opt-in. Set `enabled: true` for configuration-level
+authorization or pass `run-batch --deploy --reuse-validated` for one deploy.
+Reuse requires the recorded integration base, task heads, train membership,
+validation commit/tree, gate policy, environment fingerprints, and validation
+age to match. `on_mismatch: rerun` performs the normal full reassembly and gate
+run; `fail` blocks before push. The default remains full gate rerun.
+
+Each fingerprint command must print one stable, opaque, non-empty line of at
+most 512 characters. mergetrain hashes the values instead of storing them.
+Adapters can use these commands to identify a compiler, SDK, container image,
+or other environment-sensitive input. Post-push `deploy.verify` hooks always
+run, including after gate reuse.
 
 ## `deploy.verify`
 
@@ -125,7 +156,8 @@ hooks record `verify_status=not_configured`; configured hooks that all pass reco
 
 ## Placeholders and environment
 
-Placeholders available in `gates` and `deploy.verify`:
+Placeholders available in `gates`, `deploy.reuse.fingerprints`, and
+`deploy.verify`:
 
 ```text
 ${integration_ref}

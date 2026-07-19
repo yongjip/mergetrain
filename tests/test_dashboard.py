@@ -51,9 +51,9 @@ class DashboardTests(unittest.TestCase):
                     conn,
                     claim_token=claimed[0].claim_token,
                     phase="gating",
-                    state="success",
-                    message="Passed gate 1/2: diff-check",
-                    detail="git diff --check origin/main..HEAD",
+                    state="reused",
+                    message="Reused gate 1/2: diff-check",
+                    detail="a" * 40,
                 )
                 record_run_event(
                     conn,
@@ -84,8 +84,10 @@ class DashboardTests(unittest.TestCase):
             )
             self.assertEqual(
                 [gate["state"] for gate in payload["progress"]["gates"]],
-                ["success", "active"],
+                ["reused", "active"],
             )
+            self.assertFalse(payload["project"]["reuse"]["enabled"])
+            self.assertEqual(payload["project"]["reuse"]["max_age_minutes"], 60)
             self.assertEqual(payload["lock"]["owner"], f"local:{os.getpid()}")
             self.assertIn("heartbeat_at", payload["lock"])
             self.assertNotIn("worktree_path", payload["jobs"][0])
