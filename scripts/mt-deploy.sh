@@ -2,9 +2,9 @@
 # Guarded Git integration for phone / Dispatch use.
 # Shows exactly what will be pushed; only mutates refs with --confirm (or -y).
 # Usage:
-#   scripts/ty-deploy.sh                 # dry run: print what would ship, exit 2
-#   scripts/ty-deploy.sh --confirm       # actually run: mergetrain run-batch --deploy
-#   scripts/ty-deploy.sh --confirm --train-id ID  # select among multiple validated trains
+#   scripts/mt-deploy.sh                 # dry run: print what would ship, exit 2
+#   scripts/mt-deploy.sh --confirm       # actually run: mergetrain run-batch --deploy
+#   scripts/mt-deploy.sh --confirm --train-id ID  # select among multiple validated trains
 # Override the binary for testing: MERGETRAIN_BIN="python3 -m mergetrain"
 set -eo pipefail
 TY="${MERGETRAIN_BIN:-mergetrain}"
@@ -83,7 +83,7 @@ else:
 PY
 
 if [ "$CONFIRM" -ne 1 ]; then
-  printf '\nDRY RUN — nothing %s. To %s, re-run with --confirm:\n  scripts/ty-deploy.sh --confirm %s\n' "$completed" "$operation" "${RUN_ARGS[*]}"
+  printf '\nDRY RUN — nothing %s. To %s, re-run with --confirm:\n  scripts/mt-deploy.sh --confirm %s\n' "$completed" "$operation" "${RUN_ARGS[*]}"
   exit 2
 fi
 

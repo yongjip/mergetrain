@@ -113,8 +113,11 @@ agent:
   prefer_json_status: true
 ```
 
-These fields document expected agent behavior. CLI readiness checks are enforced
-by enqueue options.
+These fields document expected agent behavior only — they are parsed but have no
+runtime effect, so toggling them (e.g. `require_explicit_auto_approval: false`)
+changes nothing. Actual readiness gating is enforced by `enqueue` options
+(`--allow-dirty`, `--allow-branch-mismatch`, `--no-ready-check`, `--auto`), not by
+these keys.
 
 ## `gates`
 

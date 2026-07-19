@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate the queued merge train (never pushes). Safe to run anytime.
-# Usage: scripts/ty-validate.sh [--repo PATH] [--config PATH]
+# Usage: scripts/mt-validate.sh [--repo PATH] [--config PATH]
 # Override the binary for testing: MERGETRAIN_BIN="python3 -m mergetrain"
 set -eo pipefail
 TY="${MERGETRAIN_BIN:-mergetrain}"

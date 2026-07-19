@@ -111,7 +111,7 @@ Print queue and lock state.
 mergetrain status --json --limit 50
 ```
 
-`--json` returns `ok`, `db`, `lock`, and `jobs`. `--limit` caps the job list (default 50).
+`--json` returns `ok`, `db`, `lock`, `jobs`, and `validated_trains`. `--limit` caps the job list (default 50).
 
 ## `events`
 

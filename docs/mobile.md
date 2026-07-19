@@ -5,7 +5,7 @@ mergetrain is a local CLI: the queue, the git worktrees, and the deploy all run 
 This repo ships two things that make that work well:
 
 - [`CLAUDE.md`](../CLAUDE.md) — tells the on-machine agent how to operate the queue safely (read state first, validate freely, **confirm before deploy**).
-- `scripts/ty-status.sh`, `scripts/ty-validate.sh`, `scripts/ty-deploy.sh` — phone-friendly wrappers with a deploy guard.
+- `scripts/mt-status.sh`, `scripts/mt-validate.sh`, `scripts/mt-deploy.sh` — phone-friendly wrappers with a deploy guard.
 
 > Prefer a terminal? You can also drive a running session with **Remote Control** (`claude remote-control`) or just SSH in from a phone terminal app — see [Alternatives](#alternatives).
 
@@ -31,7 +31,7 @@ That's it — the same conversation now syncs between phone and desktop. Full de
 
 You send a short message from your phone. On your Mac, Claude reads [`CLAUDE.md`](../CLAUDE.md), runs the right `mergetrain` commands in your repo, and replies with a short summary (plus a push notification when it's done or needs your go-ahead).
 
-**Deploy policy: confirm, then deploy.** Status checks and `--validate-only` run freely. For an actual deploy, the agent first summarizes exactly what will ship and waits for your explicit "deploy / yes / go" in the thread before running `run-batch --deploy`. The `scripts/ty-deploy.sh` wrapper enforces the same thing on the command line: it prints what would ship and does nothing unless you pass `--confirm`.
+**Deploy policy: confirm, then deploy.** Status checks and `--validate-only` run freely. For an actual deploy, the agent first summarizes exactly what will ship and waits for your explicit "deploy / yes / go" in the thread before running `run-batch --deploy`. The `scripts/mt-deploy.sh` wrapper enforces the same thing on the command line: it prints what would ship and does nothing unless you pass `--confirm`.
 
 ## Phone phrasebook
 
@@ -46,7 +46,7 @@ Type these to the Dispatch thread. Both languages work — say it however is nat
 | Triage a blocker | "blocked 있으면 원인만 알려줘" | "If anything's blocked, just tell me why" |
 | Preview cleanup | "임시 worktree 정리할 거 있는지 봐줘" | "Any temp worktrees to clean up?" |
 
-The agent will run the matching commands (e.g. `scripts/ty-status.sh`, `mergetrain run-batch --validate-only`) and, for deploy, will show you the plan and wait for your confirmation first.
+The agent will run the matching commands (e.g. `scripts/mt-status.sh`, `mergetrain run-batch --validate-only`) and, for deploy, will show you the plan and wait for your confirmation first.
 
 ## Keeping the machine awake
 
