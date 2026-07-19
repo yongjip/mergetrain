@@ -78,6 +78,18 @@ the exact current gate and command template, and the next safe action. `CONNECTE
 describes the browser's data stream; `RUNNER ACTIVE` separately describes the
 process that owns the train. It has no mutation endpoints or deploy controls.
 
+Non-interactive callers can observe the same runner without starting a browser:
+
+```sh
+mergetrain inspect <job-id> --json
+mergetrain events --job <job-id> --after 0 --follow --jsonl
+mergetrain logs <job-id> --follow --tail 20
+```
+
+The event stream is resumable by persisted event ID and emits separate heartbeat
+and terminal frames. Raw command output stays in the explicit local `logs`
+command, not structured events.
+
 Validation records an exact train identity, including every task HEAD and the
 integration base used for the check. The later deploy reassembles that same
 train on the current integration ref, reruns all gates, and refuses changed
@@ -93,6 +105,7 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 - **Job** — one task branch waiting in the queue, with the SHAs captured at enqueue time.
 - **Validated train** — an exact, deployable group of jobs that passed gates together and is waiting for explicit deploy approval.
 - **Runner lock** — gives every claim a unique lease token, heartbeats through long-running commands, and prevents a stale runner from overwriting a newer owner.
+- **Run event** — a persisted, secret-conscious phase transition with an integer resume cursor; follow mode adds ephemeral heartbeat and terminal frames.
 - **Integration worktree** — a disposable, detached Git worktree built on your integration ref. The runner merges here, so agents never checkout or push the deploy branch.
 - **Gate** — a verification command (diff-check, tests, secret-scan…) run once over the assembled train *before* push. A gate failure means nothing ships.
 - **Verify hook** — a command run *after* push to confirm the deploy is live.
@@ -153,6 +166,9 @@ mergetrain is designed so an agent can operate it from a short contract and JSON
 6. Let one runner or daemon own merge → test → push → verify.
 7. Fix `blocked`/`failed` work on the owning branch and enqueue a fresh clean job.
 
+When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
+`events --follow --jsonl` stream instead of probing the OS process tree.
+
 `mergetrain init` writes `AGENTS.mergetrain.md` / `CLAUDE.mergetrain.md` so your agents pick this up automatically.
 
 ## Documentation
@@ -168,7 +184,7 @@ mergetrain is designed so an agent can operate it from a short contract and JSON
 
 ## Status
 
-`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
+`v0.1.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, auto-only daemon, resumable CLI events/inspection/log following, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
 
 ## License
 

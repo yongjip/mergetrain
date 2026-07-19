@@ -24,7 +24,9 @@ still validate/deploy.
 ## Push failure
 
 Push failures mark jobs as `failed` with `push_status=failed` and
-`verify_status=not_run`. Inspect the job log path from `mergetrain status --json`.
+`verify_status=not_run`. Use `mergetrain inspect <job-id> --json` for the stable
+`push_failed` category and `mergetrain logs <job-id> --tail 200` for explicit raw
+diagnostics.
 
 ## Validated-gate reuse declined
 
@@ -66,7 +68,13 @@ Inspect with:
 ```sh
 mergetrain doctor --json
 mergetrain status --json
+mergetrain inspect <job-id> --json
+mergetrain events --job <job-id> --after <last-event-id> --follow --jsonl
 ```
+
+A scoped event follower emits `stream_end.reason=lost_lease` and exits `1` if an
+`in_progress` job no longer matches a live runner lease. This distinguishes an
+abandoned run from a merely quiet long-running gate.
 
 ## Orphan `in_progress`
 

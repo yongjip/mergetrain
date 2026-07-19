@@ -17,7 +17,9 @@ from mergetrain.store import (
     get_job,
     get_lock,
     list_run_events,
+    list_train_jobs,
     mark_job,
+    record_run_event,
     refresh_runner_lock,
     release_runner_lock,
     terminal_branch_candidates,
@@ -133,6 +135,47 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(events[-1].state, "active")
         self.assertEqual(events[-1].claim_token, claimed[0].claim_token)
         self.assertNotIn("claim_token", events[-1].to_dict())
+
+    def test_event_resume_and_job_scope_include_shared_batch_events(self) -> None:
+        conn = self.make_conn()
+        first = enqueue_job(conn, task="a", branch="feature/a")
+        second = enqueue_job(conn, task="b", branch="feature/b")
+        claimed = claim_all_queued(conn, owner=f"owner:{os.getpid()}")
+        token = claimed[0].claim_token
+        first_event = list_run_events(conn)[0]
+        shared = record_run_event(
+            conn,
+            claim_token=token,
+            phase="gating",
+            state="active",
+            message="Running gate 1/1: tests",
+        )
+        own = record_run_event(
+            conn,
+            claim_token=token,
+            job_id=first.id,
+            phase="complete",
+            state="success",
+            message="first complete",
+        )
+        record_run_event(
+            conn,
+            claim_token=token,
+            job_id=second.id,
+            phase="complete",
+            state="success",
+            message="second complete",
+        )
+
+        resumed = list_run_events(
+            conn,
+            after_id=first_event.id,
+            job_ids=[first.id],
+            limit=20,
+        )
+        self.assertEqual([event.id for event in resumed], [shared.id, own.id])
+        self.assertEqual(list_train_jobs(conn, "missing"), [])
+        release_runner_lock(conn, owner=f"owner:{os.getpid()}", token=token)
 
     def test_validated_train_is_claimed_without_new_queued_jobs(self) -> None:
         conn = self.make_conn()

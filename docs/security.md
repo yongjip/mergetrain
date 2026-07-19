@@ -13,6 +13,21 @@
 - Logs may contain command output. Gate and verify commands should avoid printing
   secrets.
 
+## CLI observability boundaries
+
+`events --jsonl` and `inspect --json` expose structured phases, bounded/redacted
+command templates, status notes, SHAs, failure categories, and lease timing. They
+do not copy gate, push, or verify stdout/stderr into event records. Error event
+details expose a return code rather than subprocess output. Lease/claim tokens are
+never serialized.
+
+`logs` is the explicit opt-in path to raw local command output and therefore may
+show secrets that a command printed. It accepts only a job ID and refuses a stored
+path outside configured `state.logs`. Protect that directory and do not forward
+log output to an untrusted channel. JSONL event and heartbeat frames remain safe
+to resume by event ID; heartbeat frames are ephemeral and contain no process owner
+or lease token.
+
 ## Network access
 
 `deploy.verify` hooks can run arbitrary network commands. Review verify hooks

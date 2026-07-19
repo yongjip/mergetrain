@@ -16,6 +16,9 @@ Core commands:
 - `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`
 - `mergetrain status --json`
 - `mergetrain doctor --json`
+- `mergetrain inspect JOB_ID --json`
+- `mergetrain events --job JOB_ID --after EVENT_ID --follow --jsonl`
+- `mergetrain logs JOB_ID --tail 200`
 - `mergetrain run-batch --validate-only`
 - `mergetrain run-batch --deploy`
 - `mergetrain daemon --once`

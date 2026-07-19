@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add resumable `events --follow --jsonl` progress with heartbeat and terminal frames.
+- Add structured job/train `inspect --json` outcomes and confined `logs --follow` access.
+- Keep subprocess output out of structured events while publishing active log paths early.
+
 ## 0.1.0 - 2026-07-17
 
 First public alpha release.

@@ -354,6 +354,36 @@ class GitRunnerTests(unittest.TestCase):
             "TEST_TOKEN=[redacted] run-check --password [redacted]",
         )
 
+    def test_command_output_is_kept_out_of_structured_events(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            secret = "fixture-secret-output"
+            gate = (
+                f'{sys.executable} -c "import sys; '
+                "import os; print(os.environ['FIXTURE_EVENT_SECRET'], "
+                "file=sys.stderr); sys.exit(5)\""
+            )
+            repo, _marker = make_demo_repo(root, gate_command=gate)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                with patch.dict(
+                    os.environ, {"FIXTURE_EVENT_SECRET": secret}, clear=False
+                ):
+                    result = GitRunner(config).process_batch(
+                        conn, [job], deploy=False
+                    )[0]
+                events = list_run_events(conn, limit=200)
+            finally:
+                conn.close()
+            self.assertIn(secret, result.note)
+            serialized_events = json.dumps(
+                [event.to_dict() for event in events], ensure_ascii=False
+            )
+            self.assertNotIn(secret, serialized_events)
+            self.assertIn("exit_code=5", serialized_events)
+
     def test_managed_command_timeout_terminates_process_group(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             started = time.monotonic()
@@ -675,6 +705,9 @@ class GitRunnerTests(unittest.TestCase):
             worker.start()
             time.sleep(0.5)
             control = connect(config.state.db)
+            active = get_job(control, job.id)
+            self.assertTrue(active.log_path)
+            self.assertTrue(Path(active.log_path).is_file())
             control.execute(
                 "UPDATE locks SET expires_at = '2000-01-01T00:00:00Z' WHERE token = ?",
                 (token,),

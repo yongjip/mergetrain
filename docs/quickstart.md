@@ -38,7 +38,22 @@ A successful validation marks merged jobs as `validated`, records a shared
 `train_id` plus the integration and task SHAs, and does not push. Inspect
 `status --json` before approval to see the exact deployable train.
 
-## 5. Deploy
+## 5. Observe a long run
+
+Use the job ID returned by `enqueue` to inspect or follow without parsing OS
+processes:
+
+```sh
+mergetrain inspect <job-id> --json
+mergetrain events --job <job-id> --after 0 --follow --jsonl
+mergetrain logs <job-id> --follow --tail 20
+```
+
+Reconnect `events` with the last event ID already processed. Structured events
+and heartbeat frames never contain command output; request `logs` only when raw
+local output is appropriate for the destination.
+
+## 6. Deploy
 
 After explicit approval:
 
@@ -65,7 +80,7 @@ Only an unchanged safety identity reuses the exact validation SHA. Otherwise the
 normal full gate path runs (or the policy fails closed), and post-push verify
 hooks still run.
 
-## 6. Auto-only daemon
+## 7. Auto-only daemon
 
 Use `--auto` only when unattended deploy is explicitly approved:
 

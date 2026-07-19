@@ -45,3 +45,17 @@ identity and member HEADs. A later deploy must not silently include newer
 queued jobs. Validated-but-not-deployed branches are not GC deletion candidates.
 Deploy approval by itself does not authorize gate reuse; that is a separate,
 explicit policy decision.
+
+When a runner is active, observe it with read-only commands instead of inspecting
+the process tree:
+
+```sh
+mergetrain inspect <job-id> --json
+mergetrain events --job <job-id> --after <last-event-id> --follow --jsonl
+mergetrain logs <job-id> --follow --tail 20
+```
+
+Only persisted `type=event` IDs are resume cursors. `type=heartbeat` is ephemeral,
+and `type=stream_end` states why a scoped follower stopped. Treat `logs` as raw
+command output that may be sensitive; structured events do not include that
+output.

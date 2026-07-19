@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
@@ -27,6 +28,12 @@ from .git_runner import (
     git_worktree_clean,
 )
 from .models import Job
+from .observability import (
+    event_record,
+    heartbeat_record,
+    inspect_job_payload,
+    stream_terminal,
+)
 from .runtime import runtime_provenance
 from .snapshot import next_action as _doctor_next_action
 from .store import (
@@ -38,8 +45,11 @@ from .store import (
     counts,
     default_owner,
     enqueue_job,
+    get_job,
     get_lock,
     list_jobs,
+    list_run_events,
+    list_train_jobs,
     release_runner_lock,
     select_validated_train,
     terminal_branch_candidates,
@@ -107,6 +117,7 @@ def agent_contract_payload() -> dict[str, Any]:
             "validate_requires": "run-next --validate-only or run-batch --validate-only",
             "validated_train_deploy": "run-batch --deploy claims one exact validated train",
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
+            "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
             "daemon_processes_only": "jobs enqueued with --auto",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
         },
@@ -130,6 +141,7 @@ Purpose: {payload['purpose']}
 - Validation requires `run-next --validate-only` or `run-batch --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
+- `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The daemon processes only jobs enqueued with `--auto`.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
 """
@@ -254,6 +266,231 @@ def cmd_status(args: argparse.Namespace) -> int:
         for job in payload["jobs"]:
             print(f"{_job_result_line(job)} - {job['task']}")
     return 0
+
+
+def _dump_jsonl(payload: dict[str, Any]) -> None:
+    print(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        flush=True,
+    )
+
+
+def _event_scope(config: MergetrainConfig, args: argparse.Namespace, after_id: int | None):
+    conn = connect(config.state.db)
+    try:
+        if args.job_id is not None:
+            jobs = [get_job(conn, args.job_id)]
+            event_job_ids: list[int] | None = [args.job_id]
+        elif args.train_id:
+            jobs = list_train_jobs(conn, args.train_id)
+            if not jobs:
+                raise QueueError(f"train not found: {args.train_id}")
+            event_job_ids = [job.id for job in jobs]
+        else:
+            jobs = list_jobs(conn, limit=200)
+            event_job_ids = None
+        events = list_run_events(
+            conn,
+            limit=args.limit,
+            after_id=after_id,
+            job_ids=event_job_ids,
+        )
+        latest = events[-1] if events else None
+        if latest is None and args.follow:
+            recent = list_run_events(conn, limit=1, job_ids=event_job_ids)
+            latest = recent[-1] if recent else None
+        lock = get_lock(conn)
+        return jobs, events, latest, lock
+    finally:
+        conn.close()
+
+
+def _print_event_record(payload: dict[str, Any], *, jsonl: bool) -> None:
+    if jsonl:
+        _dump_jsonl(payload)
+        return
+    if payload["type"] == "event":
+        gate = payload.get("gate")
+        gate_text = (
+            f" gate={gate['index']}/{gate['total']}:{gate['name']}" if gate else ""
+        )
+        job_text = f" job={payload['job_id']}" if payload.get("job_id") else ""
+        print(
+            f"#{payload['id']} {payload['created_at']} "
+            f"{payload['phase']}/{payload['state']}{job_text}{gate_text} "
+            f"{payload['message']}",
+            flush=True,
+        )
+    elif payload["type"] == "heartbeat":
+        print(
+            f"heartbeat {payload['heartbeat_at']} {payload['phase']} "
+            f"elapsed={payload['elapsed_seconds']}s",
+            flush=True,
+        )
+    else:
+        print(f"stream ended: {payload['reason']}", flush=True)
+
+
+def cmd_events(args: argparse.Namespace) -> int:
+    if args.after is not None and args.after < 0:
+        raise QueueError("--after must be zero or greater")
+    if not 1 <= args.limit <= 200:
+        raise QueueError("--limit must be between 1 and 200")
+    if not 0.05 <= args.poll_interval <= 60:
+        raise QueueError("--poll-interval must be between 0.05 and 60 seconds")
+    config = config_from_args(args)
+    cursor = args.after
+    last_heartbeat = ""
+    scoped = args.job_id is not None or bool(args.train_id)
+    try:
+        while True:
+            jobs, events, latest, lock = _event_scope(config, args, cursor)
+            for event in events:
+                payload = event_record(event, jobs, lock)
+                _print_event_record(payload, jsonl=args.jsonl)
+                cursor = event.id
+
+            if args.follow and lock and lock.heartbeat_at != last_heartbeat:
+                running_tokens = {
+                    job.claim_token
+                    for job in jobs
+                    if job.status == "in_progress" and job.claim_token
+                }
+                if lock.token in running_tokens:
+                    payload = heartbeat_record(
+                        jobs,
+                        lock,
+                        after_event_id=int(cursor or 0),
+                        latest_event=latest,
+                    )
+                    _print_event_record(payload, jsonl=args.jsonl)
+                    last_heartbeat = lock.heartbeat_at
+
+            terminal = stream_terminal(jobs, lock) if scoped else None
+            if args.follow and terminal is not None and (not events or len(events) < args.limit):
+                payload = {
+                    "type": "stream_end",
+                    "after_event_id": int(cursor or 0),
+                    "job_ids": [job.id for job in jobs],
+                    **terminal,
+                }
+                _print_event_record(payload, jsonl=args.jsonl)
+                return int(terminal["exit_code"])
+            if not args.follow:
+                return 0
+            if len(events) >= args.limit:
+                continue
+            time.sleep(args.poll_interval)
+    except KeyboardInterrupt:
+        payload = {
+            "type": "stream_end",
+            "reason": "interrupted",
+            "exit_code": 130,
+            "after_event_id": int(cursor or 0),
+        }
+        _print_event_record(payload, jsonl=args.jsonl)
+        return 130
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    if not 1 <= args.event_limit <= 200:
+        raise QueueError("--event-limit must be between 1 and 200")
+    payload = inspect_job_payload(
+        config_from_args(args),
+        args.job_id,
+        event_limit=args.event_limit,
+    )
+    if args.json:
+        dump_json(payload)
+    else:
+        progress = payload["progress"]
+        gate = progress.get("gate")
+        gate_text = (
+            f" · gate {gate['index']}/{gate['total']} {gate['name']}" if gate else ""
+        )
+        print(_job_result_line(payload["job"]))
+        print(
+            f"phase: {progress['phase']} · {progress['state']}{gate_text} · "
+            f"elapsed {progress['elapsed_seconds']}s"
+        )
+        print(
+            f"heartbeat: {progress['heartbeat_at'] or 'none'} "
+            f"({progress['lease_liveness']})"
+        )
+        print(
+            f"outcome: {payload['outcome']['severity']} / "
+            f"{payload['outcome']['category']}"
+        )
+    return 0
+
+
+def _read_job_and_lock(config: MergetrainConfig, job_id: int):
+    conn = connect(config.state.db)
+    try:
+        return get_job(conn, job_id), get_lock(conn)
+    finally:
+        conn.close()
+
+
+def _safe_log_path(config: MergetrainConfig, job: Job) -> Path | None:
+    if not job.log_path:
+        return None
+    root = config.state.logs.expanduser().resolve()
+    candidate = Path(job.log_path).expanduser().resolve()
+    if candidate != root and root not in candidate.parents:
+        raise QueueError(
+            f"refusing log path outside configured state.logs directory: {candidate}"
+        )
+    return candidate
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    if args.tail < 0:
+        raise QueueError("--tail must be zero or greater")
+    if not 0.05 <= args.poll_interval <= 60:
+        raise QueueError("--poll-interval must be between 0.05 and 60 seconds")
+    config = config_from_args(args)
+    try:
+        while True:
+            job, lock = _read_job_and_lock(config, args.job_id)
+            log_path = _safe_log_path(config, job)
+            if log_path is not None and log_path.exists():
+                break
+            terminal = stream_terminal([job], lock)
+            if not args.follow or terminal is not None:
+                raise QueueError(f"log is not available for job {job.id}")
+            time.sleep(args.poll_interval)
+
+        with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+            if args.tail:
+                sys.stdout.writelines(lines[-args.tail :])
+                sys.stdout.flush()
+            if not args.follow:
+                return 0
+            while True:
+                chunk = handle.read()
+                if chunk:
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+                job, lock = _read_job_and_lock(config, args.job_id)
+                terminal = stream_terminal([job], lock)
+                if terminal is not None:
+                    quiet_polls = 0
+                    while quiet_polls < 2:
+                        time.sleep(args.poll_interval)
+                        trailing = handle.read()
+                        if trailing:
+                            sys.stdout.write(trailing)
+                            sys.stdout.flush()
+                            quiet_polls = 0
+                        else:
+                            quiet_polls += 1
+                    return int(terminal["exit_code"])
+                time.sleep(args.poll_interval)
+    except KeyboardInterrupt:
+        print("mergetrain: log follow interrupted", file=sys.stderr)
+        return 130
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -630,6 +867,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--json", action="store_true")
     p_status.add_argument("--limit", type=int, default=50)
     p_status.set_defaults(func=cmd_status)
+
+    p_events = subparsers.add_parser(
+        "events", help="Read or follow structured runner events"
+    )
+    event_scope = p_events.add_mutually_exclusive_group()
+    event_scope.add_argument("--job", dest="job_id", type=int, help="Scope to one job run history")
+    event_scope.add_argument("--train-id", help="Scope to one validated train")
+    p_events.add_argument("--after", type=int, help="Resume after this event ID (exclusive)")
+    p_events.add_argument("--limit", type=int, default=200)
+    p_events.add_argument("--follow", action="store_true")
+    p_events.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="Emit one compact JSON object per line",
+    )
+    p_events.add_argument("--poll-interval", type=float, default=0.5)
+    p_events.set_defaults(func=cmd_events)
+
+    p_inspect = subparsers.add_parser(
+        "inspect", help="Inspect one job, its latest run, and train outcome"
+    )
+    p_inspect.add_argument("job_id", type=int)
+    p_inspect.add_argument("--event-limit", type=int, default=100)
+    p_inspect.add_argument("--json", action="store_true")
+    p_inspect.set_defaults(func=cmd_inspect)
+
+    p_logs = subparsers.add_parser("logs", help="Read or follow one job's runner log")
+    p_logs.add_argument("job_id", type=int)
+    p_logs.add_argument("--follow", action="store_true")
+    p_logs.add_argument("--tail", type=int, default=200)
+    p_logs.add_argument("--poll-interval", type=float, default=0.5)
+    p_logs.set_defaults(func=cmd_logs)
 
     p_doctor = subparsers.add_parser("doctor", help="Diagnose config, queue, git, and next action")
     p_doctor.add_argument("--json", action="store_true")
