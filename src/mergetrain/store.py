@@ -24,7 +24,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Liveness:
@@ -72,6 +72,11 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout = 5000")
     # WAL is not available for in-memory DBs, but SQLite quietly returns memory.
     conn.execute("PRAGMA journal_mode = WAL")
+    # Durability (0.3.0 recovery): fsync each commit so the pre-push
+    # pending_deploy_sha marker cannot be lost to power loss after the remote
+    # was already mutated. Deploys are infrequent, so the per-commit fsync cost
+    # is negligible; see docs/proposals/0.3.0-recovery.md decision Q3.
+    conn.execute("PRAGMA synchronous = FULL")
     try:
         ensure_schema(conn)
     except Exception:
@@ -121,7 +126,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           validation_train_sha TEXT NOT NULL DEFAULT '',
           reused_validation_sha TEXT NOT NULL DEFAULT '',
           claim_token TEXT NOT NULL DEFAULT '',
-          cancel_requested_at TEXT NOT NULL DEFAULT ''
+          cancel_requested_at TEXT NOT NULL DEFAULT '',
+          pending_deploy_sha TEXT NOT NULL DEFAULT ''
         )
         """
         )
@@ -197,6 +203,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ),
                 ("deploy_queue", "validation_train_sha", "TEXT NOT NULL DEFAULT ''"),
                 ("deploy_queue", "reused_validation_sha", "TEXT NOT NULL DEFAULT ''"),
+            ),
+            6: (
+                ("deploy_queue", "pending_deploy_sha", "TEXT NOT NULL DEFAULT ''"),
             ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):

@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated")
+ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated", "needs_reconcile")
 TERMINAL_STATUSES = ("deployed", "canceled")
 ALL_STATUSES = ACTIVE_STATUSES + TERMINAL_STATUSES
-PUSH_STATUSES = ("not_run", "succeeded", "failed")
-VERIFY_STATUSES = ("not_run", "not_configured", "succeeded", "failed")
+PUSH_STATUSES = ("not_run", "pending", "succeeded", "failed")
+VERIFY_STATUSES = ("not_run", "not_configured", "succeeded", "failed", "unknown")
 
 
 @dataclass(slots=True)
@@ -43,6 +43,7 @@ class Job:
     reused_validation_sha: str = ""
     claim_token: str = ""
     cancel_requested_at: str = ""
+    pending_deploy_sha: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> "Job":
@@ -80,6 +81,7 @@ class Job:
             reused_validation_sha=str(row["reused_validation_sha"] or ""),
             claim_token=str(row["claim_token"] or ""),
             cancel_requested_at=str(row["cancel_requested_at"] or ""),
+            pending_deploy_sha=str(row["pending_deploy_sha"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -90,9 +90,10 @@ class StoreTests(unittest.TestCase):
         self.assertIn("validation_environment_sha", columns)
         self.assertIn("validation_train_sha", columns)
         self.assertIn("reused_validation_sha", columns)
+        self.assertIn("pending_deploy_sha", columns)
         migrated_db = sqlite3.connect(db)
         try:
-            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 6)
             event_columns = {
                 row[1] for row in migrated_db.execute("PRAGMA table_info(run_events)")
             }
