@@ -7,6 +7,8 @@ your machine. Coding agents commit in separate worktrees; one local runner
 serializes their branches, validates the exact train, and pushes only after
 explicit approval. No hosted merge-queue service or CI provider is required.
 
+![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](./docs/images/hub-overview.png)
+
 Four guarantees shape the design: an **exact validated train identity** (the
 train you approved is the train that ships, byte for byte), a **lease-fenced
 single runner** (two processes can never race a push), an **atomic multi-ref
