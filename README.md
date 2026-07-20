@@ -7,6 +7,13 @@ your machine. Coding agents commit in separate worktrees; one local runner
 serializes their branches, validates the exact train, and pushes only after
 explicit approval. No hosted merge-queue service or CI provider is required.
 
+Four guarantees shape the design: an **exact validated train identity** (the
+train you approved is the train that ships, byte for byte), a **lease-fenced
+single runner** (two processes can never race a push), an **atomic multi-ref
+push**, and **crash-safe, exactly-once deploys** (after any crash, recovery
+reconciles the local queue against the *remote*, so a landed train is never
+re-pushed and a lost one is never mislabeled as shipped).
+
 > **Local-first, not local-only.** Queue state, locking, train assembly, and
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
@@ -120,12 +127,36 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 
 Full reference in [docs/design.md](./docs/design.md) and the [CLI reference](./docs/cli.md).
 
-## When to use mergetrain
+## Alternatives — and what's different here
 
-| Your workflow is… | Use |
-|---|---|
-| PR-first, remote-CI-first, hosted platform | GitHub / GitLab merge queue, Mergify, Aviator |
-| Local agents in worktrees shipping to a deploy branch | **mergetrain** |
+Every established merge queue assumes a forge app, webhooks, and a hosted CI
+provider. mergetrain assumes a laptop, worktrees, and `git push`.
+
+| Category | Examples | They assume | mergetrain |
+|---|---|---|---|
+| Forge-native queues | [GitHub Merge Queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), [GitLab Merge Trains](https://docs.gitlab.com/ci/pipelines/merge_trains/) | PRs + the forge's CI; for private repos, Enterprise Cloud (GitHub) or Premium (GitLab) as of mid-2026 | No forge app, no plan gate — any Git remote |
+| Merge-queue SaaS | [Mergify](https://mergify.com), [Aviator](https://www.aviator.co/merge-queue), [Trunk](https://trunk.io/merge-queue), [Graphite](https://graphite.com) | A GitHub App + webhooks + your CI provider + per-seat pricing | Queue state never leaves your machine |
+| Self-hosted bots | bors lineage, [Zuul](https://zuul-ci.org/), Marge-bot | A server you operate + forge webhooks + CI | One `pip install`, zero runtime dependencies, no server |
+| Local agent queues | [claude-code-merge-queue](https://github.com/funador/claude-code-merge-queue) | Also local-first: lands queued branches one at a time (rebase → check → push), built around Claude Code's worktree hooks | Batched **validated trains** with an exact approved identity, SQLite-durable state, remote-reconciled crash recovery, and harness-agnostic operation (Codex, Claude, anything that can run a CLI) |
+
+If your team is PR-first on a hosted forge with remote CI, use the native
+queue — that is exactly what it is for. mergetrain is for the other workflow:
+**local coding agents in worktrees, shipping to a deploy branch, with or
+before any PR.**
+
+### The crash story, specifically
+
+A hosted queue's crash recovery is its vendor's uptime page. A local queue
+runs on a laptop — which loses power, sleeps mid-push, and gets its terminal
+killed. mergetrain treats that as the normal case, not the exception: every
+push is preceded by a durable write-ahead marker and a
+`refs/mergetrain/pending/<id>` pin ref, so `mergetrain recover` can ask the
+**remote** what actually happened. A train is marked `deployed` only when a
+push ref carries its SHA, a landed train is never pushed twice, and deploys
+are refused while any job still needs reconciling. As far as we can tell, no
+other merge queue — hosted or local — documents an exactly-once push contract
+at all; the full failure catalogue is in
+[failure modes](./docs/failure-modes.md).
 
 mergetrain is **not** a general-purpose job queue (it won't replace Celery/RQ/Sidekiq), a CI provider, or a deploy provider. The core is provider-neutral: your push targets, test commands, and deploy checks live in config, not in mergetrain.
 
