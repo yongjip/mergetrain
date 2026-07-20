@@ -165,7 +165,16 @@ ENQ="--capture-sha --allow-branch-mismatch"
 section(){ echo; echo "=== $1 ==="; }
 
 section "S0  Packaging smoke (installed console script)"
-[ "$("$MT" --version)" = "mergetrain 0.3.0" ] && ok "version" || no "version=$("$MT" --version)"
+# Derive the expected version from the source tree instead of hardcoding it:
+# the assertion is "installed wheel == this checkout", which never goes stale
+# on a release bump (the 0.4.0 cut broke CI on exactly this).
+SRC_VERSION="$("$VPY" - "$PROJECT/pyproject.toml" <<'PYEOF'
+import sys, tomllib
+with open(sys.argv[1], "rb") as fh:
+    print(tomllib.load(fh)["project"]["version"])
+PYEOF
+)"
+[ "$("$MT" --version)" = "mergetrain $SRC_VERSION" ] && ok "version" || no "version=$("$MT" --version) expected=$SRC_VERSION"
 "$MT" --help >/dev/null 2>&1 && ok "--help exit 0" || no "--help nonzero"
 [ "$("$MT" agent-contract --json | jget boundary.deploy_requires)" = "run-next --deploy or run-batch --deploy" ] && ok "agent-contract well-formed (nested leaf)" || no "agent-contract"
 "$VPY" -c "import mergetrain, mergetrain.cli, mergetrain.store, mergetrain.git_runner, mergetrain.daemon, mergetrain.dashboard, mergetrain.snapshot" 2>/dev/null && ok "imports" || no "imports"
