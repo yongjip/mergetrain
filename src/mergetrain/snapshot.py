@@ -231,10 +231,15 @@ def build_dashboard_snapshot(
     job_limit: int = 50,
     event_limit: int = 40,
     preview: bool = False,
+    read_only: bool = False,
 ) -> dict[str, Any]:
-    """Build one stable, read-only payload for the browser."""
+    """Build one stable, read-only payload for the browser.
 
-    conn = connect(config.state.db)
+    With ``read_only`` the queue database is opened without creating or
+    migrating anything — the hub's contract when observing other repos.
+    """
+
+    conn = connect(config.state.db, read_only=read_only)
     try:
         recent_jobs = list_jobs(conn, limit=job_limit)
         selected_jobs, selection = _selected_jobs(conn)

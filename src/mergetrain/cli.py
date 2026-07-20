@@ -1079,6 +1079,81 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hub_serve(args: argparse.Namespace) -> int:
+    from .dashboard import serve_hub
+    from .registry import load_registry, registry_path
+
+    host = str(args.host).strip()
+    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host not in loopback_hosts and not args.allow_remote:
+        raise QueueError(
+            "hub binds to loopback by default; pass --allow-remote to expose it"
+        )
+    if not 0 <= args.port <= 65535:
+        raise QueueError("hub port must be between 0 and 65535")
+    registered = load_registry(args.registry)
+    roster = args.registry or registry_path()
+
+    def announce(url: str) -> None:
+        print(f"mergetrain hub: {url}", flush=True)
+        print(
+            f"read-only · {len(registered)} repo(s) registered in {roster} · press Ctrl-C to stop",
+            flush=True,
+        )
+
+    serve_hub(host=host, port=args.port, registry=args.registry, ready=announce)
+    return 0
+
+
+def cmd_hub_add(args: argparse.Namespace) -> int:
+    from .registry import add_repo, registry_path
+
+    entry = add_repo(args.path, args.registry)
+    if args.json:
+        dump_json({"ok": True, "registry": str(args.registry or registry_path()), "entry": entry})
+    else:
+        print(f"registered: {entry['path']}")
+    return 0
+
+
+def cmd_hub_remove(args: argparse.Namespace) -> int:
+    from .registry import registry_path, remove_repo
+
+    removed = remove_repo(args.path, args.registry)
+    if args.json:
+        dump_json(
+            {
+                "ok": removed,
+                "registry": str(args.registry or registry_path()),
+                "removed": removed,
+            }
+        )
+    else:
+        print("deregistered" if removed else "not registered; nothing removed")
+    return 0 if removed else 1
+
+
+def cmd_hub_list(args: argparse.Namespace) -> int:
+    from .registry import load_registry, registry_path
+
+    entries = load_registry(args.registry)
+    if args.json:
+        dump_json(
+            {
+                "ok": True,
+                "registry": str(args.registry or registry_path()),
+                "repos": entries,
+            }
+        )
+        return 0
+    if not entries:
+        print("no repos registered; run `mergetrain hub add <repo>`")
+        return 0
+    for entry in entries:
+        print(entry["path"])
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mergetrain")
     parser.add_argument("--version", action="version", version=f"mergetrain {__version__}")
@@ -1248,6 +1323,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Label the connected database as preview data",
     )
     p_dashboard.set_defaults(func=cmd_dashboard)
+
+    p_hub = subparsers.add_parser(
+        "hub",
+        help="Serve one read-only dashboard over every registered repo",
+    )
+    p_hub.add_argument("--host", default="127.0.0.1")
+    p_hub.add_argument("--port", type=int, default=8765)
+    p_hub.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Explicitly allow binding outside the loopback interface",
+    )
+    p_hub.add_argument("--registry", help="Override the hub registry file path")
+    p_hub.set_defaults(func=cmd_hub_serve)
+    hub_sub = p_hub.add_subparsers(dest="hub_command")
+    p_hub_add = hub_sub.add_parser("add", help="Register a repo with the hub")
+    p_hub_add.add_argument("path", nargs="?", default=".")
+    p_hub_add.add_argument("--registry", help="Override the hub registry file path")
+    p_hub_add.add_argument("--json", action="store_true")
+    p_hub_add.set_defaults(func=cmd_hub_add)
+    p_hub_remove = hub_sub.add_parser("remove", help="Deregister a repo from the hub")
+    p_hub_remove.add_argument("path")
+    p_hub_remove.add_argument("--registry", help="Override the hub registry file path")
+    p_hub_remove.add_argument("--json", action="store_true")
+    p_hub_remove.set_defaults(func=cmd_hub_remove)
+    p_hub_list = hub_sub.add_parser("list", help="List repos registered with the hub")
+    p_hub_list.add_argument("--registry", help="Override the hub registry file path")
+    p_hub_list.add_argument("--json", action="store_true")
+    p_hub_list.set_defaults(func=cmd_hub_list)
     return parser
 
 
