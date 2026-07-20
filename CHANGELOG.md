@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-07-21
 
 - Add a per-repo hub-daemon opt-out: `hub add REPO --no-daemon` keeps a repo
   on the dashboard but excludes it from every `hub daemon` sweep (policy-level

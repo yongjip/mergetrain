@@ -64,7 +64,7 @@ class CliTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised, redirect_stdout(out):
             main(["--version"])
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(out.getvalue(), "mergetrain 0.3.0\n")
+        self.assertEqual(out.getvalue(), "mergetrain 0.4.0\n")
 
     def test_version_json_exposes_runtime_provenance(self) -> None:
         runtime = {
@@ -80,7 +80,7 @@ class CliTests(unittest.TestCase):
             code = main(["version", "--json"])
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["version"], "0.3.0")
+        self.assertEqual(payload["version"], "0.4.0")
         self.assertEqual(payload["runtime"], runtime)
 
     def test_doctor_json_includes_runtime_provenance(self) -> None:
