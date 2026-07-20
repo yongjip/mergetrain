@@ -260,6 +260,21 @@ or migrates anything inside it, and one broken repo renders as an isolated
 error card. The registry is re-read on every snapshot, so `hub add`/`hub
 remove` show up live. Full contract in [hub.md](./hub.md).
 
+### `hub daemon`
+
+Run the auto-only daemon across every registered repo:
+
+```sh
+mergetrain hub daemon [--interval 15] [--concurrency 1] [--once [--json]] [--keep-worktree] [--registry PATH]
+```
+
+Each repo is processed by the same per-tick policy as the single-repo
+`daemon` — only `--auto` jobs, behind that repo's own lock, gates, and
+reconcile pauses. `--concurrency` caps how many repos may run gates at the
+same time machine-wide (default `1`: strictly serial). `--once` runs a
+single sweep; with `--json` it prints one outcome per repo
+(`processed:<n>` / `idle` / `skipped` / `reconcile_paused` / `error`).
+
 ## `run-next`
 
 Process exactly one queued job. Requires `--validate-only` or one Git push mode:

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `mergetrain hub daemon` (RFC #23 Phase 1): the auto-only daemon across
+  every registered repo, scheduled machine-wide. Each repo runs through the
+  same per-tick policy as the single-repo daemon (only `--auto` jobs, that
+  repo's own lock, gates, and reconcile pauses); `--concurrency` caps how
+  many repos may run gates simultaneously (default 1, strictly serial), and
+  per-repo failures are isolated so a sweep never stops at a broken repo.
 - Add `mergetrain hub` (RFC #23 Phase 0): a machine-level repo registry
   (`hub add`/`remove`/`list`) and one read-only multi-repo dashboard with
   per-repo drill-down. The hub owns no queue state — every repo entry is

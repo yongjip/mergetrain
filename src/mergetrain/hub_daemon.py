@@ -1,0 +1,172 @@
+"""Machine-wide auto-only daemon: one scheduler over every registered repo.
+
+Phase 1 of RFC #23. The hub daemon owns no queue state and adds no new
+execution semantics: every repo is processed by the same ``daemon_tick`` the
+single-repo daemon runs, against that repo's own SQLite database, lock, and
+gates. What the hub adds is *scheduling* — which repos get a turn, and how
+many may run their gates at the same time on this machine (``concurrency``,
+default 1, so heavy gates from different repos never stack).
+"""
+
+from __future__ import annotations
+
+import signal
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+
+from .config import MergetrainConfig, load_config
+from .daemon import ProcessBatch, Say, daemon_tick
+from .hub import display_path
+from .registry import load_registry
+from .store import default_owner
+
+ProcessBatchFactory = Callable[[MergetrainConfig, str], ProcessBatch]
+
+
+def _default_factory(keep_worktree: bool) -> ProcessBatchFactory:
+    def factory(config: MergetrainConfig, owner: str) -> ProcessBatch:
+        from .git_runner import GitRunner
+
+        runner = GitRunner(config)
+
+        def process_batch(conn: Any, jobs: list) -> object:
+            return runner.process_batch(
+                conn,
+                jobs,
+                deploy=True,
+                keep_worktree=keep_worktree,
+                owner=owner,
+                ttl_minutes=config.queue.lock_ttl_minutes,
+            )
+
+        return process_batch
+
+    return factory
+
+
+def hub_sweep(
+    registered: list[dict[str, Any]],
+    *,
+    concurrency: int = 1,
+    keep_worktree: bool = False,
+    say: Say = print,
+    process_batch_factory: ProcessBatchFactory | None = None,
+) -> list[dict[str, Any]]:
+    """Run one auto-only pass over every registered repo.
+
+    At most ``concurrency`` repos run at a time; each repo's outcome is
+    isolated, so one broken repo never stops the sweep. Returns one outcome
+    dict per repo: ``{"path", "name"?, "ok", "outcome", "error"?}`` where
+    outcome is ``processed:<n>``/``idle``/``reconcile_paused``/``skipped``/
+    ``error``.
+    """
+
+    factory = process_batch_factory or _default_factory(keep_worktree)
+
+    def tick_one(item: dict[str, Any]) -> dict[str, Any]:
+        raw = str(item.get("path") or "")
+        out: dict[str, Any] = {"path": display_path(raw)}
+        # Same isolation contract as the hub dashboard: any failure in one
+        # repo becomes that repo's error outcome, so the catch is broad.
+        try:
+            repo = Path(raw)
+            if not repo.is_dir():
+                out.update(ok=False, outcome="error", error="repo directory is missing")
+                return out
+            config = load_config(repo=repo)
+            out["name"] = config.project.name
+            if not config.config_exists:
+                out.update(ok=False, outcome="error", error="no .mergetrain.yaml in this repo")
+                return out
+            if not Path(config.state.db).is_file():
+                # No queue database means no auto work can exist — and the
+                # scheduler must not create the database to find out.
+                out.update(ok=True, outcome="skipped", error="no queue database yet")
+                return out
+            owner = default_owner()
+            outcome = daemon_tick(
+                db_path=str(config.state.db),
+                process_batch=factory(config, owner),
+                owner=owner,
+                lock_ttl_minutes=config.queue.lock_ttl_minutes,
+                say=lambda message: say(f"[{config.project.name}] {message}"),
+            )
+            out.update(ok=True, outcome=outcome)
+            return out
+        except Exception as exc:  # noqa: BLE001 - per-repo isolation is the contract
+            out.update(ok=False, outcome="error", error=str(exc) or exc.__class__.__name__)
+            return out
+
+    if concurrency <= 1:
+        return [tick_one(item) for item in registered]
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        return list(pool.map(tick_one, registered))
+
+
+def hub_daemon_loop(
+    *,
+    registry: str | None = None,
+    interval_seconds: int = 15,
+    concurrency: int = 1,
+    keep_worktree: bool = False,
+    once: bool = False,
+    say: Say = print,
+    install_signal_handlers: bool = True,
+    process_batch_factory: ProcessBatchFactory | None = None,
+) -> list[dict[str, Any]]:
+    """Sweep every registered repo on an interval until stopped.
+
+    The registry is re-read on every sweep so ``hub add``/``hub remove``
+    take effect live. Returns the outcomes of the final sweep (useful with
+    ``once``).
+    """
+
+    should_stop = False
+
+    def request_stop(signum, frame):  # type: ignore[no-untyped-def]
+        nonlocal should_stop
+        should_stop = True
+        say(f"mergetrain hub daemon received signal {signum}; finishing current sweep")
+
+    old_handlers: dict[int, Any] = {}
+    if install_signal_handlers:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            old_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_stop)
+
+    outcomes: list[dict[str, Any]] = []
+    try:
+        while True:
+            try:
+                registered = load_registry(registry)
+                if registered:
+                    outcomes = hub_sweep(
+                        registered,
+                        concurrency=concurrency,
+                        keep_worktree=keep_worktree,
+                        say=say,
+                        process_batch_factory=process_batch_factory,
+                    )
+                    processed = sum(
+                        1 for item in outcomes if str(item.get("outcome", "")).startswith("processed")
+                    )
+                    say(
+                        f"mergetrain hub sweep: {len(outcomes)} repo(s), "
+                        f"{processed} with work processed"
+                    )
+                else:
+                    outcomes = []
+                    say("mergetrain hub sweep: no repos registered")
+            except Exception as exc:
+                say(f"mergetrain hub sweep error: {exc}")
+            if once or should_stop:
+                break
+            time.sleep(max(1, int(interval_seconds)))
+    finally:
+        if install_signal_handlers:
+            for signum, handler in old_handlers.items():
+                signal.signal(signum, handler)
+    return outcomes

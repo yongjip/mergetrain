@@ -21,6 +21,57 @@ Say = Callable[[str], None]
 ProcessBatch = Callable[[Any, list[Job]], object]
 
 
+def daemon_tick(
+    *,
+    db_path: str,
+    process_batch: ProcessBatch,
+    owner: str,
+    lock_ttl_minutes: int = 30,
+    say: Say = print,
+) -> str:
+    """Run one auto-only pass over a single repo's queue.
+
+    This is the daemon's whole per-tick policy in one reusable place — the
+    hub daemon calls it per registered repo so auto-only claiming, the
+    reconcile pause, and lease release cannot drift between the two paths.
+    Returns ``"reconcile_paused"``, ``"processed:<n>"``, or ``"idle"``.
+    Exceptions propagate; callers decide how to isolate them.
+    """
+
+    lease_token = ""
+    conn = connect(db_path)
+    try:
+        pending = deploy_reconcile_pending(conn)
+        if pending:
+            # A crash left a possibly-landed push unresolved. The daemon
+            # deploys to the same push refs, so it must not push over a
+            # pending reconcile (0.3.0 Phase 2, decision Q4). Pause until
+            # an operator runs `mergetrain reconcile --apply`.
+            say(
+                f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
+                "deploy paused (run 'mergetrain reconcile --apply')"
+            )
+            return "reconcile_paused"
+        if has_queued_auto(conn):
+            jobs = claim_all_queued(
+                conn,
+                owner=owner,
+                ttl_minutes=lock_ttl_minutes,
+                auto_only=True,
+            )
+            if jobs:
+                lease_token = jobs[0].claim_token
+                say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
+                process_batch(conn, jobs)
+                return f"processed:{len(jobs)}"
+        say("mergetrain daemon tick: no auto-approved queued jobs")
+        return "idle"
+    finally:
+        if lease_token:
+            release_runner_lock(conn, owner=owner, token=lease_token)
+        conn.close()
+
+
 def daemon_loop(
     *,
     db_path: str,
@@ -55,37 +106,14 @@ def daemon_loop(
 
     try:
         while True:
-            lease_token = ""
             try:
-                conn = connect(db_path)
-                try:
-                    pending = deploy_reconcile_pending(conn)
-                    if pending:
-                        # A crash left a possibly-landed push unresolved. The daemon
-                        # deploys to the same push refs, so it must not push over a
-                        # pending reconcile (0.3.0 Phase 2, decision Q4). Pause until
-                        # an operator runs `mergetrain reconcile --apply`.
-                        say(
-                            f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
-                            "deploy paused (run 'mergetrain reconcile --apply')"
-                        )
-                    elif has_queued_auto(conn):
-                        jobs = claim_all_queued(
-                            conn,
-                            owner=actual_owner,
-                            ttl_minutes=lock_ttl_minutes,
-                            auto_only=True,
-                        )
-                        if jobs:
-                            lease_token = jobs[0].claim_token
-                            say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
-                            process_batch(conn, jobs)
-                    else:
-                        say("mergetrain daemon tick: no auto-approved queued jobs")
-                finally:
-                    if lease_token:
-                        release_runner_lock(conn, owner=actual_owner, token=lease_token)
-                    conn.close()
+                daemon_tick(
+                    db_path=db_path,
+                    process_batch=process_batch,
+                    owner=actual_owner,
+                    lock_ttl_minutes=lock_ttl_minutes,
+                    say=say,
+                )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")
             if once or should_stop:

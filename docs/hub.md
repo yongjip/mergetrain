@@ -44,6 +44,31 @@ page's purpose.
 Deploys, recovery, and cleanup remain explicit CLI actions inside each repo.
 The hub cannot ship anything.
 
+## Hub daemon — auto-only execution across repos
+
+```bash
+mergetrain hub daemon                      # sweep all registered repos every 15s
+mergetrain hub daemon --concurrency 2      # allow two repos to run gates at once
+mergetrain hub daemon --once --json        # one sweep, machine-readable outcomes
+```
+
+The hub daemon is the multi-repo form of `mergetrain daemon`, and it adds no
+new execution semantics: every repo is processed by the same per-tick policy
+as the single-repo daemon — **only jobs enqueued with `--auto`**, behind that
+repo's own runner lock, gates, and crash-recovery pauses (a repo with jobs
+pending reconcile stays paused). What the hub adds is *scheduling*:
+
+- `--concurrency` caps how many repos may run gates at the same time on this
+  machine. The default is **1** — strictly serial — so heavy gates (engine
+  builds, full test suites) from different repos never stack up.
+- The registry is re-read every sweep; a repo with no queue database is
+  skipped without creating one; a broken repo becomes an isolated error
+  outcome and the sweep continues.
+
+The `--auto` flag remains the explicit unattended-deploy approval boundary,
+exactly as with the single-repo daemon. The hub daemon never touches
+manually enqueued jobs.
+
 ## Relationship to `mergetrain dashboard`
 
 `mergetrain dashboard` (single repo, run from inside that repo) is unchanged.
