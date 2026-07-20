@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `mergetrain hub status` (RFC #23 Phase 2): one machine-wide read of
+  every registered repo's queue — per-repo lines for humans, the hub
+  dashboard's aggregate payload with `--json` for coordinator agents.
 - Add `mergetrain hub daemon` (RFC #23 Phase 1): the auto-only daemon across
   every registered repo, scheduled machine-wide. Each repo runs through the
   same per-tick policy as the single-repo daemon (only `--auto` jobs, that

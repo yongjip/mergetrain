@@ -9,6 +9,7 @@ mergetrain hub add ~/projects/app        # register a repo (requires .mergetrain
 mergetrain hub add .                     # register the current repo
 mergetrain hub list                      # show the roster
 mergetrain hub                           # serve http://127.0.0.1:8765/
+mergetrain hub status [--json]           # same aggregate, for terminals and agents
 mergetrain hub remove ~/projects/app     # deregister (repo state untouched)
 ```
 

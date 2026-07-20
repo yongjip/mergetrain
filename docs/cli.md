@@ -260,6 +260,19 @@ or migrates anything inside it, and one broken repo renders as an isolated
 error card. The registry is re-read on every snapshot, so `hub add`/`hub
 remove` show up live. Full contract in [hub.md](./hub.md).
 
+### `hub status`
+
+One machine-wide read of every registered repo's queue — the coordinator-agent
+counterpart of the hub dashboard:
+
+```sh
+mergetrain hub status [--json] [--registry PATH]
+```
+
+Human mode prints one line per repo (nonzero counts, runner liveness, and the
+advisory next action); `--json` emits the same aggregate payload the hub
+dashboard serves, per-repo errors isolated.
+
 ### `hub daemon`
 
 Run the auto-only daemon across every registered repo:
