@@ -20,7 +20,7 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: alpha (`v0.3.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
+> Status: alpha (`v0.4.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
 
 ---
 
@@ -245,7 +245,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 
 ## Status
 
-`v0.3.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, crash-safe reconciliation/recovery (`reconcile`/`recover`/`unlock`), auto-only daemon, resumable CLI events/inspection/log following, JSON `doctor`/`status`, and the local read-only dashboard — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
+`v0.4.0`, alpha. The core — queue, runner lock, merge train, gates, atomic push, crash-safe reconciliation/recovery (`reconcile`/`recover`/`unlock`), auto-only daemon, resumable CLI events/inspection/log following, JSON `doctor`/`status`, the local read-only dashboard, and the multi-repo hub (registry, aggregated board, `hub status`, auto-only `hub daemon` with a machine-wide concurrency cap) — is implemented with a passing test suite. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
 
 ## License
 
