@@ -132,6 +132,8 @@ def agent_contract_payload(
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
             "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
             "daemon_processes_only": "jobs enqueued with --auto",
+            "hub_observation": "hub serves a read-only aggregate; every repo keeps its own queue, lock, and recovery state",
+            "hub_daemon_processes_only": "jobs enqueued with --auto, across registered repos, through each repo's own runner and lock; concurrency caps simultaneous repos machine-wide",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
             "recovery_after_crash": "reconcile / recover / unlock resolve crash state against the remote; run-batch --deploy is refused while any job is needs_reconcile",
         },
@@ -166,6 +168,8 @@ Purpose: {payload['purpose']}
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The daemon processes only jobs enqueued with `--auto`.
+- The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
+- The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
 - After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the remote; `run-batch --{words.action}` is refused while any job is `needs_reconcile`. `unlock --force` clears a wedged lock (remote-reachable first).
 
@@ -1105,6 +1109,25 @@ def cmd_hub_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hub_daemon(args: argparse.Namespace) -> int:
+    from .hub_daemon import hub_daemon_loop
+
+    if args.concurrency < 1:
+        raise QueueError("hub daemon --concurrency must be at least 1")
+    say = (lambda message: None) if args.json and args.once else print
+    outcomes = hub_daemon_loop(
+        registry=args.registry,
+        interval_seconds=args.interval,
+        concurrency=args.concurrency,
+        keep_worktree=args.keep_worktree,
+        once=args.once,
+        say=say,
+    )
+    if args.json and args.once:
+        dump_json({"ok": True, "outcomes": outcomes})
+    return 0
+
+
 def cmd_hub_add(args: argparse.Namespace) -> int:
     from .registry import add_repo, registry_path
 
@@ -1352,6 +1375,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_hub_list.add_argument("--registry", help="Override the hub registry file path")
     p_hub_list.add_argument("--json", action="store_true")
     p_hub_list.set_defaults(func=cmd_hub_list)
+    p_hub_daemon = hub_sub.add_parser(
+        "daemon",
+        help="Run the auto-only daemon across every registered repo",
+    )
+    p_hub_daemon.add_argument("--interval", type=int, default=15)
+    p_hub_daemon.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Max repos running gates at the same time (default 1: machine-wide serial)",
+    )
+    p_hub_daemon.add_argument("--once", action="store_true", help="Run one sweep and exit")
+    p_hub_daemon.add_argument("--keep-worktree", action="store_true")
+    p_hub_daemon.add_argument("--registry", help="Override the hub registry file path")
+    p_hub_daemon.add_argument("--json", action="store_true", help="With --once, print sweep outcomes as JSON")
+    p_hub_daemon.set_defaults(func=cmd_hub_daemon)
     return parser
 
 

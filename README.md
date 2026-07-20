@@ -104,7 +104,10 @@ The hub is the same read-only UI in multi-repo mode — repo cards with queue
 counts, runner state, and the next safe action, each drilling down into the
 full single-repo view. It owns no queue state: every repo entry is read from
 that repo's own SQLite database, opened read-only, so observing a repo never
-creates or migrates anything inside it. See [hub](./docs/hub.md).
+creates or migrates anything inside it. `mergetrain hub daemon` runs your
+`--auto` work across those repos too, with a machine-wide concurrency cap
+(default: one repo's gates at a time — parallel agents, but never parallel
+engine builds). See [hub](./docs/hub.md).
 
 Non-interactive callers can observe the same runner without starting a browser:
 

@@ -17,7 +17,7 @@ from .snapshot import build_dashboard_snapshot
 from .store import utc_now
 
 
-def _display_path(path: str) -> str:
+def display_path(path: str) -> str:
     """Home-relative display form; the hub identifies repos, so their location
     is the payload's subject rather than incidental leakage."""
 
@@ -29,7 +29,7 @@ def _display_path(path: str) -> str:
 
 def _repo_entry(registered: dict[str, Any]) -> dict[str, Any]:
     raw_path = str(registered.get("path") or "")
-    entry: dict[str, Any] = {"path": _display_path(raw_path), "ok": False}
+    entry: dict[str, Any] = {"path": display_path(raw_path), "ok": False}
     # Isolation is the point: any failure in one repo becomes that repo's
     # error card instead of a hub-wide crash, so the catch is deliberately broad.
     try:
