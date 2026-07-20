@@ -93,6 +93,60 @@ class HubSnapshotTests(unittest.TestCase):
                 conn.close()
 
 
+class HubStatusCliTests(unittest.TestCase):
+    def test_hub_status_json_reports_every_registered_repo(self) -> None:
+        import contextlib
+        import io
+
+        from mergetrain.cli import main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            empty = make_repo(root, "empty")
+            for repo in (live, empty):
+                add_repo(repo, registry)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(["hub", "status", "--registry", str(registry), "--json"])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload["hub"])
+            by_name = {entry.get("name"): entry for entry in payload["repos"]}
+            self.assertEqual(by_name["live"]["snapshot"]["counts"]["queued"], 1)
+            self.assertTrue(by_name["empty"]["empty"])
+
+    def test_hub_status_human_lines_cover_all_states(self) -> None:
+        import contextlib
+        import io
+
+        from mergetrain.cli import main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            gone = make_repo(root, "gone")
+            for repo in (live, gone):
+                add_repo(repo, registry)
+            (gone / ".mergetrain.yaml").unlink()
+            gone.rmdir()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(["hub", "status", "--registry", str(registry)])
+
+            self.assertEqual(code, 0)
+            lines = stdout.getvalue().splitlines()
+            self.assertIn("live: queued=1 | next: run_batch_validate", lines)
+            self.assertTrue(any("gone" in line and "ERROR" in line for line in lines))
+
+
 class HubServerTests(unittest.TestCase):
     def request(self, port: int, method: str, path: str):
         client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)

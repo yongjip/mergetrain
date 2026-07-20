@@ -1109,6 +1109,39 @@ def cmd_hub_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hub_status(args: argparse.Namespace) -> int:
+    from .hub import build_hub_snapshot
+    from .registry import load_registry
+
+    snapshot = build_hub_snapshot(load_registry(args.registry))
+    if args.json:
+        dump_json(snapshot)
+        return 0
+    if not snapshot["repos"]:
+        print("no repos registered; run `mergetrain hub add <repo>`")
+        return 0
+    for entry in snapshot["repos"]:
+        name = entry.get("name") or entry["path"]
+        if not entry["ok"]:
+            print(f"{name}: ERROR - {entry.get('error', 'unknown')}")
+            continue
+        if entry.get("empty"):
+            print(f"{name}: no queue database yet")
+            continue
+        repo_snapshot = entry["snapshot"]
+        counts = repo_snapshot.get("counts", {})
+        active = " ".join(
+            f"{key}={counts[key]}"
+            for key in ("queued", "in_progress", "blocked", "failed", "needs_reconcile", "validated")
+            if counts.get(key)
+        )
+        lock = repo_snapshot.get("lock")
+        runner = "runner=active" if lock and lock.get("liveness") == "alive" else ""
+        detail = " ".join(part for part in (active or "idle", runner) if part)
+        print(f"{name}: {detail} | next: {repo_snapshot.get('next_action')}")
+    return 0
+
+
 def cmd_hub_daemon(args: argparse.Namespace) -> int:
     from .hub_daemon import hub_daemon_loop
 
@@ -1375,6 +1408,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_hub_list.add_argument("--registry", help="Override the hub registry file path")
     p_hub_list.add_argument("--json", action="store_true")
     p_hub_list.set_defaults(func=cmd_hub_list)
+    p_hub_status = hub_sub.add_parser(
+        "status",
+        help="One machine-wide read of every registered repo's queue",
+    )
+    p_hub_status.add_argument("--registry", help="Override the hub registry file path")
+    p_hub_status.add_argument("--json", action="store_true")
+    p_hub_status.set_defaults(func=cmd_hub_status)
     p_hub_daemon = hub_sub.add_parser(
         "daemon",
         help="Run the auto-only daemon across every registered repo",
