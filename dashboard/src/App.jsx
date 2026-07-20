@@ -516,6 +516,9 @@ function RepoCard({ entry, onSelect }) {
         <span className={`count-chip ${key}`} key={key}>{snapshot.counts[key]} {text}</span>
       ))
     : [];
+  if (entry.daemon === false) {
+    chips.push(<span className="count-chip daemon-off" key="daemon-off">daemon off</span>);
+  }
   const words = snapshot ? terminology(snapshot) : DEFAULT_TERMINOLOGY;
   const summary = !entry.ok
     ? entry.error

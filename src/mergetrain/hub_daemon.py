@@ -61,7 +61,7 @@ def hub_sweep(
     isolated, so one broken repo never stops the sweep. Returns one outcome
     dict per repo: ``{"path", "name"?, "ok", "outcome", "error"?}`` where
     outcome is ``processed:<n>``/``idle``/``reconcile_paused``/``skipped``/
-    ``error``.
+    ``excluded``/``error``.
     """
 
     factory = process_batch_factory or _default_factory(keep_worktree)
@@ -69,6 +69,11 @@ def hub_sweep(
     def tick_one(item: dict[str, Any]) -> dict[str, Any]:
         raw = str(item.get("path") or "")
         out: dict[str, Any] = {"path": display_path(raw)}
+        if not item.get("daemon", True):
+            # Policy-level opt-out (`hub add --no-daemon`): this repo stays on
+            # the dashboard but is never swept, regardless of any --auto jobs.
+            out.update(ok=True, outcome="excluded", error="daemon excluded by registry flag")
+            return out
         # Same isolation contract as the hub dashboard: any failure in one
         # repo becomes that repo's error outcome, so the catch is broad.
         try:

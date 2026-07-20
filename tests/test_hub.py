@@ -93,6 +93,71 @@ class HubSnapshotTests(unittest.TestCase):
                 conn.close()
 
 
+class HubSnapshotCacheTests(unittest.TestCase):
+    def test_cache_skips_rebuilds_until_queue_or_config_changes(self) -> None:
+        import mergetrain.hub as hub_module
+        from mergetrain.hub import HubSnapshotCache
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+            cache = HubSnapshotCache()
+            calls = []
+            real_build = hub_module.build_dashboard_snapshot
+
+            def counting_build(*args, **kwargs):
+                calls.append(1)
+                return real_build(*args, **kwargs)
+
+            with mock.patch.object(hub_module, "build_dashboard_snapshot", counting_build):
+                first = build_hub_snapshot(load_registry(registry), cache=cache)
+                second = build_hub_snapshot(load_registry(registry), cache=cache)
+                self.assertEqual(len(calls), 1)  # second build was a cache hit
+                self.assertEqual(
+                    second["repos"][0]["snapshot"]["counts"]["queued"],
+                    first["repos"][0]["snapshot"]["counts"]["queued"],
+                )
+
+                # A queue write touches db/-wal → fingerprint changes.
+                config = load_config(repo=live)
+                conn = connect(config.state.db)
+                try:
+                    enqueue_job(conn, task="second", branch="agent/second", worktree_path=str(live))
+                finally:
+                    conn.close()
+                third = build_hub_snapshot(load_registry(registry), cache=cache)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(third["repos"][0]["snapshot"]["counts"]["queued"], 2)
+
+                config_file = live / ".mergetrain.yaml"
+                config_file.write_text("project:\n  name: renamed\n", encoding="utf-8")
+                fourth = build_hub_snapshot(load_registry(registry), cache=cache)
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(fourth["repos"][0]["name"], "renamed")
+
+    def test_daemon_flag_flip_is_visible_through_a_warm_cache(self) -> None:
+        from mergetrain.hub import HubSnapshotCache
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+            cache = HubSnapshotCache()
+
+            warm = build_hub_snapshot(load_registry(registry), cache=cache)
+            self.assertTrue(warm["repos"][0]["daemon"])
+
+            add_repo(live, registry, daemon=False)  # registry-only change
+            flipped = build_hub_snapshot(load_registry(registry), cache=cache)
+            self.assertFalse(flipped["repos"][0]["daemon"])
+
+
 class HubRegistryDegradationTests(unittest.TestCase):
     def test_broken_registry_degrades_to_visible_error_payload(self) -> None:
         from mergetrain.hub import build_hub_snapshot_safe

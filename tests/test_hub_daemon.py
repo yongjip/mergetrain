@@ -117,6 +117,36 @@ class HubSweepTests(unittest.TestCase):
             self.assertEqual(outcomes[1]["outcome"], "processed:1")
             self.assertEqual(len(log), 1)
 
+    def test_sweep_excludes_opted_out_repos_even_with_auto_work(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            excluded = make_repo(root, "excluded")
+            seed_jobs(excluded, auto=True)
+            swept = make_repo(root, "swept")
+            seed_jobs(swept, auto=True)
+            add_repo(excluded, registry, daemon=False)
+            add_repo(swept, registry)
+
+            log: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(log),
+            )
+
+            self.assertEqual(outcomes[0]["outcome"], "excluded")
+            self.assertEqual(outcomes[1]["outcome"], "processed:1")
+            # The excluded repo's auto job was never claimed, let alone run.
+            self.assertEqual([name for name, *_ in log], ["swept"])
+            config = load_config(repo=excluded)
+            conn = connect(config.state.db)
+            try:
+                statuses = {job.status for job in list_jobs(conn)}
+            finally:
+                conn.close()
+            self.assertEqual(statuses, {"queued"})
+
     def test_serial_concurrency_never_overlaps_repo_runs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

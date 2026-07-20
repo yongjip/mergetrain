@@ -244,10 +244,15 @@ repo on one read-only board with a per-repo drill-down:
 
 ```sh
 mergetrain hub add ~/projects/app   # register (requires .mergetrain.yaml)
+mergetrain hub add ~/projects/app --no-daemon   # keep on the board, never sweep
 mergetrain hub list [--json]
 mergetrain hub                      # serve http://127.0.0.1:8765/
 mergetrain hub remove ~/projects/app
 ```
+
+`--daemon/--no-daemon` upserts hub-daemon eligibility for the repo (re-run
+`add` to flip an existing entry). Excluded repos stay on the dashboard and in
+`hub status`, but every `hub daemon` sweep reports them `excluded`.
 
 | Option | Meaning |
 |---|---|
