@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Broadcast,
   CalendarBlank,
@@ -190,16 +190,25 @@ function StatusIcon({ state, size = 22 }) {
   return <Circle size={size} weight="regular" />;
 }
 
-function Header({ snapshot, connection, now }) {
+function Header({ snapshot, connection, now, hub, repoName }) {
   const generated = relative(snapshot.generated_at, now);
   const connectionLabel = connection === "live" ? "CONNECTED" : connection === "offline" ? "DISCONNECTED" : "POLLING";
+  const preview = !hub && snapshot.project?.preview;
   return (
     <header className="topbar">
-      <div className="brand"><StackSimple size={34} weight="bold" /><strong>mergetrain</strong></div>
-      <div className="context"><FileCode size={19} /><span>{snapshot.project.name}</span></div>
-      <div className="context"><GitBranch size={19} /><span>{snapshot.project.integration_ref}</span></div>
+      <div className="brand"><StackSimple size={34} weight="bold" /><strong>mergetrain</strong>{hub && <span className="hub-badge">HUB</span>}</div>
+      {hub ? (
+        repoName
+          ? <div className="context"><FileCode size={19} /><span>{repoName}</span></div>
+          : <div className="context"><StackSimple size={19} /><span>{snapshot.repo_count} repo{snapshot.repo_count === 1 ? "" : "s"}</span></div>
+      ) : (
+        <>
+          <div className="context"><FileCode size={19} /><span>{snapshot.project.name}</span></div>
+          <div className="context"><GitBranch size={19} /><span>{snapshot.project.integration_ref}</span></div>
+        </>
+      )}
       <span className="local-badge">LOCAL</span>
-      {snapshot.project.preview && <span className="preview-badge">PREVIEW</span>}
+      {preview && <span className="preview-badge">PREVIEW</span>}
       <div className="topbar-spacer" />
       <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
       <div className="context divider"><Clock size={19} /><span>{clockTime(now)}</span></div>
@@ -458,15 +467,117 @@ function Loading() {
   return <main className="loading"><SpinnerGap size={36} className="spin" /><strong>Reading local train state…</strong></main>;
 }
 
-export function App() {
+function SingleRepoBody({ snapshot, now }) {
+  const recentJobs = snapshot.jobs || [];
+  return (
+    <div className="dashboard-grid">
+      <main className="main-column">
+        <Hero snapshot={snapshot} now={now} />
+        <PhaseRail snapshot={snapshot} />
+        <CurrentWork snapshot={snapshot} now={now} />
+        <JobCards snapshot={snapshot} />
+        <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={terminology(snapshot)} />
+      </main>
+      <aside className="side-rail">
+        <RunnerPanel snapshot={snapshot} now={now} />
+        <AttentionPanel jobs={recentJobs} />
+        <NextAction snapshot={snapshot} />
+      </aside>
+    </div>
+  );
+}
+
+const REPO_CARD_COUNTS = [
+  ["queued", "queued"],
+  ["in_progress", "running"],
+  ["blocked", "blocked"],
+  ["failed", "failed"],
+  ["needs_reconcile", "reconcile"],
+  ["validated", "validated"],
+];
+
+function repoCardState(entry) {
+  if (!entry.ok) return ["error", "ERROR"];
+  if (entry.empty) return ["waiting", "NO QUEUE"];
+  const snapshot = entry.snapshot;
+  const c = snapshot.counts || {};
+  if (c.needs_reconcile || c.blocked || c.failed || c.deployed_verify_unknown) return ["warning", "ATTENTION"];
+  if (snapshot.lock?.liveness === "alive" || c.in_progress) return ["active", "RUNNING"];
+  if ((snapshot.validated_trains || []).some((train) => train.deploy_eligible)) return ["done", "READY"];
+  return ["idle", "IDLE"];
+}
+
+function RepoCard({ entry, index, onSelect }) {
+  const [state, label] = repoCardState(entry);
+  const name = entry.name || entry.path;
+  const snapshot = entry.ok && !entry.empty ? entry.snapshot : null;
+  const chips = snapshot
+    ? REPO_CARD_COUNTS.filter(([key]) => snapshot.counts?.[key]).map(([key, text]) => (
+        <span className={`count-chip ${key}`} key={key}>{snapshot.counts[key]} {text}</span>
+      ))
+    : [];
+  const words = snapshot ? terminology(snapshot) : DEFAULT_TERMINOLOGY;
+  const summary = !entry.ok
+    ? entry.error
+    : entry.empty
+      ? "No queue database yet — enqueue the first job in this repo."
+      : actionCopy(snapshot.next_action, words)[0];
+  const clickable = Boolean(snapshot);
+  return (
+    <article
+      className={`repo-card ${state} ${clickable ? "clickable" : ""}`}
+      onClick={clickable ? () => onSelect(index) : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (event) => { if (event.key === "Enter" || event.key === " ") onSelect(index); } : undefined}
+    >
+      <div className="repo-card-head">
+        <strong>{name}</strong>
+        <span className={`state-pill ${state}`}>{label}</span>
+      </div>
+      <code className="repo-path">{entry.path}</code>
+      {!!chips.length && <div className="repo-chips">{chips}</div>}
+      <p className="repo-summary">
+        {!entry.ok && <WarningCircle size={17} weight="fill" />}
+        <span>{summary}</span>
+      </p>
+      {snapshot && (
+        <footer className="repo-card-foot">
+          <span><GitBranch size={15} />{snapshot.project.integration_ref}</span>
+          <span>{snapshot.counts?.deployed || 0} {words.completed}</span>
+        </footer>
+      )}
+    </article>
+  );
+}
+
+function HubOverview({ snapshot, onSelect }) {
+  if (!snapshot.repos.length) {
+    return (
+      <main className="hub-empty">
+        <StackSimple size={30} weight="duotone" />
+        <strong>No repos registered.</strong>
+        <span>Run <code>mergetrain hub add &lt;repo&gt;</code> to put a repo on this board.</span>
+      </main>
+    );
+  }
+  return (
+    <main className="hub-grid" aria-label="Registered repos">
+      {snapshot.repos.map((entry, index) => (
+        <RepoCard entry={entry} index={index} key={`${entry.path}-${index}`} onSelect={onSelect} />
+      ))}
+    </main>
+  );
+}
+
+function readRepoHash() {
+  const match = window.location.hash.match(/^#repo=(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function useSnapshotFeed() {
   const [snapshot, setSnapshot] = useState(null);
   const [connection, setConnection] = useState("connecting");
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const tick = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(tick);
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -504,26 +615,62 @@ export function App() {
     };
   }, []);
 
-  const recentJobs = useMemo(() => snapshot?.jobs || [], [snapshot]);
+  return [snapshot, connection];
+}
+
+export function App() {
+  const [snapshot, connection] = useSnapshotFeed();
+  const [now, setNow] = useState(new Date());
+  const [selectedRepo, setSelectedRepo] = useState(readRepoHash);
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => setSelectedRepo(readRepoHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const selectRepo = (index) => {
+    window.location.hash = index === null ? "" : `repo=${index}`;
+    setSelectedRepo(index);
+  };
+
   if (!snapshot) return <Loading />;
+
+  if (snapshot.hub) {
+    const entry = selectedRepo === null ? null : snapshot.repos[selectedRepo];
+    const drillable = entry?.ok && !entry.empty ? entry : null;
+    return (
+      <div className="app-shell">
+        <Header
+          snapshot={snapshot}
+          connection={connection}
+          now={now}
+          hub
+          repoName={drillable ? drillable.name || drillable.path : null}
+        />
+        {drillable ? (
+          <>
+            <button className="hub-back" type="button" onClick={() => selectRepo(null)}>← All repos</button>
+            <SingleRepoBody snapshot={drillable.snapshot} now={now} />
+          </>
+        ) : (
+          <HubOverview snapshot={snapshot} onSelect={selectRepo} />
+        )}
+        <footer className="page-footer"><WifiHigh size={18} /><span>Read-only local view</span><i>·</i><span>All actions are performed by mergetrain.</span></footer>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <Header snapshot={snapshot} connection={connection} now={now} />
       {snapshot.project.preview && <PreviewBanner />}
-      <div className="dashboard-grid">
-        <main className="main-column">
-          <Hero snapshot={snapshot} now={now} />
-          <PhaseRail snapshot={snapshot} />
-          <CurrentWork snapshot={snapshot} now={now} />
-          <JobCards snapshot={snapshot} />
-          <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={terminology(snapshot)} />
-        </main>
-        <aside className="side-rail">
-          <RunnerPanel snapshot={snapshot} now={now} />
-          <AttentionPanel jobs={recentJobs} />
-          <NextAction snapshot={snapshot} />
-        </aside>
-      </div>
+      <SingleRepoBody snapshot={snapshot} now={now} />
       <footer className="page-footer"><WifiHigh size={18} /><span>Read-only local view</span><i>·</i><span>All actions are performed by mergetrain.</span></footer>
     </div>
   );

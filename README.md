@@ -92,6 +92,20 @@ the exact current gate and command template, and the next safe action. `CONNECTE
 describes the browser's data stream; `RUNNER ACTIVE` separately describes the
 process that owns the train. It has no mutation endpoints or deploy controls.
 
+Running agents across several repos? Register each one and serve every queue
+on a single board:
+
+```sh
+mergetrain hub add ~/projects/app     # once per repo
+mergetrain hub                        # one dashboard for the whole machine
+```
+
+The hub is the same read-only UI in multi-repo mode — repo cards with queue
+counts, runner state, and the next safe action, each drilling down into the
+full single-repo view. It owns no queue state: every repo entry is read from
+that repo's own SQLite database, opened read-only, so observing a repo never
+creates or migrates anything inside it. See [hub](./docs/hub.md).
+
 Non-interactive callers can observe the same runner without starting a browser:
 
 ```sh
@@ -219,6 +233,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 - [Config reference](./docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
 - [Design & architecture](./docs/design.md) — the model, data model, and safety guarantees
 - [Daemon](./docs/daemon.md) · [Failure modes](./docs/failure-modes.md) — operating it day to day
+- [Hub](./docs/hub.md) — every repo on one read-only board
 - [Manage from your phone](./docs/mobile.md) — drive mergetrain via Cowork Dispatch
 - [Agent contract](./docs/agent-contract.md) — the rules agents follow
 - [Security](./docs/security.md) · [Adapter pattern](./docs/adapter-pattern.md) · [Development](./docs/development.md) · [Release](./docs/release.md)

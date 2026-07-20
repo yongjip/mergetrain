@@ -13,6 +13,8 @@ from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from .config import MergetrainConfig
+from .hub import build_hub_snapshot
+from .registry import load_registry
 from .snapshot import build_dashboard_snapshot
 
 STATIC_ROOT = Path(__file__).with_name("dashboard_dist")
@@ -56,7 +58,9 @@ def _safe_static_path(raw_path: str) -> Path | None:
     return candidate
 
 
-def make_handler(config: MergetrainConfig, *, preview: bool = False) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    snapshot_fn: Callable[[], dict], *, preview: bool = False
+) -> type[BaseHTTPRequestHandler]:
     class DashboardHandler(BaseHTTPRequestHandler):
         server_version = "mergetrain-dashboard"
         sys_version = ""
@@ -109,7 +113,7 @@ def make_handler(config: MergetrainConfig, *, preview: bool = False) -> type[Bas
                 self._send_json({"ok": True, "mode": "read-only", "preview": preview})
                 return
             if path == "/api/snapshot":
-                self._send_json(build_dashboard_snapshot(config, preview=preview))
+                self._send_json(snapshot_fn())
                 return
             if path == "/api/events":
                 self._serve_events()
@@ -144,7 +148,7 @@ def make_handler(config: MergetrainConfig, *, preview: bool = False) -> type[Bas
             last_body = b""
             try:
                 while True:
-                    body = _json_bytes(build_dashboard_snapshot(config, preview=preview))
+                    body = _json_bytes(snapshot_fn())
                     if body != last_body:
                         self.wfile.write(b"event: snapshot\n")
                         self.wfile.write(b"data: " + body + b"\n\n")
@@ -157,6 +161,18 @@ def make_handler(config: MergetrainConfig, *, preview: bool = False) -> type[Bas
     return DashboardHandler
 
 
+def _create_from_snapshot_fn(
+    snapshot_fn: Callable[[], dict],
+    *,
+    host: str,
+    port: int,
+    preview: bool = False,
+) -> DashboardHTTPServer:
+    if not STATIC_ROOT.joinpath("index.html").is_file():
+        raise FileNotFoundError("dashboard assets are missing from this installation")
+    return DashboardHTTPServer((host, port), make_handler(snapshot_fn, preview=preview))
+
+
 def create_server(
     config: MergetrainConfig,
     *,
@@ -164,9 +180,38 @@ def create_server(
     port: int = 8765,
     preview: bool = False,
 ) -> DashboardHTTPServer:
-    if not STATIC_ROOT.joinpath("index.html").is_file():
-        raise FileNotFoundError("dashboard assets are missing from this installation")
-    return DashboardHTTPServer((host, port), make_handler(config, preview=preview))
+    return _create_from_snapshot_fn(
+        lambda: build_dashboard_snapshot(config, preview=preview),
+        host=host,
+        port=port,
+        preview=preview,
+    )
+
+
+def create_hub_server(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    registry: str | None = None,
+) -> DashboardHTTPServer:
+    # The registry is re-read on every snapshot so `hub add`/`hub remove`
+    # show up live without restarting the server.
+    return _create_from_snapshot_fn(
+        lambda: build_hub_snapshot(load_registry(registry)),
+        host=host,
+        port=port,
+    )
+
+
+def _serve(server: DashboardHTTPServer, host: str, ready: Callable[[str], None] | None) -> None:
+    actual_port = int(server.server_address[1])
+    url = f"http://{host}:{actual_port}/"
+    if ready:
+        ready(url)
+    try:
+        server.serve_forever(poll_interval=0.25)
+    finally:
+        server.server_close()
 
 
 def serve_dashboard(
@@ -177,12 +222,14 @@ def serve_dashboard(
     preview: bool = False,
     ready: Callable[[str], None] | None = None,
 ) -> None:
-    server = create_server(config, host=host, port=port, preview=preview)
-    actual_port = int(server.server_address[1])
-    url = f"http://{host}:{actual_port}/"
-    if ready:
-        ready(url)
-    try:
-        server.serve_forever(poll_interval=0.25)
-    finally:
-        server.server_close()
+    _serve(create_server(config, host=host, port=port, preview=preview), host, ready)
+
+
+def serve_hub(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    registry: str | None = None,
+    ready: Callable[[str], None] | None = None,
+) -> None:
+    _serve(create_hub_server(host=host, port=port, registry=registry), host, ready)

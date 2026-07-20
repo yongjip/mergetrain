@@ -237,6 +237,29 @@ time.
 Remote binding expands access to queue metadata and status notes. Prefer the
 loopback default; there are no authentication or TLS layers in this local tool.
 
+## `hub`
+
+Serve the same dashboard in multi-repo mode, aggregating every registered
+repo on one read-only board with a per-repo drill-down:
+
+```sh
+mergetrain hub add ~/projects/app   # register (requires .mergetrain.yaml)
+mergetrain hub list [--json]
+mergetrain hub                      # serve http://127.0.0.1:8765/
+mergetrain hub remove ~/projects/app
+```
+
+| Option | Meaning |
+|---|---|
+| `--host` / `--port` / `--allow-remote` | Same semantics as `dashboard`. |
+| `--registry` | Override the roster file (default `$XDG_CONFIG_HOME/mergetrain/repos.json`, or the `MERGETRAIN_HUB_REGISTRY` environment variable). |
+
+The hub owns no queue state: each repo entry is read from that repo's own
+config and SQLite database, opened read-only — observing a repo never creates
+or migrates anything inside it, and one broken repo renders as an isolated
+error card. The registry is re-read on every snapshot, so `hub add`/`hub
+remove` show up live. Full contract in [hub.md](./hub.md).
+
 ## `run-next`
 
 Process exactly one queued job. Requires `--validate-only` or one Git push mode:

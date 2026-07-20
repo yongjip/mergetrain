@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add `mergetrain hub` (RFC #23 Phase 0): a machine-level repo registry
+  (`hub add`/`remove`/`list`) and one read-only multi-repo dashboard with
+  per-repo drill-down. The hub owns no queue state — every repo entry is
+  read from that repo's own config and SQLite database.
+- Add a read-only observer path to queue access (`connect(read_only=True)`):
+  no directory creation, no database creation, no schema migration. The hub
+  renders a repo with no queue yet as idle and a schema-mismatched or broken
+  repo as an isolated error card.
+
 ## 0.3.0 - 2026-07-20
 
 - Crash-safe reconciliation and recovery: after any crash, reconcile local queue

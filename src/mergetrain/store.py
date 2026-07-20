@@ -63,8 +63,29 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
         conn.commit()
 
 
-def connect(db_path: str | Path) -> sqlite3.Connection:
+def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
     path = Path(db_path).expanduser()
+    if read_only:
+        # Observer path (the hub): never create directories or files, never
+        # migrate another repo's state. A repo whose schema differs from this
+        # CLI is reported, not upgraded — sovereignty over repo state stays
+        # with a runner invoked inside that repo.
+        if path == Path(":memory:") or not path.is_file():
+            raise QueueError(f"queue database does not exist: {path}")
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
+        try:
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if version != SCHEMA_VERSION:
+                raise QueueError(
+                    f"queue schema version {version} does not match supported version "
+                    f"{SCHEMA_VERSION}; run mergetrain inside that repo to migrate"
+                )
+        except Exception:
+            conn.close()
+            raise
+        return conn
     if path != Path(":memory:"):
         path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
