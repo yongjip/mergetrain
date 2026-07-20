@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Harden the hub for release: a corrupt or unreadable registry file degrades
+  to a visible `registry_error` banner on a live page instead of killing the
+  snapshot endpoint and freezing the dashboard; the drill-down hash routes by
+  repo path instead of roster index, so removing a repo can no longer switch
+  the view to a different repo silently; `llms.txt`/`llms-full.txt` document
+  the hub commands and the 0.3.0 `needs_reconcile` recovery contract.
 - Add `mergetrain hub status` (RFC #23 Phase 2): one machine-wide read of
   every registered repo's queue — per-repo lines for humans, the hub
   dashboard's aggregate payload with `--json` for coordinator agents.

@@ -507,7 +507,7 @@ function repoCardState(entry) {
   return ["idle", "IDLE"];
 }
 
-function RepoCard({ entry, index, onSelect }) {
+function RepoCard({ entry, onSelect }) {
   const [state, label] = repoCardState(entry);
   const name = entry.name || entry.path;
   const snapshot = entry.ok && !entry.empty ? entry.snapshot : null;
@@ -526,10 +526,10 @@ function RepoCard({ entry, index, onSelect }) {
   return (
     <article
       className={`repo-card ${state} ${clickable ? "clickable" : ""}`}
-      onClick={clickable ? () => onSelect(index) : undefined}
+      onClick={clickable ? () => onSelect(entry.path) : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (event) => { if (event.key === "Enter" || event.key === " ") onSelect(index); } : undefined}
+      onKeyDown={clickable ? (event) => { if (event.key === "Enter" || event.key === " ") onSelect(entry.path); } : undefined}
     >
       <div className="repo-card-head">
         <strong>{name}</strong>
@@ -551,6 +551,16 @@ function RepoCard({ entry, index, onSelect }) {
   );
 }
 
+function RegistryErrorBanner({ message }) {
+  return (
+    <div className="registry-error-banner" role="alert">
+      <WarningCircle size={18} weight="fill" />
+      <strong>Registry unreadable</strong>
+      <span>{message}</span>
+    </div>
+  );
+}
+
 function HubOverview({ snapshot, onSelect }) {
   if (!snapshot.repos.length) {
     return (
@@ -563,16 +573,21 @@ function HubOverview({ snapshot, onSelect }) {
   }
   return (
     <main className="hub-grid" aria-label="Registered repos">
-      {snapshot.repos.map((entry, index) => (
-        <RepoCard entry={entry} index={index} key={`${entry.path}-${index}`} onSelect={onSelect} />
+      {snapshot.repos.map((entry) => (
+        <RepoCard entry={entry} key={entry.path} onSelect={onSelect} />
       ))}
     </main>
   );
 }
 
 function readRepoHash() {
-  const match = window.location.hash.match(/^#repo=(\d+)$/);
-  return match ? Number(match[1]) : null;
+  const match = window.location.hash.match(/^#repo=(.+)$/);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 function useSnapshotFeed() {
@@ -634,15 +649,17 @@ export function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const selectRepo = (index) => {
-    window.location.hash = index === null ? "" : `repo=${index}`;
-    setSelectedRepo(index);
+  const selectRepo = (path) => {
+    window.location.hash = path === null ? "" : `repo=${encodeURIComponent(path)}`;
+    setSelectedRepo(path);
   };
 
   if (!snapshot) return <Loading />;
 
   if (snapshot.hub) {
-    const entry = selectedRepo === null ? null : snapshot.repos[selectedRepo];
+    const entry = selectedRepo === null
+      ? null
+      : snapshot.repos.find((item) => item.path === selectedRepo) || null;
     const drillable = entry?.ok && !entry.empty ? entry : null;
     return (
       <div className="app-shell">
@@ -653,6 +670,7 @@ export function App() {
           hub
           repoName={drillable ? drillable.name || drillable.path : null}
         />
+        {snapshot.registry_error && <RegistryErrorBanner message={snapshot.registry_error} />}
         {drillable ? (
           <>
             <button className="hub-back" type="button" onClick={() => selectRepo(null)}>← All repos</button>

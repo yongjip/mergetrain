@@ -11,6 +11,8 @@ Rules:
 - Use `--auto` only after explicit unattended-deploy approval.
 - Use `run-batch --validate-only` for validation and `run-batch --deploy` for deployment.
 - After validation, deploy the exact `validated_trains` entry shown by status; do not assume newer queued jobs are included.
+- After a crash, resolve `needs_reconcile` jobs with `reconcile`/`recover` against the remote; deploy is refused while any job needs reconciling.
+- Across several repos, read the whole machine with `mergetrain hub status --json`; the hub is read-only and owns no queue state.
 
 Core commands:
 - `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`
@@ -22,6 +24,9 @@ Core commands:
 - `mergetrain run-batch --validate-only`
 - `mergetrain run-batch --deploy`
 - `mergetrain daemon --once`
+- `mergetrain reconcile` (dry-run) / `mergetrain recover` (apply, after a crash)
+- `mergetrain hub add REPO` / `mergetrain hub status --json` / `mergetrain hub` (dashboard)
+- `mergetrain hub daemon --once` (auto-only, across registered repos)
 
 Vocabulary compatibility:
 - `terminology.git_operation: integrate` makes human output prefer `--integrate`;

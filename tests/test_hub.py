@@ -93,6 +93,56 @@ class HubSnapshotTests(unittest.TestCase):
                 conn.close()
 
 
+class HubRegistryDegradationTests(unittest.TestCase):
+    def test_broken_registry_degrades_to_visible_error_payload(self) -> None:
+        from mergetrain.hub import build_hub_snapshot_safe
+
+        with tempfile.TemporaryDirectory() as td:
+            registry = Path(td) / "repos.json"
+            registry.write_text("not json", encoding="utf-8")
+
+            snapshot = build_hub_snapshot_safe(str(registry))
+
+            self.assertTrue(snapshot["ok"])
+            self.assertTrue(snapshot["hub"])
+            self.assertEqual(snapshot["repos"], [])
+            self.assertIn("unreadable", snapshot["registry_error"])
+
+    def test_hub_server_survives_registry_corruption_mid_flight(self) -> None:
+        from mergetrain.dashboard import create_hub_server
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+
+            server = create_hub_server(host="127.0.0.1", port=0, registry=str(registry))
+            port = int(server.server_address[1])
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                client.request("GET", "/api/snapshot")
+                first = json.loads(client.getresponse().read())
+                client.close()
+                self.assertEqual(first["repo_count"], 1)
+
+                registry.write_text("corrupted", encoding="utf-8")
+                client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                client.request("GET", "/api/snapshot")
+                response = client.getresponse()
+                degraded = json.loads(response.read())
+                client.close()
+                self.assertEqual(response.status, 200)
+                self.assertIn("registry_error", degraded)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+
 class HubStatusCliTests(unittest.TestCase):
     def test_hub_status_json_reports_every_registered_repo(self) -> None:
         import contextlib

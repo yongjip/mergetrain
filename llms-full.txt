@@ -24,6 +24,9 @@ Agents should:
 - `validated`: validation succeeded without push; the exact train remains deployable after approval.
 - `deployed`: deploy push succeeded; inspect `push_status` and `verify_status`
   for the independent push and post-push verification outcomes.
+- `needs_reconcile`: a crash left a possibly-landed push; run `reconcile`
+  (dry-run) then `reconcile --apply` or `recover`. Every deploy entrypoint is
+  refused while any job is in this state.
 - `canceled`: user canceled the item.
 
 ## Safe commands
@@ -36,7 +39,16 @@ mergetrain inspect JOB_ID --json
 mergetrain events --job JOB_ID --after EVENT_ID --follow --jsonl
 mergetrain logs JOB_ID --tail 200
 mergetrain gc --json
+mergetrain reconcile
+mergetrain hub list --json
+mergetrain hub status --json
 ```
+
+The hub is a machine-level, read-only aggregate over registered repos. It
+owns no queue state: every repo keeps its own SQLite database, runner lock,
+and recovery markers, and observing a repo never creates or migrates
+anything inside it. `hub status --json` returns one entry per repo with
+per-repo errors isolated.
 
 For long runs, prefer `inspect` or scoped `events --follow` over OS process
 inspection. JSONL is one object per line: persisted `type=event` rows have the
@@ -51,12 +63,20 @@ structured events do not copy subprocess output.
 ```sh
 mergetrain run-batch --deploy
 mergetrain enqueue --auto ...
+mergetrain hub daemon
+mergetrain reconcile --apply
+mergetrain recover
+mergetrain unlock --force
 mergetrain gc --apply
 mergetrain gc --apply --delete-branches
 ```
 
 Do not infer consent from context. Require explicit user/operator approval for
-unattended deploy and deploy execution.
+unattended deploy and deploy execution. `hub daemon` deploys `--auto` jobs
+across every registered repo (through each repo's own runner and lock, with a
+machine-wide `--concurrency` cap), so it carries the same approval requirement
+as `--auto` itself. Recovery applies (`reconcile --apply`, `recover`,
+`unlock --force`) mutate queue state or steal a lock; run the dry-run first.
 
 Repositories may configure `terminology.git_operation: integrate` or `push`.
 Human output and the preferred `--integrate`/`--push` alias follow that setting,
