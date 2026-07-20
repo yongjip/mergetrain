@@ -80,3 +80,28 @@ def build_hub_snapshot(registered: list[dict[str, Any]]) -> dict[str, Any]:
         "repo_count": len(repos),
         "repos": repos,
     }
+
+
+def build_hub_snapshot_safe(registry: str | None = None) -> dict[str, Any]:
+    """Hub snapshot that degrades instead of dying when the roster is broken.
+
+    The per-repo isolation contract must extend to the registry file itself:
+    a corrupt or unreadable roster becomes a visible ``registry_error`` on an
+    otherwise-empty payload, never a dead ``/api/snapshot`` and a silently
+    frozen page.
+    """
+
+    from .registry import load_registry
+
+    try:
+        registered = load_registry(registry)
+    except Exception as exc:  # noqa: BLE001 - degrade, never kill the board
+        return {
+            "ok": True,
+            "hub": True,
+            "generated_at": utc_now(),
+            "repo_count": 0,
+            "repos": [],
+            "registry_error": str(exc) or exc.__class__.__name__,
+        }
+    return build_hub_snapshot(registered)

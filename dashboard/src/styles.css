@@ -546,3 +546,17 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   .hub-grid { padding: 20px 18px 30px; grid-template-columns: 1fr; }
   .hub-back { margin-inline: 18px; }
 }
+
+.registry-error-banner {
+  margin: 18px 36px 0;
+  padding: 11px 15px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #e49a9d;
+  border-radius: 7px;
+  background: #fff1f1;
+  color: var(--red);
+  font-size: 14px;
+}
+.registry-error-banner span { color: #8a3134; }
