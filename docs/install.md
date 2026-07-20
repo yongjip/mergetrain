@@ -6,6 +6,14 @@
 python -m pip install mergetrain
 ```
 
+## Platforms
+
+Developed and continuously tested on **macOS and Linux** (Python 3.10–3.14).
+**Windows is untested** — the code is pure Python, but queue locking, worktree
+paths, and subprocess handling have not been verified there; see the
+[tracking issue](https://github.com/yongjip/mergetrain/issues/33) before
+relying on it.
+
 ## Local editable install
 
 ```sh
