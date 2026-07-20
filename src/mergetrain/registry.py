@@ -49,7 +49,15 @@ def load_registry(path: str | Path | None = None) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for item in data["repos"]:
         if isinstance(item, dict) and isinstance(item.get("path"), str) and item["path"]:
-            entries.append({"path": item["path"], "added_at": str(item.get("added_at") or "")})
+            entries.append(
+                {
+                    "path": item["path"],
+                    "added_at": str(item.get("added_at") or ""),
+                    # Pre-flag rosters default to daemon-eligible, matching the
+                    # behavior those entries already had.
+                    "daemon": bool(item.get("daemon", True)),
+                }
+            )
     return entries
 
 
@@ -72,8 +80,21 @@ def save_registry(entries: list[dict[str, Any]], path: str | Path | None = None)
     return target
 
 
-def add_repo(repo: str | Path, path: str | Path | None = None) -> dict[str, Any]:
-    """Register one repo. Requires its config so typos fail loudly, not quietly."""
+def add_repo(
+    repo: str | Path,
+    path: str | Path | None = None,
+    *,
+    daemon: bool | None = None,
+) -> dict[str, Any]:
+    """Register one repo. Requires its config so typos fail loudly, not quietly.
+
+    ``daemon`` upserts the hub-daemon eligibility flag: ``False`` excludes the
+    repo from every ``hub daemon`` sweep (policy-level opt-out for repos that
+    must never see unattended deploys), ``True`` re-enables it, and ``None``
+    leaves an existing entry unchanged (new entries default to eligible).
+    Re-running ``add`` on a registered repo is the supported way to flip the
+    flag.
+    """
 
     resolved = _normalize(repo)
     if not resolved.is_dir():
@@ -85,8 +106,15 @@ def add_repo(repo: str | Path, path: str | Path | None = None) -> dict[str, Any]
     entries = load_registry(path)
     for entry in entries:
         if entry["path"] == str(resolved):
+            if daemon is not None and entry.get("daemon", True) != daemon:
+                entry["daemon"] = daemon
+                save_registry(entries, path)
             return entry
-    entry = {"path": str(resolved), "added_at": utc_now()}
+    entry = {
+        "path": str(resolved),
+        "added_at": utc_now(),
+        "daemon": True if daemon is None else daemon,
+    }
     entries.append(entry)
     save_registry(entries, path)
     return entry

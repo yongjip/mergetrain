@@ -75,7 +75,9 @@ Do not infer consent from context. Require explicit user/operator approval for
 unattended deploy and deploy execution. `hub daemon` deploys `--auto` jobs
 across every registered repo (through each repo's own runner and lock, with a
 machine-wide `--concurrency` cap), so it carries the same approval requirement
-as `--auto` itself. Recovery applies (`reconcile --apply`, `recover`,
+as `--auto` itself. A repo registered with `hub add REPO --no-daemon` is
+excluded from every sweep as policy; do not re-enable it without explicit
+operator instruction. Recovery applies (`reconcile --apply`, `recover`,
 `unlock --force`) mutate queue state or steal a lock; run the dry-run first.
 
 Repositories may configure `terminology.git_operation: integrate` or `push`.

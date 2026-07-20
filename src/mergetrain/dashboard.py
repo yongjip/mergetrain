@@ -13,7 +13,7 @@ from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from .config import MergetrainConfig
-from .hub import build_hub_snapshot_safe
+from .hub import HubSnapshotCache, build_hub_snapshot_safe
 from .snapshot import build_dashboard_snapshot
 
 STATIC_ROOT = Path(__file__).with_name("dashboard_dist")
@@ -196,8 +196,10 @@ def create_hub_server(
     # The registry is re-read on every snapshot so `hub add`/`hub remove`
     # show up live without restarting the server; a broken roster degrades
     # to a visible registry_error payload instead of killing the stream.
+    # One cache per server: unchanged repos cost stat calls, not DB opens.
+    cache = HubSnapshotCache()
     return _create_from_snapshot_fn(
-        lambda: build_hub_snapshot_safe(registry),
+        lambda: build_hub_snapshot_safe(registry, cache=cache),
         host=host,
         port=port,
     )

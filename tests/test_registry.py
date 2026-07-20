@@ -55,6 +55,20 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(len(load_registry(registry)), 1)
 
+    def test_daemon_flag_defaults_upserts_and_survives_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root)
+            self.assertTrue(add_repo(repo, registry)["daemon"])
+            self.assertTrue(add_repo(repo, registry, daemon=None)["daemon"])
+            self.assertFalse(add_repo(repo, registry, daemon=False)["daemon"])
+            self.assertFalse(load_registry(registry)[0]["daemon"])
+            self.assertFalse(add_repo(repo, registry, daemon=None)["daemon"])
+            self.assertTrue(add_repo(repo, registry, daemon=True)["daemon"])
+            other = make_repo(root, "other")
+            self.assertFalse(add_repo(other, registry, daemon=False)["daemon"])
+
     def test_remove_reports_membership_and_keeps_repo_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

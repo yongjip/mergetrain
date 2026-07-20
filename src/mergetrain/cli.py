@@ -1164,11 +1164,12 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
 def cmd_hub_add(args: argparse.Namespace) -> int:
     from .registry import add_repo, registry_path
 
-    entry = add_repo(args.path, args.registry)
+    entry = add_repo(args.path, args.registry, daemon=args.daemon)
     if args.json:
         dump_json({"ok": True, "registry": str(args.registry or registry_path()), "entry": entry})
     else:
-        print(f"registered: {entry['path']}")
+        suffix = "" if entry.get("daemon", True) else " (hub daemon: excluded)"
+        print(f"registered: {entry['path']}{suffix}")
     return 0
 
 
@@ -1206,7 +1207,8 @@ def cmd_hub_list(args: argparse.Namespace) -> int:
         print("no repos registered; run `mergetrain hub add <repo>`")
         return 0
     for entry in entries:
-        print(entry["path"])
+        suffix = "" if entry.get("daemon", True) else "  [no-daemon]"
+        print(f"{entry['path']}{suffix}")
     return 0
 
 
@@ -1396,6 +1398,13 @@ def build_parser() -> argparse.ArgumentParser:
     hub_sub = p_hub.add_subparsers(dest="hub_command")
     p_hub_add = hub_sub.add_parser("add", help="Register a repo with the hub")
     p_hub_add.add_argument("path", nargs="?", default=".")
+    p_hub_add.add_argument(
+        "--daemon",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Whether `hub daemon` may sweep this repo (--no-daemon: policy opt-out; "
+        "re-run add to flip an existing entry; default for new entries: eligible)",
+    )
     p_hub_add.add_argument("--registry", help="Override the hub registry file path")
     p_hub_add.add_argument("--json", action="store_true")
     p_hub_add.set_defaults(func=cmd_hub_add)

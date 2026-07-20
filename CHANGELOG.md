@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add a per-repo hub-daemon opt-out: `hub add REPO --no-daemon` keeps a repo
+  on the dashboard but excludes it from every `hub daemon` sweep (policy-level
+  guarantee for repos that must never see unattended deploys); re-run with
+  `--daemon` to re-enable. Excluded repos report the `excluded` outcome and
+  show a "daemon off" chip on their card.
+- Cache hub snapshots by file fingerprint: a repo's dashboard entry is reused
+  while its config and queue database (including the SQLite `-wal`) have
+  unchanged mtime/size, replacing a YAML parse plus a database open per repo
+  per second with a few `stat` calls. Registry-derived fields (the daemon
+  flag) bypass the cache, and error entries are never cached.
 - Harden the hub for release: a corrupt or unreadable registry file degrades
   to a visible `registry_error` banner on a live page instead of killing the
   snapshot endpoint and freezing the dashboard; the drill-down hash routes by

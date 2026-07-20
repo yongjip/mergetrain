@@ -70,6 +70,25 @@ The `--auto` flag remains the explicit unattended-deploy approval boundary,
 exactly as with the single-repo daemon. The hub daemon never touches
 manually enqueued jobs.
 
+### Per-repo opt-out
+
+Some repos must never see unattended deploys as a matter of policy, not just
+because no `--auto` job happens to exist. Register them with
+`mergetrain hub add REPO --no-daemon`: they stay on the dashboard (marked
+"daemon off") but every `hub daemon` sweep reports them `excluded` without
+claiming anything. Re-run `mergetrain hub add REPO --daemon` to re-enable.
+The flag lives in the registry, not the repo.
+
+## Snapshot caching
+
+The dashboard rebuilds the hub payload once per second per connected client.
+To keep that cheap, the server reuses a repo's entry while its config file
+and queue database (including the SQLite `-wal`, which every commit touches)
+have unchanged mtime/size fingerprints — a handful of `stat` calls instead
+of a YAML parse and a database open. Any queue write, config edit, or
+`hub add`/`hub remove`/flag flip is visible on the next snapshot; error
+entries are never cached.
+
 ## Relationship to `mergetrain dashboard`
 
 `mergetrain dashboard` (single repo, run from inside that repo) is unchanged.
