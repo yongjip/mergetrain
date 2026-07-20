@@ -31,10 +31,16 @@ python -m twine check --strict dist/*
 
 Create two GitHub Environments in repository settings:
 
-| Environment | Purpose | Recommended protection |
+| Environment | Purpose | Protection |
 | --- | --- | --- |
-| `testpypi` | Manual TestPyPI rehearsal | Required reviewer; restrict to `main` |
-| `pypi` | Production PyPI release | Required reviewer; restrict to protected tags |
+| `testpypi` | Manual TestPyPI rehearsal | No required reviewer (deliberate, 2026-07-21) |
+| `pypi` | Production PyPI release | No required reviewer (deliberate, 2026-07-21) |
+
+Both environments intentionally carry **no manual approval gate**: publishing
+the GitHub Release is itself the deliberate human act that authorizes the
+upload, and adding a second click on top of it only slowed releases down.
+OIDC still scopes credentials to these exact workflows, and versions are
+immutable once published.
 
 Then register one pending publisher on each package index. The values must
 match exactly.
@@ -64,16 +70,18 @@ On <https://pypi.org/manage/account/publishing/>:
 | Environment | `pypi` |
 
 No GitHub or PyPI API token is stored in repository secrets. Protect both
-accounts with 2FA. Environment approval is the final human release boundary.
+accounts with 2FA. **Publishing the GitHub Release is the final human release
+boundary** — once it is published, `release.yml` builds and uploads without
+further prompts.
 
 ## Rehearse on TestPyPI
 
 After the release-preparation pull request is merged:
 
-1. Open **Actions → TestPyPI → Run workflow** on `main`.
-2. Approve the `testpypi` environment deployment.
-3. Wait for the publish job to complete.
-4. Install the exact version from TestPyPI in a fresh environment:
+1. Open **Actions → TestPyPI → Run workflow** on `main`. Triggering the run
+   is the deliberate act; it publishes without further approval.
+2. Wait for the publish job to complete.
+3. Install the exact version from TestPyPI in a fresh environment:
 
    ```sh
    python -m venv /tmp/mergetrain-testpypi
@@ -88,7 +96,9 @@ an upload that already succeeded.
 
 ## Publish to production
 
-1. Confirm the TestPyPI rehearsal and all `main` CI checks passed.
+1. Confirm all `main` CI checks passed (the TestPyPI rehearsal is optional —
+   PR CI already builds both distributions, runs `twine check --strict`, and
+   smoke-installs the wheel in a clean environment).
 2. Update the version and dated changelog heading for the intended release.
 3. Create an annotated tag on the exact verified `main` commit and push it:
 
@@ -107,8 +117,9 @@ an upload that already succeeded.
      --title "mergetrain 0.1.0"
    ```
 
-5. Approve the `pypi` environment deployment after the unprivileged build job
-   passes. Publishing the GitHub Release triggers `.github/workflows/release.yml`.
+5. Publishing the GitHub Release triggers `.github/workflows/release.yml`,
+   which builds and uploads to PyPI with no further prompt — the Release
+   publication in step 4 **is** the approval.
 6. Verify <https://pypi.org/project/mergetrain/> and install from PyPI in a
    fresh environment.
 
