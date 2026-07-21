@@ -7,6 +7,12 @@
 
 **A local-first merge-and-push queue for coding-agent worktrees.**
 
+<p align="center">
+  <img src="./docs/images/mergetrain-explainer.gif"
+       alt="What happens when 3 AI agents push to main at once. Without a queue they collide and break main. With a merge train they enqueue, one runner assembles main + A + B + C, gates run once on the combination, and one atomic push keeps main green."
+       width="720">
+</p>
+
 mergetrain keeps its queue, coordination, merge assembly, and gate execution on
 your machine. Coding agents commit in separate worktrees; one local runner
 serializes their branches, validates the exact train, and pushes only after

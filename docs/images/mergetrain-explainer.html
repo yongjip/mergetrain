@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Mergetrain — visual explainer</title>
+<style>
+  :root{
+    color-scheme:light;
+    --paper:#fefefe;
+    --ink:#0c1f34;
+    --muted:#4c6278;
+    --red:#e6402f;
+    --green:#149451;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper)}
+  body{min-width:320px}
+  main{width:min(100%,1254px);margin-inline:auto}
+  svg#art{
+    display:block;
+    width:100%;
+    height:auto;
+    background:var(--paper);
+    text-rendering:geometricPrecision;
+    shape-rendering:geometricPrecision;
+  }
+  .flow{
+    fill:none;
+    stroke-linecap:round;
+    pointer-events:none;
+    stroke-dasharray:1 15;
+    animation:march 2.4s linear infinite;
+  }
+  .flow.red{stroke:#ff6a55;stroke-width:5.5;opacity:.72}
+  .flow.grn{stroke:#1cab63;stroke-width:5.5;opacity:.8}
+  @keyframes march{to{stroke-dashoffset:-64}}
+  @media (prefers-reduced-motion:reduce){.flow{display:none}}
+  @media print{
+    @page{size:1254px 1254px;margin:0}
+    main{width:1254px}
+    .flow{display:none}
+  }
+</style>
+</head>
+<body>
+<main>
+<svg id="art" viewBox="0 0 1254 1254" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">What happens when three AI agents push to main at once?</title>
+  <desc id="svg-desc">Without a queue, agents collide and can break main. With Mergetrain, agents enqueue, one runner assembles the train, gates run once on the combined result, and one atomic push keeps main green.</desc>
+
+  <defs>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.2" markerHeight="5.2" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#e6402f"/>
+    </marker>
+    <marker id="arrow-ink" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.6" markerHeight="5.6" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#1d2c3e"/>
+    </marker>
+
+    <symbol id="bot" viewBox="0 0 48 48">
+      <path d="M24 4v6" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+      <circle cx="24" cy="4" r="3.1" fill="currentColor"/>
+      <rect x="7" y="10" width="34" height="29" rx="10" fill="currentColor"/>
+      <rect x="2.5" y="18" width="5.5" height="13" rx="2.7" fill="currentColor"/>
+      <rect x="40" y="18" width="5.5" height="13" rx="2.7" fill="currentColor"/>
+      <rect x="13" y="17" width="22" height="15" rx="6" fill="#fff"/>
+      <circle cx="19" cy="24" r="2.15" fill="currentColor"/>
+      <circle cx="29" cy="24" r="2.15" fill="currentColor"/>
+      <path d="M20 29h8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    </symbol>
+
+    <symbol id="ic-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.5"/>
+      <path d="M12 7.5V12l3.5 2.2"/>
+    </symbol>
+    <symbol id="ic-db" viewBox="0 0 28 28">
+      <ellipse cx="14" cy="6.5" rx="8.5" ry="3.3"/>
+      <path d="M5.5 6.5v13c0 1.8 3.8 3.3 8.5 3.3s8.5-1.5 8.5-3.3v-13"/>
+      <path d="M5.5 12c0 1.8 3.8 3.3 8.5 3.3s8.5-1.5 8.5-3.3M5.5 17.5c0 1.8 3.8 3.3 8.5 3.3s8.5-1.5 8.5-3.3"/>
+    </symbol>
+    <symbol id="ic-shield" viewBox="0 0 44 52">
+      <path d="M22 3 40 10v13c0 12.2-7.5 20.7-18 25C11.5 43.7 4 35.2 4 23V10Z"/>
+      <path d="m13 25 6 6 13-14"/>
+    </symbol>
+    <symbol id="ic-lock" viewBox="0 0 24 24">
+      <rect x="5.5" y="10" width="13" height="10" rx="2"/>
+      <path d="M8.5 10V7a3.5 3.5 0 0 1 7 0v3"/>
+    </symbol>
+    <symbol id="ic-branch" viewBox="0 0 38 38">
+      <circle cx="10" cy="7" r="4"/>
+      <circle cx="10" cy="31" r="4"/>
+      <circle cx="29" cy="13" r="4"/>
+      <path d="M10 11v16M10 19h8c6 0 11-2 11-6"/>
+    </symbol>
+    <symbol id="ic-term" viewBox="0 0 24 24">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+      <path d="m7.5 9 3 3-3 3M13.5 15h3"/>
+    </symbol>
+    <symbol id="ic-laptop" viewBox="0 0 30 24">
+      <rect x="6" y="3" width="18" height="14" rx="1.5"/>
+      <path d="M2.5 20h25l-2.5-3H5Z"/>
+    </symbol>
+    <symbol id="ic-loco" viewBox="0 0 64 48">
+      <path d="M5 35h53M12 35V16h23l8 8h13v11M43 24h13M19 16V8h10v8"/>
+      <path d="M48 12h7M52 12V6M47 6h10"/>
+      <circle cx="17" cy="40" r="4"/>
+      <circle cx="33" cy="40" r="4"/>
+      <circle cx="51" cy="40" r="4"/>
+    </symbol>
+    <symbol id="ic-gh" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+    </symbol>
+
+    <g id="burst">
+      <path d="M0-34 8-18 20-30 20-12 37-16 27-2 43 7 25 11 30 29 12 22 2 40-8 22-27 31-22 12-42 8-27-2-38-16-20-12-20-31-8-18Z" fill="#e33f2e"/>
+      <path d="M0-26 7-12 19-20 16-5 31 0 16 7 20 23 6 14 0 30-6 14-21 23-16 7-31 0-16-5-19-20-7-12Z" fill="#f3a31a"/>
+      <path d="M0-17 5-7 16-9 9 0 16 10 5 8 0 18-5 8-16 10-9 0-16-9-5-7Z" fill="#ffdc3f"/>
+      <circle r="5.5" fill="#fff8d6"/>
+    </g>
+
+    <style>
+      text{
+        font-family:"Inter","Inter Display",ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+        fill:#0c1f34;
+        font-kerning:normal;
+      }
+      .label{font-size:20px;font-weight:800;letter-spacing:1.8px;fill:#365d80}
+      .headline{font-size:55px;font-weight:800;letter-spacing:-1.65px}
+      .badge{font-size:21px;font-weight:800;letter-spacing:.15px;fill:#fff}
+      .card-title{font-size:23px;font-weight:800;letter-spacing:-.35px}
+      .card-sub{font-size:17px;font-weight:500;fill:#4d627a}
+      .reason{font-size:21px;font-weight:650;letter-spacing:-.25px;fill:#17161b}
+      .note{font-size:18px;font-weight:500;fill:#405c75}
+      .step-num{font-size:21px;font-weight:800;fill:#fff}
+      .step-title{font-size:23px;font-weight:800;letter-spacing:-.35px}
+      .step-sub{font-size:17px;font-weight:500;fill:#405c75}
+      .box-title{font-size:21px;font-weight:800;letter-spacing:-.25px}
+      .box-sub{font-size:16px;font-weight:500;fill:#405c75}
+      .train-label{font-size:24px;font-weight:800;letter-spacing:-.35px}
+      .footer{font-size:18px;font-weight:650;fill:#455c73}
+      .payoff-title{fill:#fff}
+      .payoff-sub{fill:#c3d1dc}
+      .green-text{fill:#149451}
+      .mit-text{fill:#607386}
+      .mono{fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+      .mono-strong{fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+    </style>
+  </defs>
+
+  <rect width="1254" height="1254" fill="#fefefe"/>
+
+  <!-- Header -->
+  <text x="28" y="55" class="label">MERGETRAIN · A LOCAL MERGE TRAIN FOR AI CODING AGENTS</text>
+  <text x="28" y="114" class="headline">What happens when 3 AI agents</text>
+  <text x="28" y="176" class="headline">push to <tspan fill="#e6402f">main</tspan> at once?</text>
+
+  <!-- Without a queue -->
+  <rect x="29" y="216" width="1196" height="325" rx="20" fill="#fff4f3" stroke="#e79b91" stroke-width="2"/>
+  <rect x="55" y="207" width="272" height="40" rx="11" fill="#e6402f"/>
+  <circle cx="75" cy="227" r="12" fill="#fff"/>
+  <path d="m70 222 10 10m0-10-10 10" stroke="#e6402f" stroke-width="3" stroke-linecap="round"/>
+  <text x="99" y="235" class="badge">WITHOUT A QUEUE</text>
+
+  <!-- Agent cards -->
+  <g>
+    <rect x="64" y="258" width="282" height="68" rx="12" fill="#fffaf0" stroke="#eca71d" stroke-width="1.7"/>
+    <use href="#bot" x="83" y="270" width="46" height="46" color="#f2a51b"/>
+    <text x="170" y="291" class="card-title">Agent A</text>
+    <text x="170" y="316" class="card-sub">worktree/a</text>
+
+    <rect x="64" y="335" width="282" height="68" rx="12" fill="#f1faf5" stroke="#38a26d" stroke-width="1.7"/>
+    <use href="#bot" x="83" y="347" width="46" height="46" color="#35a46d"/>
+    <text x="170" y="368" class="card-title">Agent B</text>
+    <text x="170" y="393" class="card-sub">worktree/b</text>
+
+    <rect x="64" y="412" width="282" height="68" rx="12" fill="#f4f1fb" stroke="#7653b7" stroke-width="1.7"/>
+    <use href="#bot" x="83" y="424" width="46" height="46" color="#7653b7"/>
+    <text x="170" y="445" class="card-title">Agent C</text>
+    <text x="170" y="470" class="card-sub">worktree/c</text>
+  </g>
+
+  <!-- Collision paths: solid structure + restrained moving particles -->
+  <g fill="none" stroke="#e6402f" stroke-width="4" stroke-linecap="round">
+    <path d="M346 291C422 279 465 303 500 340" marker-end="url(#arrow-red)"/>
+    <path d="M346 369H480" marker-end="url(#arrow-red)"/>
+    <path d="M346 448C423 454 466 428 500 395" marker-end="url(#arrow-red)"/>
+    <path d="M544 340C586 301 619 301 664 306" marker-end="url(#arrow-red)"/>
+    <path d="M545 369H664" marker-end="url(#arrow-red)"/>
+    <path d="M544 395C586 433 620 435 664 428" marker-end="url(#arrow-red)"/>
+  </g>
+  <g>
+    <path class="flow red" d="M346 291C422 279 465 303 500 340"/>
+    <path class="flow red" d="M346 369H480"/>
+    <path class="flow red" d="M346 448C423 454 466 428 500 395"/>
+    <path class="flow red" d="M544 340C586 301 619 301 664 306"/>
+    <path class="flow red" d="M545 369H664"/>
+    <path class="flow red" d="M544 395C586 433 620 435 664 428"/>
+  </g>
+  <use href="#burst" transform="translate(522 369) scale(.75)"/>
+
+  <!-- Broken main -->
+  <rect x="680" y="270" width="212" height="192" rx="15" fill="#fde3de" stroke="#e6402f" stroke-width="2.2"/>
+  <text x="786" y="343" text-anchor="middle" font-size="34" font-weight="800" letter-spacing="-.8">main</text>
+  <text x="786" y="378" text-anchor="middle" font-size="22" font-weight="500">broken</text>
+  <path d="M786 398 811 442H761Z" fill="#e6402f"/>
+  <path d="M786 412v14" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="786" cy="434" r="2.6" fill="#fff"/>
+
+  <!-- Failure reasons -->
+  <g>
+    <path d="m939 263 13 13m0-13-13 13" stroke="#e6402f" stroke-width="4.2" stroke-linecap="round"/>
+    <text x="966" y="273" class="reason">force-push clobbers</text>
+    <text x="966" y="304" class="reason">a sibling’s landing</text>
+    <path d="M935 326H1192" stroke="#e8aaa1" stroke-width="1.5" stroke-dasharray="4 5"/>
+
+    <path d="m939 348 13 13m0-13-13 13" stroke="#e6402f" stroke-width="4.2" stroke-linecap="round"/>
+    <text x="966" y="359" class="reason">each branch green,</text>
+    <text x="966" y="390" class="reason">combined = red</text>
+    <path d="M935 412H1192" stroke="#e8aaa1" stroke-width="1.5" stroke-dasharray="4 5"/>
+
+    <path d="m939 433 13 13m0-13-13 13" stroke="#e6402f" stroke-width="4.2" stroke-linecap="round"/>
+    <text x="966" y="445" class="reason">you re-serialize</text>
+    <text x="966" y="476" class="reason">your work by hand</text>
+  </g>
+
+  <use href="#ic-clock" x="70" y="496" width="26" height="26" color="#e6402f" class="mono"/>
+  <text x="108" y="518" class="note">The time you saved running agents in parallel is spent again integrating them.</text>
+
+  <!-- With a merge train -->
+  <rect x="30" y="586" width="1194" height="561" rx="20" fill="#f6fdfa" stroke="#149451" stroke-width="2.2"/>
+  <rect x="55" y="565" width="299" height="41" rx="11" fill="#149451"/>
+  <path d="m67 586 8 8 15-20" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="101" y="594" class="badge">WITH A MERGE TRAIN</text>
+
+  <path d="M56 722H1194M56 819H1194M56 925H1194" stroke="#d6ebe2" stroke-width="1.4"/>
+
+  <!-- Step 1 -->
+  <circle cx="84" cy="642" r="19" fill="#149451"/>
+  <text x="84" y="650" text-anchor="middle" class="step-num">1</text>
+  <text x="123" y="647" class="step-title">Agents enqueue — and stop</text>
+  <text x="123" y="675" class="step-sub">nobody ever pushes main directly</text>
+  <use href="#bot" x="123" y="690" width="32" height="32" color="#f2a51b"/>
+  <use href="#bot" x="161" y="690" width="32" height="32" color="#35a46d"/>
+  <use href="#bot" x="199" y="690" width="32" height="32" color="#7653b7"/>
+
+  <rect x="629" y="619" width="153" height="59" rx="10" fill="#fff" stroke="#eca71d" stroke-width="2"/>
+  <text x="705.5" y="656" text-anchor="middle" font-size="24" font-weight="800"><tspan fill="#eca71d">A</tspan><tspan> · </tspan><tspan fill="#35a46d">B</tspan><tspan> · </tspan><tspan fill="#7653b7">C</tspan></text>
+  <path d="M790 648H851" stroke="#1d2c3e" stroke-width="4" fill="none" marker-end="url(#arrow-ink)"/>
+  <path class="flow grn" d="M790 648H851"/>
+
+  <rect x="862" y="615" width="298" height="68" rx="12" fill="#eef6ff" stroke="#2d79c2" stroke-width="2.2"/>
+  <text x="1001" y="646" text-anchor="middle" class="box-title">FIFO queue</text>
+  <text x="1001" y="671" text-anchor="middle" class="box-sub">SQLite · crash-safe</text>
+  <use href="#ic-db" x="1105" y="628" width="39" height="39" color="#425d75" class="mono"/>
+
+  <path d="M1002 683V708H866V736" stroke="#b9c6d2" stroke-width="2.5" fill="none" stroke-dasharray="7 7"/>
+  <path class="flow grn" d="M1002 683V708H866V736"/>
+
+  <!-- Step 2 -->
+  <circle cx="82" cy="756" r="19" fill="#149451"/>
+  <text x="82" y="764" text-anchor="middle" class="step-num">2</text>
+  <text x="123" y="760" class="step-title">One runner assembles the train</text>
+  <text x="123" y="788" class="step-sub">in a throwaway worktree, in order</text>
+
+  <rect x="610" y="736" width="570" height="68" rx="13" fill="#f1ecfb" stroke="#7653b7" stroke-width="2.2"/>
+  <rect x="629" y="747" width="99" height="45" rx="9" fill="#fff" stroke="#7653b7" stroke-width="2"/>
+  <text x="678.5" y="777" text-anchor="middle" class="train-label">main</text>
+  <rect x="747" y="747" width="89" height="45" rx="9" fill="#fff" stroke="#eca71d" stroke-width="2"/>
+  <text x="791.5" y="777" text-anchor="middle" class="train-label" fill="#38201d">+A</text>
+  <rect x="855" y="747" width="89" height="45" rx="9" fill="#fff" stroke="#35a46d" stroke-width="2"/>
+  <text x="899.5" y="777" text-anchor="middle" class="train-label green-text">+B</text>
+  <rect x="963" y="747" width="86" height="45" rx="9" fill="#fff" stroke="#eca71d" stroke-width="2"/>
+  <text x="1006" y="777" text-anchor="middle" class="train-label" fill="#38201d">+C</text>
+  <path d="M1055 770H1090" stroke="#1d2c3e" stroke-width="3.2" marker-end="url(#arrow-ink)"/>
+  <use href="#ic-loco" x="1098" y="747" width="61" height="46" color="#1d2c3e" class="mono-strong"/>
+
+  <path d="M866 804V836" stroke="#b9c6d2" stroke-width="2.5" fill="none" stroke-dasharray="7 7"/>
+  <path class="flow grn" d="M866 804V836"/>
+
+  <!-- Step 3 -->
+  <circle cx="82" cy="853" r="19" fill="#149451"/>
+  <text x="82" y="861" text-anchor="middle" class="step-num">3</text>
+  <text x="123" y="858" class="step-title">Gates run ONCE on the combination</text>
+  <text x="123" y="886" class="step-sub">fails together? bisect names the</text>
+  <text x="123" y="911" class="step-sub">conflicting pair</text>
+
+  <rect x="610" y="836" width="570" height="72" rx="13" fill="#dff6e9" stroke="#149451" stroke-width="2.2"/>
+  <text x="846" y="870" text-anchor="middle" class="box-title">tests · lint · scans ✓</text>
+  <text x="846" y="896" text-anchor="middle" class="box-sub">the exact train you approve is what ships</text>
+  <use href="#ic-shield" x="1104" y="846" width="52" height="58" color="#203c55" class="mono-strong"/>
+
+  <path d="M866 908V925H721V944" stroke="#b9c6d2" stroke-width="2.5" fill="none" stroke-dasharray="7 7"/>
+  <path class="flow grn" d="M866 908V925H721V944"/>
+
+  <!-- Step 4 -->
+  <circle cx="82" cy="961" r="19" fill="#149451"/>
+  <text x="82" y="969" text-anchor="middle" class="step-num">4</text>
+  <text x="123" y="961" class="step-title">One atomic push, exactly once</text>
+  <text x="123" y="991" class="step-sub">write-ahead marker — safe even if</text>
+  <text x="123" y="1017" class="step-sub">the laptop dies mid-push</text>
+
+  <rect x="615" y="944" width="210" height="68" rx="12" fill="#fff" stroke="#1d2c3e" stroke-width="2.2"/>
+  <text x="713" y="975" text-anchor="middle" class="box-title">git push</text>
+  <text x="713" y="999" text-anchor="middle" class="box-sub">--atomic</text>
+  <use href="#ic-lock" x="777" y="964" width="28" height="28" color="#1d2c3e" class="mono"/>
+  <path d="M826 978H892" stroke="#1d2c3e" stroke-width="4" fill="none" marker-end="url(#arrow-ink)"/>
+  <path class="flow grn" d="M826 978H892"/>
+
+  <rect x="905" y="943" width="271" height="69" rx="12" fill="#dff6e9" stroke="#149451" stroke-width="2.2"/>
+  <use href="#ic-branch" x="936" y="958" width="42" height="42" color="#203c55" class="mono-strong"/>
+  <text x="1040" y="973" text-anchor="middle" class="box-title">main</text>
+  <text x="1040" y="999" text-anchor="middle" class="box-sub green-text">green</text>
+
+  <!-- Payoff -->
+  <rect x="75" y="1041" width="1093" height="88" rx="15" fill="#0d2034"/>
+  <circle cx="185" cy="1085" r="27" fill="#25ad67"/>
+  <path d="m171 1085 9 9 19-24" stroke="#fff" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="650" y="1080" text-anchor="middle" font-size="23" font-weight="800" class="payoff-title">main stays green · agents never push · your parallelism stays parallel</text>
+  <use href="#ic-laptop" x="282" y="1092" width="27" height="22" color="#b9cad8" class="mono"/>
+  <text x="316" y="1111" text-anchor="start" font-size="17.5" font-weight="500" class="payoff-sub">queue, lock, gates and recovery all live on your machine — no hosted service</text>
+
+  <!-- Footer -->
+  <use href="#ic-gh" x="32" y="1183" width="30" height="30" color="#0c1f34"/>
+  <text x="78" y="1208" class="footer">github.com/yongjip/mergetrain</text>
+  <use href="#ic-term" x="879" y="1184" width="28" height="28" color="#455c73" class="mono"/>
+  <text x="916" y="1208" class="footer">pip install mergetrain</text>
+  <text x="1122" y="1208" class="footer">·</text>
+  <rect x="1140" y="1187" width="68" height="28" rx="8" fill="#edf1f4"/>
+  <text x="1174" y="1207" text-anchor="middle" font-size="16" font-weight="700" class="mit-text">MIT</text>
+</svg>
+</main>
+<script>
+/* live view runs the pure-CSS animation; ?p=<0..1> freezes every flow line at
+   one phase so headless Chrome can capture a seamless GIF loop deterministically */
+(()=>{const q=new URLSearchParams(location.search).get("p");if(q===null)return;
+  const st=document.createElement("style");
+  st.textContent=".flow{animation-play-state:paused!important;animation-delay:"+(-2.4*(parseFloat(q)||0))+"s!important}";
+  (document.head||document.documentElement).appendChild(st);})();
+</script>
+</body>
+</html>
