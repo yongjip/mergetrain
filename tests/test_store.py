@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -468,6 +469,141 @@ class StoreTests(unittest.TestCase):
     def test_terminal_job_cannot_be_canceled(self) -> None:
         conn = self.make_conn()
         job = enqueue_job(conn, task="a", branch="a")
+        mark_job(conn, job.id, status="deployed")
+        with self.assertRaises(QueueError):
+            cancel_job(conn, job.id)
+
+
+class ConcurrencyAndTransitionTests(unittest.TestCase):
+    """Real cross-thread contention on one DB file (guarantee #2, the lease
+    fence) plus the actual behavior of the mark_job state machine."""
+
+    def _db(self) -> Path:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        db = Path(td.name) / "queue.sqlite"
+        connect(db).close()  # create the schema once, up front
+        return db
+
+    def _race(self, db, callers):
+        # Run each (name, fn) on its OWN connection, released together by a
+        # Barrier so they hit BEGIN IMMEDIATE simultaneously — a genuine race,
+        # unlike the other lock tests which drive one connection sequentially.
+        barrier = threading.Barrier(len(callers))
+        out: dict[str, tuple[str, object]] = {}
+
+        def run(name, fn):
+            try:
+                conn = connect(db)
+            except BaseException as exc:  # pragma: no cover - setup failure
+                out[name] = ("error", repr(exc))
+                return
+            try:
+                barrier.wait(timeout=10)
+                out[name] = ("ok", fn(conn))
+            except LockHeld:
+                out[name] = ("fenced", None)
+            except BaseException as exc:  # pragma: no cover - unexpected
+                out[name] = ("error", repr(exc))
+            finally:
+                conn.close()
+
+        threads = [threading.Thread(target=run, args=(n, f)) for n, f in callers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        return out
+
+    def test_two_runners_racing_the_runner_lock_exactly_one_wins(self) -> None:
+        db = self._db()
+        pid = os.getpid()  # a live pid, so the loser is FENCED and never steals
+        owners = [f"runnerA:{pid}", f"runnerB:{pid}"]
+        out = self._race(
+            db, [(o, lambda c, o=o: acquire_runner_lock(c, owner=o)) for o in owners]
+        )
+
+        self.assertNotIn("error", [v[0] for v in out.values()], out)
+        self.assertEqual(sorted(v[0] for v in out.values()), ["fenced", "ok"], out)
+        winner = next(o for o, v in out.items() if v[0] == "ok")
+        conn = connect(db)
+        self.addCleanup(conn.close)
+        lock = get_lock(conn)
+        self.assertIsNotNone(lock)
+        self.assertEqual(lock.owner, winner)
+        self.assertEqual(lock.token, out[winner][1].token)
+
+    def test_two_runners_racing_claim_all_queued_get_no_split_batch(self) -> None:
+        db = self._db()
+        seed = connect(db)
+        try:
+            for i in range(3):
+                enqueue_job(seed, task=f"t{i}", branch=f"agent/{i}")
+        finally:
+            seed.close()
+        pid = os.getpid()
+        owners = [f"runnerA:{pid}", f"runnerB:{pid}"]
+        out = self._race(
+            db, [(o, lambda c, o=o: claim_all_queued(c, owner=o)) for o in owners]
+        )
+
+        self.assertNotIn("error", [v[0] for v in out.values()], out)
+        self.assertEqual(sorted(v[0] for v in out.values()), ["fenced", "ok"], out)
+        winner = next(o for o, v in out.items() if v[0] == "ok")
+        claimed = out[winner][1]
+        self.assertEqual(len(claimed), 3)  # the winner got the WHOLE batch
+        conn = connect(db)
+        self.addCleanup(conn.close)
+        tokens = set()
+        for job in claimed:
+            row = get_job(conn, job.id)
+            self.assertEqual(row.status, "in_progress")
+            tokens.add(row.claim_token)
+        self.assertEqual(len(tokens), 1)  # one token — no split-batch double claim
+
+    def test_mark_job_rejects_unknown_status_and_stale_claim_token(self) -> None:
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="agent/a")
+        # an unknown status value is rejected before any row is touched
+        with self.assertRaises(QueueError):
+            mark_job(conn, job.id, status="bogus")
+        # claim it for one runner, giving the row an in_progress claim token
+        claim_all_queued(conn, owner=f"runnerA:{os.getpid()}")
+        # a second runner presenting the WRONG token cannot mark this job
+        with self.assertRaises(LostLease):
+            mark_job(
+                conn, job.id, status="validated", expected_claim_token="not-the-real-token"
+            )
+        # an empty claim token is rejected immediately
+        with self.assertRaises(LostLease):
+            mark_job(conn, job.id, status="validated", expected_claim_token="")
+
+    def test_mark_job_has_no_transition_graph_documents_current_behavior(self) -> None:
+        # DOCUMENTS CURRENT BEHAVIOR (not a desired invariant): mark_job enforces
+        # no legal-transition graph and no terminal guard at the store layer —
+        # the guards live in cancel_job/dismiss_job and the claim-token fence.
+        # Pinned so a future change here is a conscious, reviewed edit.
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="agent/a")
+        mark_job(
+            conn, job.id, status="deployed",
+            deploy_sha="d" * 40, validated_head_sha="h" * 40, note="shipped",
+        )
+        self.assertEqual(get_job(conn, job.id).status, "deployed")
+
+        # an unfenced mark_job REOPENS the terminal row (no store-level guard)...
+        reopened = mark_job(conn, job.id, status="queued")
+        self.assertEqual(reopened.status, "queued")
+        # ...unconditionally WIPES the free-form note (a real footgun)...
+        self.assertEqual(reopened.note, "")
+        # ...but COALESCE-protected artifacts SURVIVE, so a reopened job still
+        # carries stale terminal shas.
+        self.assertEqual(reopened.deploy_sha, "d" * 40)
+        self.assertEqual(reopened.validated_head_sha, "h" * 40)
+
+        # By contrast the higher-level entrypoint DOES guard terminal state.
         mark_job(conn, job.id, status="deployed")
         with self.assertRaises(QueueError):
             cancel_job(conn, job.id)
