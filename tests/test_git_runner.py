@@ -1195,5 +1195,28 @@ class MergeConflictTests(unittest.TestCase):
             self.assertEqual(git(root / "remote.git", "show", "main:app.txt"), "x-change")
 
 
+class JobOutcomeCategoryTests(unittest.TestCase):
+    def test_gate_named_push_is_not_mislabeled_push_failed(self) -> None:
+        from mergetrain.models import Job
+        from mergetrain.observability import job_outcome
+
+        # A gate failure whose note merely contains "push" (e.g. a gate called
+        # "no-force-push") ran before any push — push_status stays not_run, so it
+        # must categorize as gate_failed, not push_failed, which would steer
+        # remediation toward branch-protection instead of the failing gate.
+        gate = Job(
+            id=1, task="a", branch="agent/a", status="failed",
+            push_status="not_run", note="gate 'no-force-push' failed: exit 1",
+        )
+        self.assertEqual(job_outcome(gate)["category"], "gate_failed")
+
+        # A genuine push failure is still push_failed — via the structured field.
+        pushed = Job(
+            id=2, task="a", branch="agent/b", status="failed",
+            push_status="failed", note="remote rejected the update",
+        )
+        self.assertEqual(job_outcome(pushed)["category"], "push_failed")
+
+
 if __name__ == "__main__":
     unittest.main()
