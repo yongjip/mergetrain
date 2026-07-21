@@ -1,5 +1,11 @@
 # Quickstart
 
+mergetrain earns its keep when several coding-agent sessions work the same
+repo in parallel worktrees and you want their branches to land safely without
+hand-coordinating the order, the rebases, and the combined test run. If that's
+your situation, this page takes about five minutes; the
+[README](../README.md#the-problem) explains what goes wrong without a queue.
+
 ## 1. Initialize config
 
 From your Git repository root:

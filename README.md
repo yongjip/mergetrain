@@ -31,12 +31,48 @@ re-pushed and a lost one is never mislabeled as shipped).
 
 ## The problem
 
-When several Codex/Claude/LLM sessions work on the same repo at the same time, each in its own worktree and branch, a few things break down:
+One repo, three coding-agent sessions running at once — Codex, Claude, whatever
+— each in its own `git worktree` on its own branch: one adds a health check,
+one refactors config loading, one fixes a flaky test. All three finish within
+the same hour. Now what?
 
-- It's unclear what order branches should land on the deploy branch.
-- If an agent runs `git push` itself, sessions overwrite each other or ship unverified combinations.
-- Each branch passes its own tests, but the *merge of several branches in sequence* can still be broken.
-- Conflicts, stale locks, duplicate enqueues, and "is the daemon allowed to deploy this?" all become judgment calls — and you do not want an LLM guessing at those.
+Without a queue, the ending is always one of these:
+
+- **You become the merge coordinator.** Deciding landing order, rebasing each
+  branch onto the last landing, rerunning the tests after every one — serially,
+  by hand. The time you saved by running three agents in parallel is spent
+  again integrating their results, and while you're integrating, you're not
+  reviewing or directing.
+- **Agents that push, race.** Two sessions push the same deploy branch within
+  seconds: non-fast-forward rejects, a retry with `--force` that quietly
+  clobbers the other session's landing, or an unreviewed merge combination
+  shipping because whoever pushed last "won".
+- **Green branches, red main.** Each branch passes its own tests, but two of
+  them touched the same config loader in incompatible ways. No per-branch
+  check can see that — only testing the *combined* result before it ships can.
+- **Judgment calls land on an LLM.** Stale lock or live runner? Duplicate
+  enqueue or a legitimate retry? Is unattended deploy actually approved for
+  this job? These are exactly the calls you don't want an agent guessing at
+  from fuzzy shell output.
+
+mergetrain removes that coordination work instead of redistributing it: agents
+**enqueue** and stop; one runner merges the queued branches in order, runs your
+gates once over the exact combination, and pushes atomically only after you
+approve. The parallelism you paid for stays parallel.
+
+### When to reach for it
+
+- **Several agents, one project** — the core case, and the one it was built
+  for: parallel worktree sessions on a single repo, landing their results all
+  day without you serializing them by hand.
+- **Unattended batches** — pre-approved `--auto` jobs land via the daemon
+  while you're away; everything else waits for a human.
+- **Agents across several repos** — the hub registers each repo and runs the
+  same policy machine-wide, one repo's gates at a time.
+
+One agent, one branch at a time? You don't need this — `git push` is fine.
+And if your team is PR-first on a hosted forge with remote CI, use the
+forge's native queue (see [alternatives](#alternatives--and-whats-different-here)).
 
 Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, bors) solve a related problem, but they are PR-first, remote-CI-first, and platform-first. mergetrain is for the other workflow: **local-agent, worktree-first, deploy-branch-first.**
 
