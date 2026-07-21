@@ -2,9 +2,31 @@
 
 ## From PyPI
 
+mergetrain is a machine-level CLI (one hub and daemon serve every repo), so a
+global tool install is the natural fit:
+
+```sh
+uv tool install mergetrain      # recommended
+pipx install mergetrain         # equivalent alternative
+```
+
+Try it without installing anything:
+
+```sh
+uvx mergetrain --help
+```
+
+Inside an existing virtual environment, plain pip works too:
+
 ```sh
 python -m pip install mergetrain
 ```
+
+> [!NOTE]
+> On Homebrew/Debian-managed Pythons, a bare `pip install` outside a
+> virtualenv is rejected with an `externally-managed-environment` error
+> (PEP 668). Use `uv tool install` or `pipx install` there — that is exactly
+> what they are for.
 
 ## Platforms
 
@@ -26,7 +48,8 @@ python -m pip install -e .
 instead of the built-in generated-config subset parser:
 
 ```sh
-python -m pip install 'mergetrain[yaml]'
+uv tool install 'mergetrain[yaml]'      # or: pipx install 'mergetrain[yaml]'
+python -m pip install 'mergetrain[yaml]'  # inside a virtualenv
 ```
 
 For an editable checkout with the same extra, use
