@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-07-21
+
+- Never gc a live runner's worktree (0.9.0-prep). `gc --apply` listed and
+  force-removed **every** mergetrain-prefixed worktree, including the
+  integration worktree a running deploy was merging and gating inside, killing
+  the run mid-deploy. `gc`, `doctor`, and `recover` now read the live runner
+  lock's `worktree_path` and protect it (reported as `active runner worktree,
+  skipped`, never removed).
+
+- Unblock the documented first run (0.9.0-prep). mergetrain's own in-repo
+  `.mergetrain/` state directory (queue DB, logs, worktrees) was left
+  untracked, so the command that created it made the *next* `enqueue` fail the
+  clean-worktree check — permanently. The state directory now self-ignores (a
+  `.gitignore` of `*` written on first DB open), the dirty-worktree error names
+  the offending paths, and `init --write` reports a `next_step` to commit the
+  scaffold. A branch that already has a blocked/failed job now refuses
+  re-enqueue with a typed `DuplicateActiveBranch` (`error.code:
+  duplicate_active_branch`) whose message names the escapes, instead of a
+  generic `queue_error` dead-end.
+
 - Add `mergetrain dismiss` so a superseded blocked/failed job can be cleared
   non-destructively (0.9.0-prep). A blocked/failed job never lands and never
   self-clears, so it pinned `doctor`'s `next_action` to `fix_blocked_job`
