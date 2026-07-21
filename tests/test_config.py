@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mergetrain.config import load_config, load_yaml, render_default_config
+from mergetrain.config import (
+    CONFIG_VERSION,
+    load_config,
+    load_yaml,
+    render_default_config,
+)
 from mergetrain.errors import ConfigError
 
 
@@ -127,6 +132,36 @@ deploy:
             self.assertEqual(config.deploy.reuse.on_mismatch, "fail")
             self.assertEqual(config.deploy.reuse.fingerprints[0].name, "toolchain")
             self.assertTrue(config.gates[0].always_rerun_on_deploy)
+
+    def test_config_version_defaults_absent_records_and_tolerates_newer(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            cfg = repo / ".mergetrain.yaml"
+            # A pre-versioning file (no `version:`) rides forward as version 1.
+            cfg.write_text("project:\n  name: legacy\n", encoding="utf-8")
+            self.assertEqual(load_config(repo=repo).config_version, 1)
+
+            # The default writers stamp the current version.
+            cfg.write_text(render_default_config("demo"), encoding="utf-8")
+            config = load_config(repo=repo)
+            self.assertEqual(config.config_version, CONFIG_VERSION)
+            # config_version reaches JSON consumers via to_dict().
+            self.assertEqual(config.to_dict()["config_version"], CONFIG_VERSION)
+
+            # A too-new version is RECORDED, not rejected here (enforcement is
+            # command-scoped) — load_config must never lock recovery out.
+            cfg.write_text("version: 999\nproject:\n  name: future\n", encoding="utf-8")
+            self.assertEqual(load_config(repo=repo).config_version, 999)
+
+    def test_config_version_must_be_a_positive_integer(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            cfg = repo / ".mergetrain.yaml"
+            for bad in ("version: nope", "version: 0", "version: true"):
+                with self.subTest(bad=bad):
+                    cfg.write_text(f"{bad}\nproject:\n  name: x\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigError, "version"):
+                        load_config(repo=repo)
 
     def test_invalid_validated_reuse_policy_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
