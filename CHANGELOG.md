@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Enforce the contract, two ways (#44, Phase 3 — the forcing function that
+  makes the 0.9.0 freeze real). A checked-in golden **key-set fingerprint gate**
+  (`tests/test_contract_fingerprints.py` + `contract_fingerprints.json`)
+  captures the recursive key set of every agent-facing `--json` surface and
+  each JSONL frame and fails CI on any un-bumped shape change, classifying it
+  as additive (regenerate the golden) or breaking (bump `CONTRACT_VERSION`).
+  And a **config preflight**: a `.mergetrain.yaml` whose `version:` is newer
+  than this binary understands fails `enqueue`/`run-batch`/`run-next` closed
+  with a `config_error` envelope, while `reconcile`/`recover`/`unlock` and all
+  read-only commands stay permissive — so a rollback can never lock an operator
+  out of crash recovery. `doctor` reports `next_action: upgrade_mergetrain` and
+  `config_version_supported` in that state.
+
 - Stamp `contract_version` on every machine-readable surface (#44, Phase 2).
   A single top-level integer (currently 1, from the new `mergetrain.contract`
   module) is injected at the one-shot JSON serializer (`dump_json`), at the

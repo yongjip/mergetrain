@@ -205,6 +205,36 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["name"], "mergetrain agent contract")
 
+    def test_too_new_config_fails_deploy_path_but_permits_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+
+            def run(argv):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main(["--repo", str(repo), *argv, "--json"])
+                return code, json.loads(out.getvalue())
+
+            # Deploy/state-shipping path: fail closed with the unified envelope.
+            code, payload = run(["run-batch", "--validate-only"])
+            self.assertEqual(code, 1)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "config_error")
+
+            # Recovery stays permissive — a rollback must not lock it out.
+            code, payload = run(["reconcile"])
+            self.assertEqual(payload.get("ok"), True)
+
+            # doctor runs and points at the fix.
+            code, payload = run(["doctor"])
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["next_action"], "upgrade_mergetrain")
+            self.assertEqual(payload["config_version_supported"], 1)
+
     def test_global_option_after_subcommand_is_normalized(self) -> None:
         normalized = normalize_global_options(["doctor", "--json", "--repo", "/tmp/example"])
         self.assertEqual(normalized[:2], ["--repo", "/tmp/example"])
