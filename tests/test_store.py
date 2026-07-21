@@ -9,17 +9,20 @@ from pathlib import Path
 from mergetrain.errors import CancellationRequested, LockHeld, LostLease, QueueError
 from mergetrain.store import (
     SCHEMA_VERSION,
+    Liveness,
     acquire_runner_lock,
     cancel_job,
     claim_all_queued,
     claim_deploy_batch,
     connect,
+    default_owner,
     enqueue_job,
     get_job,
     get_lock,
     list_run_events,
     list_train_jobs,
     mark_job,
+    owner_liveness,
     record_pending_push,
     record_run_event,
     refresh_runner_lock,
@@ -27,6 +30,27 @@ from mergetrain.store import (
     terminal_branch_candidates,
     validated_train_summaries,
 )
+
+
+class OwnerLivenessTests(unittest.TestCase):
+    def test_current_process_is_alive_without_signalling_itself(self) -> None:
+        # Regression for #33: on Windows os.kill(pid, 0) sends CTRL_C_EVENT
+        # (signal 0 == CTRL_C_EVENT) instead of probing, raising an
+        # asynchronous KeyboardInterrupt. A liveness probe must never signal.
+        try:
+            self.assertEqual(owner_liveness(default_owner()), Liveness.ALIVE)
+        except KeyboardInterrupt:  # pragma: no cover - the bug this pins
+            self.fail("owner_liveness signalled the current process")
+
+    def test_absent_pid_is_dead(self) -> None:
+        # PID 1 is init/System and always exists; an astronomically high pid
+        # does not. Probe the latter for a stable DEAD.
+        self.assertEqual(owner_liveness("runner:2147481000"), Liveness.DEAD)
+
+    def test_unparseable_or_nonpositive_owner_is_unknown(self) -> None:
+        self.assertEqual(owner_liveness("no-pid-here"), Liveness.UNKNOWN)
+        self.assertEqual(owner_liveness("runner:0"), Liveness.UNKNOWN)
+        self.assertEqual(owner_liveness("runner:-4"), Liveness.UNKNOWN)
 
 
 class StoreTests(unittest.TestCase):

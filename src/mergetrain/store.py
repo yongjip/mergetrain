@@ -278,12 +278,52 @@ def default_owner() -> str:
     return f"{getpass.getuser()}:{os.getpid()}"
 
 
+def _windows_liveness(pid: int) -> str:
+    # os.kill(pid, 0) is the POSIX existence-check idiom, but on Windows
+    # signal 0 IS signal.CTRL_C_EVENT: os.kill(pid, 0) sends a real Ctrl-C to
+    # that pid's console group instead of probing it, which surfaces as a
+    # KeyboardInterrupt (issue #33). Probe with OpenProcess/GetExitCodeProcess
+    # instead — no signal is ever delivered.
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    ERROR_ACCESS_DENIED = 5
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            # No such pid → DEAD; exists but not openable (access denied) →
+            # ALIVE; anything else is inconclusive.
+            return (
+                Liveness.ALIVE
+                if ctypes.get_last_error() == ERROR_ACCESS_DENIED
+                else Liveness.DEAD
+            )
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return Liveness.UNKNOWN
+            return Liveness.ALIVE if exit_code.value == STILL_ACTIVE else Liveness.DEAD
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return Liveness.UNKNOWN
+
+
 def owner_liveness(owner: str) -> str:
     try:
         pid_text = owner.rsplit(":", 1)[1]
         pid = int(pid_text)
     except Exception:
         return Liveness.UNKNOWN
+    if pid <= 0:
+        return Liveness.UNKNOWN
+    if os.name == "nt":
+        return _windows_liveness(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
