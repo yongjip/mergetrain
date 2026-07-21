@@ -80,6 +80,45 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(load_registry(registry), [])
             self.assertTrue((repo / ".mergetrain.yaml").is_file())
 
+    def test_alias_of_registered_repo_is_the_same_entry(self) -> None:
+        # An existing roster entry may name the repo through a different but
+        # samefile-identical string (case aliases on macOS, hand edits). The
+        # policy flag must follow the physical repo, not the spelling.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root)
+            alias = f"{repo.resolve()}{'/.'}"
+            save_registry(
+                [{"path": alias, "added_at": "t", "daemon": False}], registry
+            )
+            entry = add_repo(repo, registry)
+            self.assertEqual(len(load_registry(registry)), 1)
+            self.assertEqual(entry["path"], alias)
+            self.assertFalse(load_registry(registry)[0]["daemon"])
+            # Re-adding through the canonical spelling must not resurrect
+            # eligibility, and removal must match the alias too.
+            add_repo(repo, registry, daemon=True)
+            self.assertTrue(load_registry(registry)[0]["daemon"])
+            add_repo(repo, registry, daemon=False)
+            self.assertTrue(remove_repo(repo, registry))
+            self.assertEqual(load_registry(registry), [])
+
+    def test_hand_edited_non_boolean_daemon_flag_fails_safe_to_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = Path(td) / "repos.json"
+            save_registry(
+                [
+                    {"path": "/a", "added_at": "t", "daemon": "false"},
+                    {"path": "/b", "added_at": "t", "daemon": "true"},
+                    {"path": "/c", "added_at": "t", "daemon": True},
+                ],
+                registry,
+            )
+            loaded = {entry["path"]: entry["daemon"] for entry in load_registry(registry)}
+            # Non-boolean values are never truthy-coerced into eligibility.
+            self.assertEqual(loaded, {"/a": False, "/b": False, "/c": True})
+
     def test_save_is_atomic_json_and_bad_shapes_fail_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             registry = Path(td) / "repos.json"

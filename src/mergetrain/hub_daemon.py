@@ -21,7 +21,7 @@ from .config import MergetrainConfig, load_config
 from .daemon import ProcessBatch, Say, daemon_tick
 from .hub import display_path
 from .notify import Notifier, sweep_notifications
-from .registry import load_registry
+from .registry import load_registry, same_repo
 from .store import default_owner
 
 ProcessBatchFactory = Callable[[MergetrainConfig, str], ProcessBatch]
@@ -66,11 +66,24 @@ def hub_sweep(
     """
 
     factory = process_batch_factory or _default_factory(keep_worktree)
+    excluded_paths = [
+        str(item.get("path") or "")
+        for item in registered
+        if not item.get("daemon", True)
+    ]
+
+    def excluded_by_alias(raw: str) -> bool:
+        # Belt-and-braces for the `--no-daemon` guarantee: if ANY roster entry
+        # naming the same physical directory is excluded (case aliases on
+        # macOS, symlinks, historical duplicates), this entry is excluded too.
+        return any(
+            other != raw and same_repo(other, raw) for other in excluded_paths
+        )
 
     def tick_one(item: dict[str, Any]) -> dict[str, Any]:
         raw = str(item.get("path") or "")
         out: dict[str, Any] = {"path": display_path(raw)}
-        if not item.get("daemon", True):
+        if not item.get("daemon", True) or excluded_by_alias(raw):
             # Policy-level opt-out (`hub add --no-daemon`): this repo stays on
             # the dashboard but is never swept, regardless of any --auto jobs.
             out.update(ok=True, outcome="excluded", error="daemon excluded by registry flag")
