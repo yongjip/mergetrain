@@ -1005,5 +1005,33 @@ class BisectIsolationTests(unittest.TestCase):
             self.assertNotIn("Train gate failed; bisecting 3 jobs", messages)
 
 
+class GcWorktreeGuardTests(unittest.TestCase):
+    def test_gc_never_removes_a_live_runners_worktree(self) -> None:
+        # Blocker: gc --apply force-removed the worktree a running deploy was
+        # merging/gating inside. A live runner's worktree must be protected.
+        from mergetrain.git_runner import apply_gc, find_worktree_gc_candidates
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            wt_root = config.state.worktree_root
+            wt_root.mkdir(parents=True, exist_ok=True)
+            live = wt_root / f"{config.project.name}-mergetrain-1-abc"
+            orphan = wt_root / f"{config.project.name}-mergetrain-2-def"
+            live.mkdir()
+            orphan.mkdir()
+
+            # The live worktree is reported as protected in the candidate list...
+            cands = find_worktree_gc_candidates(config, protect=[str(live)])
+            protected = [c for c in cands if c.get("protected")]
+            self.assertEqual([c["path"] for c in protected], [str(live)])
+
+            # ...and apply never removes it, while the orphan is swept.
+            apply_gc(config, protect=[str(live)])
+            self.assertTrue(live.is_dir(), "live runner worktree was destroyed")
+            self.assertFalse(orphan.exists(), "orphan worktree should be gc'd")
+
+
 if __name__ == "__main__":
     unittest.main()

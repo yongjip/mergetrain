@@ -622,7 +622,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
         "validated_trains": validated_trains,
-        "gc": {"worktree_candidates": find_worktree_gc_candidates(config)},
+        "gc": {
+            "worktree_candidates": find_worktree_gc_candidates(
+                config,
+                protect=(
+                    [lock.worktree_path]
+                    if lock and lock.worktree_path and lock.liveness != "dead"
+                    else []
+                ),
+            )
+        },
     }
     # `ok` means only "the command ran without an error envelope" (contract 1);
     # the repo-health verdict moves to its own field so a healthy-but-unconfigured
@@ -950,6 +959,14 @@ def cmd_gc(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         branch_candidates_raw = terminal_branch_candidates(conn)
+        # Protect the worktree of a live runner from removal (Blocker: gc
+        # --apply must never destroy a worktree a running deploy is inside).
+        lock = get_lock(conn)
+        protect_worktrees = (
+            [lock.worktree_path]
+            if lock and lock.worktree_path and lock.liveness != "dead"
+            else []
+        )
     finally:
         conn.close()
     protected = set(config.git.push_refs) | {config.git.integration_branch, git_current_branch(config.repo)}
@@ -967,7 +984,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
         "ok": True,
         "apply": bool(args.apply),
         "delete_branches": bool(args.delete_branches),
-        "worktree_candidates": find_worktree_gc_candidates(config),
+        "worktree_candidates": find_worktree_gc_candidates(config, protect=protect_worktrees),
         "branch_candidates": branch_candidates,
         "result": None,
     }
@@ -975,6 +992,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
         result = apply_gc(
             config,
             delete_branches=delete_branch_names if args.delete_branches else (),
+            protect=protect_worktrees,
         )
         conn = connect(config.state.db)
         try:

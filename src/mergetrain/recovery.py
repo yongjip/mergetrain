@@ -393,7 +393,15 @@ def recover(
     outcome = reconcile(config, conn, apply=apply)
     gc_result = None
     if gc:
-        gc_result = apply_gc(config)
+        # Never gc a live runner's worktree, even if a runner started between
+        # reconcile releasing its lock and this sweep.
+        live = get_lock(conn)
+        protect = (
+            [live.worktree_path]
+            if live and live.worktree_path and live.liveness != "dead"
+            else []
+        )
+        gc_result = apply_gc(config, protect=protect)
         gc_result["swept_pending_refs"] = sweep_pending_refs(config, conn)
     return RecoverOutcome(reconcile=outcome, gc=gc_result, exit_code=outcome.exit_code)
 
