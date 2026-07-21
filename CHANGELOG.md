@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Verify and support Windows (issue #33): the full suite now runs on
+  `windows-latest` in CI as a **blocking** check. Fixes a real
+  cross-platform bug — `owner_liveness` used `os.kill(pid, 0)`, which on
+  Windows is `signal.CTRL_C_EVENT` and sent a real Ctrl-C to the probed
+  process instead of checking existence (it would have disrupted the daemon,
+  hub, and crash recovery); it now probes via `OpenProcess`/
+  `GetExitCodeProcess`. A killed gate/command also returns promptly on
+  Windows now (the stdout/stderr drain join is bounded instead of waiting up
+  to 10s when `TerminateProcess` leaves a pipe read blocked). The rest of the
+  work was test-fixture portability. `docs/install.md` now lists Windows as
+  tested.
+
 ## 0.5.0 - 2026-07-21
 
 - Harden the 0.4.0 hub after an adversarial review (issues #47–#51): make the
