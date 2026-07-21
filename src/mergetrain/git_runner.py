@@ -2050,15 +2050,27 @@ class GitRunner:
                 self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
 
 
-def find_worktree_gc_candidates(config: MergetrainConfig) -> list[dict[str, str]]:
+def find_worktree_gc_candidates(
+    config: MergetrainConfig, *, protect: Iterable[str] = ()
+) -> list[dict[str, str]]:
     root = config.state.worktree_root
     prefix = f"{config.project.name}-mergetrain-"
     if not root.exists():
         return []
+    # A live runner's integration worktree must never be a gc candidate —
+    # removing it mid-run kills the deploy. Callers pass the live lock's
+    # worktree_path; it is reported (skipped), not silently dropped.
+    protected = {str(Path(p)) for p in protect if p}
     candidates = []
     for path in sorted(root.iterdir()):
-        if path.is_dir() and path.name.startswith(prefix):
-            candidates.append({"path": str(path), "reason": "temporary mergetrain worktree"})
+        if not (path.is_dir() and path.name.startswith(prefix)):
+            continue
+        if str(path) in protected:
+            candidates.append(
+                {"path": str(path), "reason": "active runner worktree, skipped", "protected": "true"}
+            )
+            continue
+        candidates.append({"path": str(path), "reason": "temporary mergetrain worktree"})
     return candidates
 
 
@@ -2070,11 +2082,18 @@ def current_branch(repo: Path) -> str:
     return git_current_branch(repo)
 
 
-def apply_gc(config: MergetrainConfig, *, delete_branches: Iterable[str] = ()) -> dict[str, list[dict[str, str]]]:
+def apply_gc(
+    config: MergetrainConfig,
+    *,
+    delete_branches: Iterable[str] = (),
+    protect: Iterable[str] = (),
+) -> dict[str, list[dict[str, str]]]:
     removed_worktrees: list[dict[str, str]] = []
     deleted_branches: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
-    for candidate in find_worktree_gc_candidates(config):
+    for candidate in find_worktree_gc_candidates(config, protect=protect):
+        if candidate.get("protected"):
+            continue  # a live runner is merging/gating here — never remove it
         path = Path(candidate["path"])
         try:
             run_command(["git", "worktree", "remove", "--force", str(path)], cwd=config.repo, check=True)
