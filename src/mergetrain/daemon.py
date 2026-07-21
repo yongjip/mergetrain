@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import signal
-import time
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -64,12 +64,27 @@ def daemon_tick(
                 say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
                 process_batch(conn, jobs)
                 return f"processed:{len(jobs)}"
+            if deploy_reconcile_pending(conn):
+                # The claim itself parked orphans as needs_reconcile and
+                # refused to proceed (TOCTOU guard in claim_all_queued).
+                say(
+                    "mergetrain daemon tick: jobs pending reconcile; deploy "
+                    "paused (run 'mergetrain reconcile --apply')"
+                )
+                return "reconcile_paused"
         say("mergetrain daemon tick: no auto-approved queued jobs")
         return "idle"
     finally:
-        if lease_token:
-            release_runner_lock(conn, owner=owner, token=lease_token)
-        conn.close()
+        try:
+            if lease_token:
+                release_runner_lock(conn, owner=owner, token=lease_token)
+        except Exception as exc:  # noqa: BLE001 - lease expires at TTL anyway
+            say(
+                "mergetrain daemon: failed to release runner lock "
+                f"(lease expires at TTL): {exc}"
+            )
+        finally:
+            conn.close()
 
 
 def daemon_loop(
@@ -91,11 +106,10 @@ def daemon_loop(
     """
 
     actual_owner = owner or default_owner()
-    should_stop = False
+    stop = threading.Event()
 
     def request_stop(signum, frame):  # type: ignore[no-untyped-def]
-        nonlocal should_stop
-        should_stop = True
+        stop.set()
         say(f"mergetrain daemon received signal {signum}; finishing current tick")
 
     old_handlers: dict[int, Any] = {}
@@ -106,6 +120,12 @@ def daemon_loop(
 
     try:
         while True:
+            # Checked at the TOP of the loop: a signal that lands during the
+            # inter-tick wait must never start one more tick (PEP 475 resumes
+            # the wait after the handler returns, so the wait alone is not a
+            # reliable exit point).
+            if stop.is_set():
+                break
             try:
                 daemon_tick(
                     db_path=db_path,
@@ -116,9 +136,9 @@ def daemon_loop(
                 )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")
-            if once or should_stop:
+            if once or stop.is_set():
                 break
-            time.sleep(max(1, int(interval_seconds)))
+            stop.wait(max(1, int(interval_seconds)))
     finally:
         if install_signal_handlers:
             for signum, handler in old_handlers.items():
