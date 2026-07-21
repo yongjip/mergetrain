@@ -156,8 +156,16 @@ def _run_managed(
         _stop_process(process)
         raise
     finally:
+        # A normally-exited process closes its pipe write ends, so the drain
+        # threads hit EOF and this join is instant. When we KILLED the process
+        # (timeout/cancel), the read ends can stay blocked in a pending OS read
+        # — on Windows TerminateProcess does not unblock the parent's ReadFile —
+        # so bound the total wait instead of blocking up to 5s per reader (which
+        # made a killed command take ~10s to return). The readers are daemon
+        # threads, reaped when their pipe is finalized.
+        _join_deadline = time.monotonic() + 2.0
         for reader in readers:
-            reader.join(timeout=5)
+            reader.join(timeout=max(0.0, _join_deadline - time.monotonic()))
 
     stdout = "".join(stdout_tail)
     stderr = "".join(stderr_tail)

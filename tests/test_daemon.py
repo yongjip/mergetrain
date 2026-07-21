@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -146,10 +147,14 @@ class ReadOnlyTickTests(unittest.TestCase):
             self.assertTrue(db.is_file())
 
     def test_read_only_connect_survives_uri_special_characters(self) -> None:
-        # '?', '#', and '%' are legal in POSIX paths; an unescaped sqlite URI
-        # would truncate the filename or silently drop mode=ro.
+        # Characters that are URI-special (so an unescaped sqlite URI would
+        # truncate the filename or drop mode=ro) yet legal in a filename. '?'
+        # exercises the query-string truncation but is illegal on Windows, so
+        # include it only where the OS allows it; '#'/'%' cover the rest
+        # everywhere.
+        name = "we#dir%41" if os.name == "nt" else "we?rd#dir%41"
         with tempfile.TemporaryDirectory() as td:
-            weird = Path(td) / "we?rd#dir%41"
+            weird = Path(td) / name
             weird.mkdir()
             db = weird / "queue.sqlite"
             conn = connect(db)
