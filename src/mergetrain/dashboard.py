@@ -6,10 +6,10 @@ import json
 import mimetypes
 import sys
 import time
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
-from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from .config import MergetrainConfig
@@ -38,7 +38,7 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         error = sys.exc_info()[1]
         if isinstance(error, (BrokenPipeError, ConnectionResetError)):
             return
-        super().handle_error(request, client_address)
+        super().handle_error(request, client_address)  # type: ignore[arg-type]
 
 
 def _json_bytes(payload: object) -> bytes:
@@ -129,7 +129,7 @@ def make_handler(
                 self._serve_events()
                 return
             if path in {"/", "/index.html"}:
-                static_path = STATIC_ROOT / "index.html"
+                static_path: Path | None = STATIC_ROOT / "index.html"
             else:
                 static_path = _safe_static_path(path)
             if static_path is None or not static_path.is_file():

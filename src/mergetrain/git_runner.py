@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import io
 import os
-import signal
 import shutil
+import signal
 import subprocess
 import threading
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import IO, Iterable, Sequence
+from typing import IO
 
 from .config import GateConfig, MergetrainConfig
 from .errors import (
@@ -215,7 +215,7 @@ def run_command(
         )
     completed = subprocess.run(
         list(command), cwd=str(cwd), env=env, text=True,
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, capture_output=True,
     )
     if log:
         if completed.stdout:
@@ -257,7 +257,7 @@ def run_shell(
     completed = subprocess.run(
         command, cwd=str(cwd), env=env, shell=True,
         executable="/bin/sh" if Path("/bin/sh").exists() else None,
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, capture_output=True,
     )
     if log:
         if completed.stdout:
@@ -1007,8 +1007,11 @@ class GitRunner:
                 check_cancel=check_cancel,
             )
 
-        normal_pulse = lambda: pulse(check_cancel=True)
-        ownership_pulse = lambda: pulse(check_cancel=False)
+        def normal_pulse() -> None:
+            pulse(check_cancel=True)
+
+        def ownership_pulse() -> None:
+            pulse(check_cancel=False)
 
         def gate_progress(name: str, state: str, index: int, total: int, command: str) -> None:
             verb = {
@@ -1475,7 +1478,7 @@ class GitRunner:
             culprit_ids.update(job.id for job in group)
         goods = [job for job in merged_jobs if job.id not in culprit_ids]
 
-        results: list[Job] = []
+        results = []
         for job in singles:
             results.append(
                 self._finish_job(
@@ -1587,8 +1590,11 @@ class GitRunner:
                 check_cancel=check_cancel,
             )
 
-        normal_pulse = lambda: pulse(check_cancel=True)
-        ownership_pulse = lambda: pulse(check_cancel=False)
+        def normal_pulse() -> None:
+            pulse(check_cancel=True)
+
+        def ownership_pulse() -> None:
+            pulse(check_cancel=False)
 
         def gate_progress(name: str, state: str, index: int, total: int, command: str) -> None:
             verb = {

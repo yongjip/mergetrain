@@ -25,7 +25,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -34,11 +33,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from test_git_runner import make_demo_repo
+
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.store import connect, enqueue_job, record_run_event
-from test_git_runner import make_demo_repo
 
 GOLDEN = Path(__file__).resolve().parent / "contract_fingerprints.json"
 

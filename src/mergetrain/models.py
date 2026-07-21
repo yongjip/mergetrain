@@ -47,7 +47,7 @@ class Job:
     conflict_with: str = ""
 
     @classmethod
-    def from_row(cls, row: Any) -> "Job":
+    def from_row(cls, row: Any) -> Job:
         return cls(
             id=int(row["id"]),
             task=str(row["task"]),
@@ -106,7 +106,7 @@ class RunnerLock:
     liveness: str = "unknown"
 
     @classmethod
-    def from_row(cls, row: Any, *, liveness: str = "unknown") -> "RunnerLock":
+    def from_row(cls, row: Any, *, liveness: str = "unknown") -> RunnerLock:
         return cls(
             name=str(row["name"]),
             owner=str(row["owner"]),
@@ -139,7 +139,7 @@ class RunEvent:
     claim_token: str = ""
 
     @classmethod
-    def from_row(cls, row: Any) -> "RunEvent":
+    def from_row(cls, row: Any) -> RunEvent:
         return cls(
             id=int(row["id"]),
             phase=str(row["phase"]),

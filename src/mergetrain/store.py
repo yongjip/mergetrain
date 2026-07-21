@@ -6,11 +6,12 @@ import getpass
 import os
 import sqlite3
 import uuid
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
-from typing import Any, Iterator, Sequence
 
 from .errors import (
     CancellationRequested,
@@ -318,7 +319,7 @@ def _windows_liveness(pid: int) -> str:
     STILL_ACTIVE = 259
     ERROR_ACCESS_DENIED = 5
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
         handle = kernel32.OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION, False, pid
         )
@@ -327,7 +328,7 @@ def _windows_liveness(pid: int) -> str:
             # ALIVE; anything else is inconclusive.
             return (
                 Liveness.ALIVE
-                if ctypes.get_last_error() == ERROR_ACCESS_DENIED
+                if ctypes.get_last_error() == ERROR_ACCESS_DENIED  # type: ignore[attr-defined]
                 else Liveness.DEAD
             )
         try:
@@ -411,7 +412,8 @@ def enqueue_job(
             """,
             (task, branch, worktree_path, base_sha, head_sha, now, note, 1 if auto_deploy else 0),
         )
-        job_id = int(cur.lastrowid)
+        job_id = cur.lastrowid
+        assert job_id is not None  # an INSERT always assigns a rowid
     return get_job(conn, job_id)
 
 
@@ -491,7 +493,7 @@ def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued", auto_onl
 
 
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
-    result = {status: 0 for status in ALL_STATUSES}
+    result = dict.fromkeys(ALL_STATUSES, 0)
     rows = conn.execute("SELECT status, COUNT(*) AS n FROM deploy_queue GROUP BY status").fetchall()
     for row in rows:
         result[str(row["status"])] = int(row["n"])
@@ -946,7 +948,7 @@ def select_validated_train(
         matches = [summary for summary in summaries if summary["train_id"] == train_id]
         if not matches:
             raise QueueError(f"validated train not found: {train_id}")
-        selected = matches[0]
+        selected: dict[str, Any] | None = matches[0]
     else:
         deployable = [summary for summary in summaries if summary["deploy_eligible"]]
         if len(deployable) > 1:

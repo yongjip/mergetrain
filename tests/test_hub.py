@@ -96,7 +96,7 @@ class HubSnapshotTests(unittest.TestCase):
             try:
                 rows = conn.execute("SELECT COUNT(*) AS n FROM deploy_queue").fetchone()
                 self.assertEqual(int(rows["n"]), 1)
-                with self.assertRaises(Exception):
+                with self.assertRaises(sqlite3.OperationalError):
                     conn.execute("DELETE FROM deploy_queue")
             finally:
                 conn.close()
@@ -104,9 +104,10 @@ class HubSnapshotTests(unittest.TestCase):
 
 class HubSnapshotCacheTests(unittest.TestCase):
     def test_cache_skips_rebuilds_until_queue_or_config_changes(self) -> None:
+        from unittest import mock
+
         import mergetrain.hub as hub_module
         from mergetrain.hub import HubSnapshotCache
-        from unittest import mock
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

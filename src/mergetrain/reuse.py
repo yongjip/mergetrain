@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from .config import MergetrainConfig
 from .models import Job

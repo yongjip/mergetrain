@@ -203,5 +203,5 @@ def daemon_loop(
             stop.wait(max(1, int(interval_seconds)))
     finally:
         if install_signal_handlers:
-            for signum, handler in old_handlers.items():
-                signal.signal(signum, handler)
+            for saved_signum, saved_handler in old_handlers.items():
+                signal.signal(saved_signum, saved_handler)
