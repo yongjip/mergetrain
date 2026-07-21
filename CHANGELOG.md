@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-07-21
+
 - Document the machine contract (#44, Phase 4 — completes #44). New
   `docs/contract.md` enumerates every versioned surface, where
   `contract_version` lives, the contract-1 envelope (`ok`/`result`/`health`/
