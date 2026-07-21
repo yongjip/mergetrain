@@ -133,14 +133,20 @@ def make_handler(
             else:
                 static_path = _safe_static_path(path)
             if static_path is None or not static_path.is_file():
-                self._send_json({"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND)
+                self._send_json(
+                    {"ok": False, "error": {"code": "not_found", "message": "not found",
+                                            "retryable": False}},
+                    HTTPStatus.NOT_FOUND,
+                )
                 return
             self._send_file(static_path)
 
         def _read_only(self) -> None:
             self.close_connection = True
             self._send_json(
-                {"ok": False, "error": "read_only"},
+                {"ok": False, "error": {"code": "read_only",
+                                        "message": "the dashboard is read-only",
+                                        "retryable": False}},
                 HTTPStatus.METHOD_NOT_ALLOWED,
             )
 

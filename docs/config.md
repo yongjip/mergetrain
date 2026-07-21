@@ -6,6 +6,20 @@ Default config file name:
 .mergetrain.yaml
 ```
 
+## `version`
+
+```yaml
+version: 1
+```
+
+The config schema version. `mergetrain init` writes the current version (`1`);
+an omitted `version:` is treated as `1`. A file whose `version:` is **newer**
+than this binary understands is recorded — not rejected — at load, so recovery
+still works on an older binary. Command-scoped enforcement surfaces the mismatch
+instead: `doctor` reports `config_version_supported` (the highest version this
+binary understands) and a `next_action` of `upgrade_mergetrain`. Upgrade
+mergetrain before deploying.
+
 ## `project`
 
 ```yaml

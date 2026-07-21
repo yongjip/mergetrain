@@ -35,7 +35,13 @@ mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
 mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
 mergetrain daemon [--interval SECONDS] [--once] [--keep-worktree]
 mergetrain gc [--json] [--apply] [--delete-branches]
+mergetrain reconcile [--apply] [--json]
+mergetrain recover [--gc] [--json]
+mergetrain unlock [--force] [--json]
 mergetrain cancel JOB_ID [--note NOTE] [--json]
+mergetrain dismiss [JOB_ID | --all] [--note NOTE] [--json]
+mergetrain verify [--job ID] [--ack succeeded|failed] [--json]
+mergetrain hub [add|remove|list|status|daemon] [--host HOST] [--port PORT] [--allow-remote] [--registry PATH]
 ```
 
 ## `init`
@@ -129,6 +135,8 @@ shows recent repository events and follow mode continues until interrupted.
 
 The `--jsonl` framing contract is one compact JSON object followed by one newline:
 
+- `type=stream_start` is the first frame on every connect or resume. It carries
+  the stream's `contract_version` and does not consume an event ID.
 - `type=event` is a persisted event. Its integer `id` is the resume cursor. It
   includes phase/state, optional job and gate index/name, elapsed seconds, and
   the latest lease heartbeat visible when read.
@@ -203,6 +211,7 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 - `run_batch_validate` — manual jobs are queued; validate them.
 - `gc_available` — only cleanup remains.
 - `enqueue_clean_branch` — the queue is empty.
+- `upgrade_mergetrain` — the config declares a `version:` newer than this binary supports; this **overrides** the action above, and `doctor --json` also sets `config_version_supported` to the highest version this binary understands. Upgrade mergetrain before acting.
 
 `next_action` is **advisory**; it never substitutes for a destructive action or deploy consent.
 
@@ -443,16 +452,48 @@ an `in_progress` train, cancel records `cancel_requested_at` for every job with
 the same claim token. The runner notices the request during its heartbeat,
 terminates the active subprocess group, and records the final `canceled` state.
 
+## `dismiss`
+
+Non-destructively clear a superseded `blocked`/`failed` job. A blocked/failed job
+never lands and never self-clears, so it keeps `doctor`'s `next_action` pinned to
+`fix_blocked_job` (hiding a ready validated train) and blocks re-enqueue of its
+branch. `dismiss` moves it to the terminal `canceled` state; it refuses
+`queued`/`in_progress` work (use `cancel` for that) and never touches git or the
+remote, so it is safe to run unattended.
+
+```sh
+mergetrain dismiss 12 --note "fixed on a rebased branch"
+mergetrain dismiss --all      # every blocked/failed job
+```
+
+## `verify`
+
+Discharge deployed jobs a crash left with `verify_status='unknown'` — reconcile
+can prove a push landed but not that the post-push `deploy.verify` hooks ran, so
+it parks the job at `verify_reconciled_deploy`. `verify` clears that.
+
+```sh
+mergetrain verify                 # re-run deploy.verify against every unresolved deploy_sha
+mergetrain verify --job 12        # resolve one job
+mergetrain verify --ack succeeded # record the outcome without re-running (non-repeatable hooks)
+```
+
+Without `--ack`, `verify` re-runs the configured `deploy.verify` hooks against the
+recorded `deploy_sha` and records `succeeded`/`failed`; `--ack succeeded|failed`
+records the result without re-running.
+
 ## Exit codes
 
-`0` all requested jobs succeeded · `1` a job blocked/failed, post-push verify
-warning, or an expected config/queue/command error · `2` usage error · `130`
-interrupted (`Ctrl-C`). In JSON mode, run results include `ok`, `result`
-(`success`, `warning`, `partial`, or `failed`), per-status `counts`,
-`push_counts`, `verify_counts`, `reused_validation_shas`, and `jobs`. Each job exposes `push_status`
-(`not_run`, `succeeded`, or `failed`) and `verify_status` (`not_run`,
-`not_configured`, `succeeded`, or `failed`). A successful push followed by a
-failed verify keeps `status=deployed` but returns `result=warning` and `ok=false`.
-Human output prints the same push/verify facts next to each affected job.
-Expected exceptions are emitted as
-`{"ok": false, "error": {"code", "message", "retryable"}}`.
+`0` every requested job shipped — **including** a train that landed but whose
+post-push verify only warned (`result:"warning"`) · `1` a job blocked/failed, or
+an expected config/queue/command error · `2` usage error · `130` interrupted
+(`Ctrl-C`). Exit `1` never means "did not ship" on its own — read `result`. In
+JSON mode, run results include `ok`, `result` (`success`, `warning`, `partial`,
+or `failed`), per-status `counts`, `push_counts`, `verify_counts`,
+`reused_validation_shas`, and `jobs`. Each job exposes `push_status` (`not_run`,
+`succeeded`, or `failed`) and `verify_status` (`not_run`, `not_configured`,
+`succeeded`, or `failed`). A successful push followed by a failed verify keeps
+`status=deployed` and returns `result=warning` with `ok=true` — the run executed
+and the train already shipped, so the exit code is `0`. Human output prints the
+same push/verify facts next to each affected job. Expected exceptions are emitted
+as `{"ok": false, "error": {"code", "message", "retryable"}}`.

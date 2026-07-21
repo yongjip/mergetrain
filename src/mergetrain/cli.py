@@ -771,6 +771,14 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
     }
 
 
+def _run_exit_code(payload: dict[str, Any]) -> int:
+    # "warning" = the train shipped but a post-push verify hook failed. The push
+    # already landed and cannot be un-shipped, so this is exit 0 (a caller reads
+    # `result` to notice the warning). Only "partial"/"failed" — where something
+    # did NOT ship — is exit 1. Exit 1 therefore never means "did not ship".
+    return 0 if payload["result"] in ("success", "warning") else 1
+
+
 def _human_category(category: str, terminology: TerminologyConfig) -> str:
     return terminology.completed if category == "deployed" else category
 
@@ -839,7 +847,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
         dump_json(payload)
     else:
         _print_run_payload(payload, config.terminology)
-    return 0 if payload["result"] == "success" else 1
+    return _run_exit_code(payload)
 
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
@@ -941,7 +949,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         dump_json(payload)
     else:
         _print_run_payload(payload, config.terminology)
-    return 0 if payload["result"] == "success" else 1
+    return _run_exit_code(payload)
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:
@@ -1700,7 +1708,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(args.func(args))
     except KeyboardInterrupt:
         if getattr(args, "json", False):
-            dump_json({"ok": False, "error": {"code": "interrupted", "message": "interrupted"}})
+            # Route through the single builder so Ctrl-C emits the same
+            # {code,message,retryable} shape as every other failure — a consumer
+            # doing resp["error"]["retryable"] must not KeyError on interrupt.
+            dump_json(_error_payload("interrupted", "interrupted", retryable=False))
         else:
             print("mergetrain: interrupted", file=sys.stderr)
         return 130
