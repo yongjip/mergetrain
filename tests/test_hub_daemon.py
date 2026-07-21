@@ -7,7 +7,7 @@ from pathlib import Path
 
 from mergetrain.config import load_config
 from mergetrain.hub_daemon import hub_daemon_loop, hub_sweep
-from mergetrain.registry import add_repo, load_registry
+from mergetrain.registry import add_repo, load_registry, save_registry
 from mergetrain.store import connect, enqueue_job, list_jobs
 
 
@@ -146,6 +146,36 @@ class HubSweepTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(statuses, {"queued"})
+
+    def test_sweep_excludes_aliased_duplicate_of_opted_out_repo(self) -> None:
+        # A historical roster can hold two entries for one physical repo
+        # (case aliases, hand edits). If ANY of them says --no-daemon, the
+        # repo must not be swept through the eligible alias.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root, "aliased")
+            seed_jobs(repo, auto=True)
+            resolved = str(repo.resolve())
+            save_registry(
+                [
+                    {"path": f"{resolved}{'/.'}", "added_at": "t", "daemon": False},
+                    {"path": resolved, "added_at": "t", "daemon": True},
+                ],
+                registry,
+            )
+
+            log: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(log),
+            )
+
+            self.assertEqual(
+                [item["outcome"] for item in outcomes], ["excluded", "excluded"]
+            )
+            self.assertEqual(log, [])
 
     def test_serial_concurrency_never_overlaps_repo_runs(self) -> None:
         with tempfile.TemporaryDirectory() as td:

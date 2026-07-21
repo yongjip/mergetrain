@@ -11,8 +11,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+try:  # POSIX advisory locking; Windows support is tracked in issue #33.
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX platform
+    fcntl = None  # type: ignore[assignment]
 
 from .errors import QueueError
 from .store import utc_now
@@ -34,6 +40,48 @@ def _normalize(repo: str | Path) -> Path:
     return Path(repo).expanduser().resolve()
 
 
+def same_repo(stored: str, candidate: str | Path) -> bool:
+    """True when two paths name the same physical directory.
+
+    Registry identity must be the directory, not the path string: on
+    case-insensitive filesystems (macOS APFS) and through symlinks, two
+    different strings reach one repo, and a policy flag such as
+    ``daemon: false`` must follow the repo, not the spelling.
+    """
+
+    candidate_str = str(candidate)
+    if stored == candidate_str:
+        return True
+    try:
+        return os.path.samefile(stored, candidate_str)
+    except OSError:
+        return False
+
+
+@contextmanager
+def _mutation_lock(target: Path) -> Iterator[None]:
+    """Serialize registry read-modify-write cycles across processes.
+
+    ``save_registry``'s atomic replace prevents torn files but not lost
+    updates; without this lock a concurrent ``hub add`` could write back a
+    stale roster and silently resurrect ``daemon: true`` on an excluded
+    repo.
+    """
+
+    if fcntl is None:  # pragma: no cover - non-POSIX platform
+        yield
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(target.name + ".lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def load_registry(path: str | Path | None = None) -> list[dict[str, Any]]:
     """Return registered repo entries, oldest first. A missing file is empty."""
 
@@ -49,13 +97,16 @@ def load_registry(path: str | Path | None = None) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for item in data["repos"]:
         if isinstance(item, dict) and isinstance(item.get("path"), str) and item["path"]:
+            raw_daemon = item.get("daemon", True)
             entries.append(
                 {
                     "path": item["path"],
                     "added_at": str(item.get("added_at") or ""),
                     # Pre-flag rosters default to daemon-eligible, matching the
-                    # behavior those entries already had.
-                    "daemon": bool(item.get("daemon", True)),
+                    # behavior those entries already had. A hand-edited
+                    # non-boolean value (e.g. the string "false") fails SAFE to
+                    # excluded rather than being truthy-coerced into eligible.
+                    "daemon": raw_daemon if isinstance(raw_daemon, bool) else False,
                 }
             )
     return entries
@@ -103,30 +154,34 @@ def add_repo(
         raise QueueError(
             f"no {DEFAULT_CONFIG_NAME} in {resolved}; run `mergetrain init` there first"
         )
-    entries = load_registry(path)
-    for entry in entries:
-        if entry["path"] == str(resolved):
-            if daemon is not None and entry.get("daemon", True) != daemon:
-                entry["daemon"] = daemon
-                save_registry(entries, path)
-            return entry
-    entry = {
-        "path": str(resolved),
-        "added_at": utc_now(),
-        "daemon": True if daemon is None else daemon,
-    }
-    entries.append(entry)
-    save_registry(entries, path)
-    return entry
+    target = Path(path) if path else registry_path()
+    with _mutation_lock(target):
+        entries = load_registry(target)
+        for entry in entries:
+            if same_repo(entry["path"], resolved):
+                if daemon is not None and entry.get("daemon", True) != daemon:
+                    entry["daemon"] = daemon
+                    save_registry(entries, target)
+                return entry
+        entry = {
+            "path": str(resolved),
+            "added_at": utc_now(),
+            "daemon": True if daemon is None else daemon,
+        }
+        entries.append(entry)
+        save_registry(entries, target)
+        return entry
 
 
 def remove_repo(repo: str | Path, path: str | Path | None = None) -> bool:
     """Deregister one repo; the repo's own state is untouched."""
 
-    resolved = str(_normalize(repo))
-    entries = load_registry(path)
-    remaining = [entry for entry in entries if entry["path"] != resolved]
-    if len(remaining) == len(entries):
-        return False
-    save_registry(remaining, path)
-    return True
+    resolved = _normalize(repo)
+    target = Path(path) if path else registry_path()
+    with _mutation_lock(target):
+        entries = load_registry(target)
+        remaining = [entry for entry in entries if not same_repo(entry["path"], resolved)]
+        if len(remaining) == len(entries):
+            return False
+        save_registry(remaining, target)
+        return True
