@@ -30,8 +30,15 @@ The hub owns no correctness-critical state
 
 - Every repo entry is built by loading **that repo's own config** and opening
   **that repo's own SQLite database read-only**. Observing a repo never
-  creates directories, never creates the queue database, and never migrates
-  its schema — a registered repo with no queue yet renders as an idle card.
+  creates directories, never creates the queue database, never writes a row,
+  and never migrates its schema — a registered repo with no queue yet renders
+  as an idle card. (Honest limit: a WAL-mode reader may create or refresh
+  SQLite's sidecar `-shm`/`-wal` files next to an existing database; queue
+  data is never touched.)
+- `hub daemon` probes each repo's policy state on that same read-only path:
+  an idle sweep never opens a writable connection, so it can never migrate a
+  swept repo's schema. Creating or migrating a queue database is reserved
+  for commands run inside the repo itself.
 - A repo that is missing, unreadable, or on a different schema version
   becomes an isolated error card. One broken repo never breaks the page.
 - Killing the hub at any moment loses a view, never data integrity. Queue

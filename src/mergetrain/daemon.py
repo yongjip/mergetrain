@@ -7,6 +7,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from .errors import QueueError
 from .models import Job
 from .store import (
     claim_all_queued,
@@ -28,6 +29,7 @@ def daemon_tick(
     owner: str,
     lock_ttl_minutes: int = 30,
     say: Say = print,
+    sovereign: bool = False,
 ) -> str:
     """Run one auto-only pass over a single repo's queue.
 
@@ -36,17 +38,48 @@ def daemon_tick(
     reconcile pause, and lease release cannot drift between the two paths.
     Returns ``"reconcile_paused"``, ``"processed:<n>"``, or ``"idle"``.
     Exceptions propagate; callers decide how to isolate them.
+
+    Policy probes run on a read-only connection first, so an idle tick never
+    creates, migrates, or otherwise writes the queue database. Only when
+    there is actual auto work does the tick open a writable connection.
+    ``sovereign`` marks a daemon running inside its own repo: it may create
+    a missing database and migrate an old schema (first run). The hub sweeps
+    other people's repos and must leave both to a runner invoked in-repo.
     """
 
     lease_token = ""
+    probe_failed: QueueError | None = None
+    try:
+        probe = connect(db_path, read_only=True)
+    except QueueError as exc:
+        if not sovereign:
+            raise
+        # First run (no database) or pending migration: the repo's own
+        # daemon is allowed to create/migrate below.
+        probe_failed = exc
+    if probe_failed is None:
+        try:
+            pending = deploy_reconcile_pending(probe)
+            if pending:
+                # A crash left a possibly-landed push unresolved. The daemon
+                # deploys to the same push refs, so it must not push over a
+                # pending reconcile (0.3.0 Phase 2, decision Q4). Pause until
+                # an operator runs `mergetrain reconcile --apply`.
+                say(
+                    f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
+                    "deploy paused (run 'mergetrain reconcile --apply')"
+                )
+                return "reconcile_paused"
+            has_work = has_queued_auto(probe)
+        finally:
+            probe.close()
+        if not has_work:
+            say("mergetrain daemon tick: no auto-approved queued jobs")
+            return "idle"
     conn = connect(db_path)
     try:
         pending = deploy_reconcile_pending(conn)
         if pending:
-            # A crash left a possibly-landed push unresolved. The daemon
-            # deploys to the same push refs, so it must not push over a
-            # pending reconcile (0.3.0 Phase 2, decision Q4). Pause until
-            # an operator runs `mergetrain reconcile --apply`.
             say(
                 f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
                 "deploy paused (run 'mergetrain reconcile --apply')"
@@ -133,6 +166,9 @@ def daemon_loop(
                     owner=actual_owner,
                     lock_ttl_minutes=lock_ttl_minutes,
                     say=say,
+                    # The single-repo daemon runs inside its own repo and may
+                    # create/migrate its own queue database.
+                    sovereign=True,
                 )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")

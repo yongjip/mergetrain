@@ -4,7 +4,9 @@ The hub owns no correctness-critical state (RFC #23): each repo entry here is
 built by loading that repo's own config and opening its own SQLite database
 read-only. A repo that is missing, unreadable, or on a different schema is
 reported as an isolated error card — one broken repo never breaks the page,
-and observing a repo never creates or migrates anything inside it.
+and observing a repo never creates directories, queue databases, rows, or
+schema migrations inside it. (Honest limit: a WAL reader may create or
+refresh SQLite's sidecar ``-shm``/``-wal`` files next to the database.)
 
 The dashboard rebuilds this payload once per second per connected client, and
 almost every rebuild reads unchanged files. ``HubSnapshotCache`` turns those

@@ -51,7 +51,7 @@ mergetrain hub status --json
 
 The hub is a machine-level, read-only aggregate over registered repos. It
 owns no queue state: every repo keeps its own SQLite database, runner lock,
-and recovery markers, and observing a repo never creates or migrates
+and recovery markers, and observing a repo never creates queue data or migrates
 anything inside it. `hub status --json` returns one entry per repo with
 per-repo errors isolated.
 

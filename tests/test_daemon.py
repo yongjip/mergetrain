@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from mergetrain.daemon import daemon_loop, daemon_tick
+from mergetrain.errors import QueueError
 from mergetrain.store import claim_all_queued, connect, enqueue_job, get_job, list_jobs
 
 
@@ -91,6 +93,75 @@ class DaemonTests(unittest.TestCase):
                 say=lambda _: None,
             )
             self.assertEqual(outcome, "reconcile_paused")
+
+
+class ReadOnlyTickTests(unittest.TestCase):
+    def test_non_sovereign_tick_never_creates_or_migrates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            # Missing database: the hub path must refuse, not create.
+            with self.assertRaises(QueueError):
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=lambda conn, jobs: None,
+                    owner="daemon:1",
+                    say=lambda _: None,
+                )
+            self.assertFalse(db.exists())
+
+            # Old schema stamp: the hub path must report, not migrate. And an
+            # idle tick must not rewrite the repo's journal mode either.
+            conn = connect(db)
+            conn.execute("PRAGMA journal_mode = DELETE")
+            conn.execute("PRAGMA user_version = 6")
+            conn.commit()
+            conn.close()
+            with self.assertRaises(QueueError):
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=lambda conn, jobs: None,
+                    owner="daemon:1",
+                    say=lambda _: None,
+                )
+            raw = sqlite3.connect(db)
+            try:
+                self.assertEqual(raw.execute("PRAGMA user_version").fetchone()[0], 6)
+                self.assertEqual(
+                    raw.execute("PRAGMA journal_mode").fetchone()[0].lower(), "delete"
+                )
+            finally:
+                raw.close()
+
+    def test_sovereign_tick_creates_its_own_database(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: None,
+                owner="daemon:1",
+                say=lambda _: None,
+                sovereign=True,
+            )
+            self.assertEqual(outcome, "idle")
+            self.assertTrue(db.is_file())
+
+    def test_read_only_connect_survives_uri_special_characters(self) -> None:
+        # '?', '#', and '%' are legal in POSIX paths; an unescaped sqlite URI
+        # would truncate the filename or silently drop mode=ro.
+        with tempfile.TemporaryDirectory() as td:
+            weird = Path(td) / "we?rd#dir%41"
+            weird.mkdir()
+            db = weird / "queue.sqlite"
+            conn = connect(db)
+            enqueue_job(conn, task="a", branch="a")
+            conn.close()
+            observer = connect(db, read_only=True)
+            try:
+                self.assertEqual(len(list_jobs(observer)), 1)
+                with self.assertRaises(sqlite3.OperationalError):
+                    observer.execute("UPDATE deploy_queue SET note = 'w'")
+            finally:
+                observer.close()
 
 
 if __name__ == "__main__":
