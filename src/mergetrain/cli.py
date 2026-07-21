@@ -12,6 +12,7 @@ from typing import Any, Sequence
 
 from . import __version__
 from .config import MergetrainConfig, TerminologyConfig, load_config, render_default_config
+from .contract import CONTRACT_VERSION
 from .daemon import daemon_loop
 from .errors import (
     CommandFailed,
@@ -100,6 +101,13 @@ def normalize_global_options(argv: Sequence[str]) -> list[str]:
 
 
 def dump_json(payload: Any) -> None:
+    # Stamp the contract version on every one-shot JSON payload at the single
+    # serializer (contract 1). sort_keys places it deterministically. Payloads
+    # that already carry the field (or aren't dicts) pass through untouched;
+    # nested sub-objects (job dicts, embedded snapshots) are deliberately NOT
+    # stamped — the outer frame owns the number.
+    if isinstance(payload, dict) and "contract_version" not in payload:
+        payload = {"contract_version": CONTRACT_VERSION, **payload}
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
@@ -389,6 +397,18 @@ def cmd_events(args: argparse.Namespace) -> int:
     cursor = args.after
     last_heartbeat = ""
     scoped = args.job_id is not None or bool(args.train_id)
+    if args.jsonl:
+        # A stream header on every connect (including an --after resume, which
+        # is a fresh and possibly different-binary process) lets a long-lived
+        # consumer re-confirm the contract. It carries no event id, so id-based
+        # resume dedupe is unaffected; consumers dispatch JSONL frames on `type`.
+        _dump_jsonl(
+            {
+                "type": "stream_start",
+                "contract_version": CONTRACT_VERSION,
+                "after_event_id": int(cursor or 0),
+            }
+        )
     try:
         while True:
             jobs, events, latest, lock = _event_scope(config, args, cursor)

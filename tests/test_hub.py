@@ -369,6 +369,10 @@ class HubServerTests(unittest.TestCase):
                 self.assertTrue(payload["hub"])
                 self.assertEqual(payload["repo_count"], 1)
                 self.assertEqual(payload["repos"][0]["name"], "live")
+                # Contract 1: the outer hub frame is stamped at the HTTP
+                # boundary; embedded per-repo snapshots stay bare.
+                self.assertEqual(payload["contract_version"], 1)
+                self.assertNotIn("contract_version", payload["repos"][0]["snapshot"])
 
                 # Registry edits show up without a server restart.
                 extra = make_repo(root, "extra")
