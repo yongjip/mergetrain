@@ -59,6 +59,42 @@
       "purpose": null,
       "rules": "[]"
     },
+    "cancel": {
+      "contract_version": null,
+      "job": {
+        "auto_deploy": null,
+        "base_sha": null,
+        "branch": null,
+        "cancel_requested_at": null,
+        "conflict_with": null,
+        "deploy_sha": null,
+        "finished_at": null,
+        "head_sha": null,
+        "id": null,
+        "log_path": null,
+        "note": null,
+        "pending_deploy_sha": null,
+        "push_status": null,
+        "requested_at": null,
+        "reused_validation_sha": null,
+        "started_at": null,
+        "status": null,
+        "task": null,
+        "train_id": null,
+        "train_size": null,
+        "validated_at": null,
+        "validated_head_sha": null,
+        "validation_base_sha": null,
+        "validation_environment_sha": null,
+        "validation_gate_policy_sha": null,
+        "validation_sha": null,
+        "validation_train_sha": null,
+        "validation_tree_sha": null,
+        "verify_status": null,
+        "worktree_path": null
+      },
+      "ok": null
+    },
     "doctor": {
       "config": {
         "agent": {
@@ -218,6 +254,164 @@
       "result": null,
       "worktree_candidates": "[]?"
     },
+    "hub_status": {
+      "contract_version": null,
+      "generated_at": null,
+      "hub": null,
+      "ok": null,
+      "repo_count": null,
+      "repos": {
+        "[]": {
+          "daemon": null,
+          "name": null,
+          "ok": null,
+          "path": null,
+          "snapshot": {
+            "counts": {
+              "auto_queued": null,
+              "blocked": null,
+              "blocked_with_marker": null,
+              "canceled": null,
+              "deployed": null,
+              "deployed_verify_unknown": null,
+              "failed": null,
+              "in_progress": null,
+              "in_progress_with_marker": null,
+              "manual_queued": null,
+              "needs_reconcile": null,
+              "queued": null,
+              "validated": null
+            },
+            "events": "[]?",
+            "generated_at": null,
+            "jobs": {
+              "[]": {
+                "auto_deploy": null,
+                "base_sha": null,
+                "branch": null,
+                "cancel_requested_at": null,
+                "conflict_with": null,
+                "deploy_sha": null,
+                "finished_at": null,
+                "head_sha": null,
+                "id": null,
+                "note": null,
+                "pending_deploy_sha": null,
+                "push_status": null,
+                "requested_at": null,
+                "reused_validation_sha": null,
+                "started_at": null,
+                "status": null,
+                "task": null,
+                "train_id": null,
+                "train_size": null,
+                "validated_at": null,
+                "validated_head_sha": null,
+                "validation_base_sha": null,
+                "validation_environment_sha": null,
+                "validation_gate_policy_sha": null,
+                "validation_sha": null,
+                "validation_train_sha": null,
+                "validation_tree_sha": null,
+                "verify_status": null
+              }
+            },
+            "lock": null,
+            "next_action": null,
+            "ok": null,
+            "progress": {
+              "completed_job_ids": "[]?",
+              "completed_phases": "[]?",
+              "current_gate": null,
+              "detail": null,
+              "gates": {
+                "[]": {
+                  "command": null,
+                  "index": null,
+                  "name": null,
+                  "state": null,
+                  "total": null
+                }
+              },
+              "job_id": null,
+              "message": null,
+              "phase": null,
+              "started_at": null,
+              "state": null,
+              "updated_at": null
+            },
+            "project": {
+              "config_exists": null,
+              "gate_count": null,
+              "gates": {
+                "[]": {
+                  "index": null,
+                  "kind": null,
+                  "name": null
+                }
+              },
+              "integration_ref": null,
+              "name": null,
+              "preview": null,
+              "push_refs": "[]",
+              "push_specs": "[]",
+              "remote": null,
+              "reuse": {
+                "always_rerun_gates": "[]?",
+                "enabled": null,
+                "fingerprint_count": null,
+                "max_age_minutes": null,
+                "on_mismatch": null
+              },
+              "terminology": {
+                "action": null,
+                "completed": null,
+                "git_operation": null,
+                "in_progress": null,
+                "noun": null
+              },
+              "verify_count": null
+            },
+            "train": {
+              "jobs": {
+                "[]": {
+                  "auto_deploy": null,
+                  "base_sha": null,
+                  "branch": null,
+                  "cancel_requested_at": null,
+                  "conflict_with": null,
+                  "deploy_sha": null,
+                  "finished_at": null,
+                  "head_sha": null,
+                  "id": null,
+                  "note": null,
+                  "pending_deploy_sha": null,
+                  "push_status": null,
+                  "requested_at": null,
+                  "reused_validation_sha": null,
+                  "started_at": null,
+                  "status": null,
+                  "task": null,
+                  "train_id": null,
+                  "train_size": null,
+                  "validated_at": null,
+                  "validated_head_sha": null,
+                  "validation_base_sha": null,
+                  "validation_environment_sha": null,
+                  "validation_gate_policy_sha": null,
+                  "validation_sha": null,
+                  "validation_train_sha": null,
+                  "validation_tree_sha": null,
+                  "verify_status": null
+                }
+              },
+              "selection": null
+            },
+            "validated_trains": "[]?"
+          }
+        }
+      }
+    },
     "inspect": {
       "contract_version": null,
       "events": "[]?",
@@ -291,12 +485,30 @@
       "jobs": "[]?",
       "next_action": null,
       "ok": null,
+      "result": null,
       "summary": {
         "canceled": null,
         "conflicts": null,
         "reconciled_deployed": null,
         "requeued": null
       }
+    },
+    "recover": {
+      "contract_version": null,
+      "gc": null,
+      "next_action": null,
+      "ok": null,
+      "reconcile": {
+        "applied": null,
+        "jobs": "[]?",
+        "summary": {
+          "canceled": null,
+          "conflicts": null,
+          "reconciled_deployed": null,
+          "requeued": null
+        }
+      },
+      "result": null
     },
     "run_batch_validate": {
       "contract_version": null,
@@ -317,6 +529,17 @@
       "next_action": null,
       "ok": null,
       "validated_trains": "[]?"
+    },
+    "unlock": {
+      "audit_event_id": null,
+      "cleared": null,
+      "contract_version": null,
+      "liveness": null,
+      "lock_context": {},
+      "next_action": null,
+      "ok": null,
+      "prior_owner": null,
+      "reason": null
     },
     "version": {
       "contract_version": null,

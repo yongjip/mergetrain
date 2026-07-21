@@ -1067,7 +1067,10 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     payload = {
-        "ok": outcome.exit_code == 0,
+        # Contract 1: ok = the command ran; the graded outcome is in `result`.
+        # A reconcile that finds conflicts still ran (exit 10 carries that).
+        "ok": True,
+        "result": "conflict" if outcome.summary.get("conflicts") else "success",
         "applied": outcome.applied,
         "jobs": outcome.jobs,
         "summary": outcome.summary,
@@ -1106,7 +1109,8 @@ def cmd_recover(args: argparse.Namespace) -> int:
         conn.close()
     reconciled = outcome.reconcile
     payload = {
-        "ok": outcome.exit_code == 0,
+        "ok": True,
+        "result": "conflict" if reconciled.summary.get("conflicts") else "success",
         "reconcile": {
             "applied": reconciled.applied,
             "jobs": reconciled.jobs,
@@ -1144,7 +1148,10 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     payload = {
-        "ok": outcome.exit_code == 0,
+        # ok = the command ran; `cleared` carries whether a lock was removed
+        # (mirrors hub remove's ok:true + removed). The exit code carries the
+        # machine signal for no-lock (5) / refused-without-force (4).
+        "ok": True,
         "cleared": outcome.cleared,
         "prior_owner": outcome.prior_owner,
         "liveness": outcome.liveness,
