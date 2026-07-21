@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
+import sqlite3
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mergetrain.config import load_config
 from mergetrain.dashboard import create_hub_server
 from mergetrain.errors import QueueError
 from mergetrain.hub import build_hub_snapshot
-from mergetrain.registry import add_repo, load_registry
-from mergetrain.store import connect, enqueue_job
+from mergetrain.registry import add_repo, load_registry, remove_repo
+from mergetrain.store import connect, enqueue_job, utc_now
+
+
+def _plus_hour() -> str:
+    return (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
 def make_repo(root: Path, name: str) -> Path:
@@ -138,6 +147,75 @@ class HubSnapshotCacheTests(unittest.TestCase):
                 fourth = build_hub_snapshot(load_registry(registry), cache=cache)
                 self.assertEqual(len(calls), 3)
                 self.assertEqual(fourth["repos"][0]["name"], "renamed")
+
+    def test_cache_hit_refreshes_lock_liveness_and_next_action(self) -> None:
+        from mergetrain.hub import HubSnapshotCache
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+            config = load_config(repo=live)
+            # Plant an in-progress job held by a live-looking lock (this test
+            # process's own PID), so the warm entry reads liveness=alive /
+            # next_action=wait_for_runner.
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="run", branch="agent/run", worktree_path=str(live))
+                token = f"local:{os.getpid()}"
+                conn.execute(
+                    "INSERT INTO locks (name, owner, acquired_at, heartbeat_at, expires_at, token) "
+                    "VALUES ('runner', ?, ?, ?, ?, ?)",
+                    (f"tester:{os.getpid()}", utc_now(), utc_now(), _plus_hour(), token),
+                )
+                conn.execute(
+                    "UPDATE deploy_queue SET status='in_progress', claim_token=? WHERE id=?",
+                    (token, job.id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            cache = HubSnapshotCache()
+            warm = build_hub_snapshot(load_registry(registry), cache=cache)
+            self.assertEqual(warm["repos"][0]["snapshot"]["lock"]["liveness"], "alive")
+            self.assertEqual(
+                warm["repos"][0]["snapshot"]["next_action"], "wait_for_runner"
+            )
+
+            # The runner "dies" (owner PID replaced with an impossible one) but
+            # touches no file the cache fingerprints. A cache hit must still
+            # report the runner as dead and stop saying "wait".
+            raw = sqlite3.connect(config.state.db)
+            try:
+                raw.execute("UPDATE locks SET owner='tester:999999999'")
+                raw.commit()
+            finally:
+                raw.close()
+            served = build_hub_snapshot(load_registry(registry), cache=cache)
+            lock = served["repos"][0]["snapshot"]["lock"]
+            self.assertEqual(lock["liveness"], "dead")
+            self.assertNotEqual(
+                served["repos"][0]["snapshot"]["next_action"], "wait_for_runner"
+            )
+
+    def test_cache_evicts_deregistered_repos(self) -> None:
+        from mergetrain.hub import HubSnapshotCache
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+            cache = HubSnapshotCache()
+            build_hub_snapshot(load_registry(registry), cache=cache)
+            self.assertEqual(len(cache._entries), 1)
+            remove_repo(live, registry)
+            build_hub_snapshot(load_registry(registry), cache=cache)
+            self.assertEqual(cache._entries, {})
 
     def test_daemon_flag_flip_is_visible_through_a_warm_cache(self) -> None:
         from mergetrain.hub import HubSnapshotCache
