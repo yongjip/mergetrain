@@ -23,6 +23,7 @@ from .errors import (
     LostLease,
     MergeBlocked,
     MergetrainError,
+    PushRejected,
 )
 from .models import Job
 from .reuse import (
@@ -301,6 +302,31 @@ def git_current_branch(path: str | Path) -> str:
 
 def git_worktree_clean(path: str | Path) -> bool:
     return git_output_or_empty(["status", "--porcelain"], cwd=path) == ""
+
+
+# Remote responses that mean "you are not allowed to update this ref" rather
+# than "your code/merge is wrong" — protected branches, required PRs, denied
+# non-fast-forward-by-policy, forge rulesets.
+_PUSH_REJECTION_MARKERS = (
+    "protected branch",
+    "pull request",
+    "GH006",
+    "GH013",
+    "denied to",
+    "not permitted",
+    "not allowed to",
+    "refusing to allow",
+    "pre-receive hook declined",
+    "required status check",
+    "ruleset",
+    "permission to",
+)
+
+
+def is_push_rejection(stderr: str) -> bool:
+    """True when a failed push was refused for a permission/policy reason."""
+    low = (stderr or "").lower()
+    return any(marker.lower() in low for marker in _PUSH_REJECTION_MARKERS)
 
 
 def git_dirty_paths(path: str | Path, *, limit: int = 5) -> list[str]:
@@ -1151,6 +1177,12 @@ class GitRunner:
                             message="Atomic push failed",
                             detail=f"exit_code={exc.returncode}",
                         )
+                        if is_push_rejection(exc.stderr):
+                            raise PushRejected(
+                                "remote rejected the push (protected branch, required "
+                                "pull request, or ref permission) — a repo-config issue, "
+                                f"not a code failure: {exc.stderr.strip() or exc}"
+                            ) from exc
                         raise
                     push_status = "succeeded"
                     self._event(
@@ -1968,6 +2000,12 @@ class GitRunner:
                             message="Atomic push failed",
                             detail=f"exit_code={exc.returncode}",
                         )
+                        if is_push_rejection(exc.stderr):
+                            raise PushRejected(
+                                "remote rejected the push (protected branch, required "
+                                "pull request, or ref permission) — a repo-config issue, "
+                                f"not a code failure: {exc.stderr.strip() or exc}"
+                            ) from exc
                         raise
                     push_status = "succeeded"
                     self._event(

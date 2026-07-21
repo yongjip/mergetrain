@@ -370,16 +370,19 @@ rb=$("$MT" --repo "$R" run-batch --deploy --json); rc=$?
 [ "$before" = "$(remote_main "$(dirname "$R")")" ] && ok "remote UNCHANGED (no push on gate fail)" || no "remote changed despite gate fail!"
 [ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "fix_blocked_job" ] && ok "doctor=fix_blocked_job" || no "doctor next_action wrong"
 
-section "S9b  push REJECTED by remote -> failed, remote unchanged"
+section "S9b  push REJECTED by remote -> blocked (policy, not bad code), remote unchanged"
 R=$(setup s9b); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 hk="$D/remote.git/hooks/pre-receive"; printf '#!/bin/sh\necho "remote: ref locked" >&2\nexit 1\n' > "$hk"; chmod +x "$hk"
 before=$(remote_main "$D")
 rb=$("$MT" --repo "$R" run-batch --deploy --json)
-[ "$(echo "$rb" | jget jobs.0.status)" = "failed" ] && ok "job failed on push rejection" || no "status not failed: $rb"
-echo "$(echo "$rb" | jget jobs.0.note)" | grep -Eqi 'command failed|push|reject|locked' && ok "note reflects the push failure" || no "note not push-related"
+jid=$(echo "$rb" | jget jobs.0.id)
+# A pre-receive decline is a policy/permission rejection, not bad code:
+# the job parks blocked (not failed) and inspect classifies push_rejected.
+[ "$(echo "$rb" | jget jobs.0.status)" = "blocked" ] && ok "push rejection parks the job blocked" || no "status not blocked: $rb"
+[ "$("$MT" --repo "$R" inspect "$jid" --json | jget outcome.category)" = "push_rejected" ] && ok "inspect classifies push_rejected" || no "category not push_rejected"
+echo "$(echo "$rb" | jget jobs.0.note)" | grep -Eqi 'reject|push|locked' && ok "note reflects the push rejection" || no "note not push-related"
 [ "$before" = "$(remote_main "$D")" ] && ok "remote UNCHANGED after rejected push" || no "remote changed despite rejection!"
-[ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "fix_blocked_job" ] && ok "doctor=fix_blocked_job" || no "doctor next_action wrong"
 
 section "S10  lock: concurrent run rejected while a runner holds it"
 R=$(setup s10 sleep); make_branch "$R" feature/a a.txt aaa

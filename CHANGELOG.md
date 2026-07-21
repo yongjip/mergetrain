@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Classify a policy-rejected push as `blocked`, not `failed` (0.9.0-prep). When
+  the remote refuses the deploy push for a protected branch, a required pull
+  request, a denied ref update, or a declined pre-receive hook, the job used to
+  land `failed` — which tells an agent "the code is bad, rebase and re-enqueue",
+  a wrong and self-perpetuating signal. It now parks `blocked` (a repo-config
+  action, not a code fix), and `inspect --json` reports the stable
+  `push_rejected` category so agents branch on that instead of regexing the
+  note. Transient/infrastructure push failures still mark `failed`
+  (`push_failed`). See [failure modes](./docs/failure-modes.md).
+
 - Add `mergetrain verify` to discharge a crash-orphaned post-push verify
   (0.9.0-prep). A crash in the verify window finalizes the job `deployed` with
   `verify_status='unknown'`, and `doctor`'s `next_action` became a **permanent**

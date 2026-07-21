@@ -1005,6 +1005,53 @@ class BisectIsolationTests(unittest.TestCase):
             self.assertNotIn("Train gate failed; bisecting 3 jobs", messages)
 
 
+class PushRejectionTests(unittest.TestCase):
+    def test_classifier_distinguishes_permission_from_other_failures(self) -> None:
+        from mergetrain.git_runner import is_push_rejection
+
+        self.assertTrue(is_push_rejection("remote: error: GH006 Protected branch update failed"))
+        self.assertTrue(is_push_rejection("! [remote rejected] main -> main (protected branch hook declined)"))
+        self.assertTrue(is_push_rejection("remote: Changes must be made through a pull request."))
+        self.assertFalse(is_push_rejection("! [rejected] main -> main (non-fast-forward)"))
+        self.assertFalse(is_push_rejection("fatal: could not read from remote repository"))
+
+    def test_inspect_categorizes_a_push_blocked_job_as_push_rejected(self) -> None:
+        from mergetrain.observability import job_outcome
+        from mergetrain.models import Job
+
+        job = Job(
+            id=1, task="a", branch="feature/a", status="blocked",
+            push_status="failed",
+            note="remote rejected the push (protected branch, required pull request)",
+        )
+        self.assertEqual(job_outcome(job)["category"], "push_rejected")
+
+    def test_protected_branch_push_lands_blocked_not_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            # A pre-receive hook that rejects with a protected-branch message,
+            # so the real push path exercises the rejection classifier.
+            hook = root / "remote.git" / "hooks" / "pre-receive"
+            hook.write_text(
+                "#!/bin/sh\necho 'remote: error: GH006 Protected branch update failed' 1>&2\nexit 1\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+            finally:
+                conn.close()
+            # Not `failed` (which means "bad code, rebase") — this is a repo
+            # policy issue the operator must fix, so the job is blocked.
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(result.push_status, "failed")
+            self.assertIn("rejected the push", result.note)
+
+
 class GcWorktreeGuardTests(unittest.TestCase):
     def test_gc_never_removes_a_live_runners_worktree(self) -> None:
         # Blocker: gc --apply force-removed the worktree a running deploy was

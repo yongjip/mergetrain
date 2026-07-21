@@ -34,6 +34,15 @@ class DuplicateActiveBranch(QueueError):
     (cancel the superseded job, or re-enqueue with --allow-duplicate)."""
 
 
+class PushRejected(MergetrainError):
+    """Raised when the remote rejects the deploy push for a permission/policy
+    reason (protected branch, required pull request, denied ref update).
+
+    This is a repo-configuration issue, not a bad-code failure, so the job is
+    parked ``blocked`` (not ``failed``) and an agent can branch on
+    error.code == "push_rejected"."""
+
+
 class RemoteUnreachable(MergetrainError):
     """Raised when reconcile cannot reach the remote to establish deploy truth.
 

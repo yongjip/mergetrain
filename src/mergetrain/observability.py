@@ -69,7 +69,13 @@ def job_outcome(job: Job) -> dict[str, Any]:
     elif job.status == "blocked":
         severity = "failure"
         lowered = message.lower()
-        if "conflict" in lowered:
+        if job.push_status == "failed":
+            # Blocked at the push, not the merge/gates: the remote refused the
+            # ref update (protected branch / required PR / permission). A
+            # repo-config action, not a code fix — agents branch on this
+            # category instead of regexing the note.
+            category = "push_rejected"
+        elif "conflict" in lowered:
             category = "merge_conflict"
         elif "head changed" in lowered or "identity" in lowered:
             category = "source_identity_mismatch"
