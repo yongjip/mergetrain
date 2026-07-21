@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Contract-1 JSON frame normalization (#44, Phase 1 — a deliberate breaking
+  change to the `--json` envelope, made now because it is the last moment
+  before the 0.9.0 API freeze).** `ok` now means exactly one thing on every
+  command — "the command executed without raising an error envelope" — instead
+  of four different things: `doctor`'s repo-health verdict moves to a new
+  `health` field (`ok` is now always true when doctor runs); a completed run
+  with a post-push verify warning is `ok:true, result:"warning"` (branch on
+  `result`, never `ok`, for the outcome); `hub remove` is `ok:true` with the
+  existing `removed` bool carrying found-or-not; `agent-contract --json` gains
+  `ok:true`. `status --json` now carries `next_action`, so it and `doctor` are
+  symmetric (CLAUDE.md tells agents to read either). All three failure shapes
+  collapse into one envelope `{ok:false, error:{code,message,retryable},
+  next_action?}` — the deploy-reconcile block now reports
+  `error.code:"reconcile_pending_deploy"` instead of a bespoke
+  `result:"blocked"`/`blocked_reason` shape. Exit codes are unchanged.
+
 - Verify and support Windows (issue #33): the full suite now runs on
   `windows-latest` in CI as a **blocking** check. Fixes a real
   cross-platform bug — `owner_liveness` used `os.kill(pid, 0)`, which on

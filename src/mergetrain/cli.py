@@ -206,7 +206,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_agent_contract(args: argparse.Namespace) -> int:
     terminology = config_from_args(args).terminology
     if args.json:
-        dump_json(agent_contract_payload(terminology))
+        dump_json({"ok": True, **agent_contract_payload(terminology)})
     else:
         print(render_agent_contract(terminology), end="")
     return 0
@@ -289,6 +289,17 @@ def cmd_status(args: argparse.Namespace) -> int:
             "lock": lock.to_dict() if lock else None,
             "jobs": [job.to_dict() for job in list_jobs(conn, limit=args.limit)],
             "validated_trains": validated_trains,
+            # CLAUDE.md tells agents to read status --json OR doctor --json
+            # before acting; carry next_action on both so the two mandated
+            # reads are symmetric.
+            "next_action": _doctor_next_action(
+                {
+                    "lock": lock.to_dict() if lock else None,
+                    "counts": counts(conn),
+                    "validated_trains": validated_trains,
+                    "gc": {"worktree_candidates": []},
+                }
+            ),
         }
     finally:
         conn.close()
@@ -298,6 +309,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         lock_text = payload["lock"]["owner"] if payload["lock"] else "none"
         print(f"db: {payload['db']}")
         print(f"lock: {lock_text}")
+        print(f"next action: {_human_next_action(payload['next_action'], config.terminology)}")
         for job in payload["jobs"]:
             print(f"{_job_result_line(job, config.terminology)} - {job['task']}")
     return 0
@@ -566,12 +578,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "validated_trains": validated_trains,
         "gc": {"worktree_candidates": find_worktree_gc_candidates(config)},
     }
-    payload["ok"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
+    # `ok` means only "the command ran without an error envelope" (contract 1);
+    # the repo-health verdict moves to its own field so a healthy-but-unconfigured
+    # repo no longer reads as ok:false.
+    payload["health"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
     payload["next_action"] = _doctor_next_action(payload)
     if args.json:
         dump_json(payload)
     else:
-        print(f"ok: {payload['ok']}")
+        print(f"health: {payload['health']}")
         print(f"config: {payload['config']['config_path']} ({'found' if payload['config_exists'] else 'default'})")
         print(f"db: {payload['db']}")
         print(f"git repo: {payload['git']['repo_root'] or 'not found'}")
@@ -594,6 +609,28 @@ def _mode_from_args(args: argparse.Namespace) -> bool:
     return bool(args.deploy)
 
 
+def _error_payload(
+    code: str,
+    message: str,
+    *,
+    retryable: bool = False,
+    next_action: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """The one failure envelope (contract 1): ``{ok:false, error{code,message,
+    retryable}, next_action?}``. Every failing --json command emits exactly
+    this, so a consumer parses one shape and branches on ``error.code``."""
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": {"code": code, "message": message, "retryable": retryable},
+    }
+    if next_action is not None:
+        payload["next_action"] = next_action
+    payload.update(extra)
+    return payload
+
+
 def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
     note = (
         f"deploy hard-blocked: {pending} job(s) pending reconcile — run "
@@ -601,14 +638,12 @@ def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
     )
     if args.json:
         dump_json(
-            {
-                "ok": False,
-                "result": "blocked",
-                "blocked_reason": "reconcile_pending_deploy",
-                "needs_reconcile": pending,
-                "next_action": "reconcile_pending_deploy",
-                "note": note,
-            }
+            _error_payload(
+                "reconcile_pending_deploy",
+                note,
+                next_action="reconcile_pending_deploy",
+                needs_reconcile=pending,
+            )
         )
     else:
         print(note, file=sys.stderr)
@@ -646,7 +681,10 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
     else:
         result = "failed"
     return {
-        "ok": result == "success",
+        # ok = the run executed and produced a result; the graded outcome
+        # (success/warning/partial/failed) lives in `result`. A completed run
+        # with a post-push verify warning is ok:true, result:"warning".
+        "ok": True,
         "result": result,
         "counts": dict(sorted(status_counts.items())),
         "push_counts": dict(sorted(push_counts.items())),
@@ -723,7 +761,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
         dump_json(payload)
     else:
         _print_run_payload(payload, config.terminology)
-    return 0 if payload["ok"] else 1
+    return 0 if payload["result"] == "success" else 1
 
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
@@ -824,7 +862,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         dump_json(payload)
     else:
         _print_run_payload(payload, config.terminology)
-    return 0 if payload["ok"] else 1
+    return 0 if payload["result"] == "success" else 1
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:
@@ -910,14 +948,7 @@ def _emit_recovery_error(
 ) -> int:
     if getattr(args, "json", False):
         dump_json(
-            {
-                "ok": False,
-                "error": {
-                    "code": error_code,
-                    "message": message,
-                    "retryable": exit_code in (3, 7),
-                },
-            }
+            _error_payload(error_code, message, retryable=exit_code in (3, 7))
         )
     else:
         print(f"mergetrain: {message}", file=sys.stderr)
@@ -1180,9 +1211,10 @@ def cmd_hub_remove(args: argparse.Namespace) -> int:
 
     removed = remove_repo(args.path, args.registry)
     if args.json:
+        # ok = the removal attempt ran; `removed` carries found-or-not.
         dump_json(
             {
-                "ok": removed,
+                "ok": True,
                 "registry": str(args.registry or registry_path()),
                 "removed": removed,
             }
@@ -1471,14 +1503,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]
             ).lstrip("_")
             dump_json(
-                {
-                    "ok": False,
-                    "error": {
-                        "code": code,
-                        "message": str(exc),
-                        "retryable": type(exc).__name__ in {"LockHeld", "LostLease"},
-                    },
-                }
+                _error_payload(
+                    code,
+                    str(exc),
+                    retryable=type(exc).__name__ in {"LockHeld", "LostLease"},
+                )
             )
         else:
             print(f"mergetrain: error: {exc}", file=sys.stderr)

@@ -426,6 +426,9 @@ class DeployGateTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(payload["next_action"], "reconcile_pending_deploy")
             self.assertFalse(payload["ok"])
+            # Contract 1: the deploy-block now uses the uniform failure envelope.
+            self.assertEqual(payload["error"]["code"], "reconcile_pending_deploy")
+            self.assertEqual(payload["needs_reconcile"], 1)
             # the remote must not have advanced
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")

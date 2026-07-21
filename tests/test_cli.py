@@ -50,7 +50,9 @@ class CliTests(unittest.TestCase):
             verify_status="failed",
         )
         payload = _results_payload([job])
-        self.assertFalse(payload["ok"])
+        # Contract 1: ok = the run executed; the graded outcome is in `result`.
+        # A completed deploy with a verify warning is ok:true, result:"warning".
+        self.assertTrue(payload["ok"])
         self.assertEqual(payload["result"], "warning")
         self.assertEqual(payload["push_counts"], {"succeeded": 1})
         self.assertEqual(payload["verify_counts"], {"failed": 1})
@@ -114,8 +116,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["runtime"], runtime)
 
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
+        # ok stays true (the run executed); the outcome is graded in `result`.
         failed = _results_payload([Job(id=1, task="a", branch="a", status="failed")])
-        self.assertFalse(failed["ok"])
+        self.assertTrue(failed["ok"])
         self.assertEqual(failed["result"], "failed")
         partial = _results_payload(
             [
@@ -123,7 +126,7 @@ class CliTests(unittest.TestCase):
                 Job(id=2, task="b", branch="b", status="blocked"),
             ]
         )
-        self.assertFalse(partial["ok"])
+        self.assertTrue(partial["ok"])
         self.assertEqual(partial["result"], "partial")
         self.assertEqual(partial["counts"], {"blocked": 1, "validated": 1})
         self.assertNotIn("claim_token", partial["jobs"][0])
@@ -141,6 +144,45 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["error"]["code"], "config_error")
+
+    def test_contract1_envelope_ok_is_uniform_and_health_is_separate(self) -> None:
+        # A valid but unconfigured repo: the command ran (ok:true), and the
+        # repo-health verdict lives in its own `health` field, not in `ok`.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            self.assertIn("health", payload)
+            self.assertIn("next_action", payload)
+
+    def test_contract1_status_carries_next_action(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "status", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            # The two mandated reads (status/doctor) are now symmetric.
+            self.assertIn("next_action", payload)
+
+    def test_contract1_agent_contract_carries_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "agent-contract", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["name"], "mergetrain agent contract")
 
     def test_global_option_after_subcommand_is_normalized(self) -> None:
         normalized = normalize_global_options(["doctor", "--json", "--repo", "/tmp/example"])
