@@ -67,6 +67,8 @@ from .store import (
     list_jobs,
     list_run_events,
     list_train_jobs,
+    list_verify_unknown_jobs,
+    resolve_verify_status,
     release_runner_lock,
     select_validated_train,
     terminal_branch_candidates,
@@ -1169,6 +1171,60 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     return outcome.exit_code
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Discharge deployed jobs left verify_status='unknown' by a crash.
+
+    Re-runs the configured deploy.verify hooks against the recorded deploy_sha
+    and records the result, or accepts an explicit --ack for hooks that cannot
+    be re-run. This clears the otherwise-permanent verify_reconciled_deploy
+    next_action.
+    """
+
+    config = config_from_args(args)
+    conn = connect(config.state.db)
+    try:
+        if args.job is not None:
+            job = get_job(conn, args.job)
+            if job.status != "deployed" or job.verify_status != "unknown":
+                raise QueueError(
+                    f"job {args.job} is not an unresolved verify "
+                    f"(status={job.status}, verify_status={job.verify_status})"
+                )
+            targets = [job]
+        else:
+            targets = list_verify_unknown_jobs(conn)
+        resolved: list[dict[str, Any]] = []
+        for job in targets:
+            if args.ack:
+                outcome = args.ack
+                note = f"verify {outcome} by operator --ack"
+            else:
+                log_path = config.state.logs / f"verify-{job.id}.log"
+                config.state.logs.mkdir(parents=True, exist_ok=True)
+                with log_path.open("w", encoding="utf-8") as log:
+                    passed = GitRunner(config).reverify_deploy(
+                        deploy_sha=job.deploy_sha, log=log
+                    )
+                outcome = "succeeded" if passed else "failed"
+                note = f"verify re-run against {job.deploy_sha}: {outcome}"
+            updated = resolve_verify_status(conn, job.id, verify_status=outcome, note=note)
+            resolved.append({"job_id": updated.id, "verify_status": updated.verify_status})
+        next_action = _recovery_next_action(conn)
+    finally:
+        conn.close()
+    payload = {"ok": True, "resolved": resolved, "next_action": next_action}
+    if args.json:
+        dump_json(payload)
+    else:
+        if not resolved:
+            print("no deployed jobs awaiting verify")
+        for item in resolved:
+            print(f"job {item['job_id']}: verify {item['verify_status']}")
+        print(f"next action: {next_action}")
+    # Exit 1 if any re-run verify failed, so scripts can react.
+    return 0 if all(item["verify_status"] == "succeeded" for item in resolved) else 1
+
+
 def cmd_cancel(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     conn = connect(config.state.db)
@@ -1489,6 +1545,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_cancel.add_argument("--note", default="")
     p_cancel.add_argument("--json", action="store_true")
     p_cancel.set_defaults(func=cmd_cancel)
+
+    p_verify = subparsers.add_parser(
+        "verify",
+        help="Discharge deployed jobs left verify_status='unknown' by a crash",
+    )
+    p_verify.add_argument("--job", type=int, help="Resolve one job (default: all unresolved)")
+    p_verify.add_argument(
+        "--ack",
+        choices=["succeeded", "failed"],
+        help="Mark the result without re-running hooks (for non-repeatable verifies)",
+    )
+    p_verify.add_argument("--json", action="store_true")
+    p_verify.set_defaults(func=cmd_verify)
 
     p_dashboard = subparsers.add_parser(
         "dashboard", help="Serve the local read-only live dashboard"

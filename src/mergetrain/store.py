@@ -429,6 +429,42 @@ def list_jobs(conn: sqlite3.Connection, *, limit: int = 50) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
+def list_verify_unknown_jobs(conn: sqlite3.Connection) -> list[Job]:
+    """Deployed jobs whose post-push verify never resolved (crash recovery)."""
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue WHERE status = 'deployed' AND verify_status = 'unknown' "
+        "ORDER BY id ASC"
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
+
+
+def resolve_verify_status(
+    conn: sqlite3.Connection, job_id: int, *, verify_status: str, note: str = ""
+) -> Job:
+    """Discharge a deployed job's unresolved post-push verify (``mergetrain
+    verify``). Only moves a deployed+unknown job to succeeded/failed — never
+    reopens a terminal job or touches its deployed status."""
+    if verify_status not in {"succeeded", "failed"}:
+        raise QueueError(f"verify_status must be 'succeeded' or 'failed', got {verify_status!r}")
+    with immediate(conn):
+        row = conn.execute(
+            "SELECT status, verify_status FROM deploy_queue WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            raise QueueError(f"job not found: {job_id}")
+        if str(row["status"]) != "deployed" or str(row["verify_status"]) != "unknown":
+            raise QueueError(
+                f"job {job_id} is not an unresolved verify (status={row['status']}, "
+                f"verify_status={row['verify_status']})"
+            )
+        conn.execute(
+            "UPDATE deploy_queue SET verify_status = ?, note = COALESCE(NULLIF(?, ''), note) "
+            "WHERE id = ?",
+            (verify_status, note, job_id),
+        )
+    return get_job(conn, job_id)
+
+
 def list_train_jobs(conn: sqlite3.Connection, train_id: str) -> list[Job]:
     if not train_id:
         return []

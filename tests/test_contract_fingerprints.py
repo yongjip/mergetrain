@@ -207,6 +207,20 @@ def _cap_cancel(repo):
     return _run_json(["--repo", str(repo), "cancel", str(job.id)])
 
 
+def _cap_verify(repo):
+    # Seed a deployed+unknown job so `resolved` has a representative element.
+    from mergetrain.store import mark_job
+
+    conn = connect(_db(repo))
+    job = enqueue_job(conn, task="a", branch="feature/a")
+    mark_job(
+        conn, job.id, status="deployed", deploy_sha="e" * 40,
+        push_status="succeeded", verify_status="unknown",
+    )
+    conn.close()
+    return _run_json(["--repo", str(repo), "verify", "--ack", "succeeded"])
+
+
 def _cap_hub_status(repo):
     # Seed a one-repo registry with a live queue so repos[] has a
     # representative entry carrying an embedded snapshot.
@@ -231,6 +245,7 @@ SURFACES = {
     "reconcile": _cap_reconcile,
     "recover": _cap_recover,
     "unlock": _cap_unlock,
+    "verify": _cap_verify,
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
     "inspect": _cap_inspect,

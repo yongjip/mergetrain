@@ -541,6 +541,17 @@
       "prior_owner": null,
       "reason": null
     },
+    "verify": {
+      "contract_version": null,
+      "next_action": null,
+      "ok": null,
+      "resolved": {
+        "[]": {
+          "job_id": null,
+          "verify_status": null
+        }
+      }
+    },
     "version": {
       "contract_version": null,
       "ok": null,
