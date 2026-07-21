@@ -74,6 +74,12 @@ The `--auto` flag remains the explicit unattended-deploy approval boundary,
 exactly as with the single-repo daemon. The hub daemon never touches
 manually enqueued jobs.
 
+`--notify` posts a desktop notification when a repo's train lands, when a
+sweep hits an error, or when deploys pause for reconcile (transitions only,
+so a broken repo doesn't re-notify every sweep). macOS `osascript` only — a
+deliberate zero-dependency choice; on other platforms the flag is a silent
+no-op.
+
 ### Per-repo opt-out
 
 Some repos must never see unattended deploys as a matter of policy, not just

@@ -20,6 +20,7 @@ from typing import Any
 from .config import MergetrainConfig, load_config
 from .daemon import ProcessBatch, Say, daemon_tick
 from .hub import display_path
+from .notify import Notifier, sweep_notifications
 from .registry import load_registry
 from .store import default_owner
 
@@ -121,6 +122,7 @@ def hub_daemon_loop(
     say: Say = print,
     install_signal_handlers: bool = True,
     process_batch_factory: ProcessBatchFactory | None = None,
+    notifier: Notifier | None = None,
 ) -> list[dict[str, Any]]:
     """Sweep every registered repo on an interval until stopped.
 
@@ -143,6 +145,7 @@ def hub_daemon_loop(
             signal.signal(signum, request_stop)
 
     outcomes: list[dict[str, Any]] = []
+    last_outcomes: dict[str, str] = {}
     try:
         while True:
             try:
@@ -162,6 +165,13 @@ def hub_daemon_loop(
                         f"mergetrain hub sweep: {len(outcomes)} repo(s), "
                         f"{processed} with work processed"
                     )
+                    if notifier is not None:
+                        messages, last_outcomes = sweep_notifications(outcomes, last_outcomes)
+                        for title, message in messages:
+                            try:
+                                notifier(title, message)
+                            except Exception as exc:  # noqa: BLE001 - never break a sweep
+                                say(f"mergetrain hub notify error: {exc}")
                 else:
                     outcomes = []
                     say("mergetrain hub sweep: no repos registered")
