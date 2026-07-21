@@ -30,6 +30,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -38,7 +39,13 @@ from test_git_runner import make_demo_repo
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.contract import CONTRACT_VERSION
-from mergetrain.store import connect, enqueue_job, record_run_event
+from mergetrain.store import (
+    acquire_runner_lock,
+    connect,
+    default_owner,
+    enqueue_job,
+    record_run_event,
+)
 
 GOLDEN = Path(__file__).resolve().parent / "contract_fingerprints.json"
 
@@ -334,6 +341,62 @@ class ContractFingerprintTests(unittest.TestCase):
                 "CONTRACT_VERSION, then regen). Set "
                 "MERGETRAIN_REGEN_FINGERPRINTS=1 to regenerate.",
             )
+
+
+class ErrorTaxonomyTests(unittest.TestCase):
+    """keyset() nulls every value, so the error.code strings and retryable flags
+    that agents dispatch on live OUTSIDE the fingerprint golden. Pin the literal
+    values here so the taxonomy cannot drift silently."""
+
+    def _repo(self) -> Path:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        repo, _marker = make_demo_repo(Path(td.name))
+        return repo
+
+    def test_config_error_is_not_retryable(self) -> None:
+        repo = self._repo()
+        (repo / ".mergetrain.yaml").write_text("git:\n  push_refs: []\n", encoding="utf-8")
+        error = _run_json(["--repo", str(repo), "doctor"])["error"]
+        self.assertEqual(error["code"], "config_error")
+        self.assertFalse(error["retryable"])
+
+    def test_queue_error_is_not_retryable(self) -> None:
+        repo = self._repo()
+        error = _run_json(["--repo", str(repo), "inspect", "999"])["error"]
+        self.assertEqual(error["code"], "queue_error")
+        self.assertFalse(error["retryable"])
+
+    def test_duplicate_active_branch_is_not_retryable(self) -> None:
+        repo = self._repo()
+        argv = ["--repo", str(repo), "enqueue", "--task", "a",
+                "--branch", "feature/a", "--no-ready-check"]
+        _run_json(argv)  # the first enqueue succeeds
+        error = _run_json(argv)["error"]  # the duplicate is rejected
+        self.assertEqual(error["code"], "duplicate_active_branch")
+        self.assertFalse(error["retryable"])
+
+    def test_lock_held_is_retryable(self) -> None:
+        # LockHeld / LostLease are the ONLY retryable=true classes on the generic
+        # failure path — pin the flag, not just the code.
+        repo = self._repo()
+        conn = connect(_db(repo))
+        try:
+            enqueue_job(conn, task="a", branch="feature/a")
+            acquire_runner_lock(conn, owner=default_owner())  # a live lock this process owns
+        finally:
+            conn.close()
+        error = _run_json(["--repo", str(repo), "run-batch", "--deploy"])["error"]
+        self.assertEqual(error["code"], "lock_held")
+        self.assertTrue(error["retryable"])
+
+    def test_interrupted_envelope_has_the_full_shape(self) -> None:
+        repo = self._repo()
+        with mock.patch("mergetrain.cli.config_from_args", side_effect=KeyboardInterrupt):
+            payload = _run_json(["--repo", str(repo), "doctor"])
+        self.assertEqual(payload["error"]["code"], "interrupted")
+        self.assertEqual(payload["error"]["message"], "interrupted")
+        self.assertFalse(payload["error"]["retryable"])
 
 
 if __name__ == "__main__":
