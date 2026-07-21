@@ -303,6 +303,13 @@ def git_worktree_clean(path: str | Path) -> bool:
     return git_output_or_empty(["status", "--porcelain"], cwd=path) == ""
 
 
+def git_dirty_paths(path: str | Path, *, limit: int = 5) -> list[str]:
+    """The paths making a worktree dirty (porcelain status), for error text."""
+    lines = git_output_or_empty(["status", "--porcelain"], cwd=path).splitlines()
+    paths = [line[3:].strip() for line in lines if len(line) > 3]
+    return paths[:limit]
+
+
 def git_remote_url(path: str | Path, remote: str) -> str:
     return git_output_or_empty(["remote", "get-url", remote], cwd=path)
 
@@ -917,7 +924,7 @@ class GitRunner:
             checkpoint = "validation" if deploying_validated else "enqueue"
             raise MergeBlocked(
                 f"branch HEAD changed since {checkpoint}: {job.branch} "
-                f"(expected {expected_sha}, found {current_sha}); enqueue a fresh job"
+                f"(expected {expected_sha}, found {current_sha}); cancel the job (mergetrain cancel <id>) or use --allow-duplicate, then enqueue the fix"
             )
         return expected_sha
 
@@ -1426,7 +1433,7 @@ class GitRunner:
                     log_path=str(log_path),
                     note=(
                         "failed train gates individually during bisect isolation; "
-                        "fix the branch and enqueue a fresh job"
+                        "fix the branch and cancel the job (mergetrain cancel <id>) or use --allow-duplicate, then enqueue the fix"
                     ),
                 )
             )

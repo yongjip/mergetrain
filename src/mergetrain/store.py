@@ -12,7 +12,13 @@ from pathlib import Path
 from urllib.parse import quote
 from typing import Any, Iterator, Sequence
 
-from .errors import CancellationRequested, LockHeld, LostLease, QueueError
+from .errors import (
+    CancellationRequested,
+    DuplicateActiveBranch,
+    LockHeld,
+    LostLease,
+    QueueError,
+)
 from .models import (
     ACTIVE_STATUSES,
     ALL_STATUSES,
@@ -64,6 +70,26 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
         conn.commit()
 
 
+def _self_ignore(state_dir: Path) -> None:
+    """Drop a ``.gitignore`` of ``*`` inside mergetrain's state directory.
+
+    The queue DB, logs, and worktrees live in-repo (``.mergetrain/`` by
+    default). Without this, the first command that opens the DB leaves that
+    directory untracked, so the *next* ``enqueue`` fails the clean-worktree
+    check — the tool's own state breaks its own precondition. A cargo-style
+    self-ignoring directory keeps the whole thing invisible to git wherever
+    the user points ``state.db``.
+    """
+
+    marker = state_dir / ".gitignore"
+    if marker.exists():
+        return
+    try:
+        marker.write_text("# Managed by mergetrain — local queue state.\n*\n", encoding="utf-8")
+    except OSError:
+        pass  # best-effort; never fail a connect over an ignore file
+
+
 def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
     path = Path(db_path).expanduser()
     if read_only:
@@ -108,6 +134,7 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
         return conn
     if path != Path(":memory:"):
         path.parent.mkdir(parents=True, exist_ok=True)
+        _self_ignore(path.parent)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
@@ -368,7 +395,11 @@ def enqueue_job(
         raise QueueError("--branch is required")
     with immediate(conn):
         if not allow_duplicate and _active_branch_count(conn, branch):
-            raise QueueError(f"branch already has an active job: {branch}")
+            raise DuplicateActiveBranch(
+                f"branch '{branch}' already has an active job. If a job on it is "
+                "blocked/failed, cancel it first (mergetrain cancel <id>) then "
+                "enqueue the fix, or re-enqueue with --allow-duplicate."
+            )
         now = utc_now()
         cur = conn.execute(
             """

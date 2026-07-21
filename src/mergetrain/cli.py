@@ -39,6 +39,7 @@ from .git_runner import (
     git_remote_url,
     git_repo_root,
     git_rev_parse,
+    git_dirty_paths,
     git_worktree_clean,
 )
 from .models import Job
@@ -136,7 +137,7 @@ def agent_contract_payload(
             f"Use --auto only after explicit unattended-{words.noun} approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
-            "Fix blocked or failed work in the owning branch, commit a clean result, then enqueue a new job.",
+            "Fix blocked or failed work in the owning branch and commit a clean result; a branch keeps its blocked/failed job, so cancel that job (mergetrain cancel <id>) or re-enqueue with --allow-duplicate, then enqueue the fix.",
             "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
         ],
         "boundary": {
@@ -214,7 +215,13 @@ def cmd_init(args: argparse.Namespace) -> int:
             raise ConfigError(f"refusing to overwrite existing file without --force: {path}")
         path.write_text(content, encoding="utf-8")
         written.append(str(path))
-    dump_json({"ok": True, "written": written})
+    # The scaffold is meant to be committed; the .mergetrain/ runtime dir
+    # self-ignores. Say so, or the first enqueue trips the clean-worktree check.
+    next_step = (
+        "commit these files (git add . && git commit); mergetrain's own "
+        ".mergetrain/ state directory is git-ignored automatically"
+    )
+    dump_json({"ok": True, "written": written, "next_step": next_step})
     return 0
 
 
@@ -279,7 +286,13 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         if not git_repo_root(worktree):
             raise QueueError(f"not a git worktree: {worktree}")
         if not args.allow_dirty and not git_worktree_clean(worktree):
-            raise QueueError("worktree is dirty; commit/stash changes or pass --allow-dirty")
+            dirty = git_dirty_paths(worktree)
+            hint = f" ({', '.join(dirty)})" if dirty else ""
+            raise QueueError(
+                f"worktree has uncommitted changes{hint}; commit or stash them, "
+                "or pass --allow-dirty. (mergetrain's own .mergetrain/ state is "
+                "self-ignored — if it appears here, upgrade mergetrain.)"
+            )
         current = git_current_branch(worktree)
         if not args.allow_branch_mismatch and current != args.branch:
             raise QueueError(f"current branch {current!r} does not match --branch {args.branch!r}")

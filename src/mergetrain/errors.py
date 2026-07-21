@@ -26,6 +26,14 @@ class LostLease(QueueError):
     """Raised when a runner no longer owns the lease it was given."""
 
 
+class DuplicateActiveBranch(QueueError):
+    """Raised when a branch already has a non-terminal job in the queue.
+
+    Distinct from a generic queue error so an agent can branch on
+    error.code == "duplicate_active_branch" and take the documented escape
+    (cancel the superseded job, or re-enqueue with --allow-duplicate)."""
+
+
 class RemoteUnreachable(MergetrainError):
     """Raised when reconcile cannot reach the remote to establish deploy truth.
 
