@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Document the machine contract (#44, Phase 4 — completes #44). New
+  `docs/contract.md` enumerates every versioned surface, where
+  `contract_version` lives, the contract-1 envelope (`ok`/`result`/`health`/
+  the single failure shape), the additive-vs-breaking policy, the too-new
+  config handling, and the 0.9.0 freeze linkage. The `agent-contract` payload
+  gains a `machine_contract` boundary pointer, and `README`/`llms.txt`/
+  `CLAUDE.md` point agents at it.
+
 - Enforce the contract, two ways (#44, Phase 3 — the forcing function that
   makes the 0.9.0 freeze real). A checked-in golden **key-set fingerprint gate**
   (`tests/test_contract_fingerprints.py` + `contract_fingerprints.json`)

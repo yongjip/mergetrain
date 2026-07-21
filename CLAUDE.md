@@ -8,6 +8,7 @@ This repository ships **mergetrain**, a local deploy train for coding-agent work
 - mergetrain runs locally on this machine's git repo. Run commands from the repo root that contains `.mergetrain.yaml`, or pass `--repo <path>` to operate another service repo.
 - **Always read state first:** run `mergetrain doctor --json` and `mergetrain status --json` before acting, and decide from that JSON — never from assumptions.
 - Every command is non-interactive and JSON-first. Prefer `--json`, then summarize. Don't paste raw JSON unless asked.
+- Every `--json` payload carries `contract_version` (the shape you can rely on). `ok` means only "the command ran"; read `result` for a run's outcome, `health` for repo health, `error.code` for failures. See [docs/contract.md](./docs/contract.md).
 
 ## GitHub CLI authentication
 

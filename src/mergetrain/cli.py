@@ -150,6 +150,7 @@ def agent_contract_payload(
             "hub_daemon_processes_only": "jobs enqueued with --auto, across registered repos, through each repo's own runner and lock; concurrency caps simultaneous repos machine-wide",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
             "recovery_after_crash": "reconcile / recover / unlock resolve crash state against the remote; run-batch --deploy is refused while any job is needs_reconcile",
+            "machine_contract": "every --json payload and the stream_start JSONL frame carry contract_version; branch outcome on result, health on health, failures on error.code; ignore unknown keys and dispatch JSONL on type (see docs/contract.md)",
         },
         "human_vocabulary": {
             **words.to_dict(),

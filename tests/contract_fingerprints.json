@@ -34,6 +34,7 @@
         "destructive_cleanup_requires": null,
         "hub_daemon_processes_only": null,
         "hub_observation": null,
+        "machine_contract": null,
         "progress_observation": null,
         "recovery_after_crash": null,
         "validate_requires": null,
