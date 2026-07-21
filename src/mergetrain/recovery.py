@@ -41,7 +41,6 @@ from .store import (
     release_runner_lock,
 )
 
-
 # --------------------------------------------------------------------------- #
 # git primitives — all reuse run_command(check=False) so a non-zero return is a
 # datum, not an exception (git_runner has no ls-remote / merge-base wrappers).
@@ -515,7 +514,7 @@ def force_unlock(
     )
 
 
-def _lock_changed(lock: Any, context: dict[str, Any]) -> "UnlockOutcome":
+def _lock_changed(lock: Any, context: dict[str, Any]) -> UnlockOutcome:
     """The inspected lock was replaced (or released) during the remote probe."""
     return UnlockOutcome(
         cleared=False,

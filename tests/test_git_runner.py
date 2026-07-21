@@ -43,8 +43,8 @@ def rmtree(path: Path | str) -> None:
         kwargs = {"onerror": lambda f, p, _e: _clear_readonly(f, p, None)}
     shutil.rmtree(path, **kwargs)
 
-from mergetrain.config import load_config
 from mergetrain.cli import main
+from mergetrain.config import load_config
 from mergetrain.errors import CommandFailed, redact_secrets
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.store import (
@@ -61,7 +61,7 @@ from mergetrain.store import (
 
 
 def git(cwd: Path, *args: str) -> str:
-    completed = subprocess.run(["git", *args], cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    completed = subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True)
     if completed.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed\n{completed.stdout}\n{completed.stderr}")
     return completed.stdout.strip()
@@ -1051,8 +1051,8 @@ class PushRejectionTests(unittest.TestCase):
         self.assertFalse(is_push_rejection("fatal: could not read from remote repository"))
 
     def test_inspect_categorizes_a_push_blocked_job_as_push_rejected(self) -> None:
-        from mergetrain.observability import job_outcome
         from mergetrain.models import Job
+        from mergetrain.observability import job_outcome
 
         job = Job(
             id=1, task="a", branch="feature/a", status="blocked",

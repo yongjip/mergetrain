@@ -27,13 +27,12 @@ from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
 from mergetrain.git_runner import GitRunner, pending_ref_name
-from mergetrain.recovery import _classify, force_unlock, recover, reconcile, sweep_pending_refs
+from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
     acquire_runner_lock,
     claim_deploy_batch,
     claim_next_job,
     connect,
-    counts,
     enqueue_job,
     force_clear_lock_and_split,
     get_job,

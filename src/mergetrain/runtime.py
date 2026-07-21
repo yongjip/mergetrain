@@ -55,7 +55,7 @@ def _installed_package_path(distribution: metadata.Distribution) -> Path | None:
         if pure.parts[-2:] != ("mergetrain", "__init__.py"):
             continue
         try:
-            return Path(distribution.locate_file(entry)).resolve().parent
+            return Path(str(distribution.locate_file(entry))).resolve().parent
         except (AttributeError, OSError, TypeError, ValueError):
             return None
     return None
@@ -66,7 +66,7 @@ def _matches_distribution(package_path: Path, distribution: metadata.Distributio
     if installed_path is not None:
         return installed_path == package_path
     try:
-        distribution_root = Path(distribution.locate_file("")).resolve()
+        distribution_root = Path(str(distribution.locate_file(""))).resolve()
     except (AttributeError, OSError, TypeError, ValueError):
         return False
     return _is_within(package_path, distribution_root)
@@ -155,7 +155,7 @@ def runtime_provenance(*, package_path: Path | None = None) -> dict[str, Any]:
 
     source_path_value = payload["source_path"]
     if isinstance(source_path_value, str):
-        source_checkout = Path(source_path_value)
+        source_checkout: Path | None = Path(source_path_value)
     else:
         source_checkout = _source_checkout_path(imported_path)
         if source_checkout is not None:

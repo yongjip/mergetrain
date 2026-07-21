@@ -196,7 +196,7 @@ class HubSweepTests(unittest.TestCase):
 
             self.assertEqual(len(log), 3)
             spans = sorted((start, end) for _, _, start, end in log)
-            for (_, first_end), (second_start, _) in zip(spans, spans[1:]):
+            for (_, first_end), (second_start, _) in zip(spans, spans[1:], strict=False):
                 self.assertLessEqual(first_end, second_start)
 
     def test_parallel_concurrency_processes_every_repo(self) -> None:

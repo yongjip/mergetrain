@@ -7,8 +7,9 @@ import json
 import sys
 import time
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from . import __version__
 from .config import (
@@ -34,12 +35,12 @@ from .git_runner import (
     branch_exists,
     find_worktree_gc_candidates,
     git_current_branch,
+    git_dirty_paths,
     git_ref_exists,
     git_remote_exists,
     git_remote_url,
     git_repo_root,
     git_rev_parse,
-    git_dirty_paths,
     git_worktree_clean,
 )
 from .models import Job
@@ -49,7 +50,7 @@ from .observability import (
     inspect_job_payload,
     stream_terminal,
 )
-from .recovery import force_unlock, recover, reconcile, sweep_pending_refs
+from .recovery import force_unlock, reconcile, recover, sweep_pending_refs
 from .runtime import runtime_provenance
 from .snapshot import next_action as _doctor_next_action
 from .store import (
@@ -69,8 +70,8 @@ from .store import (
     list_run_events,
     list_train_jobs,
     list_verify_unknown_jobs,
-    resolve_verify_status,
     release_runner_lock,
+    resolve_verify_status,
     select_validated_train,
     terminal_branch_candidates,
     validated_train_summaries,
@@ -333,7 +334,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         lock = get_lock(conn)
         validated_trains = validated_train_summaries(conn)
-        payload = {
+        payload: dict[str, Any] = {
             "ok": True,
             "db": str(config.state.db),
             "lock": lock.to_dict() if lock else None,

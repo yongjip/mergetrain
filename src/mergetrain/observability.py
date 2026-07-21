@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any
 
 from .config import MergetrainConfig
 from .models import Job, RunEvent, RunnerLock
