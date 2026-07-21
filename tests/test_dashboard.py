@@ -149,7 +149,7 @@ terminology:
                 response = connection.getresponse()
                 payload = json.loads(response.read())
                 self.assertEqual(response.status, 405)
-                self.assertEqual(payload["error"], "read_only")
+                self.assertEqual(payload["error"]["code"], "read_only")
                 connection.close()
 
                 connection = http.client.HTTPConnection(host, port, timeout=3)

@@ -11,7 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mergetrain import __version__
-from mergetrain.cli import _job_result_line, _results_payload, main, normalize_global_options
+from mergetrain.cli import (
+    _job_result_line,
+    _results_payload,
+    _run_exit_code,
+    main,
+    normalize_global_options,
+)
 from mergetrain.config import render_default_config
 from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.models import Job
@@ -63,6 +69,28 @@ class CliTests(unittest.TestCase):
             _job_result_line(payload["jobs"][0]),
             "#1 deployed (push=succeeded, verify=failed): feature/a",
         )
+
+    def test_run_exit_code_treats_verify_warning_as_shipped(self) -> None:
+        # A shipped train whose post-push verify warned must not report the same
+        # exit 1 as a run that never shipped — exit 1 means "did not ship".
+        self.assertEqual(_run_exit_code({"result": "success"}), 0)
+        self.assertEqual(_run_exit_code({"result": "warning"}), 0)
+        self.assertEqual(_run_exit_code({"result": "partial"}), 1)
+        self.assertEqual(_run_exit_code({"result": "failed"}), 1)
+
+    def test_interrupted_json_envelope_carries_retryable(self) -> None:
+        # Ctrl-C during a --json command must emit the one failure shape
+        # {code,message,retryable}, not a two-key envelope that KeyErrors a
+        # consumer reading error.retryable.
+        out = io.StringIO()
+        with patch("mergetrain.cli.cmd_status", side_effect=KeyboardInterrupt), redirect_stdout(out):
+            code = main(["status", "--json"])
+        self.assertEqual(code, 130)
+        payload = json.loads(out.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "interrupted")
+        self.assertEqual(payload["error"]["message"], "interrupted")
+        self.assertFalse(payload["error"]["retryable"])
 
     def test_legacy_version_output_remains_compatible(self) -> None:
         out = io.StringIO()

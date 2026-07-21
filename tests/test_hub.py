@@ -383,7 +383,7 @@ class HubServerTests(unittest.TestCase):
 
                 status, body = self.request(port, "POST", "/api/snapshot")
                 self.assertEqual(status, 405)
-                self.assertEqual(json.loads(body)["error"], "read_only")
+                self.assertEqual(json.loads(body)["error"]["code"], "read_only")
             finally:
                 server.shutdown()
                 server.server_close()
