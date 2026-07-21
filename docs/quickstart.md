@@ -15,7 +15,17 @@ mergetrain init --project example-app --write
 ```
 
 Edit `.mergetrain.yaml` so `git.remote`, `git.integration_branch`, `git.push_refs`,
-`gates`, and `deploy.verify` match your service.
+`gates`, and `deploy.verify` match your service, then **commit the scaffold** —
+`init` writes `.mergetrain.yaml` and the agent-contract docs, and an uncommitted
+file trips the clean-worktree check at enqueue time:
+
+```sh
+git add .mergetrain.yaml AGENTS.mergetrain.md CLAUDE.mergetrain.md
+git commit -m "add mergetrain config"
+```
+
+mergetrain's own `.mergetrain/` runtime directory (queue DB, logs, worktrees)
+is git-ignored automatically, so it never shows up as uncommitted.
 
 ## 2. Create a task branch
 

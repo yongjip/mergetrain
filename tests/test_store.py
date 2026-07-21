@@ -6,7 +6,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mergetrain.errors import CancellationRequested, LockHeld, LostLease, QueueError
+from mergetrain.errors import (
+    CancellationRequested,
+    DuplicateActiveBranch,
+    LockHeld,
+    LostLease,
+    QueueError,
+)
 from mergetrain.store import (
     SCHEMA_VERSION,
     Liveness,
@@ -89,6 +95,29 @@ class StoreTests(unittest.TestCase):
         mark_job(conn, b.id, status="failed", expected_claim_token=token)
         self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
+
+    def test_state_dir_self_ignores(self) -> None:
+        # First DB open drops a .gitignore of '*' so the in-repo state dir
+        # never trips the enqueue clean-worktree check on the next command.
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        db = Path(td.name) / ".mergetrain" / "queue.sqlite"
+        conn = connect(db)
+        conn.close()
+        ignore = db.parent / ".gitignore"
+        self.assertTrue(ignore.is_file())
+        self.assertIn("*", ignore.read_text(encoding="utf-8"))
+
+    def test_duplicate_active_branch_is_a_typed_error_naming_the_escape(self) -> None:
+        conn = self.make_conn()
+        enqueue_job(conn, task="a", branch="feature/a")
+        with self.assertRaises(DuplicateActiveBranch) as raised:
+            enqueue_job(conn, task="a2", branch="feature/a")
+        msg = str(raised.exception)
+        self.assertIn("cancel", msg)
+        self.assertIn("--allow-duplicate", msg)
+        # --allow-duplicate still bypasses it.
+        enqueue_job(conn, task="a3", branch="feature/a", allow_duplicate=True)
 
     def test_conflict_with_is_set_on_block_and_cleared_on_requeue(self) -> None:
         conn = self.make_conn()

@@ -205,6 +205,25 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["name"], "mergetrain agent contract")
 
+    def test_duplicate_branch_surfaces_typed_error_code(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            base = ["--repo", str(repo), "enqueue", "--task", "a",
+                    "--branch", "feature/a", "--no-ready-check"]
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(base), 0)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main([*base, "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 1)
+            # Agents branch on error.code, not the free-text message.
+            self.assertEqual(payload["error"]["code"], "duplicate_active_branch")
+
     def test_too_new_config_fails_deploy_path_but_permits_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
