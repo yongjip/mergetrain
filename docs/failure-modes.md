@@ -38,10 +38,19 @@ enqueue a fresh job.
 
 ## Push failure
 
-Push failures mark jobs as `failed` with `push_status=failed` and
-`verify_status=not_run`. Use `mergetrain inspect <job-id> --json` for the stable
-`push_failed` category and `mergetrain logs <job-id> --tail 200` for explicit raw
-diagnostics.
+A push that fails for a transient/infrastructure reason marks the job `failed`
+with `push_status=failed` and `verify_status=not_run`; `mergetrain inspect
+<job-id> --json` reports the stable `push_failed` category.
+
+A push the remote **rejects for policy/permission** — a protected branch, a
+required pull request, a denied ref update, a declined pre-receive hook — is a
+repo-configuration issue, not bad code. mergetrain parks that job **`blocked`**
+(not `failed`, which would tell an agent to rebase and re-enqueue) with
+`push_status=failed`, and `inspect` reports the `push_rejected` category. Fix
+the branch protection / push permission (or point `git.push_refs` at a branch
+you can push, and land through your forge's own flow), then re-deploy.
+
+Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 
 ## Validated-gate reuse declined
 
