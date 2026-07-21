@@ -44,6 +44,7 @@ class Job:
     claim_token: str = ""
     cancel_requested_at: str = ""
     pending_deploy_sha: str = ""
+    conflict_with: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> "Job":
@@ -82,6 +83,7 @@ class Job:
             claim_token=str(row["claim_token"] or ""),
             cancel_requested_at=str(row["cancel_requested_at"] or ""),
             pending_deploy_sha=str(row["pending_deploy_sha"] or ""),
+            conflict_with=str(row["conflict_with"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -24,7 +24,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class Liveness:
@@ -148,7 +148,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           reused_validation_sha TEXT NOT NULL DEFAULT '',
           claim_token TEXT NOT NULL DEFAULT '',
           cancel_requested_at TEXT NOT NULL DEFAULT '',
-          pending_deploy_sha TEXT NOT NULL DEFAULT ''
+          pending_deploy_sha TEXT NOT NULL DEFAULT '',
+          conflict_with TEXT NOT NULL DEFAULT ''
         )
         """
         )
@@ -227,6 +228,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ),
             6: (
                 ("deploy_queue", "pending_deploy_sha", "TEXT NOT NULL DEFAULT ''"),
+            ),
+            7: (
+                ("deploy_queue", "conflict_with", "TEXT NOT NULL DEFAULT ''"),
             ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
@@ -1059,6 +1063,7 @@ def mark_job(
     validation_environment_sha: str = "",
     validation_train_sha: str = "",
     reused_validation_sha: str = "",
+    conflict_with: str = "",
     expected_claim_token: str | None = None,
 ) -> Job:
     if status not in ALL_STATUSES:
@@ -1096,6 +1101,7 @@ def mark_job(
                 validation_environment_sha = COALESCE(NULLIF(?, ''), validation_environment_sha),
                 validation_train_sha = COALESCE(NULLIF(?, ''), validation_train_sha),
                 reused_validation_sha = COALESCE(NULLIF(?, ''), reused_validation_sha),
+                conflict_with = ?,
                 claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
                 cancel_requested_at = CASE
                     WHEN ? IN ('in_progress', 'canceled') THEN cancel_requested_at
@@ -1126,6 +1132,7 @@ def mark_job(
                 validation_environment_sha,
                 validation_train_sha,
                 reused_validation_sha,
+                conflict_with,
                 status,
                 status,
                 status,

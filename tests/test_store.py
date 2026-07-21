@@ -8,6 +8,7 @@ from pathlib import Path
 
 from mergetrain.errors import CancellationRequested, LockHeld, LostLease, QueueError
 from mergetrain.store import (
+    SCHEMA_VERSION,
     acquire_runner_lock,
     cancel_job,
     claim_all_queued,
@@ -65,6 +66,22 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
 
+    def test_conflict_with_is_set_on_block_and_cleared_on_requeue(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="a")
+        blocked = mark_job(
+            conn,
+            job.id,
+            status="blocked",
+            note="semantic conflict: passes gates alone but fails combined",
+            conflict_with="7,9",
+        )
+        self.assertEqual(blocked.conflict_with, "7,9")
+        self.assertEqual(get_job(conn, job.id).conflict_with, "7,9")
+        # Any later transition without an explicit value clears the stale claim.
+        requeued = mark_job(conn, job.id, status="queued")
+        self.assertEqual(requeued.conflict_with, "")
+
     def test_legacy_database_migrates_validation_train_columns(self) -> None:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -121,9 +138,12 @@ class StoreTests(unittest.TestCase):
         self.assertIn("validation_train_sha", columns)
         self.assertIn("reused_validation_sha", columns)
         self.assertIn("pending_deploy_sha", columns)
+        self.assertIn("conflict_with", columns)
         migrated_db = sqlite3.connect(db)
         try:
-            self.assertEqual(migrated_db.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(
+                migrated_db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION
+            )
             event_columns = {
                 row[1] for row in migrated_db.execute("PRAGMA table_info(run_events)")
             }
