@@ -10,6 +10,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from mergetrain import __version__
 from mergetrain.cli import _job_result_line, _results_payload, main, normalize_global_options
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
@@ -64,7 +65,7 @@ class CliTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised, redirect_stdout(out):
             main(["--version"])
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(out.getvalue(), "mergetrain 0.4.0\n")
+        self.assertEqual(out.getvalue(), f"mergetrain {__version__}\n")
 
     def test_version_json_exposes_runtime_provenance(self) -> None:
         runtime = {
@@ -80,7 +81,7 @@ class CliTests(unittest.TestCase):
             code = main(["version", "--json"])
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["version"], "0.4.0")
+        self.assertEqual(payload["version"], __version__)
         self.assertEqual(payload["runtime"], runtime)
 
     def test_doctor_json_includes_runtime_provenance(self) -> None:
