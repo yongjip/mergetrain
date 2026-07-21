@@ -71,6 +71,28 @@ class SweepNotificationTests(unittest.TestCase):
         # The error cleared (idle) and came back: that transition notifies again.
         self.assertEqual(fourth, [("mergetrain · web", "repo directory is missing")])
 
+    def test_landing_grades_are_honest_and_no_landing_dedups(self) -> None:
+        prev: dict[str, str] = {}
+        msgs, prev = deliver(
+            [
+                outcome("/w/a", "landed:2"),
+                outcome("/w/b", "partial:1/3"),
+                outcome("/w/c", "no_landing:2"),
+            ],
+            prev,
+        )
+        self.assertEqual(
+            msgs,
+            [
+                ("mergetrain · a", "Train landed (2 jobs)"),
+                ("mergetrain · b", "Partial: 1/3 landed, rest blocked/failed"),
+                ("mergetrain · c", "Nothing landed — 2 jobs blocked or failed"),
+            ],
+        )
+        # A repo that keeps landing nothing is a persistent state — notify once.
+        again, prev = deliver([outcome("/w/c", "no_landing:2")], prev)
+        self.assertEqual(again, [])
+
     def test_reconcile_pause_notifies_on_transition_only(self) -> None:
         prev: dict[str, str] = {}
         first, prev = deliver([outcome("/w/api", "reconcile_paused")], prev)

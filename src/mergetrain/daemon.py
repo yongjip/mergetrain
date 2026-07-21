@@ -22,6 +22,32 @@ Say = Callable[[str], None]
 ProcessBatch = Callable[[Any, list[Job]], object]
 
 
+def _grade_batch(results: object, claimed: int, say: Say) -> str:
+    """Turn a processed batch into an honest outcome string.
+
+    ``processed:<n>`` used to mean only "n jobs ran", but the notifier read it
+    as "n landed" — so a sweep where every job blocked on a conflict reported a
+    green deploy. Grade by what actually landed:
+    ``landed:<n>`` (all n deployed) / ``partial:<d>/<n>`` (some) /
+    ``no_landing:<n>`` (nothing deployed — blocked or failed).
+    """
+
+    statuses = [getattr(job, "status", "") for job in results] if isinstance(results, list) else []
+    if not statuses:
+        # A caller (or test double) that returns no inspectable results: fall
+        # back to the neutral "ran" report rather than claim a landing.
+        return f"processed:{claimed}"
+    deployed = sum(1 for status in statuses if status == "deployed")
+    total = len(statuses)
+    if deployed == total:
+        return f"landed:{deployed}"
+    if deployed:
+        say(f"mergetrain daemon: {deployed}/{total} landed, rest blocked/failed")
+        return f"partial:{deployed}/{total}"
+    say(f"mergetrain daemon: 0/{total} landed — jobs blocked or failed")
+    return f"no_landing:{total}"
+
+
 def daemon_tick(
     *,
     db_path: str,
@@ -95,8 +121,8 @@ def daemon_tick(
             if jobs:
                 lease_token = jobs[0].claim_token
                 say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
-                process_batch(conn, jobs)
-                return f"processed:{len(jobs)}"
+                results = process_batch(conn, jobs)
+                return _grade_batch(results, len(jobs), say)
             if deploy_reconcile_pending(conn):
                 # The claim itself parked orphans as needs_reconcile and
                 # refused to proceed (TOCTOU guard in claim_all_queued).

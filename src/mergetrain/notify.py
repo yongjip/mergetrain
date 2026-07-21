@@ -22,9 +22,15 @@ from typing import Any
 Notifier = Callable[[str, str], None]
 
 # Outcomes that repeat sweep after sweep (a broken repo stays broken) notify
-# only when the outcome *changes*; a processed train is new work every time.
+# only when the outcome *changes*; a landed train is new work every time.
 _TRANSITION_ONLY = {"error", "reconcile_paused"}
 _SILENT = {"idle", "skipped", "excluded"}
+
+
+def _is_transition_only(outcome: str) -> bool:
+    # A repo that lands nothing every sweep (all jobs blocked/failed) is a
+    # persistent state like `error` — notify once, not every tick.
+    return outcome in _TRANSITION_ONLY or outcome.startswith("no_landing:")
 
 
 def _dedup_key(outcome: str, error: str) -> str:
@@ -84,14 +90,20 @@ def sweep_notifications(
         if outcome in _SILENT:
             settled[path] = key
             continue
-        if outcome in _TRANSITION_ONLY and previous.get(path) == key:
+        if _is_transition_only(outcome) and previous.get(path) == key:
             settled[path] = key
             continue
         title = f"mergetrain · {name}"
-        if outcome.startswith("processed:"):
+        if outcome.startswith("landed:") or outcome.startswith("processed:"):
             count = outcome.split(":", 1)[1]
             job_word = "job" if count == "1" else "jobs"
             messages.append((path, key, title, f"Train landed ({count} {job_word})"))
+        elif outcome.startswith("partial:"):
+            messages.append((path, key, title, f"Partial: {outcome.split(':', 1)[1]} landed, rest blocked/failed"))
+        elif outcome.startswith("no_landing:"):
+            count = outcome.split(":", 1)[1]
+            job_word = "job" if count == "1" else "jobs"
+            messages.append((path, key, title, f"Nothing landed — {count} {job_word} blocked or failed"))
         elif outcome == "reconcile_paused":
             messages.append((path, key, title, "Deploy paused: jobs need reconcile"))
         elif outcome == "error":

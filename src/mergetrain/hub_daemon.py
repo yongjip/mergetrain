@@ -66,7 +66,7 @@ def hub_sweep(
     At most ``concurrency`` repos run at a time; each repo's outcome is
     isolated, so one broken repo never stops the sweep. Returns one outcome
     dict per repo: ``{"path", "name"?, "ok", "outcome", "error"?}`` where
-    outcome is ``processed:<n>``/``idle``/``reconcile_paused``/``skipped``/
+    outcome is ``landed:<n>``/``partial:<d>/<n>``/``no_landing:<n>``/``idle``/``reconcile_paused``/``skipped``/
     ``excluded``/``error``.
     """
 
@@ -186,7 +186,10 @@ def hub_daemon_loop(
                         process_batch_factory=process_batch_factory,
                     )
                     processed = sum(
-                        1 for item in outcomes if str(item.get("outcome", "")).startswith("processed")
+                        1
+                        for item in outcomes
+                        if str(item.get("outcome", "")).split(":", 1)[0]
+                        in {"landed", "partial", "no_landing", "processed"}
                     )
                     say(
                         f"mergetrain hub sweep: {len(outcomes)} repo(s), "
