@@ -1,0 +1,334 @@
+{
+  "contract_version": 1,
+  "surfaces": {
+    "_jsonl_frames": {
+      "event": {
+        "created_at": null,
+        "detail": null,
+        "elapsed_seconds": null,
+        "gate": {
+          "index": null,
+          "name": null,
+          "state": null,
+          "total": null
+        },
+        "heartbeat_at": null,
+        "id": null,
+        "job_id": null,
+        "lease_liveness": null,
+        "message": null,
+        "phase": null,
+        "state": null,
+        "type": null
+      },
+      "stream_start": {
+        "after_event_id": null,
+        "contract_version": null,
+        "type": null
+      }
+    },
+    "agent_contract": {
+      "boundary": {
+        "daemon_processes_only": null,
+        "deploy_requires": null,
+        "destructive_cleanup_requires": null,
+        "hub_daemon_processes_only": null,
+        "hub_observation": null,
+        "progress_observation": null,
+        "recovery_after_crash": null,
+        "validate_requires": null,
+        "validated_gate_reuse": null,
+        "validated_train_deploy": null
+      },
+      "contract_version": null,
+      "human_vocabulary": {
+        "action": null,
+        "canonical_cli_flag": null,
+        "cli_flag": null,
+        "completed": null,
+        "git_operation": null,
+        "in_progress": null,
+        "machine_fields": "[]",
+        "machine_status": null,
+        "noun": null,
+        "scope": null
+      },
+      "name": null,
+      "ok": null,
+      "purpose": null,
+      "rules": "[]"
+    },
+    "doctor": {
+      "config": {
+        "agent": {
+          "prefer_json_status": null,
+          "require_clean_worktree_before_enqueue": null,
+          "require_explicit_auto_approval": null
+        },
+        "config_exists": null,
+        "config_path": null,
+        "config_version": null,
+        "deploy": {
+          "reuse": {
+            "enabled": null,
+            "fingerprints": "[]?",
+            "max_age_minutes": null,
+            "on_mismatch": null
+          },
+          "verify": "[]?"
+        },
+        "gates": {
+          "[]": {
+            "always_rerun_on_deploy": null,
+            "name": null,
+            "run": null
+          }
+        },
+        "git": {
+          "integration_branch": null,
+          "integration_ref": null,
+          "push_refs": "[]",
+          "remote": null
+        },
+        "project": {
+          "name": null
+        },
+        "queue": {
+          "command_timeout_seconds": null,
+          "daemon_interval_seconds": null,
+          "heartbeat_interval_seconds": null,
+          "lock_ttl_minutes": null
+        },
+        "repo": null,
+        "state": {
+          "db": null,
+          "logs": null,
+          "worktree_root": null
+        },
+        "terminology": {
+          "action": null,
+          "completed": null,
+          "git_operation": null,
+          "in_progress": null,
+          "noun": null
+        }
+      },
+      "config_exists": null,
+      "contract_version": null,
+      "counts": {
+        "auto_queued": null,
+        "blocked": null,
+        "blocked_with_marker": null,
+        "canceled": null,
+        "deployed": null,
+        "deployed_verify_unknown": null,
+        "failed": null,
+        "in_progress": null,
+        "in_progress_with_marker": null,
+        "manual_queued": null,
+        "needs_reconcile": null,
+        "queued": null,
+        "validated": null
+      },
+      "db": null,
+      "db_existed_before": null,
+      "gc": {
+        "worktree_candidates": "[]?"
+      },
+      "git": {
+        "current_branch": null,
+        "integration_ref": null,
+        "integration_ref_exists": null,
+        "remote_exists": null,
+        "remote_url": null,
+        "repo_root": null,
+        "worktree_clean": null
+      },
+      "health": null,
+      "lock": null,
+      "next_action": null,
+      "ok": null,
+      "runtime": {
+        "distribution_version": null,
+        "install_mode": null,
+        "package_path": null,
+        "source_commit": null,
+        "source_dirty": null,
+        "source_path": null
+      },
+      "state": {
+        "logs": null,
+        "worktree_root": null
+      },
+      "validated_trains": "[]?",
+      "version": null
+    },
+    "enqueue": {
+      "contract_version": null,
+      "job": {
+        "auto_deploy": null,
+        "base_sha": null,
+        "branch": null,
+        "cancel_requested_at": null,
+        "conflict_with": null,
+        "deploy_sha": null,
+        "finished_at": null,
+        "head_sha": null,
+        "id": null,
+        "log_path": null,
+        "note": null,
+        "pending_deploy_sha": null,
+        "push_status": null,
+        "requested_at": null,
+        "reused_validation_sha": null,
+        "started_at": null,
+        "status": null,
+        "task": null,
+        "train_id": null,
+        "train_size": null,
+        "validated_at": null,
+        "validated_head_sha": null,
+        "validation_base_sha": null,
+        "validation_environment_sha": null,
+        "validation_gate_policy_sha": null,
+        "validation_sha": null,
+        "validation_train_sha": null,
+        "validation_tree_sha": null,
+        "verify_status": null,
+        "worktree_path": null
+      },
+      "ok": null
+    },
+    "failure_envelope": {
+      "contract_version": null,
+      "error": {
+        "code": null,
+        "message": null,
+        "retryable": null
+      },
+      "ok": null
+    },
+    "gc": {
+      "apply": null,
+      "branch_candidates": "[]?",
+      "contract_version": null,
+      "delete_branches": null,
+      "ok": null,
+      "result": null,
+      "worktree_candidates": "[]?"
+    },
+    "inspect": {
+      "contract_version": null,
+      "events": "[]?",
+      "job": {
+        "auto_deploy": null,
+        "base_sha": null,
+        "branch": null,
+        "cancel_requested_at": null,
+        "conflict_with": null,
+        "deploy_sha": null,
+        "finished_at": null,
+        "head_sha": null,
+        "id": null,
+        "log_path": null,
+        "note": null,
+        "pending_deploy_sha": null,
+        "push_status": null,
+        "requested_at": null,
+        "reused_validation_sha": null,
+        "started_at": null,
+        "status": null,
+        "task": null,
+        "train_id": null,
+        "train_size": null,
+        "validated_at": null,
+        "validated_head_sha": null,
+        "validation_base_sha": null,
+        "validation_environment_sha": null,
+        "validation_gate_policy_sha": null,
+        "validation_sha": null,
+        "validation_train_sha": null,
+        "validation_tree_sha": null,
+        "verify_status": null,
+        "worktree_path": null
+      },
+      "ok": null,
+      "outcome": {
+        "category": null,
+        "failure_category": null,
+        "message": null,
+        "severity": null,
+        "warning_categories": "[]?"
+      },
+      "progress": {
+        "detail": null,
+        "elapsed_seconds": null,
+        "gate": null,
+        "heartbeat_at": null,
+        "latest_event_id": null,
+        "lease_expires_at": null,
+        "lease_liveness": null,
+        "lost_lease": null,
+        "message": null,
+        "phase": null,
+        "started_at": null,
+        "state": null,
+        "updated_at": null
+      },
+      "terminology": {
+        "action": null,
+        "completed": null,
+        "git_operation": null,
+        "in_progress": null,
+        "noun": null
+      },
+      "train": null
+    },
+    "reconcile": {
+      "applied": null,
+      "contract_version": null,
+      "jobs": "[]?",
+      "next_action": null,
+      "ok": null,
+      "summary": {
+        "canceled": null,
+        "conflicts": null,
+        "reconciled_deployed": null,
+        "requeued": null
+      }
+    },
+    "run_batch_validate": {
+      "contract_version": null,
+      "counts": {},
+      "jobs": "[]?",
+      "note": null,
+      "ok": null,
+      "push_counts": {},
+      "result": null,
+      "reused_validation_shas": "[]?",
+      "verify_counts": {}
+    },
+    "status": {
+      "contract_version": null,
+      "db": null,
+      "jobs": "[]?",
+      "lock": null,
+      "next_action": null,
+      "ok": null,
+      "validated_trains": "[]?"
+    },
+    "version": {
+      "contract_version": null,
+      "ok": null,
+      "runtime": {
+        "distribution_version": null,
+        "install_mode": null,
+        "package_path": null,
+        "source_commit": null,
+        "source_dirty": null,
+        "source_path": null
+      },
+      "version": null
+    }
+  }
+}

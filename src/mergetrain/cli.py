@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from . import __version__
-from .config import MergetrainConfig, TerminologyConfig, load_config, render_default_config
+from .config import (
+    CONFIG_VERSION,
+    MergetrainConfig,
+    TerminologyConfig,
+    load_config,
+    render_default_config,
+)
 from .contract import CONTRACT_VERSION
 from .daemon import daemon_loop
 from .errors import (
@@ -244,8 +250,27 @@ def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
         raise QueueError(f"could not capture {label} SHA for {ref}: {exc}") from exc
 
 
+def _preflight_config(config: MergetrainConfig) -> None:
+    """Fail closed on a too-new config for the state-shipping path (#44).
+
+    Enforced only on ``enqueue``/``run-batch``/``run-next`` — never inside
+    ``load_config`` — so a version mismatch after a rollback can still run
+    ``reconcile``/``recover``/``unlock`` and every read-only command. Never
+    ship code against a config an older binary may misread.
+    """
+
+    if config.config_version > CONFIG_VERSION:
+        raise ConfigError(
+            f"config version {config.config_version} is newer than this "
+            f"mergetrain understands (supports {CONFIG_VERSION}); upgrade "
+            "mergetrain before enqueuing or deploying. Recovery and read-only "
+            "commands still work."
+        )
+
+
 def cmd_enqueue(args: argparse.Namespace) -> int:
     config = config_from_args(args)
+    _preflight_config(config)
     worktree = Path(args.worktree or Path.cwd()).expanduser().resolve()
     if not args.no_ready_check:
         if not worktree.exists():
@@ -603,6 +628,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # repo no longer reads as ok:false.
     payload["health"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
     payload["next_action"] = _doctor_next_action(payload)
+    if config.config_version > CONFIG_VERSION:
+        # A too-new config: the deploy path is fail-closed, but doctor still
+        # runs and points the operator at the fix (recovery stays permitted).
+        payload["config_version_supported"] = CONFIG_VERSION
+        payload["next_action"] = "upgrade_mergetrain"
     if args.json:
         dump_json(payload)
     else:
@@ -751,6 +781,7 @@ def _print_run_payload(
 def cmd_run_next(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
     config = config_from_args(args)
+    _preflight_config(config)
     owner = default_owner()
     lease_token = ""
     conn = connect(config.state.db)
@@ -793,6 +824,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     if args.preview and not deploy:
         raise QueueError("--preview requires --deploy, --integrate, or --push")
     config = config_from_args(args)
+    _preflight_config(config)
     if args.preview:
         conn = connect(config.state.db)
         try:
