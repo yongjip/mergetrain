@@ -21,7 +21,9 @@ from mergetrain.store import (
     claim_all_queued,
     claim_deploy_batch,
     connect,
+    counts,
     default_owner,
+    dismiss_job,
     enqueue_job,
     get_job,
     get_lock,
@@ -108,13 +110,27 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(ignore.is_file())
         self.assertIn("*", ignore.read_text(encoding="utf-8"))
 
+    def test_dismiss_clears_blocked_failed_but_refuses_live_work(self) -> None:
+        conn = self.make_conn()
+        blocked = enqueue_job(conn, task="a", branch="feature/a")
+        mark_job(conn, blocked.id, status="blocked", note="gate failed")
+        queued = enqueue_job(conn, task="b", branch="feature/b")
+        # A blocked job dismisses to canceled (terminal, out of the count).
+        result = dismiss_job(conn, blocked.id)
+        self.assertEqual(result.status, "canceled")
+        self.assertIn("dismissed", result.note)
+        self.assertEqual(counts(conn).get("blocked", 0), 0)
+        # Queued (live) work is refused — that needs cancel, not dismiss.
+        with self.assertRaisesRegex(QueueError, "blocked or failed"):
+            dismiss_job(conn, queued.id)
+
     def test_duplicate_active_branch_is_a_typed_error_naming_the_escape(self) -> None:
         conn = self.make_conn()
         enqueue_job(conn, task="a", branch="feature/a")
         with self.assertRaises(DuplicateActiveBranch) as raised:
             enqueue_job(conn, task="a2", branch="feature/a")
         msg = str(raised.exception)
-        self.assertIn("cancel", msg)
+        self.assertIn("dismiss", msg)
         self.assertIn("--allow-duplicate", msg)
         # --allow-duplicate still bypasses it.
         enqueue_job(conn, task="a3", branch="feature/a", allow_duplicate=True)

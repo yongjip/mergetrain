@@ -61,6 +61,7 @@ from .store import (
     counts,
     default_owner,
     deploy_reconcile_pending,
+    dismiss_job,
     enqueue_job,
     get_job,
     get_lock,
@@ -139,7 +140,7 @@ def agent_contract_payload(
             f"Use --auto only after explicit unattended-{words.noun} approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
-            "Fix blocked or failed work in the owning branch and commit a clean result; a branch keeps its blocked/failed job, so cancel that job (mergetrain cancel <id>) or re-enqueue with --allow-duplicate, then enqueue the fix.",
+            "Fix blocked or failed work in the owning branch and commit a clean result; a branch keeps its blocked/failed job, so dismiss it (mergetrain dismiss <id> — non-destructive, clears the stuck next_action) or re-enqueue with --allow-duplicate, then enqueue the fix.",
             "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
         ],
         "boundary": {
@@ -1171,6 +1172,41 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     return outcome.exit_code
 
 
+def cmd_dismiss(args: argparse.Namespace) -> int:
+    """Clear superseded blocked/failed jobs so they stop pinning next_action.
+
+    Non-destructive by construction: it only touches jobs that already failed
+    to land, never queued or in-progress work.
+    """
+
+    config = config_from_args(args)
+    conn = connect(config.state.db)
+    try:
+        if args.all:
+            targets = [
+                job for job in list_jobs(conn, limit=1000)
+                if job.status in {"blocked", "failed"}
+            ]
+        else:
+            if args.job_id is None:
+                raise QueueError("dismiss requires a job id or --all")
+            targets = [get_job(conn, args.job_id)]
+        dismissed = [dismiss_job(conn, job.id, note=args.note or "").to_dict() for job in targets]
+        next_action = _recovery_next_action(conn)
+    finally:
+        conn.close()
+    payload = {"ok": True, "dismissed": dismissed, "next_action": next_action}
+    if args.json:
+        dump_json(payload)
+    else:
+        if not dismissed:
+            print("no blocked/failed jobs to dismiss")
+        for job in dismissed:
+            print(f"dismissed job {job['id']}: {job['branch']}")
+        print(f"next action: {next_action}")
+    return 0
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     """Discharge deployed jobs left verify_status='unknown' by a crash.
 
@@ -1545,6 +1581,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cancel.add_argument("--note", default="")
     p_cancel.add_argument("--json", action="store_true")
     p_cancel.set_defaults(func=cmd_cancel)
+
+    p_dismiss = subparsers.add_parser(
+        "dismiss",
+        help="Clear a superseded blocked/failed job (non-destructive; not for queued/in-progress)",
+    )
+    p_dismiss.add_argument("job_id", type=int, nargs="?", help="Job to dismiss (or use --all)")
+    p_dismiss.add_argument("--all", action="store_true", help="Dismiss every blocked/failed job")
+    p_dismiss.add_argument("--note", default="")
+    p_dismiss.add_argument("--json", action="store_true")
+    p_dismiss.set_defaults(func=cmd_dismiss)
 
     p_verify = subparsers.add_parser(
         "verify",

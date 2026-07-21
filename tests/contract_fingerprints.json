@@ -95,6 +95,45 @@
       },
       "ok": null
     },
+    "dismiss": {
+      "contract_version": null,
+      "dismissed": {
+        "[]": {
+          "auto_deploy": null,
+          "base_sha": null,
+          "branch": null,
+          "cancel_requested_at": null,
+          "conflict_with": null,
+          "deploy_sha": null,
+          "finished_at": null,
+          "head_sha": null,
+          "id": null,
+          "log_path": null,
+          "note": null,
+          "pending_deploy_sha": null,
+          "push_status": null,
+          "requested_at": null,
+          "reused_validation_sha": null,
+          "started_at": null,
+          "status": null,
+          "task": null,
+          "train_id": null,
+          "train_size": null,
+          "validated_at": null,
+          "validated_head_sha": null,
+          "validation_base_sha": null,
+          "validation_environment_sha": null,
+          "validation_gate_policy_sha": null,
+          "validation_sha": null,
+          "validation_train_sha": null,
+          "validation_tree_sha": null,
+          "verify_status": null,
+          "worktree_path": null
+        }
+      },
+      "next_action": null,
+      "ok": null
+    },
     "doctor": {
       "config": {
         "agent": {

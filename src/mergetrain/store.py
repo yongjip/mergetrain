@@ -397,8 +397,9 @@ def enqueue_job(
         if not allow_duplicate and _active_branch_count(conn, branch):
             raise DuplicateActiveBranch(
                 f"branch '{branch}' already has an active job. If a job on it is "
-                "blocked/failed, cancel it first (mergetrain cancel <id>) then "
-                "enqueue the fix, or re-enqueue with --allow-duplicate."
+                "blocked/failed, dismiss it first (mergetrain dismiss <id>, "
+                "non-destructive) then enqueue the fix, or re-enqueue with "
+                "--allow-duplicate."
             )
         now = utc_now()
         cur = conn.execute(
@@ -1328,6 +1329,32 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
             )
         return get_job(conn, job_id)
     return mark_job(conn, job_id, status="canceled", note=note or "canceled by user")
+
+
+def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
+    """Non-destructively clear a blocked/failed job that has been superseded.
+
+    A blocked/failed job never lands and never self-clears, yet it keeps
+    ``doctor``'s ``next_action`` pinned to ``fix_blocked_job`` — hiding a
+    ready validated train — and blocks re-enqueue of its branch. Once its work
+    is fixed (and enqueued afresh, or abandoned), dismissing it moves it to the
+    terminal ``canceled`` state so the queue reflects reality. Unlike
+    ``cancel``, this only ever touches an already-failed outcome — never queued
+    or in-progress work — so it is safe for an agent to run unattended.
+    """
+
+    job = get_job(conn, job_id)
+    if job.status not in {"blocked", "failed"}:
+        raise QueueError(
+            f"only a blocked or failed job can be dismissed (job {job_id} is "
+            f"{job.status}); use cancel for queued/in-progress work"
+        )
+    return mark_job(
+        conn,
+        job_id,
+        status="canceled",
+        note=note or f"dismissed superseded {job.status} job",
+    )
 
 
 def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, str]]:
