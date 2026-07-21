@@ -1115,5 +1115,85 @@ class GcWorktreeGuardTests(unittest.TestCase):
             self.assertFalse(orphan.exists(), "orphan worktree should be gc'd")
 
 
+class MergeConflictTests(unittest.TestCase):
+    """Real git-level merge conflicts during assembly (the BisectIsolation
+    suite only fakes semantic conflicts via gate exit codes)."""
+
+    def test_real_merge_conflict_blocks_the_job_and_pushes_nothing(self) -> None:
+        from mergetrain.observability import job_outcome
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            # the branch edits app.txt line 1...
+            git(repo, "switch", "-c", "agent/x", "main")
+            (repo / "app.txt").write_text("x-change\n", encoding="utf-8")
+            git(repo, "add", "app.txt")
+            git(repo, "commit", "-m", "x")
+            # ...and the integration ref moves to a conflicting state on the same line
+            git(repo, "switch", "main")
+            (repo / "app.txt").write_text("main-change\n", encoding="utf-8")
+            git(repo, "add", "app.txt")
+            git(repo, "commit", "-m", "move main")
+            git(repo, "push", "origin", "main")
+
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="x", branch="agent/x")
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+                stored = get_job(conn, job.id)
+                pending = git(
+                    repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/"
+                )
+            finally:
+                conn.close()
+
+            self.assertEqual(stored.status, "blocked")
+            self.assertIn("conflict", stored.note.lower())
+            self.assertEqual(job_outcome(stored)["category"], "merge_conflict")
+            self.assertEqual(result.push_status, "not_run")
+            # nothing shipped: the remote still holds the integration change (not
+            # the branch's), no write-ahead marker was written, no gate ran.
+            self.assertEqual(git(root / "remote.git", "show", "main:app.txt"), "main-change")
+            self.assertEqual(pending, "")
+            self.assertFalse(marker.exists())
+
+    def test_merge_conflict_isolates_one_job_and_siblings_still_deploy(self) -> None:
+        from mergetrain.observability import job_outcome
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            # two branches, each editing the SAME line of app.txt differently
+            for name, content in (("agent/x", "x-change\n"), ("agent/y", "y-change\n")):
+                git(repo, "switch", "-c", name, "main")
+                (repo / "app.txt").write_text(content, encoding="utf-8")
+                git(repo, "add", "app.txt")
+                git(repo, "commit", "-m", name)
+                git(repo, "switch", "main")
+
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [
+                    enqueue_job(conn, task="x", branch="agent/x"),
+                    enqueue_job(conn, task="y", branch="agent/y"),
+                ]
+                GitRunner(config).process_batch(conn, jobs, deploy=True)
+                stored = {job.branch: get_job(conn, job.id) for job in jobs}
+            finally:
+                conn.close()
+
+            # assembly merges in list order: agent/x lands, agent/y conflicts and
+            # is isolated — the innocent sibling still gates once and deploys.
+            self.assertEqual(stored["agent/x"].status, "deployed")
+            self.assertEqual(stored["agent/x"].push_status, "succeeded")
+            self.assertEqual(stored["agent/y"].status, "blocked")
+            self.assertEqual(job_outcome(stored["agent/y"])["category"], "merge_conflict")
+            # only the sibling's change reached the remote
+            self.assertEqual(git(root / "remote.git", "show", "main:app.txt"), "x-change")
+
+
 if __name__ == "__main__":
     unittest.main()
