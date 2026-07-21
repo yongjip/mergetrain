@@ -12,8 +12,15 @@ git rebase <remote>/<integration-branch>
 # resolve conflicts
 git add .
 git commit --amend
+# The branch still holds its blocked job; clear it (non-destructive) so the
+# re-enqueue is not refused as a duplicate, then enqueue the fix:
+mergetrain dismiss <blocked-job-id>
 mergetrain enqueue --task "rebased task" --branch <blocked-branch> --capture-sha
 ```
+
+`dismiss` only touches a blocked/failed job (never queued or in-progress work),
+so it is safe to run unattended. It also clears the `fix_blocked_job`
+`next_action` that a superseded blocked job would otherwise pin forever.
 
 ## Gate failure
 

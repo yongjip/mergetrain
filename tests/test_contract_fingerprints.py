@@ -221,6 +221,17 @@ def _cap_verify(repo):
     return _run_json(["--repo", str(repo), "verify", "--ack", "succeeded"])
 
 
+def _cap_dismiss(repo):
+    # Seed a blocked job so `dismissed` has a representative element.
+    from mergetrain.store import mark_job
+
+    conn = connect(_db(repo))
+    job = enqueue_job(conn, task="a", branch="feature/a")
+    mark_job(conn, job.id, status="blocked", note="gate failed")
+    conn.close()
+    return _run_json(["--repo", str(repo), "dismiss", str(job.id)])
+
+
 def _cap_hub_status(repo):
     # Seed a one-repo registry with a live queue so repos[] has a
     # representative entry carrying an embedded snapshot.
@@ -246,6 +257,7 @@ SURFACES = {
     "recover": _cap_recover,
     "unlock": _cap_unlock,
     "verify": _cap_verify,
+    "dismiss": _cap_dismiss,
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
     "inspect": _cap_inspect,

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Add `mergetrain dismiss` so a superseded blocked/failed job can be cleared
+  non-destructively (0.9.0-prep). A blocked/failed job never lands and never
+  self-clears, so it pinned `doctor`'s `next_action` to `fix_blocked_job`
+  forever — hiding a ready validated train — and blocked re-enqueue of its
+  branch; the only escape was `cancel`, which the operator docs classify as
+  destructive. `dismiss <id>` (or `--all`) moves a blocked/failed job to the
+  terminal `canceled` state, and by construction only ever touches
+  already-failed outcomes — never queued or in-progress work — so an agent can
+  run it unattended. The agent contract, the duplicate-branch error, the
+  blocked-job notes, and the failure-modes recipe now point to it. The new
+  `--json` surface is fingerprinted.
+
 - Classify a policy-rejected push as `blocked`, not `failed` (0.9.0-prep). When
   the remote refuses the deploy push for a protected branch, a required pull
   request, a denied ref update, or a declined pre-receive hook, the job used to

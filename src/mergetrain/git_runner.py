@@ -981,7 +981,7 @@ class GitRunner:
             checkpoint = "validation" if deploying_validated else "enqueue"
             raise MergeBlocked(
                 f"branch HEAD changed since {checkpoint}: {job.branch} "
-                f"(expected {expected_sha}, found {current_sha}); cancel the job (mergetrain cancel <id>) or use --allow-duplicate, then enqueue the fix"
+                f"(expected {expected_sha}, found {current_sha}); dismiss the job (mergetrain dismiss <id>) or use --allow-duplicate, then enqueue the fix"
             )
         return expected_sha
 
@@ -1496,7 +1496,7 @@ class GitRunner:
                     log_path=str(log_path),
                     note=(
                         "failed train gates individually during bisect isolation; "
-                        "fix the branch and cancel the job (mergetrain cancel <id>) or use --allow-duplicate, then enqueue the fix"
+                        "fix the branch and dismiss the job (mergetrain dismiss <id>) or use --allow-duplicate, then enqueue the fix"
                     ),
                 )
             )
