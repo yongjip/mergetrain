@@ -1186,6 +1186,215 @@ class GitRunner:
             finally:
                 self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
 
+    def _bisect_failed_train(
+        self,
+        conn,
+        merged_jobs: list[Job],
+        *,
+        merge_shas: dict[int, str],
+        integration_base_sha: str,
+        worktree: Path,
+        log: IO[str],
+        log_path: Path,
+        lease_token: str,
+        deploy: bool,
+        keep_worktree: bool,
+        owner: str | None,
+        ttl_minutes: int,
+        pulse: Pulse,
+    ) -> list[Job]:
+        """Isolate a failed train in O(log n) gate runs instead of O(n).
+
+        Bisection only ever *removes* jobs from the train: individually
+        failing jobs finish as ``failed``, and combinations whose members
+        pass alone but fail together finish as ``blocked`` semantic
+        conflicts with ``conflict_with`` naming the partners. Surviving
+        jobs are re-run through ``process_batch``, so nothing ships without
+        a full gate pass over the exact final combination.
+        """
+        order = {job.id: index for index, job in enumerate(merged_jobs)}
+        probe_cache: dict[frozenset[int], bool] = {}
+        probe_count = 0
+
+        def probe(subset: Sequence[Job]) -> bool:
+            nonlocal probe_count
+            members = sorted(subset, key=lambda job: order[job.id])
+            key = frozenset(job.id for job in members)
+            if key in probe_cache:
+                return probe_cache[key]
+            probe_count += 1
+            ids = [job.id for job in members]
+            log.write(f"\n## bisect probe {probe_count}: jobs {ids}\n")
+            self._event(
+                conn,
+                lease_token=lease_token,
+                phase="gating",
+                state="active",
+                message=f"Bisect probe {probe_count}: jobs {ids}",
+            )
+            pulse()
+            run_command(
+                ["git", "reset", "--hard", integration_base_sha],
+                cwd=worktree,
+                log=log,
+            )
+            run_command(["git", "clean", "-fd"], cwd=worktree, log=log, check=False)
+            passed = False
+            try:
+                for job in members:
+                    merge = run_command(
+                        ["git", "merge", "--no-edit", merge_shas[job.id]],
+                        cwd=worktree,
+                        log=log,
+                        check=False,
+                        pulse=pulse,
+                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                        timeout_seconds=self.config.queue.command_timeout_seconds,
+                    )
+                    if merge.returncode != 0:
+                        run_command(
+                            ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
+                        )
+                        log.write(
+                            f"probe merge failed for job {job.id}; subset fails\n"
+                        )
+                        probe_cache[key] = False
+                        return False
+                self._run_gates(worktree=worktree, log=log, pulse=pulse)
+                passed = True
+            except CommandFailed:
+                passed = False
+            probe_cache[key] = passed
+            return passed
+
+        def narrow(context: list[Job], candidates: list[Job]) -> Job | None:
+            """Return the single candidate that fails with ``context``, if one exists.
+
+            Invariant on entry and through every iteration:
+            ``probe(context + candidates)`` fails.
+            """
+            while len(candidates) > 1:
+                mid = len(candidates) // 2
+                first, second = candidates[:mid], candidates[mid:]
+                if not probe(context + first):
+                    candidates = first
+                elif not probe(context + second):
+                    candidates = second
+                else:
+                    return None
+            return candidates[0]
+
+        def find_cross_pair(left: list[Job], right: list[Job]) -> list[Job] | None:
+            r_star = narrow(left, right)
+            if r_star is None:
+                return None
+            l_star = narrow([r_star], left)
+            if l_star is None:
+                return None
+            if probe([l_star, r_star]):
+                return None
+            return sorted([l_star, r_star], key=lambda job: order[job.id])
+
+        singles: list[Job] = []
+        conflict_sets: list[list[Job]] = []
+
+        def descend(subset: list[Job]) -> None:
+            # Invariant: subset is known to fail as a combination.
+            if len(subset) == 1:
+                singles.append(subset[0])
+                return
+            mid = len(subset) // 2
+            left, right = subset[:mid], subset[mid:]
+            left_fails = not probe(left)
+            right_fails = not probe(right)
+            if left_fails:
+                descend(left)
+            if right_fails:
+                descend(right)
+            if left_fails or right_fails:
+                return
+            pair = find_cross_pair(left, right)
+            conflict_sets.append(pair if pair is not None else list(subset))
+
+        descend(list(merged_jobs))
+
+        culprit_ids = {job.id for job in singles}
+        for group in conflict_sets:
+            culprit_ids.update(job.id for job in group)
+        goods = [job for job in merged_jobs if job.id not in culprit_ids]
+
+        results: list[Job] = []
+        for job in singles:
+            results.append(
+                self._finish_job(
+                    conn,
+                    job.id,
+                    lease_token=lease_token,
+                    status="failed",
+                    log_path=str(log_path),
+                    note=(
+                        "failed train gates individually during bisect isolation; "
+                        "fix the branch and enqueue a fresh job"
+                    ),
+                )
+            )
+        for group in conflict_sets:
+            for job in group:
+                others = [item for item in group if item.id != job.id]
+                partners = ", ".join(
+                    f"job {other.id} ({other.branch} @ {merge_shas[other.id][:12]})"
+                    for other in others
+                )
+                if len(group) == 2:
+                    note = (
+                        "semantic conflict: passes gates alone but fails combined "
+                        f"with {partners}; rebase one side on the other and enqueue "
+                        "a fresh job"
+                    )
+                else:
+                    note = (
+                        f"joint gate failure with {partners}: the combination fails "
+                        "while its halves pass and no minimal failing pair was found"
+                    )
+                results.append(
+                    self._finish_job(
+                        conn,
+                        job.id,
+                        lease_token=lease_token,
+                        status="blocked",
+                        log_path=str(log_path),
+                        note=note,
+                        conflict_with=",".join(str(other.id) for other in others),
+                    )
+                )
+        summary = (
+            f"bisect isolation: {probe_count} probe(s), {len(singles)} failing alone, "
+            f"{sum(len(group) for group in conflict_sets)} in conflict, "
+            f"{len(goods)} rejoining"
+        )
+        log.write(f"\n{summary}\n")
+        self._event(
+            conn,
+            lease_token=lease_token,
+            phase="gating",
+            state="warning" if conflict_sets else "success",
+            message=f"Bisect isolation complete: {len(goods)} job(s) rejoin the train",
+            detail=summary,
+        )
+        self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
+        if goods:
+            results.extend(
+                self.process_batch(
+                    conn,
+                    goods,
+                    deploy=deploy,
+                    keep_worktree=keep_worktree,
+                    owner=owner,
+                    ttl_minutes=ttl_minutes,
+                )
+            )
+        return results
+
     def process_batch(
         self,
         conn,
@@ -1552,27 +1761,57 @@ class GitRunner:
                             )
                             for job in jobs
                         ]
-                    log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
+                    if len(merged_jobs) <= 3:
+                        log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            phase="gating",
+                            state="warning",
+                            message="Train gate failed; isolating jobs",
+                            detail=f"exit_code={exc.returncode}",
+                        )
+                        self._cleanup_worktree(worktree, log=log, keep_worktree=False)
+                        for job in merged_jobs:
+                            results.append(
+                                self.process_one(
+                                    conn,
+                                    job,
+                                    deploy=deploy,
+                                    keep_worktree=keep_worktree,
+                                    owner=owner,
+                                    ttl_minutes=ttl_minutes,
+                                )
+                            )
+                        return results
+                    log.write(
+                        f"\ntrain gate failed; bisecting {len(merged_jobs)} merged jobs\n"
+                    )
                     self._event(
                         conn,
                         lease_token=lease_token,
                         phase="gating",
                         state="warning",
-                        message="Train gate failed; isolating jobs",
+                        message=f"Train gate failed; bisecting {len(merged_jobs)} jobs",
                         detail=f"exit_code={exc.returncode}",
                     )
-                    self._cleanup_worktree(worktree, log=log, keep_worktree=False)
-                    for job in merged_jobs:
-                        results.append(
-                            self.process_one(
-                                conn,
-                                job,
-                                deploy=deploy,
-                                keep_worktree=keep_worktree,
-                                owner=owner,
-                                ttl_minutes=ttl_minutes,
-                            )
+                    results.extend(
+                        self._bisect_failed_train(
+                            conn,
+                            merged_jobs,
+                            merge_shas=merge_shas,
+                            integration_base_sha=integration_base_sha,
+                            worktree=worktree,
+                            log=log,
+                            log_path=log_path,
+                            lease_token=lease_token,
+                            deploy=deploy,
+                            keep_worktree=keep_worktree,
+                            owner=owner,
+                            ttl_minutes=ttl_minutes,
+                            pulse=normal_pulse,
                         )
+                    )
                     return results
                 verify_warning = ""
                 if deploy:

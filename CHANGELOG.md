@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Escalate joint-failure isolation from linear to bisect (issue #38): when a
+  train of more than 3 jobs fails its gates, the runner now bisects subsets
+  (O(log n) gate runs instead of O(n)) to pin the failure. Jobs that fail
+  alone finish `failed`; jobs that pass alone but fail together finish
+  `blocked` as a named **semantic conflict**, with partner SHAs in the note
+  and a new machine-readable `conflict_with` column (schema v7) listing the
+  partner job IDs. Surviving jobs are re-run as a fresh train — bisection
+  only removes jobs, so nothing ships without a full gate pass over the
+  exact final combination. Trains of ≤3 jobs keep the existing one-by-one
+  isolation.
+
 - Add `hub daemon --notify` (issue #32 Stage 0): desktop notifications for
   landed trains, sweep errors, and reconcile pauses, deduplicated to state
   transitions so a persistently broken repo notifies once. macOS

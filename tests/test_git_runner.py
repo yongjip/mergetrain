@@ -747,5 +747,119 @@ class GitRunnerTests(unittest.TestCase):
                 cleanup.close()
 
 
+def add_branch(repo: Path, name: str, filename: str) -> None:
+    git(repo, "switch", "-c", name, "main")
+    (repo / filename).write_text(f"{name}\n", encoding="utf-8")
+    git(repo, "add", filename)
+    git(repo, "commit", "-m", name)
+    git(repo, "switch", "main")
+
+
+class BisectIsolationTests(unittest.TestCase):
+    def test_bisect_isolates_single_bad_job_and_revalidates_the_rest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f"{sys.executable} -c \"import sys, pathlib; "
+                "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            add_branch(repo, "agent/bad", "bad.txt")
+            add_branch(repo, "agent/b", "b.txt")
+            add_branch(repo, "agent/c", "c.txt")
+            add_branch(repo, "agent/d", "d.txt")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [enqueue_job(conn, task="a", branch="feature/a")]
+                jobs.extend(
+                    enqueue_job(conn, task=name, branch=f"agent/{name}")
+                    for name in ("bad", "b", "c", "d")
+                )
+                results = GitRunner(config).process_batch(conn, jobs, deploy=False)
+                stored = {job.id: get_job(conn, job.id) for job in jobs}
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            by_branch = {job.branch: stored[job.id] for job in jobs}
+            self.assertEqual(by_branch["agent/bad"].status, "failed")
+            self.assertIn("bisect isolation", by_branch["agent/bad"].note)
+            self.assertEqual(by_branch["agent/bad"].conflict_with, "")
+            for branch in ("feature/a", "agent/b", "agent/c", "agent/d"):
+                self.assertEqual(by_branch[branch].status, "validated", branch)
+                self.assertEqual(by_branch[branch].conflict_with, "")
+                self.assertEqual(by_branch[branch].train_size, 4, branch)
+            self.assertEqual(len(results), 5)
+            messages = [event.message for event in events]
+            self.assertIn("Train gate failed; bisecting 5 jobs", messages)
+            self.assertIn("Bisect isolation complete: 4 job(s) rejoin the train", messages)
+
+    def test_bisect_reports_semantic_conflict_pair_with_conflict_with(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f"{sys.executable} -c \"import sys, pathlib; "
+                "sys.exit(1 if (pathlib.Path('left.txt').exists() "
+                "and pathlib.Path('right.txt').exists()) else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            add_branch(repo, "agent/left", "left.txt")
+            add_branch(repo, "agent/right", "right.txt")
+            add_branch(repo, "agent/ok1", "ok1.txt")
+            add_branch(repo, "agent/ok2", "ok2.txt")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [
+                    enqueue_job(conn, task=name, branch=f"agent/{name}")
+                    for name in ("left", "right", "ok1", "ok2")
+                ]
+                results = GitRunner(config).process_batch(conn, jobs, deploy=False)
+                stored = {job.branch: get_job(conn, job.id) for job in jobs}
+                ids = {job.branch: job.id for job in jobs}
+            finally:
+                conn.close()
+            left, right = stored["agent/left"], stored["agent/right"]
+            self.assertEqual(left.status, "blocked")
+            self.assertEqual(right.status, "blocked")
+            self.assertEqual(left.conflict_with, str(ids["agent/right"]))
+            self.assertEqual(right.conflict_with, str(ids["agent/left"]))
+            self.assertIn("semantic conflict", left.note)
+            self.assertIn("agent/right", left.note)
+            self.assertIn("agent/left", right.note)
+            for branch in ("agent/ok1", "agent/ok2"):
+                self.assertEqual(stored[branch].status, "validated", branch)
+                self.assertEqual(stored[branch].conflict_with, "")
+            self.assertEqual(len(results), 4)
+
+    def test_small_train_keeps_linear_isolation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f"{sys.executable} -c \"import sys, pathlib; "
+                "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            add_branch(repo, "agent/bad", "bad.txt")
+            add_branch(repo, "agent/b", "b.txt")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [enqueue_job(conn, task="a", branch="feature/a")]
+                jobs.append(enqueue_job(conn, task="bad", branch="agent/bad"))
+                jobs.append(enqueue_job(conn, task="b", branch="agent/b"))
+                GitRunner(config).process_batch(conn, jobs, deploy=False)
+                stored = {job.branch: get_job(conn, job.id) for job in jobs}
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(stored["agent/bad"].status, "failed")
+            self.assertEqual(stored["feature/a"].status, "validated")
+            self.assertEqual(stored["agent/b"].status, "validated")
+            messages = [event.message for event in events]
+            self.assertIn("Train gate failed; isolating jobs", messages)
+            self.assertNotIn("Train gate failed; bisecting 3 jobs", messages)
+
+
 if __name__ == "__main__":
     unittest.main()
