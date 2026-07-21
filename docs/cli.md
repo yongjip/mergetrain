@@ -196,7 +196,7 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 - `reconcile_pending_deploy` — a crash left jobs `needs_reconcile` (or a marker-bearing orphan); resolve with `reconcile` before deploying (0.3.0).
 - `reconcile_conflict_manual` — `reconcile` left a job `blocked` with its marker; git inspection is required (0.3.0).
 - `fix_blocked_job` — there are `blocked`/`failed` jobs to resolve first.
-- `verify_reconciled_deploy` — a reconciled deploy landed but its post-push verify could not be proven (`verify_status='unknown'`); re-run verification manually (0.3.0).
+- `verify_reconciled_deploy` — a reconciled deploy landed but its post-push verify could not be proven (`verify_status='unknown'`); run `mergetrain verify` to re-run the `deploy.verify` hooks against the recorded `deploy_sha` (or `mergetrain verify --ack succeeded|failed` for hooks that cannot be re-run). This clears the state.
 - `deploy_validated_train_when_approved` — an exact validated train is waiting for explicit deploy approval.
 - `cancel_and_reenqueue_legacy_validated_jobs` — pre-migration validated jobs lack safe train identity.
 - `run_daemon_or_run_batch_deploy_when_approved` — auto-approved jobs are queued.

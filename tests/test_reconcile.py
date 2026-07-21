@@ -477,6 +477,19 @@ class DoctorNextActionTests(unittest.TestCase):
             self.assertEqual(
                 self._doctor(repo)["next_action"], "verify_reconciled_deploy"
             )
+            # `mergetrain verify --ack` discharges it — the next_action was
+            # otherwise permanent (deployed_verify_unknown never decremented).
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "verify", "--ack", "succeeded", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["resolved"][0]["verify_status"], "succeeded")
+            self.assertNotEqual(payload["next_action"], "verify_reconciled_deploy")
+            self.assertNotEqual(
+                self._doctor(repo)["next_action"], "verify_reconciled_deploy"
+            )
 
     def test_wedged_lock_reports_unlock_wedged_runner(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -826,6 +826,37 @@ class GitRunner:
             if on_gate:
                 on_gate(gate.name, "success", index, total, _dashboard_command(gate.run))
 
+    def reverify_deploy(self, *, deploy_sha: str, log: IO[str]) -> bool:
+        """Re-run the configured post-push verify hooks against a deploy_sha.
+
+        Used by ``mergetrain verify`` to discharge a job left
+        verify_status='unknown' by a crash in the post-push verify window.
+        Assembles a throwaway detached worktree at the deployed commit and runs
+        the hooks there; returns True iff every hook passed. Raises if the
+        commit cannot be checked out (the caller reports it, does not guess).
+        """
+
+        if not self.config.deploy.verify:
+            return True
+        self._ensure_state_dirs()
+        worktree = self._worktree_path(0)
+        run_command(
+            ["git", "fetch", self.config.git.remote], cwd=self.repo, log=log,
+            timeout_seconds=self.config.queue.command_timeout_seconds,
+        )
+        run_command(
+            ["git", "worktree", "add", "--detach", str(worktree), deploy_sha],
+            cwd=self.repo, log=log,
+            timeout_seconds=self.config.queue.command_timeout_seconds,
+        )
+        try:
+            self._run_verify_hooks(worktree=worktree, log=log, pulse=None)
+            return True
+        except CommandFailed:
+            return False
+        finally:
+            self._cleanup_worktree(worktree, log=log, keep_worktree=False)
+
     def push_verified_head(
         self, *, worktree: Path, log: IO[str] | None = None, pulse: Pulse | None = None
     ) -> None:

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add `mergetrain verify` to discharge a crash-orphaned post-push verify
+  (0.9.0-prep). A crash in the verify window finalizes the job `deployed` with
+  `verify_status='unknown'`, and `doctor`'s `next_action` became a **permanent**
+  `verify_reconciled_deploy` — no command could clear it, so it masked every
+  lower-priority action forever. `mergetrain verify` re-runs the configured
+  `deploy.verify` hooks against the recorded `deploy_sha` (assembled in a
+  throwaway worktree) and records `succeeded`/`failed`, or takes
+  `--ack succeeded|failed` for hooks that can't be re-run. `--job` targets one;
+  the default resolves all unresolved. The new `--json` surface is fingerprinted.
+
 - Make the auto-daemon report what actually **landed**, not merely what ran
   (0.9.0-prep). A sweep whose every job blocked on a conflict or failed its
   gates was indistinguishable from a green deploy — `daemon_tick` returned
