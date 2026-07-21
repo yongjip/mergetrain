@@ -137,6 +137,8 @@ terminology:
                 payload = json.loads(response.read())
                 self.assertEqual(response.status, 200)
                 self.assertTrue(payload["ok"])
+                # Contract 1: the served snapshot is stamped at the HTTP boundary.
+                self.assertEqual(payload["contract_version"], 1)
                 self.assertTrue(payload["project"]["preview"])
                 self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
                 self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Stamp `contract_version` on every machine-readable surface (#44, Phase 2).
+  A single top-level integer (currently 1, from the new `mergetrain.contract`
+  module) is injected at the one-shot JSON serializer (`dump_json`), at the
+  HTTP `/api/snapshot` boundary (the dashboard-snapshot builder stays bare, so
+  a hub payload's embedded per-repo snapshots carry no inner number), and as a
+  new `stream_start` header re-emitted at the top of every `events --jsonl`
+  stream (the existing `event`/`heartbeat`/`stream_end` frames are unchanged;
+  dispatch JSONL on `type`). This is distinct from the product `__version__`,
+  so a patch release never reads as a contract change.
+
 - **Contract-1 JSON frame normalization (#44, Phase 1 — a deliberate breaking
   change to the `--json` envelope, made now because it is the last moment
   before the 0.9.0 API freeze).** `ok` now means exactly one thing on every

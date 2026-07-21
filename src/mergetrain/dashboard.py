@@ -13,6 +13,7 @@ from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from .config import MergetrainConfig
+from .contract import CONTRACT_VERSION
 from .hub import HubSnapshotCache, build_hub_snapshot_safe
 from .snapshot import build_dashboard_snapshot
 
@@ -58,8 +59,18 @@ def _safe_static_path(raw_path: str) -> Path | None:
 
 
 def make_handler(
-    snapshot_fn: Callable[[], dict], *, preview: bool = False
+    raw_snapshot_fn: Callable[[], dict], *, preview: bool = False
 ) -> type[BaseHTTPRequestHandler]:
+    def snapshot_fn() -> dict:
+        # Stamp contract_version at the HTTP boundary, not inside
+        # build_dashboard_snapshot — so a hub payload's embedded per-repo
+        # snapshots stay bare and only the outer served frame carries the
+        # number (contract 1).
+        payload = raw_snapshot_fn()
+        if isinstance(payload, dict) and "contract_version" not in payload:
+            return {"contract_version": CONTRACT_VERSION, **payload}
+        return payload
+
     class DashboardHandler(BaseHTTPRequestHandler):
         server_version = "mergetrain-dashboard"
         sys_version = ""

@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 from mergetrain import __version__
 from mergetrain.cli import _job_result_line, _results_payload, main, normalize_global_options
+from mergetrain.config import render_default_config
+from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
 from mergetrain.store import (
@@ -172,6 +174,25 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             # The two mandated reads (status/doctor) are now symmetric.
             self.assertIn("next_action", payload)
+
+    def test_contract1_version_stamped_top_level_not_nested(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            conn = connect(repo / ".mergetrain" / "queue.sqlite")
+            enqueue_job(conn, task="a", branch="feature/a")
+            conn.close()
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "status", "--json"])
+            payload = json.loads(out.getvalue())
+            # Top-level frame carries the number...
+            self.assertEqual(payload["contract_version"], CONTRACT_VERSION)
+            # ...nested job dicts do NOT (the outer frame owns it).
+            self.assertNotIn("contract_version", payload["jobs"][0])
 
     def test_contract1_agent_contract_carries_ok(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -500,9 +521,13 @@ terminology:
                 )
             records = [json.loads(line) for line in out.getvalue().splitlines()]
             self.assertEqual(code, 0)
-            self.assertEqual(records[0]["id"], event.id)
-            self.assertEqual(records[0]["type"], "event")
-            self.assertNotIn("claim_token", records[0])
+            # Contract 1: every JSONL stream opens with a stream_start header
+            # carrying the contract version (re-emitted on each connect/resume).
+            self.assertEqual(records[0]["type"], "stream_start")
+            self.assertEqual(records[0]["contract_version"], CONTRACT_VERSION)
+            self.assertEqual(records[1]["id"], event.id)
+            self.assertEqual(records[1]["type"], "event")
+            self.assertNotIn("claim_token", records[1])
             self.assertEqual(records[-1]["type"], "stream_end")
             self.assertEqual(records[-1]["reason"], "success")
 
