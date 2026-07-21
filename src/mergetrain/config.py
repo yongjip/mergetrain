@@ -15,6 +15,15 @@ from .errors import ConfigError
 
 DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 
+# Schema version of `.mergetrain.yaml` (issue #44). A file with no `version:`
+# key is treated as version 1 (every file written before versioning existed).
+# Mirrors store.SCHEMA_VERSION / registry.REGISTRY_VERSION: one integer per
+# artifact, forward-only. Enforcement of a too-new config is command-scoped
+# (the deploy/enqueue path fails closed; recovery and read-only commands stay
+# permissive) — not done inside load_config, so a version mismatch after a
+# rollback can never lock an operator out of crash recovery.
+CONFIG_VERSION = 1
+
 
 @dataclass(frozen=True, slots=True)
 class ProjectConfig:
@@ -132,6 +141,7 @@ class MergetrainConfig:
     repo: Path
     config_path: Path
     config_exists: bool
+    config_version: int = CONFIG_VERSION
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -264,6 +274,7 @@ def load_yaml(text: str) -> dict[str, Any]:
 
 def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
     return {
+        "version": CONFIG_VERSION,
         "project": {"name": project_name},
         "state": {
             "db": ".mergetrain/queue.sqlite",
@@ -289,7 +300,9 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
 
 
 def render_default_config(project_name: str = "example-app") -> str:
-    return f"""project:
+    return f"""version: {CONFIG_VERSION}
+
+project:
   name: {project_name}
 
 state:
@@ -442,6 +455,8 @@ def load_config(
     else:
         data = default_config_dict(repo_path.name or "example-app")
 
+    config_version, data = _read_config_version(data)
+
     project_data = _as_mapping(data, "project")
     project_name = str(project_data.get("name") or repo_path.name or "example-app")
 
@@ -563,4 +578,36 @@ def load_config(
         repo=repo_path,
         config_path=path,
         config_exists=exists,
+        config_version=config_version,
     )
+
+
+def _read_config_version(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """Return ``(config_version, migrated_data)``.
+
+    An absent ``version:`` key means version 1 — every config written before
+    versioning existed rides forward unchanged. A newer version is *recorded*,
+    not rejected here: refusal is command-scoped (the deploy path fails closed;
+    recovery stays permissive), so load_config never blocks. Older versions are
+    migrated forward in memory only; there is no persist path at v1 because
+    re-serializing hand-edited YAML would lose comments and unknown keys.
+    """
+
+    raw = data.get("version", CONFIG_VERSION)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ConfigError(
+            f"config 'version' must be an integer, got {raw!r}"
+        )
+    if raw < 1:
+        raise ConfigError(f"config 'version' must be >= 1, got {raw}")
+    data = {key: value for key, value in data.items() if key != "version"}
+    if raw < CONFIG_VERSION:
+        data = _migrate_config(data, from_version=raw)
+    return raw, data
+
+
+def _migrate_config(data: dict[str, Any], *, from_version: int) -> dict[str, Any]:
+    """Forward-migrate parsed config data in memory. Identity at v1 — the hook
+    exists so a future v2 has a home without reshaping load_config."""
+
+    return data
