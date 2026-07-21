@@ -344,6 +344,10 @@ def command_env(*, config: MergetrainConfig, worktree: Path) -> dict[str, str]:
     return env
 
 
+class _BisectAbort(Exception):
+    """Bisect isolation cannot classify the failure from gate evidence."""
+
+
 class GitRunner:
     """Executes queued branches in temporary Git worktrees."""
 
@@ -461,7 +465,8 @@ class GitRunner:
 
     def _log_path(self, prefix: str, first_job_id: int) -> Path:
         stamp = utc_now().replace(":", "").replace("-", "").replace("Z", "")
-        return self.config.state.logs / f"{prefix}-{first_job_id}-{stamp}.log"
+        suffix = uuid.uuid4().hex[:8]
+        return self.config.state.logs / f"{prefix}-{first_job_id}-{stamp}-{suffix}.log"
 
     def _worktree_path(self, first_job_id: int) -> Path:
         suffix = uuid.uuid4().hex[:8]
@@ -1215,8 +1220,16 @@ class GitRunner:
         order = {job.id: index for index, job in enumerate(merged_jobs)}
         probe_cache: dict[frozenset[int], bool] = {}
         probe_count = 0
+        probe_worktree = self._worktree_path(merged_jobs[0].id)
 
         def probe(subset: Sequence[Job]) -> bool:
+            """Assemble ``subset`` on the recorded base and run the gates.
+
+            Returns True iff the merges are clean and every gate passes.
+            Raises ``_BisectAbort`` on a merge conflict: a subset whose merge
+            does not reproduce the train's context cannot be classified by
+            gate evidence, so the caller falls back to linear isolation.
+            """
             nonlocal probe_count
             members = sorted(subset, key=lambda job: order[job.id])
             key = frozenset(job.id for job in members)
@@ -1235,71 +1248,80 @@ class GitRunner:
             pulse()
             run_command(
                 ["git", "reset", "--hard", integration_base_sha],
-                cwd=worktree,
+                cwd=probe_worktree,
                 log=log,
             )
-            run_command(["git", "clean", "-fd"], cwd=worktree, log=log, check=False)
-            passed = False
-            try:
-                for job in members:
-                    merge = run_command(
-                        ["git", "merge", "--no-edit", merge_shas[job.id]],
-                        cwd=worktree,
+            run_command(
+                ["git", "clean", "-fdx"], cwd=probe_worktree, log=log, check=False
+            )
+            for job in members:
+                merge = run_command(
+                    ["git", "merge", "--no-edit", merge_shas[job.id]],
+                    cwd=probe_worktree,
+                    log=log,
+                    check=False,
+                    pulse=pulse,
+                    pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                    timeout_seconds=self.config.queue.command_timeout_seconds,
+                )
+                if merge.returncode != 0:
+                    run_command(
+                        ["git", "merge", "--abort"],
+                        cwd=probe_worktree,
                         log=log,
                         check=False,
-                        pulse=pulse,
-                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                        timeout_seconds=self.config.queue.command_timeout_seconds,
                     )
-                    if merge.returncode != 0:
-                        run_command(
-                            ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
-                        )
-                        log.write(
-                            f"probe merge failed for job {job.id}; subset fails\n"
-                        )
-                        probe_cache[key] = False
-                        return False
-                self._run_gates(worktree=worktree, log=log, pulse=pulse)
+                    raise _BisectAbort(
+                        f"probe merge of job {job.id} ({job.branch}) conflicted "
+                        f"without its train predecessors"
+                    )
+            try:
+                self._run_gates(worktree=probe_worktree, log=log, pulse=pulse)
                 passed = True
             except CommandFailed:
                 passed = False
             probe_cache[key] = passed
             return passed
 
-        def narrow(context: list[Job], candidates: list[Job]) -> Job | None:
-            """Return the single candidate that fails with ``context``, if one exists.
-
-            Invariant on entry and through every iteration:
-            ``probe(context + candidates)`` fails.
-            """
-            while len(candidates) > 1:
-                mid = len(candidates) // 2
-                first, second = candidates[:mid], candidates[mid:]
-                if not probe(context + first):
-                    candidates = first
-                elif not probe(context + second):
-                    candidates = second
-                else:
-                    return None
-            return candidates[0]
-
-        def find_cross_pair(left: list[Job], right: list[Job]) -> list[Job] | None:
-            r_star = narrow(left, right)
-            if r_star is None:
-                return None
-            l_star = narrow([r_star], left)
-            if l_star is None:
-                return None
-            if probe([l_star, r_star]):
-                return None
-            return sorted([l_star, r_star], key=lambda job: order[job.id])
-
         singles: list[Job] = []
         conflict_sets: list[list[Job]] = []
 
+        def minimize_joint_failure(subset: list[Job]) -> None:
+            """Both halves of ``subset`` pass alone, so the failure is joint.
+
+            Greedily shrink to a minimal failing set, then verify each
+            remaining member really passes alone before calling the set a
+            semantic conflict. Members proven unnecessary rejoin the
+            survivors; a failure that does not reproduce aborts to linear
+            isolation instead of blaming anyone.
+            """
+            if probe(subset):
+                raise _BisectAbort(
+                    "train gate failure did not reproduce when the full "
+                    "subset was re-assembled (flaky gate?)"
+                )
+            minimal = list(subset)
+            for job in list(minimal):
+                if len(minimal) == 1:
+                    break
+                reduced = [item for item in minimal if item.id != job.id]
+                if not probe(reduced):
+                    minimal = reduced
+            if len(minimal) == 1:
+                singles.append(minimal[0])
+                return
+            solo_failures = [job for job in minimal if not probe([job])]
+            if solo_failures:
+                # A member fails alone: the joint attribution is unsound, so
+                # only the proven-solo failures are removed; the rest rejoin
+                # the survivors (a remaining real conflict re-surfaces there).
+                singles.extend(solo_failures)
+                return
+            conflict_sets.append(minimal)
+
         def descend(subset: list[Job]) -> None:
-            # Invariant: subset is known to fail as a combination.
+            # Invariant: subset is known to fail as a combination — proven by
+            # the original train gate run (top level) or by a probe.
             if len(subset) == 1:
                 singles.append(subset[0])
                 return
@@ -1313,10 +1335,48 @@ class GitRunner:
                 descend(right)
             if left_fails or right_fails:
                 return
-            pair = find_cross_pair(left, right)
-            conflict_sets.append(pair if pair is not None else list(subset))
+            minimize_joint_failure(subset)
 
-        descend(list(merged_jobs))
+        try:
+            run_command(
+                [
+                    "git",
+                    "worktree",
+                    "add",
+                    "--detach",
+                    str(probe_worktree),
+                    integration_base_sha,
+                ],
+                cwd=self.repo,
+                log=log,
+            )
+            try:
+                descend(list(merged_jobs))
+            finally:
+                self._cleanup_worktree(probe_worktree, log=log, keep_worktree=False)
+        except _BisectAbort as abort:
+            log.write(f"\nbisect aborted: {abort}; falling back to linear isolation\n")
+            self._event(
+                conn,
+                lease_token=lease_token,
+                phase="gating",
+                state="warning",
+                message="Bisect inconclusive; isolating jobs one-by-one",
+                detail=str(abort),
+            )
+            results: list[Job] = []
+            for job in merged_jobs:
+                results.append(
+                    self.process_one(
+                        conn,
+                        job,
+                        deploy=deploy,
+                        keep_worktree=keep_worktree,
+                        owner=owner,
+                        ttl_minutes=ttl_minutes,
+                    )
+                )
+            return results
 
         culprit_ids = {job.id for job in singles}
         for group in conflict_sets:
@@ -1345,17 +1405,12 @@ class GitRunner:
                     f"job {other.id} ({other.branch} @ {merge_shas[other.id][:12]})"
                     for other in others
                 )
-                if len(group) == 2:
-                    note = (
-                        "semantic conflict: passes gates alone but fails combined "
-                        f"with {partners}; rebase one side on the other and enqueue "
-                        "a fresh job"
-                    )
-                else:
-                    note = (
-                        f"joint gate failure with {partners}: the combination fails "
-                        "while its halves pass and no minimal failing pair was found"
-                    )
+                note = (
+                    "semantic conflict: passes gates alone but fails combined "
+                    f"with {partners}; rebase onto the integration branch with "
+                    "the other side merged, fix the joint breakage, and enqueue "
+                    "a fresh job"
+                )
                 results.append(
                     self._finish_job(
                         conn,
