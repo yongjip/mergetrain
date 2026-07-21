@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Harden the 0.4.0 hub after an adversarial review (issues #47–#51): make the
+  `--no-daemon` opt-out a real guarantee (samefile registry identity, an
+  advisory lock around registry mutations, fail-safe flag parsing, and a
+  sweep-level exclusion for aliased duplicate entries); give both daemon loops
+  a clean stop (a signal during the inter-sweep wait no longer triggers one
+  more deploying sweep) and bound every git subprocess so one hung repo cannot
+  starve a whole sweep; keep read-only observation honest (safe sqlite URI
+  escaping, no schema migration on an idle sweep, documented WAL sidecar
+  limit); stop the snapshot cache serving stale runner liveness / `next_action`
+  or pinning stale entries; and fix `hub daemon --notify` dedup so a failed
+  delivery is retried, dedup state persists across `--once`/cron runs, and a
+  changed error re-notifies.
+
 - Escalate joint-failure isolation from linear to bisect (issue #38): when a
   train of more than 3 jobs fails its gates, the runner now bisects subsets
   (O(log n) gate runs instead of O(n)) to pin the failure. Jobs that fail

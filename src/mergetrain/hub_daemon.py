@@ -20,7 +20,12 @@ from typing import Any
 from .config import MergetrainConfig, load_config
 from .daemon import ProcessBatch, Say, daemon_tick
 from .hub import display_path
-from .notify import Notifier, sweep_notifications
+from .notify import (
+    Notifier,
+    load_notify_state,
+    save_notify_state,
+    sweep_notifications,
+)
 from .registry import load_registry, same_repo
 from .store import default_owner
 
@@ -157,7 +162,11 @@ def hub_daemon_loop(
             signal.signal(signum, request_stop)
 
     outcomes: list[dict[str, Any]] = []
-    last_outcomes: dict[str, str] = {}
+    # Persisted across invocations so --once/cron mode does not re-notify
+    # every persistent error on every run, and a restart resumes dedup.
+    last_outcomes: dict[str, str] = (
+        load_notify_state(registry) if notifier is not None else {}
+    )
     try:
         while True:
             # Top-of-loop check: a signal landing during the inter-sweep wait
@@ -184,12 +193,20 @@ def hub_daemon_loop(
                         f"{processed} with work processed"
                     )
                     if notifier is not None:
-                        messages, last_outcomes = sweep_notifications(outcomes, last_outcomes)
-                        for title, message in messages:
+                        messages, settled = sweep_notifications(outcomes, last_outcomes)
+                        # Commit no-delivery outcomes immediately; a message's
+                        # key is committed only once its notifier succeeds, so
+                        # a failed delivery is retried next sweep instead of
+                        # being silently marked as already-notified.
+                        next_state = dict(settled)
+                        for path, key, title, message in messages:
                             try:
                                 notifier(title, message)
+                                next_state[path] = key
                             except Exception as exc:  # noqa: BLE001 - never break a sweep
                                 say(f"mergetrain hub notify error: {exc}")
+                        last_outcomes = next_state
+                        save_notify_state(last_outcomes, registry)
                 else:
                     outcomes = []
                     say("mergetrain hub sweep: no repos registered")

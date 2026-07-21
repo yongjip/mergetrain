@@ -6,17 +6,35 @@ from pathlib import Path
 from unittest import mock
 
 from mergetrain import notify as notify_module
-from mergetrain.notify import sweep_notifications, system_notifier
+from mergetrain.notify import (
+    load_notify_state,
+    save_notify_state,
+    sweep_notifications,
+    system_notifier,
+)
 
 
 def outcome(path: str, result: str, **extra):
     return {"path": path, "name": Path(path).name, "outcome": result, **extra}
 
 
+def deliver(outcomes, prev, *, fail_paths=()):
+    """Mimic the loop: commit settled immediately, message keys on success."""
+    messages, settled = sweep_notifications(outcomes, prev)
+    next_state = dict(settled)
+    delivered = []
+    for path, key, title, body in messages:
+        if path in fail_paths:
+            continue  # delivery failed; do NOT commit the key
+        next_state[path] = key
+        delivered.append((title, body))
+    return delivered, next_state
+
+
 class SweepNotificationTests(unittest.TestCase):
     def test_processed_notifies_every_time_transitions_only_once(self) -> None:
         prev: dict[str, str] = {}
-        first, prev = sweep_notifications(
+        first, prev = deliver(
             [
                 outcome("/w/api", "processed:2"),
                 outcome("/w/web", "error", error="repo directory is missing"),
@@ -33,20 +51,20 @@ class SweepNotificationTests(unittest.TestCase):
             ],
         )
 
-        second, prev = sweep_notifications(
+        second, prev = deliver(
             [outcome("/w/api", "processed:1"), outcome("/w/web", "error", error="repo directory is missing")],
             prev,
         )
         # A landed train is new work every sweep; a still-broken repo is not.
         self.assertEqual(second, [("mergetrain · api", "Train landed (1 job)")])
 
-        third, prev = sweep_notifications(
+        third, prev = deliver(
             [outcome("/w/api", "idle"), outcome("/w/web", "idle")],
             prev,
         )
         self.assertEqual(third, [])
 
-        fourth, prev = sweep_notifications(
+        fourth, prev = deliver(
             [outcome("/w/web", "error", error="repo directory is missing")],
             prev,
         )
@@ -55,10 +73,41 @@ class SweepNotificationTests(unittest.TestCase):
 
     def test_reconcile_pause_notifies_on_transition_only(self) -> None:
         prev: dict[str, str] = {}
-        first, prev = sweep_notifications([outcome("/w/api", "reconcile_paused")], prev)
+        first, prev = deliver([outcome("/w/api", "reconcile_paused")], prev)
         self.assertEqual(first, [("mergetrain · api", "Deploy paused: jobs need reconcile")])
-        second, prev = sweep_notifications([outcome("/w/api", "reconcile_paused")], prev)
+        second, prev = deliver([outcome("/w/api", "reconcile_paused")], prev)
         self.assertEqual(second, [])
+
+    def test_failed_delivery_is_retried_not_consumed(self) -> None:
+        broken = [outcome("/w/web", "error", error="repo directory is missing")]
+        # First delivery fails: the transition must NOT be marked as notified.
+        _, prev = deliver(broken, {}, fail_paths={"/w/web"})
+        second, prev = deliver(broken, prev)
+        self.assertEqual(second, [("mergetrain · web", "repo directory is missing")])
+        # Now that it delivered, the unchanged error goes quiet.
+        third, prev = deliver(broken, prev)
+        self.assertEqual(third, [])
+
+    def test_changed_error_text_is_a_new_transition(self) -> None:
+        prev: dict[str, str] = {}
+        _, prev = deliver([outcome("/w/web", "error", error="disk full")], prev)
+        second, prev = deliver([outcome("/w/web", "error", error="permission denied")], prev)
+        # A materially different failure is a genuine transition, not the
+        # "same broken repo" the dedup is meant to silence.
+        self.assertEqual(second, [("mergetrain · web", "permission denied")])
+        third, prev = deliver([outcome("/w/web", "error", error="permission denied")], prev)
+        self.assertEqual(third, [])
+
+    def test_state_round_trips_through_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = str(Path(td) / "repos.json")
+            self.assertEqual(load_notify_state(registry), {})
+            _, state = deliver([outcome("/w/web", "error", error="boom")], {})
+            save_notify_state(state, registry)
+            # A fresh process (--once/cron) resumes dedup instead of re-firing.
+            resumed = load_notify_state(registry)
+            quiet, _ = deliver([outcome("/w/web", "error", error="boom")], resumed)
+            self.assertEqual(quiet, [])
 
 
 class SystemNotifierTests(unittest.TestCase):
