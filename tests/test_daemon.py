@@ -6,9 +6,30 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mergetrain.daemon import daemon_loop, daemon_tick
+from mergetrain.daemon import _grade_batch, daemon_loop, daemon_tick
 from mergetrain.errors import QueueError
+from mergetrain.models import Job
 from mergetrain.store import claim_all_queued, connect, enqueue_job, get_job, list_jobs
+
+
+class GradeBatchTests(unittest.TestCase):
+    def _jobs(self, *statuses):
+        return [Job(id=i, task="t", branch=f"b{i}", status=s) for i, s in enumerate(statuses)]
+
+    def test_all_deployed_is_landed(self) -> None:
+        self.assertEqual(_grade_batch(self._jobs("deployed", "deployed"), 2, lambda _: None), "landed:2")
+
+    def test_nothing_deployed_is_no_landing_not_processed(self) -> None:
+        # The bug: a sweep where every job blocked reported as a green deploy.
+        out = _grade_batch(self._jobs("blocked", "failed"), 2, lambda _: None)
+        self.assertEqual(out, "no_landing:2")
+
+    def test_some_deployed_is_partial(self) -> None:
+        out = _grade_batch(self._jobs("deployed", "blocked"), 2, lambda _: None)
+        self.assertEqual(out, "partial:1/2")
+
+    def test_uninspectable_result_falls_back_to_processed(self) -> None:
+        self.assertEqual(_grade_batch(None, 3, lambda _: None), "processed:3")
 
 
 class DaemonTests(unittest.TestCase):

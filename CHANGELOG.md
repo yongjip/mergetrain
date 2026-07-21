@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Make the auto-daemon report what actually **landed**, not merely what ran
+  (0.9.0-prep). A sweep whose every job blocked on a conflict or failed its
+  gates was indistinguishable from a green deploy — `daemon_tick` returned
+  `processed:<n>` ("n ran") and the macOS notifier read it as "Train landed
+  (n jobs)". Ticks are now graded by outcome: `landed:<n>` (all deployed),
+  `partial:<d>/<n>` (some), or `no_landing:<n>` (nothing deployed —
+  blocked/failed), and the notifications say so; a repo that keeps landing
+  nothing notifies once, like a persistent error, instead of every tick.
+
 - Make the recovery commands honor the contract-1 envelope and widen the
   fingerprint gate (0.9.0-prep). `reconcile`/`recover`/`unlock` returned
   `ok:false` with **no** `error` object when they ran to completion but found
