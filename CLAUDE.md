@@ -4,6 +4,7 @@ This repository ships **mergetrain**, a local deploy train for coding-agent work
 
 ## Ground rules
 
+- **English only for everything that lands in the repo or the tracker**: issues, PRs, commit messages, comments, docs, release notes, labels. (Conversation with the owner may be in any language; artifacts may not.)
 - mergetrain runs locally on this machine's git repo. Run commands from the repo root that contains `.mergetrain.yaml`, or pass `--repo <path>` to operate another service repo.
 - **Always read state first:** run `mergetrain doctor --json` and `mergetrain status --json` before acting, and decide from that JSON — never from assumptions.
 - Every command is non-interactive and JSON-first. Prefer `--json`, then summarize. Don't paste raw JSON unless asked.

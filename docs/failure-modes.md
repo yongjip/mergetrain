@@ -121,3 +121,21 @@ Delete terminal local branches as well:
 ```sh
 mergetrain gc --apply --delete-branches --json
 ```
+
+## Why a persisted marker, instead of reconstructing from Git?
+
+A question worth answering once, properly (it came up in the launch thread —
+see issue #38's origin): after a crash, why does recovery need the SQLite
+marker at all, when the Git objects and refs are all still there?
+
+Because Git alone cannot distinguish **"never pushed"** from **"pushed, then
+died before hearing back."** The local objects, the assembled commit, even the
+pin ref look identical in both worlds; the only difference is on the remote.
+So the runner persists two things *before* the push — the lease (a SQLite lock
+row with token, heartbeat, TTL, and PID liveness) and a fsynced
+`pending_deploy_sha` marker plus a `refs/mergetrain/pending/<id>` pin — and
+recovery then reads the marker as *what we intended* and asks the remote for
+*what actually happened*. A train is marked deployed only when the push ref
+really carries its SHA; a landed train is never pushed twice; and when the
+remote is unreachable, reconcile refuses to guess and exits with its own code
+instead.
