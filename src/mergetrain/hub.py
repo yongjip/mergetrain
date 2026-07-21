@@ -11,10 +11,12 @@ refresh SQLite's sidecar ``-shm``/``-wal`` files next to the database.)
 The dashboard rebuilds this payload once per second per connected client, and
 almost every rebuild reads unchanged files. ``HubSnapshotCache`` turns those
 rebuilds into a handful of ``stat`` calls: a repo's entry is reused while its
-config file and queue database (including the SQLite ``-wal``, which every
-commit touches) have identical mtime/size fingerprints. Registry-derived
-fields like the daemon flag are attached outside the cache, so flipping them
-never serves a stale value.
+config file and queue database (including the SQLite ``-wal`` size, which a
+commit grows) have identical fingerprints. Fields that are functions of
+process state or the wall clock rather than of files — the daemon flag
+(registry-derived), lock liveness, and the ``next_action`` — are recomputed
+on every cache hit, so a warm entry never serves a stale runner or a flipped
+flag.
 """
 
 from __future__ import annotations
@@ -26,8 +28,8 @@ from typing import Any
 
 from .config import load_config
 from .registry import DEFAULT_CONFIG_NAME
-from .snapshot import build_dashboard_snapshot
-from .store import utc_now
+from .snapshot import build_dashboard_snapshot, next_action
+from .store import owner_liveness, utc_now
 
 
 def display_path(path: str) -> str:
@@ -51,6 +53,30 @@ def _fingerprint(*paths: str | Path) -> tuple[Any, ...]:
     return tuple(parts)
 
 
+def _db_fingerprint(db: str | Path) -> tuple[Any, ...]:
+    """Change-detecting fingerprint that is stable across a read-only open.
+
+    Opening a WAL database read-only creates/refreshes the ``-shm`` and an
+    empty ``-wal`` — so those files' mtimes cannot be trusted as change
+    signals. This watches the main file's (mtime, size) — untouched by a
+    pure read — plus the ``-wal`` *size* (a real commit grows it; a
+    checkpoint that truncates it moves the main file instead), and ignores
+    ``-shm`` entirely. That lets the DB fingerprint be captured *before* the
+    snapshot read without the read invalidating its own cache entry.
+    """
+
+    try:
+        stat = os.stat(db)
+        main: Any = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        main = None
+    try:
+        wal_size = os.stat(f"{db}-wal").st_size
+    except OSError:
+        wal_size = 0
+    return (main, wal_size)
+
+
 class HubSnapshotCache:
     """Reuse per-repo entries while their on-disk fingerprints are unchanged.
 
@@ -68,25 +94,60 @@ class HubSnapshotCache:
             cached = self._entries.get(raw_path)
         if cached is None or cached["config_fp"] != config_fp:
             return None
-        if _fingerprint(*cached["db_paths"]) != cached["db_fp"]:
+        if _db_fingerprint(cached["db"]) != cached["db_fp"]:
             return None
-        return dict(cached["entry"])
+        return _refresh_volatile(dict(cached["entry"]))
 
     def put(
         self,
         raw_path: str,
         *,
         config_fp: tuple[Any, ...],
-        db_paths: tuple[str, ...],
+        db: str,
+        db_fp: tuple[Any, ...],
         entry: dict[str, Any],
     ) -> None:
         with self._lock:
             self._entries[raw_path] = {
                 "config_fp": config_fp,
-                "db_paths": db_paths,
-                "db_fp": _fingerprint(*db_paths),
+                "db": db,
+                "db_fp": db_fp,
                 "entry": dict(entry),
             }
+
+    def retain(self, live_paths: set[str]) -> None:
+        """Drop cached entries for repos no longer in the roster.
+
+        Without this a ``hub remove`` would leave the removed repo's full
+        payload resident, and a path re-registered later could momentarily
+        serve the old repo's snapshot.
+        """
+
+        with self._lock:
+            for stale in [key for key in self._entries if key not in live_paths]:
+                del self._entries[stale]
+
+
+def _refresh_volatile(entry: dict[str, Any]) -> dict[str, Any]:
+    """Recompute process/clock-dependent fields on a cache hit.
+
+    Lock liveness (an ``os.kill`` probe) and ``next_action`` (compares the
+    lease expiry against the wall clock) change with no file change, so a
+    frozen cache entry would hide a crashed runner indefinitely. These are
+    cheap — one liveness probe and clock comparisons, no database open.
+    """
+
+    snapshot = entry.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return entry
+    lock = snapshot.get("lock")
+    if isinstance(lock, dict) and lock.get("owner"):
+        # The public lock owner is masked to "local:<pid>"; recover the pid to
+        # re-probe liveness.
+        pid_suffix = str(lock["owner"]).rsplit(":", 1)[-1]
+        lock["liveness"] = owner_liveness(f"local:{pid_suffix}")
+    snapshot["next_action"] = next_action(snapshot)
+    return entry
 
 
 def _repo_entry(raw_path: str, cache: HubSnapshotCache | None) -> dict[str, Any]:
@@ -109,7 +170,11 @@ def _repo_entry(raw_path: str, cache: HubSnapshotCache | None) -> dict[str, Any]
             entry.update(ok=False, error="no .mergetrain.yaml in this repo")
             return entry
         db = Path(config.state.db)
-        db_paths = (str(db), f"{db}-wal")
+        # Fingerprint BEFORE reading the database: a commit that lands between
+        # the read and the stat would otherwise be recorded under its
+        # post-commit fingerprint against the pre-commit payload, pinning a
+        # stale entry until the next unrelated change.
+        db_fp = _db_fingerprint(db)
         if not db.is_file():
             # A registered repo with no queue yet is a normal state, not an
             # error — and the hub must not create the database to find out.
@@ -134,7 +199,13 @@ def _repo_entry(raw_path: str, cache: HubSnapshotCache | None) -> dict[str, Any]
                 }
             )
         if cache is not None:
-            cache.put(raw_path, config_fp=config_fp, db_paths=db_paths, entry=entry)
+            cache.put(
+                raw_path,
+                config_fp=config_fp,
+                db=str(db),
+                db_fp=db_fp,
+                entry=entry,
+            )
         return entry
     except Exception as exc:  # noqa: BLE001 - per-repo isolation is the contract
         entry.update(ok=False, error=str(exc) or exc.__class__.__name__)
@@ -146,6 +217,8 @@ def build_hub_snapshot(
     *,
     cache: HubSnapshotCache | None = None,
 ) -> dict[str, Any]:
+    if cache is not None:
+        cache.retain({str(item.get("path") or "") for item in registered})
     repos = []
     for item in registered:
         entry = _repo_entry(str(item.get("path") or ""), cache)
