@@ -1796,6 +1796,7 @@ class GitRunner:
                                     finish(job, status="blocked", log_path=str(log_path), note=str(exc))
                                 )
                                 continue
+                        pre_merge_head = git_output(["rev-parse", "HEAD"], cwd=worktree)
                         merge = run_command(
                             ["git", "merge", "--no-edit", merge_shas[job.id]],
                             cwd=worktree,
@@ -1832,7 +1833,15 @@ class GitRunner:
                                     note="integration worktree is dirty after merge",
                                 )
                             )
-                            run_command(["git", "reset", "--hard", "HEAD"], cwd=worktree, log=log, check=False)
+                            # the merge already committed (HEAD advanced), so
+                            # `reset --hard HEAD` would only drop the stray dirt
+                            # and keep this blocked job's merge commit in the
+                            # assembled tree. Reset to the pre-merge tip instead
+                            # so a blocked job can never ride the train.
+                            run_command(
+                                ["git", "reset", "--hard", pre_merge_head],
+                                cwd=worktree, log=log, check=True,
+                            )
                             continue
                         merged_jobs.append(job)
                         self._event(

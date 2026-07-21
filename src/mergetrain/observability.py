@@ -87,7 +87,10 @@ def job_outcome(job: Job) -> dict[str, Any]:
     elif job.status == "failed":
         severity = "failure"
         lowered = message.lower()
-        if job.push_status == "failed" or "push" in lowered:
+        if job.push_status == "failed":
+            # Rely on the structured push_status, not a note substring: a gate
+            # named e.g. "no-force-push" fails before any push is attempted
+            # (push_status stays not_run) and must not be mislabeled push_failed.
             category = "push_failed"
         elif "timed out" in lowered:
             category = "command_timeout"
