@@ -686,6 +686,17 @@ def claim_all_queued(
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+        if auto_only and deploy_reconcile_pending(conn):
+            # Acquiring the lock can itself park marker-bearing orphans as
+            # needs_reconcile (dead-owner requeue). An unattended deploy must
+            # observe that inside the same claim transaction — checking only
+            # before the claim leaves a TOCTOU window where the daemon pushes
+            # over a pending reconcile.
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
+            return []
         if auto_only:
             rows = conn.execute(
                 "SELECT id FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 1 ORDER BY id ASC"

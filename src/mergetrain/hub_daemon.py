@@ -11,7 +11,7 @@ default 1, so heavy gates from different repos never stack).
 from __future__ import annotations
 
 import signal
-import time
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -144,11 +144,10 @@ def hub_daemon_loop(
     ``once``).
     """
 
-    should_stop = False
+    stop = threading.Event()
 
     def request_stop(signum, frame):  # type: ignore[no-untyped-def]
-        nonlocal should_stop
-        should_stop = True
+        stop.set()
         say(f"mergetrain hub daemon received signal {signum}; finishing current sweep")
 
     old_handlers: dict[int, Any] = {}
@@ -161,6 +160,12 @@ def hub_daemon_loop(
     last_outcomes: dict[str, str] = {}
     try:
         while True:
+            # Top-of-loop check: a signal landing during the inter-sweep wait
+            # must never trigger one more full (deploying) sweep — PEP 475
+            # resumes the wait after the handler returns, so the wait alone
+            # is not a reliable exit point.
+            if stop.is_set():
+                break
             try:
                 registered = load_registry(registry)
                 if registered:
@@ -190,9 +195,9 @@ def hub_daemon_loop(
                     say("mergetrain hub sweep: no repos registered")
             except Exception as exc:
                 say(f"mergetrain hub sweep error: {exc}")
-            if once or should_stop:
+            if once or stop.is_set():
                 break
-            time.sleep(max(1, int(interval_seconds)))
+            stop.wait(max(1, int(interval_seconds)))
     finally:
         if install_signal_handlers:
             for signum, handler in old_handlers.items():

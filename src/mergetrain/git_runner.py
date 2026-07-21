@@ -106,6 +106,7 @@ def _run_managed(
         shell=shell,
         executable="/bin/sh" if shell and Path("/bin/sh").exists() else None,
         text=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         bufsize=1,
@@ -145,7 +146,12 @@ def _run_managed(
             if pulse is not None and now >= next_pulse:
                 pulse()
                 next_pulse = now + max(0.1, pulse_interval_seconds)
-            time.sleep(0.1)
+            try:
+                # Returns the instant the process exits; the timeout only
+                # bounds how long we go between pulse/timeout checks.
+                process.wait(timeout=0.1)
+            except subprocess.TimeoutExpired:
+                pass
     except BaseException:
         _stop_process(process)
         raise
@@ -164,6 +170,21 @@ def _run_managed(
     return completed
 
 
+# Ceiling for commands whose callers did not pass an explicit timeout. These
+# are local git operations (reset, clean, worktree remove, merge --abort) that
+# finish in seconds; the ceiling only exists so a pathological hang can never
+# stall a runner — or a whole hub sweep — indefinitely.
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 600.0
+
+
+def _git_safe_env(env: dict[str, str] | None) -> dict[str, str]:
+    # Never let a git subprocess block on an interactive credential or
+    # host-key prompt: a daemonized runner has no terminal to answer it.
+    base = dict(os.environ) if env is None else dict(env)
+    base.setdefault("GIT_TERMINAL_PROMPT", "0")
+    return base
+
+
 def run_command(
     command: Sequence[str],
     *,
@@ -178,6 +199,9 @@ def run_command(
     if log:
         log.write(f"\n$ {_render_command(command)}\n")
         log.flush()
+    env = _git_safe_env(env)
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
     if pulse is not None or timeout_seconds is not None:
         return _run_managed(
             list(command),
@@ -192,7 +216,7 @@ def run_command(
         )
     completed = subprocess.run(
         list(command), cwd=str(cwd), env=env, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     if log:
         if completed.stdout:
