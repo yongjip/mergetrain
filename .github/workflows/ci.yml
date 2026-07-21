@@ -45,7 +45,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Test
-        run: python -m pytest -q
+        # Verbose + full traceback so a KeyboardInterrupt/hang that aborts the
+        # session names the exact test and shows where it really originated;
+        # faulthandler_timeout dumps every thread if a test wedges (issue #33).
+        run: python -m pytest -v --full-trace -o faulthandler_timeout=90 -p no:cacheprovider
 
   package:
     runs-on: ubuntu-latest
