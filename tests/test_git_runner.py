@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -12,6 +14,34 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+
+
+def py_path(path: Path | str) -> str:
+    """A filesystem path safe to embed inside a Python string literal.
+
+    Windows paths contain backslashes, which a ``python -c "... '{path}' ..."``
+    gate would read as escape sequences (``C:\\Users`` -> ``\\U...``). Forward
+    slashes are valid in the literal and pathlib accepts them on every OS.
+    """
+
+    return str(path).replace("\\", "/")
+
+
+def _clear_readonly(func, path, _exc):
+    # Git marks loose objects and pack files read-only; Windows refuses to
+    # delete a read-only file, so rmtree of a repo raises WinError 5. Clear the
+    # bit and retry — the POSIX default already tolerates this.
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def rmtree(path: Path | str) -> None:
+    """``shutil.rmtree`` that also removes read-only files (Windows git repos)."""
+
+    kwargs = {"onexc": _clear_readonly}
+    if sys.version_info < (3, 12):
+        kwargs = {"onerror": lambda f, p, _e: _clear_readonly(f, p, None)}
+    shutil.rmtree(path, **kwargs)
 
 from mergetrain.config import load_config
 from mergetrain.cli import main
@@ -71,7 +101,7 @@ def make_demo_repo(
     git(repo, "switch", "main")
     marker = root / "gate-count.txt"
     gate_command = gate_command or (
-        f"{sys.executable} -c \"from pathlib import Path; p=Path('{marker}'); "
+        f"{sys.executable} -c \"from pathlib import Path; p=Path('{py_path(marker)}'); "
         "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
     )
     verify_config = "  verify: []"
@@ -123,7 +153,7 @@ class GitRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             verify_marker = root / "verify.txt"
-            verify = f'{sys.executable} -c "from pathlib import Path; Path(\'{verify_marker}\').write_text(\'verified\')"'
+            verify = f'{sys.executable} -c "from pathlib import Path; Path(\'{py_path(verify_marker)}\').write_text(\'verified\')"'
             repo, marker = make_demo_repo(root, verify_command=verify)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -226,7 +256,11 @@ class GitRunnerTests(unittest.TestCase):
             repo, marker = make_demo_repo(
                 root,
                 reuse_enabled=True,
-                fingerprint_command=f"cat {fingerprint}",
+                # `cat` is not a Windows command; read the file portably.
+                fingerprint_command=(
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    f"print(Path('{py_path(fingerprint)}').read_text())\""
+                ),
             )
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -403,7 +437,11 @@ class GitRunnerTests(unittest.TestCase):
             self.assertIn("exit_code=5", serialized_events)
 
     def test_managed_command_timeout_terminates_process_group(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
+        # ignore_cleanup_errors: this test kills a subprocess mid-run; on
+        # Windows the OS may still hold the killed process's cwd/pipe handles
+        # when TemporaryDirectory tears down (WinError 32). Production worktree
+        # cleanup is best-effort + gc for the same reason, so tolerate it here.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             started = time.monotonic()
             with self.assertRaises(CommandFailed) as raised:
                 run_shell(
@@ -520,8 +558,8 @@ class GitRunnerTests(unittest.TestCase):
             root = Path(td)
             first_marker = root / "first-gate.txt"
             second_marker = root / "second-gate.txt"
-            first_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{first_marker}\').write_text(\'x\')"'
-            second_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{second_marker}\').write_text(\'y\')"'
+            first_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{py_path(first_marker)}\').write_text(\'x\')"'
+            second_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{py_path(second_marker)}\').write_text(\'y\')"'
             repo, _marker = make_demo_repo(root, gate_command=first_gate)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -687,7 +725,11 @@ class GitRunnerTests(unittest.TestCase):
             self.assertGreater(after.expires_at, before.expires_at)
 
     def test_long_gate_heartbeats_and_cooperatively_cancels(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
+        # ignore_cleanup_errors: cancelling mid-gate kills the gate subprocess
+        # and tears down its integration worktree; on Windows the OS may still
+        # hold those handles at TemporaryDirectory cleanup (WinError 32), the
+        # same best-effort situation production handles via gc.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
             gate = f'{sys.executable} -c "import time; time.sleep(10)"'
             repo, _marker = make_demo_repo(root, gate_command=gate)
@@ -909,7 +951,7 @@ class BisectIsolationTests(unittest.TestCase):
             counter = root / "count.txt"
             gate = (
                 f"{sys.executable} -c \"import pathlib, sys; "
-                f"p = pathlib.Path('{counter}'); "
+                f"p = pathlib.Path('{py_path(counter)}'); "
                 "n = (int(p.read_text()) + 1) if p.exists() else 1; "
                 "p.write_text(str(n)); sys.exit(1 if n == 1 else 0)\""
             )

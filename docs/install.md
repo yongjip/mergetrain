@@ -40,11 +40,12 @@ python -m pip install mergetrain
 
 ## Platforms
 
-Developed and continuously tested on **macOS and Linux** (Python 3.10–3.14).
-**Windows is untested** — the code is pure Python, but queue locking, worktree
-paths, and subprocess handling have not been verified there; see the
-[tracking issue](https://github.com/yongjip/mergetrain/issues/33) before
-relying on it.
+Continuously tested on **macOS and Linux** (Python 3.10–3.14) and on
+**Windows** (Python 3.13) — the full suite runs on `windows-latest` in CI as a
+blocking check, covering queue locking, worktree paths, and subprocess
+handling. Real-world Windows reports (including "it just worked") are still
+welcome on the [tracking issue](https://github.com/yongjip/mergetrain/issues/33),
+since a clean CI runner cannot exercise every local Git configuration.
 
 ## Local editable install
 
