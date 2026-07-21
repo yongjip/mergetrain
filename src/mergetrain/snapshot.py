@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import MergetrainConfig
+from .errors import redact_secrets
 from .models import Job, RunnerLock
 from .store import (
     _parse_utc,
@@ -88,6 +89,13 @@ def _public_job(job: Job) -> dict[str, Any]:
     # The dashboard needs queue identity and reasons, not local filesystem paths.
     data.pop("worktree_path", None)
     data.pop("log_path", None)
+    # Defence in depth for the network-reachable read surfaces (dashboard, hub):
+    # notes are already masked at the source (errors.redact_secrets in
+    # CommandFailed.__str__), but re-mask here so a note written before that
+    # guard — or by any future non-CommandFailed path — is never served in clear.
+    note = data.get("note")
+    if note:
+        data["note"] = redact_secrets(note)
     return data
 
 

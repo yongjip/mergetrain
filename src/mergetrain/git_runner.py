@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import os
-import re
 import signal
 import shutil
 import subprocess
@@ -24,6 +23,7 @@ from .errors import (
     MergeBlocked,
     MergetrainError,
     PushRejected,
+    redact_secrets,
 )
 from .models import Job
 from .reuse import (
@@ -45,14 +45,6 @@ from .store import (
 Pulse = Callable[[], None]
 GateProgress = Callable[[str, str, int, int, str], None]
 
-_SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|CREDENTIAL)[A-Z0-9_]*)=([^\s]+)"
-)
-_SENSITIVE_OPTION = re.compile(
-    r"(?i)(--(?:token|secret|password|passwd|api[-_]?key|credential)(?:=|\s+))([^\s]+)"
-)
-
-
 def _render_command(command: Sequence[str] | str) -> str:
     if isinstance(command, str):
         return command
@@ -62,9 +54,7 @@ def _render_command(command: Sequence[str] | str) -> str:
 def _dashboard_command(command: Sequence[str] | str) -> str:
     """Render a bounded gate command while masking obvious inline secrets."""
 
-    rendered = _render_command(command)
-    rendered = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", rendered)
-    rendered = _SENSITIVE_OPTION.sub(r"\1[redacted]", rendered)
+    rendered = redact_secrets(_render_command(command))
     return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
 
 
@@ -250,7 +240,7 @@ def run_shell(
     timeout_seconds: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     if log:
-        log.write(f"\n$ /bin/sh -c {command!r}\n")
+        log.write(f"\n$ /bin/sh -c {redact_secrets(command)!r}\n")
         log.flush()
     if pulse is not None or timeout_seconds is not None:
         return _run_managed(
