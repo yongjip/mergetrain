@@ -437,7 +437,11 @@ class GitRunnerTests(unittest.TestCase):
             self.assertIn("exit_code=5", serialized_events)
 
     def test_managed_command_timeout_terminates_process_group(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
+        # ignore_cleanup_errors: this test kills a subprocess mid-run; on
+        # Windows the OS may still hold the killed process's cwd/pipe handles
+        # when TemporaryDirectory tears down (WinError 32). Production worktree
+        # cleanup is best-effort + gc for the same reason, so tolerate it here.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             started = time.monotonic()
             with self.assertRaises(CommandFailed) as raised:
                 run_shell(
@@ -721,7 +725,11 @@ class GitRunnerTests(unittest.TestCase):
             self.assertGreater(after.expires_at, before.expires_at)
 
     def test_long_gate_heartbeats_and_cooperatively_cancels(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
+        # ignore_cleanup_errors: cancelling mid-gate kills the gate subprocess
+        # and tears down its integration worktree; on Windows the OS may still
+        # hold those handles at TemporaryDirectory cleanup (WinError 32), the
+        # same best-effort situation production handles via gc.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
             gate = f'{sys.executable} -c "import time; time.sleep(10)"'
             repo, _marker = make_demo_repo(root, gate_command=gate)
