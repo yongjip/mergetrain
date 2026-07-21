@@ -19,7 +19,12 @@ Agents should:
 
 - `queued`: waiting for a runner.
 - `in_progress`: claimed by a single-job runner.
-- `blocked`: merge conflict or user action needed.
+- `blocked`: merge conflict or user action needed. If `conflict_with` is
+  non-empty, this is a semantic conflict found during train bisection: the
+  job passes gates alone but fails combined with the comma-separated job IDs
+  listed there (partner branches and SHAs are in `note`). Fix by rebasing
+  onto the integration branch with the partner's change merged, then enqueue
+  a fresh job.
 - `failed`: gate or command failure.
 - `validated`: validation succeeded without push; the exact train remains deployable after approval.
 - `deployed`: deploy push succeeded; inspect `push_status` and `verify_status`

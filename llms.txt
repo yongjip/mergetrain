@@ -13,6 +13,7 @@ Rules:
 - After validation, deploy the exact `validated_trains` entry shown by status; do not assume newer queued jobs are included.
 - After a crash, resolve `needs_reconcile` jobs with `reconcile`/`recover` against the remote; deploy is refused while any job needs reconciling.
 - Across several repos, read the whole machine with `mergetrain hub status --json`; the hub is read-only and owns no queue state.
+- A job `blocked` with a non-empty `conflict_with` is a semantic conflict: it passes gates alone but fails combined with the listed job IDs. Rebase onto the integration branch with the partner's change merged, fix the joint breakage, and enqueue a fresh job.
 
 Core commands:
 - `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`
