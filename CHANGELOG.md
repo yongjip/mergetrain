@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add `hub daemon --notify` (issue #32 Stage 0): desktop notifications for
+  landed trains, sweep errors, and reconcile pauses, deduplicated to state
+  transitions so a persistently broken repo notifies once. macOS
+  `osascript` only, zero new dependencies; silent no-op elsewhere.
+
 ## 0.4.0 - 2026-07-21
 
 - Add a per-repo hub-daemon opt-out: `hub add REPO --no-daemon` keeps a repo

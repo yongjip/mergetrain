@@ -1144,6 +1144,7 @@ def cmd_hub_status(args: argparse.Namespace) -> int:
 
 def cmd_hub_daemon(args: argparse.Namespace) -> int:
     from .hub_daemon import hub_daemon_loop
+    from .notify import system_notifier
 
     if args.concurrency < 1:
         raise QueueError("hub daemon --concurrency must be at least 1")
@@ -1155,6 +1156,7 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
         keep_worktree=args.keep_worktree,
         once=args.once,
         say=say,
+        notifier=system_notifier if args.notify else None,
     )
     if args.json and args.once:
         dump_json({"ok": True, "outcomes": outcomes})
@@ -1436,6 +1438,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max repos running gates at the same time (default 1: machine-wide serial)",
     )
     p_hub_daemon.add_argument("--once", action="store_true", help="Run one sweep and exit")
+    p_hub_daemon.add_argument(
+        "--notify",
+        action="store_true",
+        help="Desktop notification on landed/blocked/reconcile transitions (macOS osascript; silent no-op elsewhere)",
+    )
     p_hub_daemon.add_argument("--keep-worktree", action="store_true")
     p_hub_daemon.add_argument("--registry", help="Override the hub registry file path")
     p_hub_daemon.add_argument("--json", action="store_true", help="With --once, print sweep outcomes as JSON")

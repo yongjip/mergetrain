@@ -283,8 +283,12 @@ dashboard serves, per-repo errors isolated.
 Run the auto-only daemon across every registered repo:
 
 ```sh
-mergetrain hub daemon [--interval 15] [--concurrency 1] [--once [--json]] [--keep-worktree] [--registry PATH]
+mergetrain hub daemon [--interval 15] [--concurrency 1] [--notify] [--once [--json]] [--keep-worktree] [--registry PATH]
 ```
+
+`--notify` posts macOS desktop notifications on landed trains, sweep errors,
+and reconcile pauses (transition-deduplicated); it is a silent no-op off
+macOS.
 
 Each repo is processed by the same per-tick policy as the single-repo
 `daemon` — only `--auto` jobs, behind that repo's own lock, gates, and
