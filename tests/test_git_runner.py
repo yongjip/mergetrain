@@ -45,7 +45,7 @@ def rmtree(path: Path | str) -> None:
 
 from mergetrain.config import load_config
 from mergetrain.cli import main
-from mergetrain.errors import CommandFailed
+from mergetrain.errors import CommandFailed, redact_secrets
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.store import (
     cancel_job,
@@ -405,6 +405,41 @@ class GitRunnerTests(unittest.TestCase):
             rendered,
             "TEST_TOKEN=[redacted] run-check --password [redacted]",
         )
+
+    def test_command_failed_str_redacts_inline_secrets(self) -> None:
+        # redact_secrets is the single masking primitive; CommandFailed.__str__
+        # runs through it so the persisted job note never carries an inline
+        # credential, matching what the dashboard already masks live.
+        self.assertEqual(
+            redact_secrets("deploy API_TOKEN=sk-abc123 --password hunter2"),
+            "deploy API_TOKEN=[redacted] --password [redacted]",
+        )
+        exc = CommandFailed(["run-check", "--token", "sk-secret-xyz"], 1, stderr="boom")
+        rendered = str(exc)
+        self.assertNotIn("sk-secret-xyz", rendered)
+        self.assertIn("--token [redacted]", rendered)
+        self.assertIn("boom", rendered)
+
+    def test_failed_gate_note_redacts_inline_command_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # The secret is inline in the gate command itself (not just its
+            # output), so it lands in CommandFailed.command -> the job note.
+            gate = (
+                f'{sys.executable} -c "import sys; sys.exit(5)" '
+                "--token sk-inline-secret-value"
+            )
+            repo, _marker = make_demo_repo(root, gate_command=gate)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "failed")
+            self.assertIn("[redacted]", result.note)
+            self.assertNotIn("sk-inline-secret-value", result.note)
 
     def test_command_output_is_kept_out_of_structured_events(self) -> None:
         with tempfile.TemporaryDirectory() as td:

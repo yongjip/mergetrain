@@ -2,8 +2,30 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Sequence
+
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|CREDENTIAL)[A-Z0-9_]*)=([^\s]+)"
+)
+_SENSITIVE_OPTION = re.compile(
+    r"(?i)(--(?:token|secret|password|passwd|api[-_]?key|credential)(?:=|\s+))([^\s]+)"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask inline secrets (``KEY=...``, ``--token ...``) in free-form text.
+
+    The one place secret masking is defined, so every surface that may persist
+    or display a command line or its output — a failed-gate job ``note``, the
+    on-disk log, ``status --json``, the dashboard — masks the same way and a
+    credential passed inline to a gate is never echoed in cleartext. Idempotent.
+    """
+
+    text = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", text)
+    text = _SENSITIVE_OPTION.sub(r"\1[redacted]", text)
+    return text
 
 
 class MergetrainError(Exception):
@@ -70,7 +92,7 @@ class CommandFailed(MergetrainError):
     stderr: str = ""
     cwd: str | None = None
 
-    def __str__(self) -> str:  # pragma: no cover - formatting only
+    def __str__(self) -> str:
         if isinstance(self.command, str):
             rendered = self.command
         else:
@@ -78,5 +100,10 @@ class CommandFailed(MergetrainError):
         location = f" in {self.cwd}" if self.cwd else ""
         tail = self.stderr.strip() or self.stdout.strip()
         if tail:
-            return f"command failed ({self.returncode}){location}: {rendered}\n{tail}"
-        return f"command failed ({self.returncode}){location}: {rendered}"
+            text = f"command failed ({self.returncode}){location}: {rendered}\n{tail}"
+        else:
+            text = f"command failed ({self.returncode}){location}: {rendered}"
+        # Redact at the source: this string becomes the persisted job note that
+        # `status --json` and the dashboard emit, so a gate invoked with an
+        # inline credential must never leak it in cleartext.
+        return redact_secrets(text)

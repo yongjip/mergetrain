@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mergetrain.config import (
     CONFIG_VERSION,
+    _parse_simple_yaml,
     load_config,
     load_yaml,
     render_default_config,
@@ -20,6 +21,34 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(data["git"]["push_refs"], ["main"])
         self.assertEqual(data["terminology"]["git_operation"], "deploy")
         self.assertEqual(data["gates"][0]["name"], "diff-check")
+
+    def test_fallback_parser_strips_inline_comments_like_pyyaml(self) -> None:
+        # The zero-dependency parser is the DEFAULT path (no runtime deps), so it
+        # must match PyYAML on inline comments — otherwise the same config parses
+        # differently with vs without PyYAML: `lock_ttl_minutes: 30  # x` would
+        # become the string "30  # x" and `- name: tests  # x` a corrupted gate.
+        doc = (
+            "lock_ttl_minutes: 30  # thirty\n"
+            "gates:\n"
+            "  - name: tests  # unit gate\n"
+            'quoted: "a # b"\n'
+            "url: http://example.com/p#frag\n"
+            "# a whole-line comment\n"
+            "plain: value\n"
+        )
+        parsed = _parse_simple_yaml(doc)
+        self.assertEqual(parsed["lock_ttl_minutes"], 30)  # int, not "30  # thirty"
+        self.assertEqual(parsed["gates"][0]["name"], "tests")  # not "tests  # unit gate"
+        self.assertEqual(parsed["quoted"], "a # b")  # '#' inside quotes is literal
+        self.assertEqual(parsed["url"], "http://example.com/p#frag")  # no space -> not a comment
+        self.assertEqual(parsed["plain"], "value")
+        self.assertNotIn("thirty", str(parsed))
+        # Parity: where PyYAML is installed, the built-in parser agrees with it.
+        try:
+            import yaml
+        except Exception:  # pragma: no cover - only when PyYAML is absent
+            return
+        self.assertEqual(parsed, yaml.safe_load(doc))
 
     def test_relative_paths_resolve_from_repo(self) -> None:
         with tempfile.TemporaryDirectory() as td:

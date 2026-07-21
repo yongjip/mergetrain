@@ -178,13 +178,37 @@ def _parse_scalar(value: str) -> Any:
         return value
 
 
+def _strip_inline_comment(line: str) -> str:
+    """Drop a trailing ``# ...`` comment, matching PyYAML.
+
+    A ``#`` starts a comment only at the start of the value or when preceded by
+    whitespace, and never inside a quoted scalar — so ``key: value  # note`` is
+    trimmed to ``key: value`` while ``url: http://x#frag`` and
+    ``key: "a # b"`` are left intact. Leading indentation is preserved so the
+    caller can still measure it. Without this the built-in (no-PyYAML) parser
+    diverged from PyYAML and silently corrupted values like a gate ``name``.
+    """
+
+    in_single = in_double = False
+    for i, ch in enumerate(line):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            if i == 0 or line[i - 1] in (" ", "\t"):
+                return line[:i].rstrip()
+    return line.rstrip()
+
+
 def _clean_yaml_lines(text: str) -> list[tuple[int, str]]:
     cleaned: list[tuple[int, str]] = []
     for raw in text.splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
+        line = _strip_inline_comment(raw)
+        if not line.strip():
             continue
-        indent = len(raw) - len(raw.lstrip(" "))
-        cleaned.append((indent, raw.strip()))
+        indent = len(line) - len(line.lstrip(" "))
+        cleaned.append((indent, line.strip()))
     return cleaned
 
 
