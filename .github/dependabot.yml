@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keep GitHub Actions fresh (and re-pin SHAs) via reviewed PRs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Track the (dev/optional) Python dependencies declared in pyproject.toml.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
