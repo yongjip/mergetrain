@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Make the recovery commands honor the contract-1 envelope and widen the
+  fingerprint gate (0.9.0-prep). `reconcile`/`recover`/`unlock` returned
+  `ok:false` with **no** `error` object when they ran to completion but found
+  conflicts (exit 10), no lock (exit 5), or a refused force (exit 4) — using
+  `ok` as an outcome grade, the exact thing contract 1 forbids. They now return
+  `ok:true` (the command ran; the exit code carries the machine signal),
+  `reconcile`/`recover` gain a graded `result` (`success`/`conflict`), and
+  `unlock`'s `cleared` bool carries found-or-not — matching the `hub remove`
+  precedent. Genuine errors (lock held, remote unreachable, bad config) still
+  use the `{ok:false, error:{…}}` envelope. The golden fingerprint gate now
+  also watches `recover`, `unlock`, `cancel`, and `hub status`, so their shapes
+  can't drift silently before the freeze.
+
 ## 0.6.0 - 2026-07-21
 
 - Document the machine contract (#44, Phase 4 — completes #44). New

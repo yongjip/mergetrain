@@ -549,6 +549,10 @@ class CommandExitCodeTests(unittest.TestCase):
             code, payload = self._run(repo, "unlock", "--json")
             self.assertEqual(code, 5)
             self.assertFalse(payload["cleared"])
+            # Contract 1: the command ran, so ok is true with no error envelope;
+            # the exit code + cleared carry the "no lock" outcome.
+            self.assertTrue(payload["ok"])
+            self.assertNotIn("error", payload)
 
     def test_unlock_alive_owner_refused_without_force(self) -> None:
         with tempfile.TemporaryDirectory() as td:

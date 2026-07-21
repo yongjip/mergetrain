@@ -191,6 +191,35 @@ def _cap_jsonl_frames(repo):
     return frames
 
 
+def _cap_recover(repo):
+    return _run_json(["--repo", str(repo), "recover"])
+
+
+def _cap_unlock(repo):
+    # No lock present: the command runs, ok:true, cleared:false (exit 5).
+    return _run_json(["--repo", str(repo), "unlock"])
+
+
+def _cap_cancel(repo):
+    conn = connect(_db(repo))
+    job = enqueue_job(conn, task="a", branch="feature/a")
+    conn.close()
+    return _run_json(["--repo", str(repo), "cancel", str(job.id)])
+
+
+def _cap_hub_status(repo):
+    # Seed a one-repo registry with a live queue so repos[] has a
+    # representative entry carrying an embedded snapshot.
+    from mergetrain.registry import add_repo
+
+    registry = repo / "hub-repos.json"
+    conn = connect(_db(repo))
+    enqueue_job(conn, task="a", branch="feature/a")
+    conn.close()
+    add_repo(repo, registry)
+    return _run_json(["--repo", str(repo), "hub", "status", "--registry", str(registry)])
+
+
 SURFACES = {
     "doctor": _cap_doctor,
     "status": _cap_status,
@@ -200,6 +229,10 @@ SURFACES = {
     "run_batch_validate": _cap_run_validate,
     "gc": _cap_gc,
     "reconcile": _cap_reconcile,
+    "recover": _cap_recover,
+    "unlock": _cap_unlock,
+    "cancel": _cap_cancel,
+    "hub_status": _cap_hub_status,
     "inspect": _cap_inspect,
     "failure_envelope": _cap_failure_envelope,
 }
