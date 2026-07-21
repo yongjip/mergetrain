@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-07-21
+
 - Harden the 0.4.0 hub after an adversarial review (issues #47–#51): make the
   `--no-daemon` opt-out a real guarantee (samefile registry identity, an
   advisory lock around registry mutations, fail-safe flag parsing, and a
