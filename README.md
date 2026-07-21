@@ -299,6 +299,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 - [Hub](./docs/hub.md) — every repo on one read-only board
 - [Manage from your phone](./docs/mobile.md) — drive mergetrain via Cowork Dispatch
 - [Agent contract](./docs/agent-contract.md) — the rules agents follow
+- [Machine contract](./docs/contract.md) — the versioned JSON/config shape agents parse
 - [Security](./docs/security.md) · [Adapter pattern](./docs/adapter-pattern.md) · [Development](./docs/development.md) · [Release](./docs/release.md)
 
 ## Status
