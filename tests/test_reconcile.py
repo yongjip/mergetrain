@@ -11,7 +11,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shutil
 import sys
 import tempfile
 import unittest
@@ -49,7 +48,7 @@ from mergetrain.store import (
 # during recovery (the test process itself is alive, so it cannot be the owner).
 DEAD_OWNER = "ghost:999999"
 
-from test_git_runner import git, make_demo_repo
+from test_git_runner import git, make_demo_repo, rmtree
 
 
 class _Crash(BaseException):
@@ -259,7 +258,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             try:
                 _set_needs_reconcile(conn, job.id, pending)
                 before = get_job(conn, job.id)
-                shutil.rmtree(root / "remote.git")  # remote gone
+                rmtree(root / "remote.git")  # remote gone
                 from mergetrain.errors import RemoteUnreachable
 
                 with self.assertRaises(RemoteUnreachable):
@@ -535,7 +534,7 @@ class CommandExitCodeTests(unittest.TestCase):
                 _set_needs_reconcile(conn, job.id, "f" * 40)
             finally:
                 conn.close()
-            shutil.rmtree(root / "remote.git")
+            rmtree(root / "remote.git")
             code, payload = self._run(repo, "reconcile", "--apply", "--json")
             self.assertEqual(code, 7)
             self.assertEqual(payload["error"]["code"], "remote_unreachable")
@@ -592,7 +591,7 @@ class CommandExitCodeTests(unittest.TestCase):
                 acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=30)
             finally:
                 conn.close()
-            shutil.rmtree(root / "remote.git")
+            rmtree(root / "remote.git")
             code, _ = self._run(repo, "unlock", "--force", "--json")
             self.assertEqual(code, 7)
             # the lock must be untouched
