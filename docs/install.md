@@ -16,6 +16,16 @@ Try it without installing anything:
 uvx mergetrain --help
 ```
 
+On macOS, Homebrew works without any Python on your side (brew brings its
+own and installs into an isolated environment):
+
+```sh
+brew install yongjip/tap/mergetrain
+```
+
+The [tap](https://github.com/yongjip/homebrew-tap) tracks PyPI releases
+automatically via a daily bump workflow.
+
 Inside an existing virtual environment, plain pip works too:
 
 ```sh

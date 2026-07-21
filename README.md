@@ -64,7 +64,7 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 ```bash
 # Install the public alpha (zero runtime dependencies)
 uv tool install mergetrain     # or: pipx install mergetrain
-                               # or, inside a virtualenv: pip install mergetrain
+brew install yongjip/tap/mergetrain   # macOS, no Python needed
 # No install at all? Try it first: uvx mergetrain --help
 
 # 1. Scaffold config + agent docs in your repo
