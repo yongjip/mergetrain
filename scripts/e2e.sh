@@ -194,7 +194,8 @@ section "S1b  doctor on UNCONFIGURED repo degrades safely"
 NOCFG="$WORK/nocfg"; rm -rf "$NOCFG"; mkdir -p "$NOCFG"; git init -q "$NOCFG"
 dj=$("$MT" --repo "$NOCFG" doctor --json); drc=$?
 [ "$drc" = "0" ] && ok "doctor exit 0 on missing config" || no "doctor hard-failed rc=$drc"
-[ "$(echo "$dj" | jget ok)" = "False" ] && ok "doctor ok=False (no config)" || no "ok not False"
+[ "$(echo "$dj" | jget ok)" = "True" ] && ok "doctor ok=True (command ran)" || no "ok not True"
+[ "$(echo "$dj" | jget health)" = "False" ] && ok "health=False (no config)" || no "health not False"
 [ "$(echo "$dj" | jget config_exists)" = "False" ] && ok "config_exists=False" || no "config_exists wrong"
 [ "$(echo "$dj" | jget next_action)" = "enqueue_clean_branch" ] && ok "next_action=enqueue_clean_branch" || no "next_action wrong"
 
@@ -364,8 +365,8 @@ R=$(setup s9 gatefail); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
 rb=$("$MT" --repo "$R" run-batch --deploy --json); rc=$?
-{ [ "$rc" = 1 ] && [ "$(echo "$rb" | jget ok)" = "False" ] && [ "$(echo "$rb" | jget jobs.0.status)" = "failed" ]; } \
-  && ok "job failure returns ok=false and exit 1" || no "failure outcome incorrect: rc=$rc payload=$rb"
+{ [ "$rc" = 1 ] && [ "$(echo "$rb" | jget ok)" = "True" ] && [ "$(echo "$rb" | jget result)" = "failed" ] && [ "$(echo "$rb" | jget jobs.0.status)" = "failed" ]; } \
+  && ok "job failure returns result=failed and exit 1" || no "failure outcome incorrect: rc=$rc payload=$rb"
 [ "$before" = "$(remote_main "$(dirname "$R")")" ] && ok "remote UNCHANGED (no push on gate fail)" || no "remote changed despite gate fail!"
 [ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "fix_blocked_job" ] && ok "doctor=fix_blocked_job" || no "doctor next_action wrong"
 
