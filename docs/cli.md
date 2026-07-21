@@ -332,8 +332,10 @@ leaves newer queued jobs untouched. If more than one train is pending, deploymen
 fails safely until `--train-id` selects one. The runner verifies every validated
 task HEAD, rebuilds on the current integration ref, and reruns gates before push.
 Changed task HEADs block the whole validated train. During initial validation,
-conflicts still block only the offending job and a train gate failure still
-isolates merged jobs one-by-one. See [Design → Batch](design.md#batch--merge-train-run-batch).
+conflicts still block only the offending job and a train gate failure is
+isolated per job — one-by-one for small trains, by bisection with
+semantic-conflict reporting (`conflict_with`) for trains of more than 3
+jobs. See [Design → Batch](design.md#batch--merge-train-run-batch).
 
 Validated-gate reuse is disabled by default. `--reuse-validated` authorizes the
 configured policy for that command; `deploy.reuse.enabled: true` is the persistent

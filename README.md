@@ -55,10 +55,25 @@ Without a queue, the ending is always one of these:
   this job? These are exactly the calls you don't want an agent guessing at
   from fuzzy shell output.
 
-mergetrain removes that coordination work instead of redistributing it: agents
-**enqueue** and stop; one runner merges the queued branches in order, runs your
-gates once over the exact combination, and pushes atomically only after you
-approve. The parallelism you paid for stays parallel.
+### What mergetrain does about each
+
+Each of those failure modes maps to a specific mechanism — this is the design,
+not a feature list:
+
+| Without a queue | With mergetrain |
+|---|---|
+| You order, rebase, and re-test every landing by hand | Agents **enqueue and stop**; one runner assembles the FIFO train in a throwaway worktree and lands it |
+| Sessions race `git push`; a retry with `--force` clobbers | Agents never touch deploy refs; a **lease-fenced single runner** pushes atomically, exactly once |
+| Green branches, red `main` | Gates run over the **exact combined train** before push; when a combination fails, the runner bisects it and names the conflicting pair (`conflict_with`) instead of shipping around the breakage |
+| Stale locks, duplicate enqueues, "may I deploy?" become LLM guesses | Every state is JSON with an explicit `next_action`; deploys require explicit intent (`--deploy`), and unattended runs touch only pre-approved `--auto` jobs |
+| The laptop dies mid-push | A write-ahead marker and pin ref let recovery ask the **remote** what landed — never re-pushed, never mislabeled |
+
+That mapping is also the honest origin story: mergetrain exists because I was
+running several coding-agent sessions on one repo and spending the hours they
+saved me re-serializing their branches by hand. The queue was built to get
+those hours back; the rest — validated train identity, crash recovery, the
+multi-repo hub — followed from operating it every day. The parallelism you
+paid for stays parallel.
 
 ### When to reach for it
 

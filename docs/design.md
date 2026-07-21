@@ -160,9 +160,18 @@ The runner creates the log directory and a unique integration worktree path, the
 During validation, the runner merges all queued jobs into one integration
 worktree in order. A branch that conflicts is marked `blocked`, `git merge
 --abort` is attempted, and the remaining jobs are still tried. Gates then run
-**once** over the whole train. If a pre-push gate fails, the train is torn down
-and each merged job is re-processed individually, so an offending job is
-isolated. Successful jobs receive a shared train identity and validation SHA.
+**once** over the whole train. If a pre-push gate fails, the train is torn
+down and the failure is isolated: trains of up to 3 jobs re-process each
+merged job individually, larger trains are bisected (subset re-assembly +
+gate probes, O(log n) runs) down to either an individually failing job
+(`failed`) or a minimal set of jobs that pass alone but fail together — a
+**semantic conflict**, finished `blocked` with partner job IDs in
+`conflict_with` and partner SHAs in the note. Every conflict member is
+verified to pass alone before being blamed; probes that hit merge conflicts
+or a non-reproducing failure abort bisection and fall back to one-by-one
+isolation. Surviving jobs re-run as a fresh train, so nothing ships without
+a full gate pass over the exact final combination. Successful jobs receive
+a shared train identity and validation SHA.
 
 During a later validated deploy, the selected train is atomic: every current
 task branch must still resolve to its recorded `validated_head_sha`, and the
