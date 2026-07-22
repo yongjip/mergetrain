@@ -629,6 +629,52 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(raised.exception.returncode, 124)
             self.assertLess(time.monotonic() - started, 3)
 
+    def test_managed_command_replaces_invalid_utf8_output(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            env = os.environ.copy()
+            env.update({"LC_ALL": "C", "LANG": "C"})
+            log = io.StringIO()
+            completed = run_shell(
+                f"{sys.executable} -c \"import sys; "
+                "sys.stdout.buffer.write(b'\\xff\\n')\"",
+                cwd=td,
+                env=env,
+                log=log,
+                timeout_seconds=2,
+            )
+            self.assertEqual(completed.returncode, 0)
+            self.assertIn("\ufffd", completed.stdout)
+            self.assertIn("\ufffd", log.getvalue())
+
+    def test_success_before_timeout_is_not_reclassified_while_log_drains(self) -> None:
+        class SlowLog(io.StringIO):
+            def write(self, value: str) -> int:
+                if value == "slow-tail\n":
+                    time.sleep(0.3)
+                return super().write(value)
+
+        with tempfile.TemporaryDirectory() as td:
+            completed = run_shell(
+                f'{sys.executable} -c "print(\'slow-tail\')"',
+                cwd=td,
+                env=os.environ.copy(),
+                log=SlowLog(),
+                check=False,
+                timeout_seconds=0.2,
+            )
+            self.assertEqual(completed.returncode, 0)
+            self.assertEqual(completed.stdout, "slow-tail\n")
+
+    def test_run_shell_defaults_to_managed_noninteractive_execution(self) -> None:
+        expected = subprocess.CompletedProcess("true", 0, "", "")
+        with patch("mergetrain.git_runner._run_managed", return_value=expected) as run:
+            completed = run_shell(
+                "true", cwd=".", env={"PATH": os.environ.get("PATH", "")}
+            )
+        self.assertIs(completed, expected)
+        self.assertEqual(run.call_args.kwargs["timeout_seconds"], 600.0)
+        self.assertEqual(run.call_args.kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+
     def test_batch_merges_jobs_and_runs_gate_once(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
