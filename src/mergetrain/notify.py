@@ -11,8 +11,6 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
 from .config import NotifyConfig
 
@@ -81,6 +79,11 @@ def webhook_notifier(url: str, *, timeout_seconds: int = 10) -> Notifier:
     """Build a notifier that POSTs a small provider-neutral JSON envelope."""
 
     def send(title: str, message: str) -> None:
+        # Keep the CLI's cold import path small. Webhook networking is only
+        # needed when a notification is actually delivered.
+        from urllib import error as urllib_error
+        from urllib import request as urllib_request
+
         body = json.dumps(
             {"title": title, "message": message},
             ensure_ascii=False,

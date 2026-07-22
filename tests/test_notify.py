@@ -178,9 +178,7 @@ class WebhookNotifierTests(unittest.TestCase):
         response = mock.MagicMock()
         response.__enter__.return_value.status = 204
         response.__enter__.return_value.read.return_value = b""
-        with mock.patch.object(
-            notify_module.urllib_request, "urlopen", return_value=response
-        ) as urlopen:
+        with mock.patch("urllib.request.urlopen", return_value=response) as urlopen:
             webhook_notifier(
                 "https://notify.example.invalid/hook/token",
                 timeout_seconds=7,
@@ -198,9 +196,7 @@ class WebhookNotifierTests(unittest.TestCase):
     def test_failure_never_exposes_secret_webhook_url(self) -> None:
         url = "https://notify.example.invalid/hook/super-secret"
         failure = HTTPError(url, 401, "unauthorized", {}, None)
-        with mock.patch.object(
-            notify_module.urllib_request, "urlopen", side_effect=failure
-        ):
+        with mock.patch("urllib.request.urlopen", side_effect=failure):
             with self.assertRaises(RuntimeError) as raised:
                 webhook_notifier(url)("Train", "failed")
         self.assertNotIn("super-secret", str(raised.exception))
