@@ -191,6 +191,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         return
 
     with immediate(conn):
+        # Another process may have migrated the database while this connection
+        # waited for the write lock.  Re-read under BEGIN IMMEDIATE so a stale
+        # binary can never act on its pre-lock observation and stamp a newer
+        # schema back down.
+        version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if version > SCHEMA_VERSION:
+            raise QueueError(
+                f"queue schema version {version} is newer than supported version "
+                f"{SCHEMA_VERSION}"
+            )
+        if version == SCHEMA_VERSION:
+            return
+
         conn.execute(
             """
         CREATE TABLE IF NOT EXISTS deploy_queue (

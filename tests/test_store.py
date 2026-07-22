@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -500,6 +501,26 @@ class StoreTests(unittest.TestCase):
         future.close()
         with self.assertRaisesRegex(QueueError, "newer than supported"):
             connect(db)
+
+    def test_schema_version_is_rechecked_after_acquiring_migration_lock(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        original_immediate = store_module.immediate
+
+        @contextmanager
+        def newer_binary_wins_before_lock(connection):
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+            connection.commit()
+            with original_immediate(connection):
+                yield
+
+        with patch.object(store_module, "immediate", newer_binary_wins_before_lock):
+            with self.assertRaisesRegex(QueueError, "newer than supported"):
+                store_module.ensure_schema(conn)
+
+        self.assertEqual(
+            conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION + 1
+        )
 
     def test_duplicate_active_branch_is_blocked_until_terminal(self) -> None:
         conn = self.make_conn()
