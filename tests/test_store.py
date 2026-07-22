@@ -88,15 +88,29 @@ class StoreTests(unittest.TestCase):
         )
         conn.commit()
 
+        with self.assertRaises(LostLease):
+            record_pending_push(
+                conn,
+                job_ids=[a.id, b.id, other.id],
+                deploy_sha="deadbeef",
+                claim_token=token,
+            )
+        # A partial ownership match rolls back the whole marker write.
+        self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
+        self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "")
         record_pending_push(
-            conn, job_ids=[a.id, b.id, other.id], deploy_sha="deadbeef", claim_token=token
+            conn, job_ids=[a.id, b.id], deploy_sha="deadbeef", claim_token=token
         )
-        # Marker written only for the owned in-progress rows.
         self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "deadbeef")
         self.assertEqual(get_job(conn, a.id).push_status, "pending")
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
         self.assertEqual(get_job(conn, other.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, other.id).push_status, "not_run")
+
+        with self.assertRaises(LostLease):
+            record_pending_push(
+                conn, job_ids=[a.id], deploy_sha="deadbeef", claim_token=""
+            )
 
         # A landed deploy clears the marker; a failure preserves it for forensics.
         mark_job(conn, a.id, status="deployed", expected_claim_token=token)
@@ -174,6 +188,40 @@ class StoreTests(unittest.TestCase):
         claimed = real_get_job(conn, job.id)
         self.assertEqual(claimed.status, "in_progress")
         self.assertEqual(claimed.claim_token, "new-owner-token")
+
+    def test_cancel_in_progress_reports_a_concurrent_completion(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="a")
+        conn.execute(
+            "UPDATE deploy_queue SET status='in_progress', claim_token='runner' "
+            "WHERE id=?",
+            (job.id,),
+        )
+        conn.commit()
+        real_get_job = store_module.get_job
+        raced = False
+
+        def get_then_finish(current_conn, job_id):  # type: ignore[no-untyped-def]
+            nonlocal raced
+            snapshot = real_get_job(current_conn, job_id)
+            if not raced:
+                raced = True
+                current_conn.execute(
+                    "UPDATE deploy_queue SET status='deployed', claim_token='', "
+                    "note='shipped' WHERE id=?",
+                    (job_id,),
+                )
+                current_conn.commit()
+            return snapshot
+
+        with patch("mergetrain.store.get_job", side_effect=get_then_finish):
+            with self.assertRaisesRegex(QueueError, "left 'in_progress'"):
+                cancel_job(conn, job.id)
+
+        finished = real_get_job(conn, job.id)
+        self.assertEqual(finished.status, "deployed")
+        self.assertEqual(finished.note, "shipped")
+        self.assertEqual(finished.cancel_requested_at, "")
 
     def test_state_dir_self_ignores(self) -> None:
         # First DB open drops a .gitignore of '*' inside the dedicated state
@@ -273,6 +321,34 @@ class StoreTests(unittest.TestCase):
         # Queued (live) work is refused — that needs cancel, not dismiss.
         with self.assertRaisesRegex(QueueError, "blocked or failed"):
             dismiss_job(conn, queued.id)
+
+    def test_dismiss_does_not_overwrite_a_concurrent_claim(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="feature/a")
+        mark_job(conn, job.id, status="blocked", note="gate failed")
+        real_get_job = store_module.get_job
+        raced = False
+
+        def get_then_claim(current_conn, job_id):  # type: ignore[no-untyped-def]
+            nonlocal raced
+            snapshot = real_get_job(current_conn, job_id)
+            if not raced:
+                raced = True
+                current_conn.execute(
+                    "UPDATE deploy_queue SET status='in_progress', claim_token=? "
+                    "WHERE id=?",
+                    ("new-owner-token", job_id),
+                )
+                current_conn.commit()
+            return snapshot
+
+        with patch("mergetrain.store.get_job", side_effect=get_then_claim):
+            with self.assertRaisesRegex(QueueError, "raced by a concurrent transition"):
+                dismiss_job(conn, job.id)
+
+        claimed = real_get_job(conn, job.id)
+        self.assertEqual(claimed.status, "in_progress")
+        self.assertEqual(claimed.claim_token, "new-owner-token")
 
     def test_duplicate_active_branch_is_a_typed_error_naming_the_escape(self) -> None:
         conn = self.make_conn()
@@ -610,14 +686,21 @@ class StoreTests(unittest.TestCase):
         owner = f"runner:{os.getpid()}"
         claimed = claim_all_queued(conn, owner=owner, ttl_minutes=-1)
         token = claimed[0].claim_token
+        conn.execute(
+            "UPDATE deploy_queue SET note='preserve sibling note' WHERE id=?",
+            (second.id,),
+        )
+        conn.commit()
 
         with self.assertRaises(LockHeld):
             acquire_runner_lock(conn, owner=f"other:{os.getpid()}")
 
-        requested = cancel_job(conn, first.id)
+        requested = cancel_job(conn, first.id, note="stop this train")
         self.assertEqual(requested.status, "in_progress")
         self.assertTrue(requested.cancel_requested_at)
         self.assertTrue(get_job(conn, second.id).cancel_requested_at)
+        self.assertEqual(requested.note, "stop this train")
+        self.assertEqual(get_job(conn, second.id).note, "preserve sibling note")
         with self.assertRaises(CancellationRequested):
             refresh_runner_lock(conn, owner=owner, token=token)
         with self.assertRaises(CancellationRequested):
