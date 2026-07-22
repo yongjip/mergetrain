@@ -3,13 +3,16 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import socket
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mergetrain.config import load_config
-from mergetrain.dashboard import create_server
+from mergetrain.dashboard import _create_from_snapshot_fn, create_server
 from mergetrain.snapshot import build_dashboard_snapshot
 from mergetrain.store import (
     claim_all_queued,
@@ -135,6 +138,8 @@ terminology:
     def test_http_server_serves_read_only_api_and_static_assets(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             config = self.make_config(Path(td))
+            conn = connect(config.state.db)
+            conn.close()
             server = create_server(config, host="127.0.0.1", port=0, preview=True)
             worker = threading.Thread(target=server.serve_forever, daemon=True)
             worker.start()
@@ -174,6 +179,149 @@ terminology:
                 response = connection.getresponse()
                 response.read()
                 self.assertEqual(response.status, 404)
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=3)
+
+    def test_http_server_rejects_untrusted_host_header(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = self.make_config(Path(td))
+            conn = connect(config.state.db)
+            conn.close()
+            server = create_server(config, host="127.0.0.1", port=0)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            host, port = server.server_address
+            try:
+                connection = http.client.HTTPConnection(host, port, timeout=3)
+                connection.request(
+                    "GET", "/api/snapshot", headers={"Host": "attacker.example"}
+                )
+                response = connection.getresponse()
+                payload = json.loads(response.read())
+                self.assertEqual(response.status, 421)
+                self.assertEqual(payload["error"]["code"], "invalid_host")
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=3)
+
+    def test_snapshot_error_returns_json_instead_of_dropping_connection(self) -> None:
+        def fail_snapshot() -> dict:
+            raise RuntimeError("snapshot failed")
+
+        server = _create_from_snapshot_fn(
+            fail_snapshot, host="127.0.0.1", port=0
+        )
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        host, port = server.server_address
+        try:
+            for path in ("/api/snapshot", "/api/events"):
+                connection = http.client.HTTPConnection(host, port, timeout=3)
+                connection.request("GET", path)
+                response = connection.getresponse()
+                payload = json.loads(response.read())
+                self.assertEqual(response.status, 503, path)
+                self.assertEqual(payload["error"]["code"], "snapshot_unavailable")
+                self.assertIn("snapshot failed", payload["error"]["message"])
+                connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=3)
+
+    def test_event_stream_ignores_generated_at_and_stops_with_server(self) -> None:
+        calls = 0
+
+        def changing_timestamp_only() -> dict:
+            nonlocal calls
+            calls += 1
+            return {"ok": True, "generated_at": str(calls), "value": "stable"}
+
+        server = _create_from_snapshot_fn(
+            changing_timestamp_only, host="127.0.0.1", port=0
+        )
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        host, port = server.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=3)
+        try:
+            with patch("mergetrain.dashboard.SSE_POLL_SECONDS", 0.05), patch(
+                "mergetrain.dashboard.SSE_HEARTBEAT_SECONDS", 10.0
+            ):
+                connection.request("GET", "/api/events")
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.fp.readline(), b"event: snapshot\n")
+                self.assertTrue(response.fp.readline().startswith(b"data: "))
+                self.assertEqual(response.fp.readline(), b"\n")
+                time.sleep(0.2)
+                response.fp.raw._sock.settimeout(0.1)
+                with self.assertRaises((TimeoutError, socket.timeout)):
+                    response.fp.readline()
+                self.assertGreater(calls, 1)
+                server.shutdown()
+                worker.join(timeout=3)
+                deadline = time.monotonic() + 3
+                while server.active_sse_clients and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(server.active_sse_clients, 0)
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=3)
+
+    def test_event_stream_rejects_clients_over_the_cap(self) -> None:
+        with patch("mergetrain.dashboard.MAX_SSE_CLIENTS", 1):
+            server = _create_from_snapshot_fn(
+                lambda: {"ok": True}, host="127.0.0.1", port=0
+            )
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        host, port = server.server_address
+        first = http.client.HTTPConnection(host, port, timeout=3)
+        second = http.client.HTTPConnection(host, port, timeout=3)
+        try:
+            first.request("GET", "/api/events")
+            first_response = first.getresponse()
+            self.assertEqual(first_response.status, 200)
+            self.assertEqual(first_response.fp.readline(), b"event: snapshot\n")
+            first_response.fp.readline()
+            first_response.fp.readline()
+
+            second.request("GET", "/api/events")
+            second_response = second.getresponse()
+            payload = json.loads(second_response.read())
+            self.assertEqual(second_response.status, 503)
+            self.assertEqual(payload["error"]["code"], "too_many_streams")
+        finally:
+            first.close()
+            second.close()
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=3)
+
+    def test_dashboard_get_does_not_create_queue_database(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = self.make_config(Path(td))
+            self.assertFalse(config.state.db.exists())
+            server = create_server(config, host="127.0.0.1", port=0)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            host, port = server.server_address
+            try:
+                connection = http.client.HTTPConnection(host, port, timeout=3)
+                connection.request("GET", "/api/snapshot")
+                response = connection.getresponse()
+                payload = json.loads(response.read())
+                self.assertEqual(response.status, 503)
+                self.assertEqual(payload["error"]["code"], "snapshot_unavailable")
+                self.assertFalse(config.state.db.exists())
                 connection.close()
             finally:
                 server.shutdown()
