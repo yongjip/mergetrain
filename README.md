@@ -10,7 +10,7 @@
 Let agents code in parallel. Let one train prove and ship the result.
 
 <p align="center">
-  <img src="./docs/images/mergetrain-explainer.gif"
+  <img src="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/mergetrain-explainer.gif"
        alt="What happens when 3 AI agents push to main at once. Without a queue they collide and break main. With a merge train they enqueue, one runner assembles main + A + B + C, gates run once on the combination, and one atomic push keeps main green."
        width="720">
 </p>
@@ -24,7 +24,7 @@ enqueue; one local runner serializes their branches, validates the exact train,
 and pushes only after explicit approval. No hosted merge-queue service or CI
 provider is required.
 
-![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](./docs/images/hub-overview.png)
+![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/hub-overview.png)
 
 Four guarantees shape the design: an **exact validated train identity** (the
 train you approved is the train that ships, byte for byte), a **lease-fenced
