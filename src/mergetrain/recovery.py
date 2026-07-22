@@ -36,6 +36,7 @@ from .store import (
     force_clear_lock_and_split,
     get_lock,
     list_jobs_fifo,
+    live_worktree_path,
     mark_job,
     record_run_event,
     release_runner_lock,
@@ -412,14 +413,17 @@ def recover(
     gc_result = None
     if gc:
         # Never gc a live runner's worktree, even if a runner started between
-        # reconcile releasing its lock and this sweep.
+        # reconcile releasing its lock and this sweep. The protect snapshot below
+        # is backed by a per-deletion recheck of the live lock (#84, defect 5).
         live = get_lock(conn)
         protect = (
             [live.worktree_path]
             if live and live.worktree_path and live.liveness != "dead"
             else []
         )
-        gc_result = apply_gc(config, protect=protect)
+        gc_result = apply_gc(
+            config, protect=protect, live_worktree_now=lambda: live_worktree_path(conn)
+        )
         gc_result["swept_pending_refs"] = sweep_pending_refs(config, conn)
     return RecoverOutcome(reconcile=outcome, gc=gc_result, exit_code=outcome.exit_code)
 

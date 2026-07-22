@@ -71,6 +71,7 @@ from .store import (
     list_run_events,
     list_train_jobs,
     list_verify_unknown_jobs,
+    live_worktree_path,
     release_runner_lock,
     resolve_verify_status,
     select_validated_train,
@@ -1012,39 +1013,42 @@ def cmd_gc(args: argparse.Namespace) -> int:
             if lock and lock.worktree_path and lock.liveness != "dead"
             else []
         )
+        protected = set(config.git.push_refs) | {
+            config.git.integration_branch,
+            git_current_branch(config.repo),
+        }
+        branch_candidates: list[dict[str, Any]] = []
+        delete_branch_names: list[str] = []
+        for candidate in branch_candidates_raw:
+            branch = candidate["branch"]
+            exists = branch_exists(config.repo, branch)
+            eligible = exists and branch not in protected
+            item = {**candidate, "exists": exists, "eligible": eligible}
+            branch_candidates.append(item)
+            if eligible:
+                delete_branch_names.append(branch)
+        payload: dict[str, Any] = {
+            "ok": True,
+            "apply": bool(args.apply),
+            "delete_branches": bool(args.delete_branches),
+            "worktree_candidates": find_worktree_gc_candidates(config, protect=protect_worktrees),
+            "branch_candidates": branch_candidates,
+            "result": None,
+        }
+        if args.apply:
+            # Keep the connection open across apply_gc so it can re-read the live
+            # lock immediately before each removal — a runner that acquired the
+            # lock after the protect snapshot must still be spared (#84, defect 5).
+            result = apply_gc(
+                config,
+                delete_branches=delete_branch_names if args.delete_branches else (),
+                protect=protect_worktrees,
+                live_worktree_now=lambda: live_worktree_path(conn),
+            )
+            result["swept_pending_refs"] = sweep_pending_refs(config, conn)
+            payload["result"] = result
     finally:
         conn.close()
-    protected = set(config.git.push_refs) | {config.git.integration_branch, git_current_branch(config.repo)}
-    branch_candidates: list[dict[str, Any]] = []
-    delete_branch_names: list[str] = []
-    for candidate in branch_candidates_raw:
-        branch = candidate["branch"]
-        exists = branch_exists(config.repo, branch)
-        eligible = exists and branch not in protected
-        item = {**candidate, "exists": exists, "eligible": eligible}
-        branch_candidates.append(item)
-        if eligible:
-            delete_branch_names.append(branch)
-    payload: dict[str, Any] = {
-        "ok": True,
-        "apply": bool(args.apply),
-        "delete_branches": bool(args.delete_branches),
-        "worktree_candidates": find_worktree_gc_candidates(config, protect=protect_worktrees),
-        "branch_candidates": branch_candidates,
-        "result": None,
-    }
-    if args.apply:
-        result = apply_gc(
-            config,
-            delete_branches=delete_branch_names if args.delete_branches else (),
-            protect=protect_worktrees,
-        )
-        conn = connect(config.state.db)
-        try:
-            result["swept_pending_refs"] = sweep_pending_refs(config, conn)
-        finally:
-            conn.close()
-        payload["result"] = result
     if args.json:
         dump_json(payload)
     else:

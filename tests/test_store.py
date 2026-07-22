@@ -31,6 +31,7 @@ from mergetrain.store import (
     get_lock,
     list_run_events,
     list_train_jobs,
+    live_worktree_path,
     mark_job,
     owner_liveness,
     record_pending_push,
@@ -157,6 +158,33 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(
             (root / ".gitignore").read_text(encoding="utf-8"), existing
         )
+
+    def test_live_worktree_path_reports_only_a_live_runner(self) -> None:
+        # GC re-reads this immediately before each deletion (#84 defect 5): it
+        # must return a worktree only while a live owner holds the lock.
+        conn = self.make_conn()
+
+        def put_lock(owner: str, worktree: str) -> None:
+            conn.execute("DELETE FROM locks")
+            conn.execute(
+                """
+                INSERT INTO locks (name, owner, worktree_path, acquired_at,
+                                   heartbeat_at, expires_at, token)
+                VALUES ('runner', ?, ?, '2999-01-01T00:00:00Z',
+                        '2999-01-01T00:00:00Z', '2999-01-01T00:00:00Z', 'tok')
+                """,
+                (owner, worktree),
+            )
+            conn.commit()
+
+        # No lock at all.
+        self.assertIsNone(live_worktree_path(conn))
+        # A dead owner's lock (impossible pid) is not protected, worktree or not.
+        put_lock("ghost:2147481000", "/wt/dead")
+        self.assertIsNone(live_worktree_path(conn))
+        # A live owner (this process) → its worktree is protected.
+        put_lock(f"host:{os.getpid()}", "/wt/live")
+        self.assertEqual(live_worktree_path(conn), "/wt/live")
 
     def test_dismiss_clears_blocked_failed_but_refuses_live_work(self) -> None:
         conn = self.make_conn()
