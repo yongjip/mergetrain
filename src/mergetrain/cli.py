@@ -97,6 +97,12 @@ def normalize_global_options(argv: Sequence[str]) -> list[str]:
     index = 0
     while index < len(argv):
         token = argv[index]
+        if token == "--":
+            # Everything after the POSIX option terminator is command data.
+            # Never hoist a literal global option from passthrough arguments
+            # and silently retarget the command.
+            rest.extend(argv[index:])
+            break
         matched_equals = False
         for option in GLOBAL_OPTIONS_WITH_VALUES:
             if token.startswith(option + "="):

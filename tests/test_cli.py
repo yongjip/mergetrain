@@ -403,6 +403,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(normalized[:2], ["--repo", "/tmp/example"])
         self.assertIn("doctor", normalized)
 
+    def test_global_options_after_terminator_remain_command_data(self) -> None:
+        argv = ["run-batch", "--validate-only", "--", "--repo", "/tmp/other"]
+        self.assertEqual(normalize_global_options(argv), argv)
+        value_argv = ["enqueue", "--task=--repo=/tmp/not-global", "feature/a"]
+        self.assertEqual(normalize_global_options(value_argv), value_argv)
+
+        with_global = [
+            "doctor",
+            "--repo",
+            "/tmp/actual",
+            "--",
+            "--config=/tmp/passthrough",
+        ]
+        self.assertEqual(
+            normalize_global_options(with_global),
+            [
+                "--repo",
+                "/tmp/actual",
+                "doctor",
+                "--",
+                "--config=/tmp/passthrough",
+            ],
+        )
+
     def test_agent_contract_json(self) -> None:
         out = io.StringIO()
         with redirect_stdout(out):
