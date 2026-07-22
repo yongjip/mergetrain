@@ -36,9 +36,18 @@ GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
 
 
 def _lock_expired(lock: dict[str, Any] | None) -> bool:
-    if not lock or not lock.get("expires_at"):
+    if not lock:
         return False
-    return _parse_utc(str(lock["expires_at"])) <= datetime.now(timezone.utc)
+    expires_at = lock.get("expires_at")
+    if not expires_at:
+        return True
+    try:
+        return _parse_utc(str(expires_at)) <= datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        # Corrupted state must never make observation surfaces fail. Treat an
+        # unparseable lease conservatively as expired so it cannot be reported
+        # as a healthy live runner.
+        return True
 
 
 def next_action(
