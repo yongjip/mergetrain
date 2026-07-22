@@ -70,6 +70,37 @@ def _dashboard_command(command: Sequence[str] | str) -> str:
     return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
 
 
+def _posix_shell() -> str:
+    """Return the POSIX shell used by gate and verify commands.
+
+    Git for Windows ships ``sh.exe`` even though Windows has no ``/bin/sh``.
+    Never fall back to ``cmd.exe``: command expansion and the documented gate
+    contract both use POSIX shell syntax.
+    """
+
+    if Path("/bin/sh").exists():
+        return "/bin/sh"
+    shell = shutil.which("sh")
+    if shell:
+        return shell
+    git = shutil.which("git")
+    if git:
+        git_root = Path(git).parent.parent
+        for candidate in (
+            git_root / "bin" / "sh.exe",
+            git_root / "usr" / "bin" / "sh.exe",
+        ):
+            if candidate.exists():
+                return str(candidate)
+    raise MergetrainError(
+        "A POSIX sh executable is required to run gate and verify commands"
+    )
+
+
+def _shell_command(command: str) -> list[str]:
+    return [_posix_shell(), "-c", command]
+
+
 def _stop_process(process: subprocess.Popen[str]) -> bool:
     if process.poll() is not None:
         return False
@@ -273,19 +304,18 @@ def run_shell(
         timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
     if pulse is not None or timeout_seconds is not None:
         return _run_managed(
-            command,
+            _shell_command(command),
             cwd=cwd,
             env=env,
             log=log,
             check=check,
-            shell=True,
+            shell=False,
             pulse=pulse,
             pulse_interval_seconds=pulse_interval_seconds,
             timeout_seconds=timeout_seconds,
         )
     completed = subprocess.run(
-        command, cwd=str(cwd), env=env, shell=True,
-        executable="/bin/sh" if Path("/bin/sh").exists() else None,
+        _shell_command(command), cwd=str(cwd), env=env, shell=False,
         text=True, encoding="utf-8", errors="replace",
         stdin=subprocess.DEVNULL, capture_output=True,
     )
