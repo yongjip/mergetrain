@@ -32,7 +32,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class Liveness:
@@ -326,6 +326,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ("deploy_queue", "pending_deploy_remote", "TEXT NOT NULL DEFAULT ''"),
                 ("deploy_queue", "pending_deploy_refs", "TEXT NOT NULL DEFAULT ''"),
             ),
+            9: (),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:
@@ -344,6 +345,23 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     SET verify_status = 'failed'
                     WHERE status = 'deployed' AND note LIKE 'post-push verify warning:%'
                     """
+                )
+            if next_version == 9:
+                # Queue reads overwhelmingly filter by status or by one branch.
+                # Include id so FIFO/status history queries retain their natural
+                # order without a second sort; auto claims get their own covering
+                # prefix because they sit on the write-lock hot path.
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_status_id_idx "
+                    "ON deploy_queue(status, id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_status_auto_id_idx "
+                    "ON deploy_queue(status, auto_deploy, id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_branch_status_id_idx "
+                    "ON deploy_queue(branch, status, id)"
                 )
             conn.execute(f"PRAGMA user_version = {next_version}")
 
@@ -549,40 +567,39 @@ def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued", auto_onl
 
 
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
-    result = dict.fromkeys(ALL_STATUSES, 0)
-    rows = conn.execute("SELECT status, COUNT(*) AS n FROM deploy_queue GROUP BY status").fetchall()
-    for row in rows:
-        result[str(row["status"])] = int(row["n"])
-    result["auto_queued"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 1"
-        ).fetchone()["n"]
+    row = conn.execute(
+        """
+        SELECT
+          SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+          SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) AS validated,
+          SUM(CASE WHEN status = 'needs_reconcile' THEN 1 ELSE 0 END) AS needs_reconcile,
+          SUM(CASE WHEN status = 'deployed' THEN 1 ELSE 0 END) AS deployed,
+          SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) AS canceled,
+          SUM(CASE WHEN status = 'queued' AND auto_deploy = 1 THEN 1 ELSE 0 END)
+            AS auto_queued,
+          SUM(CASE WHEN status = 'queued' AND auto_deploy = 0 THEN 1 ELSE 0 END)
+            AS manual_queued,
+          SUM(CASE WHEN status = 'in_progress' AND pending_deploy_sha != ''
+              THEN 1 ELSE 0 END) AS in_progress_with_marker,
+          SUM(CASE WHEN status = 'blocked' AND pending_deploy_sha != ''
+              THEN 1 ELSE 0 END) AS blocked_with_marker,
+          SUM(CASE WHEN status = 'deployed' AND verify_status = 'unknown'
+              THEN 1 ELSE 0 END) AS deployed_verify_unknown
+        FROM deploy_queue
+        """
+    ).fetchone()
+    keys = (
+        *ALL_STATUSES,
+        "auto_queued",
+        "manual_queued",
+        "in_progress_with_marker",
+        "blocked_with_marker",
+        "deployed_verify_unknown",
     )
-    result["manual_queued"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 0"
-        ).fetchone()["n"]
-    )
-    # Marker/verify-derived signals for doctor next_action (0.3.0 Phase 2, DB-only).
-    result["in_progress_with_marker"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue "
-            "WHERE status = 'in_progress' AND pending_deploy_sha != ''"
-        ).fetchone()["n"]
-    )
-    result["blocked_with_marker"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue "
-            "WHERE status = 'blocked' AND pending_deploy_sha != ''"
-        ).fetchone()["n"]
-    )
-    result["deployed_verify_unknown"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue "
-            "WHERE status = 'deployed' AND verify_status = 'unknown'"
-        ).fetchone()["n"]
-    )
-    return result
+    return {key: int(row[key] or 0) for key in keys}
 
 
 def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:

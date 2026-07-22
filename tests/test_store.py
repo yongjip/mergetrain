@@ -379,6 +379,30 @@ class StoreTests(unittest.TestCase):
         requeued = mark_job(conn, job.id, status="queued")
         self.assertEqual(requeued.conflict_with, "")
 
+    def test_counts_uses_one_queue_scan(self) -> None:
+        conn = self.make_conn()
+        manual = enqueue_job(conn, task="manual", branch="manual")
+        enqueue_job(conn, task="auto", branch="auto", auto_deploy=True)
+        mark_job(conn, manual.id, status="blocked")
+        statements: list[str] = []
+        conn.set_trace_callback(statements.append)
+        try:
+            result = counts(conn)
+        finally:
+            conn.set_trace_callback(None)
+
+        queue_reads = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("SELECT")
+            and "FROM DEPLOY_QUEUE" in statement.upper()
+        ]
+        self.assertEqual(len(queue_reads), 1, queue_reads)
+        self.assertEqual(result["queued"], 1)
+        self.assertEqual(result["auto_queued"], 1)
+        self.assertEqual(result["manual_queued"], 0)
+        self.assertEqual(result["blocked"], 1)
+
     def test_legacy_database_migrates_validation_train_columns(self) -> None:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -452,6 +476,13 @@ class StoreTests(unittest.TestCase):
             self.assertIn("heartbeat_at", {
                 row[1] for row in migrated_db.execute("PRAGMA table_info(locks)")
             })
+            queue_indexes = {
+                row[1]
+                for row in migrated_db.execute("PRAGMA index_list(deploy_queue)")
+            }
+            self.assertIn("deploy_queue_status_id_idx", queue_indexes)
+            self.assertIn("deploy_queue_status_auto_id_idx", queue_indexes)
+            self.assertIn("deploy_queue_branch_status_id_idx", queue_indexes)
         finally:
             migrated_db.close()
 
