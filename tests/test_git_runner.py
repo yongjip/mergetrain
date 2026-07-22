@@ -15,6 +15,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+SHELL_PYTHON = sys.executable.replace("\\", "/")
+
 
 def py_path(path: Path | str) -> str:
     """A filesystem path safe to embed inside a Python string literal.
@@ -52,7 +54,14 @@ from mergetrain.errors import (
     PushRejected,
     redact_secrets,
 )
-from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
+from mergetrain.git_runner import (
+    GitRunner,
+    _dashboard_command,
+    _shell_command,
+    command_env,
+    expand_command,
+    run_shell,
+)
 from mergetrain.snapshot import next_action
 from mergetrain.store import (
     cancel_job,
@@ -109,7 +118,7 @@ def make_demo_repo(
     git(repo, "switch", "main")
     marker = root / "gate-count.txt"
     gate_command = gate_command or (
-        f"{sys.executable} -c \"from pathlib import Path; p=Path('{py_path(marker)}'); "
+        f"{SHELL_PYTHON} -c \"from pathlib import Path; p=Path('{py_path(marker)}'); "
         "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
     )
     verify_config = "  verify: []"
@@ -157,11 +166,57 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_shell_command_uses_git_for_windows_sh_without_cmd_fallback(self) -> None:
+        with (
+            patch("mergetrain.git_runner.Path.exists", return_value=False),
+            patch("mergetrain.git_runner.shutil.which") as which,
+        ):
+            which.side_effect = lambda name: (
+                "C:/Program Files/Git/bin/sh.exe" if name == "sh" else None
+            )
+
+            command = _shell_command("printf '%s' ok")
+
+        self.assertEqual(
+            command,
+            ["C:/Program Files/Git/bin/sh.exe", "-c", "printf '%s' ok"],
+        )
+
+    def test_path_placeholders_are_shell_safe_in_all_quote_contexts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "root $(touch injected)"
+            root.mkdir()
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            worktree = root / "worktree $(touch worktree-injected)"
+            command = expand_command(
+                (
+                    f'{SHELL_PYTHON} -c "import json,sys; '
+                    'print(json.dumps(sys.argv[1:]))" '
+                    '${repo} "${repo}" ${worktree} \'${worktree}\''
+                ),
+                config=config,
+                worktree=worktree,
+            )
+
+            completed = run_shell(
+                command,
+                cwd=repo,
+                env=command_env(config=config, worktree=worktree),
+            )
+
+            self.assertEqual(
+                json.loads(completed.stdout),
+                [str(config.repo), str(config.repo), str(worktree), str(worktree)],
+            )
+            self.assertFalse((repo / "injected").exists())
+            self.assertFalse((repo / "worktree-injected").exists())
+
     def test_unchanged_validated_train_reuses_gates_and_still_verifies(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             verify_marker = root / "verify.txt"
-            verify = f'{sys.executable} -c "from pathlib import Path; Path(\'{py_path(verify_marker)}\').write_text(\'verified\')"'
+            verify = f'{SHELL_PYTHON} -c "from pathlib import Path; Path(\'{py_path(verify_marker)}\').write_text(\'verified\')"'
             repo, marker = make_demo_repo(root, verify_command=verify)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -266,7 +321,7 @@ class GitRunnerTests(unittest.TestCase):
                 reuse_enabled=True,
                 # `cat` is not a Windows command; read the file portably.
                 fingerprint_command=(
-                    f"{sys.executable} -c \"from pathlib import Path; "
+                    f"{SHELL_PYTHON} -c \"from pathlib import Path; "
                     f"print(Path('{py_path(fingerprint)}').read_text())\""
                 ),
             )
@@ -297,7 +352,7 @@ class GitRunnerTests(unittest.TestCase):
                 root,
                 reuse_enabled=True,
                 fingerprint_command=(
-                    f"{sys.executable} -c \"from pathlib import Path; "
+                    f"{SHELL_PYTHON} -c \"from pathlib import Path; "
                     "Path('fingerprint.tmp').write_text('side effect'); "
                     "print('tool-a')\""
                 ),
@@ -425,7 +480,7 @@ class GitRunnerTests(unittest.TestCase):
         for batch in (False, True):
             with self.subTest(batch=batch), tempfile.TemporaryDirectory() as td:
                 root = Path(td)
-                verify = f'{sys.executable} -c "import sys; sys.exit(0)"'
+                verify = f'{SHELL_PYTHON} -c "import sys; sys.exit(0)"'
                 repo, _marker = make_demo_repo(root, verify_command=verify)
                 config = load_config(repo=repo)
                 conn = connect(config.state.db)
@@ -467,7 +522,7 @@ class GitRunnerTests(unittest.TestCase):
         ]:
             with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as td:
                 root = Path(td)
-                verify = f'{sys.executable} -c "import sys; sys.exit({returncode})"'
+                verify = f'{SHELL_PYTHON} -c "import sys; sys.exit({returncode})"'
                 repo, _marker = make_demo_repo(root, verify_command=verify)
                 config = load_config(repo=repo)
                 conn = connect(config.state.db)
@@ -492,7 +547,7 @@ class GitRunnerTests(unittest.TestCase):
         ]:
             with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as td:
                 root = Path(td)
-                verify = f'{sys.executable} -c "import sys; sys.exit({returncode})"'
+                verify = f'{SHELL_PYTHON} -c "import sys; sys.exit({returncode})"'
                 repo, _marker = make_demo_repo(root, verify_command=verify)
                 config = load_config(repo=repo)
                 conn = connect(config.state.db)
@@ -591,7 +646,7 @@ class GitRunnerTests(unittest.TestCase):
             # The secret is inline in the gate command itself (not just its
             # output), so it lands in CommandFailed.command -> the job note.
             gate = (
-                f'{sys.executable} -c "import sys; sys.exit(5)" '
+                f'{SHELL_PYTHON} -c "import sys; sys.exit(5)" '
                 "--token sk-inline-secret-value"
             )
             repo, _marker = make_demo_repo(root, gate_command=gate)
@@ -611,7 +666,7 @@ class GitRunnerTests(unittest.TestCase):
             root = Path(td)
             secret = "fixture-secret-output"
             gate = (
-                f'{sys.executable} -c "import sys; '
+                f'{SHELL_PYTHON} -c "import sys; '
                 "import os; print(os.environ['FIXTURE_EVENT_SECRET'], "
                 "file=sys.stderr); sys.exit(5)\""
             )
@@ -645,7 +700,7 @@ class GitRunnerTests(unittest.TestCase):
             started = time.monotonic()
             with self.assertRaises(CommandFailed) as raised:
                 run_shell(
-                    f'{sys.executable} -c "import time; time.sleep(10)"',
+                    f'{SHELL_PYTHON} -c "import time; time.sleep(10)"',
                     cwd=td,
                     env=os.environ.copy(),
                     log=io.StringIO(),
@@ -661,7 +716,7 @@ class GitRunnerTests(unittest.TestCase):
             env.update({"LC_ALL": "C", "LANG": "C"})
             log = io.StringIO()
             completed = run_shell(
-                f"{sys.executable} -c \"import sys; "
+                f"{SHELL_PYTHON} -c \"import sys; "
                 "sys.stdout.buffer.write(b'\\xff\\n')\"",
                 cwd=td,
                 env=env,
@@ -681,7 +736,7 @@ class GitRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             completed = run_shell(
-                f'{sys.executable} -c "print(\'slow-tail\')"',
+                f'{SHELL_PYTHON} -c "print(\'slow-tail\')"',
                 cwd=td,
                 env=os.environ.copy(),
                 log=SlowLog(),
@@ -823,8 +878,8 @@ class GitRunnerTests(unittest.TestCase):
             root = Path(td)
             first_marker = root / "first-gate.txt"
             second_marker = root / "second-gate.txt"
-            first_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{py_path(first_marker)}\').write_text(\'x\')"'
-            second_gate = f'{sys.executable} -c "from pathlib import Path; Path(\'{py_path(second_marker)}\').write_text(\'y\')"'
+            first_gate = f'{SHELL_PYTHON} -c "from pathlib import Path; Path(\'{py_path(first_marker)}\').write_text(\'x\')"'
+            second_gate = f'{SHELL_PYTHON} -c "from pathlib import Path; Path(\'{py_path(second_marker)}\').write_text(\'y\')"'
             repo, _marker = make_demo_repo(root, gate_command=first_gate)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -996,7 +1051,7 @@ class GitRunnerTests(unittest.TestCase):
         # same best-effort situation production handles via gc.
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
-            gate = f'{sys.executable} -c "import time; time.sleep(10)"'
+            gate = f'{SHELL_PYTHON} -c "import time; time.sleep(10)"'
             repo, _marker = make_demo_repo(root, gate_command=gate)
             config = load_config(repo=repo)
             owner = f"runner:{os.getpid()}"
@@ -1067,7 +1122,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{sys.executable} -c \"import sys, pathlib; "
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
                 "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
             )
             repo, _ = make_demo_repo(root, gate_command=gate)
@@ -1105,7 +1160,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{sys.executable} -c \"import sys, pathlib; "
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
                 "sys.exit(1 if (pathlib.Path('left.txt').exists() "
                 "and pathlib.Path('right.txt').exists()) else 0)\""
             )
@@ -1143,7 +1198,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{sys.executable} -c \"import sys, pathlib; "
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
                 "sys.exit(1 if (pathlib.Path('t1.txt').exists() "
                 "and pathlib.Path('t3.txt').exists() "
                 "and pathlib.Path('t5.txt').exists()) else 0)\""
@@ -1181,7 +1236,7 @@ class BisectIsolationTests(unittest.TestCase):
             root = Path(td)
             # bad fails alone but is masked by fix; the real conflict is x+y.
             gate = (
-                f"{sys.executable} -c \"import sys, pathlib; e=pathlib.Path; "
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; e=pathlib.Path; "
                 "sys.exit(1 if ((e('bad.txt').exists() and not e('fix.txt').exists()) "
                 "or (e('x.txt').exists() and e('y.txt').exists())) else 0)\""
             )
@@ -1215,7 +1270,7 @@ class BisectIsolationTests(unittest.TestCase):
             root = Path(td)
             counter = root / "count.txt"
             gate = (
-                f"{sys.executable} -c \"import pathlib, sys; "
+                f"{SHELL_PYTHON} -c \"import pathlib, sys; "
                 f"p = pathlib.Path('{py_path(counter)}'); "
                 "n = (int(p.read_text()) + 1) if p.exists() else 1; "
                 "p.write_text(str(n)); sys.exit(1 if n == 1 else 0)\""
@@ -1246,7 +1301,7 @@ class BisectIsolationTests(unittest.TestCase):
             root = Path(td)
             counter = root / "count.txt"
             gate = (
-                f"{sys.executable} -c \"import pathlib, sys; "
+                f"{SHELL_PYTHON} -c \"import pathlib, sys; "
                 f"p = pathlib.Path('{py_path(counter)}'); "
                 "n = (int(p.read_text()) + 1) if p.exists() else 1; "
                 "p.write_text(str(n)); sys.exit(1 if n == 1 else 0)\""
@@ -1292,7 +1347,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{sys.executable} -c \"import sys, pathlib; "
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
                 "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
             )
             repo, _ = make_demo_repo(root, gate_command=gate)
@@ -1320,7 +1375,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{sys.executable} -c \"import pathlib, sys; p=pathlib.Path; "
+                f"{SHELL_PYTHON} -c \"import pathlib, sys; p=pathlib.Path; "
                 "sys.exit(1 if sum(p(name).exists() for name in "
                 "('a.txt', 'b.txt', 'c.txt')) > 1 else 0)\""
             )
