@@ -20,6 +20,7 @@ from mergetrain.errors import (
 from mergetrain.store import (
     SCHEMA_VERSION,
     Liveness,
+    active_runner_lock,
     acquire_runner_lock,
     cancel_job,
     claim_all_queued,
@@ -960,6 +961,36 @@ class ConcurrencyAndTransitionTests(unittest.TestCase):
         # inside the claim parks the orphan after the CLI pre-check (TOCTOU #4a).
         self.assertEqual(claim_deploy_batch(conn, owner=f"runner:{os.getpid()}"), [])
         self.assertIsNone(get_lock(conn))  # the lock was released, not left held
+
+    def test_live_runner_marker_is_not_crash_reconcile_evidence(self) -> None:
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        owner = default_owner()
+        job = enqueue_job(
+            conn, task="active", branch="agent/active", auto_deploy=True
+        )
+        claimed = claim_all_queued(conn, owner=owner, auto_only=True)
+        token = claimed[0].claim_token
+        self.addCleanup(
+            release_runner_lock, conn, owner=owner, token=token
+        )
+        conn.execute(
+            "UPDATE deploy_queue SET pending_deploy_sha='active-sha' WHERE id=?",
+            (job.id,),
+        )
+        conn.commit()
+
+        self.assertEqual(active_runner_lock(conn).token, token)
+        self.assertEqual(deploy_reconcile_pending(conn), 0)
+
+        orphan = enqueue_job(conn, task="orphan", branch="agent/orphan")
+        conn.execute(
+            "UPDATE deploy_queue SET status='in_progress', claim_token='old-token', "
+            "pending_deploy_sha='orphan-sha' WHERE id=?",
+            (orphan.id,),
+        )
+        conn.commit()
+        self.assertEqual(deploy_reconcile_pending(conn), 1)
 
     def test_reconcile_write_is_a_compare_and_swap_on_source_status(self) -> None:
         conn = connect(self._db())
