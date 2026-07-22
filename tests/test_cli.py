@@ -589,6 +589,22 @@ terminology:
             self.assertTrue((repo / ".mergetrain.yaml").exists())
             self.assertTrue((repo / "AGENTS.mergetrain.md").exists())
 
+    def test_init_write_preflights_all_conflicts_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            existing = repo / "AGENTS.mergetrain.md"
+            existing.write_text("keep me\n", encoding="utf-8")
+
+            with patch("sys.stderr", io.StringIO()):
+                code = main(
+                    ["--repo", str(repo), "init", "--project", "demo", "--write"]
+                )
+
+            self.assertEqual(code, 1)
+            self.assertFalse((repo / ".mergetrain.yaml").exists())
+            self.assertFalse((repo / "CLAUDE.mergetrain.md").exists())
+            self.assertEqual(existing.read_text(encoding="utf-8"), "keep me\n")
+
     def test_status_json_exposes_validated_train_identity(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
