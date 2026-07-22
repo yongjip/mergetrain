@@ -203,6 +203,33 @@ terminology:
             self.assertEqual(payload["jobs"][0]["verify_status"], "failed")
             self.assertEqual(payload["events"][-1]["state"], "warning")
 
+    def test_snapshot_removes_worktree_path_embedded_in_job_note(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            sensitive = "/private/sensitive/integration-worktree"
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(
+                    conn,
+                    task="failed gate",
+                    branch="codex/failure",
+                    worktree_path=sensitive,
+                )
+                mark_job(
+                    conn,
+                    job.id,
+                    status="failed",
+                    note=f"command failed (1) in {sensitive}: make test",
+                )
+            finally:
+                conn.close()
+
+            payload = build_dashboard_snapshot(config)
+            note = payload["jobs"][0]["note"]
+            self.assertNotIn(sensitive, note)
+            self.assertIn("[worktree]", note)
+
 
 if __name__ == "__main__":
     unittest.main()

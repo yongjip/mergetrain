@@ -12,6 +12,9 @@ _SENSITIVE_ASSIGNMENT = re.compile(
 _SENSITIVE_OPTION = re.compile(
     r"(?i)(--(?:token|secret|password|passwd|api[-_]?key|credential)(?:=|\s+))([^\s]+)"
 )
+_URL_PASSWORD = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@"
+)
 
 
 def redact_secrets(text: str) -> str:
@@ -23,6 +26,7 @@ def redact_secrets(text: str) -> str:
     credential passed inline to a gate is never echoed in cleartext. Idempotent.
     """
 
+    text = _URL_PASSWORD.sub(r"\1\2:[redacted]@", text)
     text = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", text)
     text = _SENSITIVE_OPTION.sub(r"\1[redacted]", text)
     return text
@@ -30,6 +34,12 @@ def redact_secrets(text: str) -> str:
 
 class MergetrainError(Exception):
     """Base class for expected mergetrain failures."""
+
+    def __str__(self) -> str:
+        # Expected errors often include subprocess stderr (notably push
+        # classification errors). Mask once at the exception boundary before a
+        # message can be persisted in a job note or emitted by a JSON command.
+        return redact_secrets(super().__str__())
 
 
 class ConfigError(MergetrainError):

@@ -50,6 +50,12 @@ class ConfigTests(unittest.TestCase):
             return
         self.assertEqual(parsed, yaml.safe_load(doc))
 
+    def test_fallback_parser_rejects_unsupported_flow_collections(self) -> None:
+        for value in ("[main, release]", "{name: tests}"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ConfigError, "flow-style YAML"):
+                    _parse_simple_yaml(f"value: {value}\n")
+
     def test_relative_paths_resolve_from_repo(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             # Resolve symlinks (e.g. macOS /var -> /private/var) so the expected
@@ -190,6 +196,21 @@ deploy:
                 with self.subTest(bad=bad):
                     cfg.write_text(f"{bad}\nproject:\n  name: x\n", encoding="utf-8")
                     with self.assertRaisesRegex(ConfigError, "version"):
+                        load_config(repo=repo)
+
+    def test_config_strings_and_unicode_integers_fail_with_config_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            cfg = repo / ".mergetrain.yaml"
+            invalid = [
+                ("project:\n  name:\n    nested: value\n", "project.name"),
+                ("state:\n  db:\n    nested: value\n", "state.db"),
+                ("queue:\n  lock_ttl_minutes: ²\n", "positive integer"),
+            ]
+            for text, message in invalid:
+                with self.subTest(text=text):
+                    cfg.write_text(text, encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigError, message):
                         load_config(repo=repo)
 
     def test_invalid_validated_reuse_policy_is_rejected(self) -> None:
