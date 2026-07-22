@@ -95,6 +95,28 @@ One agent, one branch at a time? You don't need this — `git push` is fine.
 And if your team is PR-first on a hosted forge with remote CI, use the
 forge's native queue (see [alternatives](#alternatives--and-whats-different-here)).
 
+### PR-first or mergetrain?
+
+A pull request is primarily a **human review unit**. A mergetrain job is an
+**execution and integration unit** for a committed agent branch. Neither model
+is universally better; the useful question is whether every agent branch needs
+its own review conversation or whether several trusted branches should be
+validated and landed as one train.
+
+| Dimension | PR-first workflow | mergetrain |
+|---|---|---|
+| Strongest advantage | Human review, approvals, audit history, and distributed collaboration | Low-ceremony integration of many local agent branches |
+| Validation | Usually per PR; a forge-native merge queue can add merge-group CI | Gates run over the exact assembled train before one atomic push |
+| Latency and CI use | Each branch enters a remote PR/CI lifecycle | Local gates can validate a batch once; failures may trigger isolation runs |
+| Platform model | Forge, webhooks, branch rules, and hosted CI | Local SQLite, Git worktrees, shell gates, and any Git remote |
+| Main trade-off | Repeated PR ceremony and changing merge bases for small agent tasks | No code-review UI; you own the runner, credentials, and branch policy |
+
+The two can coexist: use mergetrain for direct integration where that is the
+policy, push a validated train to a review branch and open one PR, or reserve
+individual PRs for changes that need human discussion. See the
+[PR-first comparison and decision guide](./docs/pr-workflows.md) for the full
+pros, cons, and hybrid patterns.
+
 Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, bors) solve a related problem, but they are PR-first, remote-CI-first, and platform-first. mergetrain is for the other workflow: **local-agent, worktree-first, deploy-branch-first.**
 
 ## How it works
@@ -301,6 +323,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 - [CLI reference](./docs/cli.md) — every command and flag
 - [Config reference](./docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
 - [Design & architecture](./docs/design.md) — the model, data model, and safety guarantees
+- [PR-first comparison](./docs/pr-workflows.md) — pros, cons, decision rules, and hybrid workflows
 - [Daemon](./docs/daemon.md) · [Failure modes](./docs/failure-modes.md) — operating it day to day
 - [Hub](./docs/hub.md) — every repo on one read-only board
 - [Manage from your phone](./docs/mobile.md) — drive mergetrain via Cowork Dispatch
