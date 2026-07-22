@@ -282,6 +282,40 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["next_action"], "upgrade_mergetrain")
             self.assertEqual(payload["config_version_supported"], 1)
 
+    def test_missing_config_fails_deploy_path_but_permits_recovery(self) -> None:
+        # #84 defect 6: with no .mergetrain.yaml, deploy-capable paths must not
+        # ship against guessed defaults (origin/main, minimal gates). They fail
+        # closed and point at `mergetrain init`; recovery and reads still work.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+
+            def run(argv):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main(["--repo", str(repo), *argv, "--json"])
+                return code, json.loads(out.getvalue())
+
+            code, payload = run(["run-batch", "--validate-only"])
+            self.assertEqual(code, 1)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "config_error")
+            self.assertIn("init", payload["error"]["message"])
+
+            # Enqueue is deploy-capable too — fail closed before any git checks.
+            code, payload = run(
+                ["enqueue", "--task", "a", "--branch", "feature/a", "--no-ready-check"]
+            )
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "config_error")
+
+            # Recovery and reads stay permissive — a missing config must not
+            # lock the operator out of reconcile/doctor.
+            code, payload = run(["reconcile"])
+            self.assertEqual(payload.get("ok"), True)
+            code, payload = run(["doctor"])
+            self.assertTrue(payload["ok"])
+
     def test_global_option_after_subcommand_is_normalized(self) -> None:
         normalized = normalize_global_options(["doctor", "--json", "--repo", "/tmp/example"])
         self.assertEqual(normalized[:2], ["--repo", "/tmp/example"])

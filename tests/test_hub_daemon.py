@@ -117,6 +117,29 @@ class HubSweepTests(unittest.TestCase):
             self.assertEqual(outcomes[1]["outcome"], "processed:1")
             self.assertEqual(len(log), 1)
 
+    def test_sweep_refuses_a_repo_whose_config_is_too_new(self) -> None:
+        # #84 defect 6: the hub must not deploy a repo whose config version it
+        # cannot read — report an error and never claim its auto jobs.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            future = make_repo(root, "future")
+            seed_jobs(future, auto=True)
+            (future / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+            add_repo(future, registry)
+
+            log: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(log),
+            )
+            self.assertEqual(outcomes[0]["outcome"], "error")
+            self.assertIn("version", outcomes[0]["error"])
+            self.assertEqual(log, [])  # the auto job was never claimed
+
     def test_sweep_excludes_opted_out_repos_even_with_auto_work(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
