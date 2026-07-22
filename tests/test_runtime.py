@@ -7,7 +7,7 @@ from importlib import metadata
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
-from mergetrain.runtime import runtime_provenance
+from mergetrain.runtime import _file_url_path, runtime_provenance
 
 
 class FakeDistribution:
@@ -27,6 +27,13 @@ class FakeDistribution:
 
 
 class RuntimeProvenanceTests(unittest.TestCase):
+    def test_file_url_path_decodes_literal_percent_sequence_once(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td) / "checkout%2Farchive"
+            source.mkdir()
+
+            self.assertEqual(_file_url_path(source.as_uri()), source.resolve())
+
     def test_matching_installed_distribution_reports_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             site_packages = Path(td)
