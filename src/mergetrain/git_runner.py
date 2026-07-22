@@ -1401,6 +1401,68 @@ class GitRunner:
             finally:
                 self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
 
+    def _process_isolated_jobs(
+        self,
+        conn,
+        jobs: Sequence[Job],
+        *,
+        deploy: bool,
+        keep_worktree: bool,
+        owner: str | None,
+        ttl_minutes: int,
+        lease_token: str,
+    ) -> list[Job]:
+        """Process isolated jobs in order, stopping at an ambiguous deploy.
+
+        Isolation happens after the whole batch has already been claimed. If an
+        isolated push becomes ambiguous, no later job may target the same refs
+        until reconcile resolves that outcome. Return the untouched suffix to
+        ``queued`` so it is neither stranded in-progress nor pushed out of FIFO
+        order.
+        """
+
+        results: list[Job] = []
+        for index, job in enumerate(jobs):
+            result = self.process_one(
+                conn,
+                job,
+                deploy=deploy,
+                keep_worktree=keep_worktree,
+                owner=owner,
+                ttl_minutes=ttl_minutes,
+            )
+            results.append(result)
+            if not deploy or result.status != "needs_reconcile":
+                continue
+
+            note = (
+                f"deferred because isolated job {job.id} has an unresolved "
+                "push; reconcile before deploying this job"
+            )
+            self._event(
+                conn,
+                lease_token=lease_token,
+                phase="pushing",
+                state="warning",
+                message="Isolation stopped for pending reconcile",
+                detail=f"job_id={job.id}",
+            )
+            for pending in jobs[index + 1 :]:
+                current = get_job(conn, pending.id)
+                if current.status == "in_progress" and (
+                    not lease_token or current.claim_token == lease_token
+                ):
+                    current = self._finish_job(
+                        conn,
+                        pending.id,
+                        lease_token=lease_token,
+                        status="queued",
+                        note=note,
+                    )
+                results.append(current)
+            break
+        return results
+
     def _bisect_failed_train(
         self,
         conn,
@@ -1574,19 +1636,15 @@ class GitRunner:
                 message="Bisect inconclusive; isolating jobs one-by-one",
                 detail=str(abort),
             )
-            results: list[Job] = []
-            for job in merged_jobs:
-                results.append(
-                    self.process_one(
-                        conn,
-                        job,
-                        deploy=deploy,
-                        keep_worktree=keep_worktree,
-                        owner=owner,
-                        ttl_minutes=ttl_minutes,
-                    )
-                )
-            return results
+            return self._process_isolated_jobs(
+                conn,
+                merged_jobs,
+                deploy=deploy,
+                keep_worktree=keep_worktree,
+                owner=owner,
+                ttl_minutes=ttl_minutes,
+                lease_token=lease_token,
+            )
 
         culprit_ids = {job.id for job in singles}
         for group in conflict_sets:
@@ -2043,17 +2101,17 @@ class GitRunner:
                             detail=f"exit_code={exc.returncode}",
                         )
                         self._cleanup_worktree(worktree, log=log, keep_worktree=False)
-                        for job in merged_jobs:
-                            results.append(
-                                self.process_one(
-                                    conn,
-                                    job,
-                                    deploy=deploy,
-                                    keep_worktree=keep_worktree,
-                                    owner=owner,
-                                    ttl_minutes=ttl_minutes,
-                                )
+                        results.extend(
+                            self._process_isolated_jobs(
+                                conn,
+                                merged_jobs,
+                                deploy=deploy,
+                                keep_worktree=keep_worktree,
+                                owner=owner,
+                                ttl_minutes=ttl_minutes,
+                                lease_token=lease_token,
                             )
+                        )
                         return results
                     log.write(
                         f"\ntrain gate failed; bisecting {len(merged_jobs)} merged jobs\n"
