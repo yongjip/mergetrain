@@ -984,6 +984,17 @@ def claim_deploy_batch(
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+        # Acquiring the lock can reap a dead owner and park a marker-bearing
+        # orphan as needs_reconcile *inside this same transaction*. A deploy
+        # targets the same push refs, so re-check here — not only in the CLI
+        # pre-check — and refuse fail-closed if a reconcile is now pending
+        # (mirrors claim_all_queued's guard, closing the claim/reconcile TOCTOU).
+        if deploy_reconcile_pending(conn):
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
+            return []
         selected, validated_jobs = select_validated_train(conn, train_id=train_id)
         if selected is not None:
             jobs = validated_jobs
@@ -1206,6 +1217,7 @@ def mark_job(
     reused_validation_sha: str = "",
     conflict_with: str = "",
     expected_claim_token: str | None = None,
+    expected_status: str = "",
 ) -> Job:
     if status not in ALL_STATUSES:
         raise QueueError(f"unknown job status: {status}")
@@ -1223,6 +1235,12 @@ def mark_job(
         where_values.append(expected_claim_token)
         if status not in {"canceled", "deployed"}:
             where += " AND cancel_requested_at = ''"
+    if expected_status:
+        # Compare-and-swap on the source status, so a concurrent transition (e.g.
+        # a cancel landing during reconcile's multi-second remote I/O) is never
+        # silently overwritten by a stale recovery decision.
+        where += " AND status = ?"
+        where_values.append(expected_status)
     with immediate(conn):
         cur = conn.execute(
             f"""
@@ -1287,6 +1305,11 @@ def mark_job(
             ).fetchone()
             if row is not None and str(row["cancel_requested_at"] or ""):
                 raise CancellationRequested(f"cancellation requested for job {job_id}")
+            if expected_status and expected_claim_token is None:
+                raise QueueError(
+                    f"job {job_id} left '{expected_status}' before the write "
+                    "(raced by a concurrent transition)"
+                )
             raise LostLease(f"job {job_id} is no longer owned by this runner")
     return get_job(conn, job_id)
 

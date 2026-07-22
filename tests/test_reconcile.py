@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
+from mergetrain.errors import CommandFailed
 from mergetrain.git_runner import GitRunner, pending_ref_name
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
@@ -33,6 +34,7 @@ from mergetrain.store import (
     claim_deploy_batch,
     claim_next_job,
     connect,
+    deploy_reconcile_pending,
     enqueue_job,
     force_clear_lock_and_split,
     get_job,
@@ -370,6 +372,52 @@ class CrashRecoveryTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.push_status, "succeeded")
             self.assertEqual(healed.verify_status, "unknown")
+            self.assertEqual(_pending_refs(repo), "")
+
+    def test_ambiguous_push_parks_needs_reconcile_then_reconcile_deploys(self) -> None:
+        # In-process ambiguous push: the remote atomically ACCEPTS the push, then
+        # the client hits a transport error. The job must park needs_reconcile
+        # (marker preserved) and block later deploys — never terminal 'failed' a
+        # re-deploy would push over. reconcile then sees the sha already on the
+        # remote and marks it deployed WITHOUT a second push (exactly-once, #3).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                ttl = config.queue.lock_ttl_minutes
+                claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
+                runner = GitRunner(config)
+                real_push = runner.push_verified_head
+
+                def land_then_drop(*, worktree, log=None, pulse=None):
+                    real_push(worktree=worktree, log=log, pulse=pulse)  # remote accepts + advances
+                    raise CommandFailed(
+                        ["git", "push"], 1,
+                        stderr="fatal: the remote end hung up unexpectedly",
+                    )
+
+                with patch.object(runner, "push_verified_head", side_effect=land_then_drop):
+                    runner.process_batch(
+                        conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
+                    )
+                parked = get_job(conn, job.id)
+                self.assertEqual(parked.status, "needs_reconcile")
+                self.assertNotEqual(parked.pending_deploy_sha, "")
+                self.assertGreater(deploy_reconcile_pending(conn), 0)
+                self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+                before = git(root / "remote.git", "rev-parse", "main")
+                outcome = reconcile(config, conn, apply=True)
+                after = git(root / "remote.git", "rev-parse", "main")
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(outcome.exit_code, 0)
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(healed.push_status, "succeeded")
+            self.assertEqual(after, before)  # reconcile never re-pushed
             self.assertEqual(_pending_refs(repo), "")
 
     def test_isolation_push_site_writes_marker(self) -> None:

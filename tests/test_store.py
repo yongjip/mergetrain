@@ -24,6 +24,7 @@ from mergetrain.store import (
     connect,
     counts,
     default_owner,
+    deploy_reconcile_pending,
     dismiss_job,
     enqueue_job,
     get_job,
@@ -607,6 +608,35 @@ class ConcurrencyAndTransitionTests(unittest.TestCase):
         mark_job(conn, job.id, status="deployed")
         with self.assertRaises(QueueError):
             cancel_job(conn, job.id)
+
+    def test_claim_deploy_batch_refuses_while_a_reconcile_is_pending(self) -> None:
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="agent/a")
+        mark_job(conn, job.id, status="needs_reconcile", note="parked by a crash")
+        self.assertGreater(deploy_reconcile_pending(conn), 0)
+        # A deploy targets the same push refs, so it must refuse fail-closed
+        # rather than push over the pending reconcile — even when the lock reap
+        # inside the claim parks the orphan after the CLI pre-check (TOCTOU #4a).
+        self.assertEqual(claim_deploy_batch(conn, owner=f"runner:{os.getpid()}"), [])
+        self.assertIsNone(get_lock(conn))  # the lock was released, not left held
+
+    def test_reconcile_write_is_a_compare_and_swap_on_source_status(self) -> None:
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        # A CAS that still matches the source status succeeds.
+        job = enqueue_job(conn, task="a", branch="agent/a")
+        mark_job(conn, job.id, status="needs_reconcile")
+        mark_job(conn, job.id, status="queued", expected_status="needs_reconcile")
+        self.assertEqual(get_job(conn, job.id).status, "queued")
+        # A stale recovery decision cannot overwrite a job a concurrent op moved:
+        # a cancel landing during reconcile's remote I/O must survive (#4b).
+        other = enqueue_job(conn, task="b", branch="agent/b")
+        mark_job(conn, other.id, status="needs_reconcile")
+        mark_job(conn, other.id, status="canceled", note="user cancel during reconcile")
+        with self.assertRaises(QueueError):
+            mark_job(conn, other.id, status="queued", expected_status="needs_reconcile")
+        self.assertEqual(get_job(conn, other.id).status, "canceled")
 
 
 if __name__ == "__main__":

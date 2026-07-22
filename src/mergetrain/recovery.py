@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import MergetrainConfig
-from .errors import RemoteUnreachable
+from .errors import CancellationRequested, QueueError, RemoteUnreachable
 from .git_runner import (
     PENDING_REF_PREFIX,
     apply_gc,
@@ -221,26 +221,45 @@ def _classify(
 
 def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision) -> None:
     job = decision.job
-    if decision.decision == "deployed":
-        mark_job(
-            conn,
-            job.id,
-            status="deployed",
-            deploy_sha=decision.pending_sha,
-            push_status="succeeded",
-            verify_status="unknown",
-            note=f"reconciled: {decision.reason}",
-        )
-        delete_pending_ref(config.repo, job.id)
-    elif decision.decision == "queued":
-        # mark_job clears pending_deploy_sha on 'queued'; delete the pin ref too.
-        mark_job(conn, job.id, status="queued", note=f"reconciled: {decision.reason}")
-        delete_pending_ref(config.repo, job.id)
-    elif decision.decision == "canceled":
-        mark_job(conn, job.id, status="canceled", note=f"reconciled: {decision.reason}")
-        delete_pending_ref(config.repo, job.id)
-    else:  # blocked — PRESERVE the marker and pin ref for forensics.
-        mark_job(conn, job.id, status="blocked", note=f"reconcile conflict: {decision.reason}")
+    # Compare-and-swap on the source status. reconcile read this job as
+    # needs_reconcile, then did seconds of remote I/O holding no write lock; if a
+    # concurrent op (e.g. a cancel) moved it since, mark_job raises and we leave
+    # the newer state intact rather than resurrecting a stale recovery decision.
+    try:
+        if decision.decision == "deployed":
+            mark_job(
+                conn,
+                job.id,
+                status="deployed",
+                deploy_sha=decision.pending_sha,
+                push_status="succeeded",
+                verify_status="unknown",
+                note=f"reconciled: {decision.reason}",
+                expected_status="needs_reconcile",
+            )
+            delete_pending_ref(config.repo, job.id)
+        elif decision.decision == "queued":
+            # mark_job clears pending_deploy_sha on 'queued'; delete the pin ref too.
+            mark_job(
+                conn, job.id, status="queued",
+                note=f"reconciled: {decision.reason}", expected_status="needs_reconcile",
+            )
+            delete_pending_ref(config.repo, job.id)
+        elif decision.decision == "canceled":
+            mark_job(
+                conn, job.id, status="canceled",
+                note=f"reconciled: {decision.reason}", expected_status="needs_reconcile",
+            )
+            delete_pending_ref(config.repo, job.id)
+        else:  # blocked — PRESERVE the marker and pin ref for forensics.
+            mark_job(
+                conn, job.id, status="blocked",
+                note=f"reconcile conflict: {decision.reason}", expected_status="needs_reconcile",
+            )
+    except (QueueError, CancellationRequested):
+        # The job was transitioned by a concurrent op after our read — do not
+        # overwrite the newer state (a landed cancel must survive reconcile).
+        return
 
 
 def _decision_dict(decision: JobDecision, *, applied: bool) -> dict[str, Any]:
