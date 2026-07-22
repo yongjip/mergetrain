@@ -1295,12 +1295,14 @@ def record_pending_push(
     push actually targeted, not whatever the current config now says (#84,
     defect 3).
     """
-    ids = [int(job_id) for job_id in job_ids]
-    if not ids or not deploy_sha or not claim_token:
+    ids = list(dict.fromkeys(int(job_id) for job_id in job_ids))
+    if not ids:
         return
+    if not deploy_sha:
+        raise QueueError("pending push deploy sha is missing")
     placeholders = ",".join("?" for _ in ids)
     with immediate(conn):
-        conn.execute(
+        cur = conn.execute(
             f"""
             UPDATE deploy_queue
             SET pending_deploy_sha = ?, push_status = 'pending',
@@ -1311,6 +1313,8 @@ def record_pending_push(
             """,
             (deploy_sha, remote, pack_push_refs(push_refs), *ids, claim_token),
         )
+        if cur.rowcount != len(ids):
+            raise LostLease("pending push is no longer owned by this runner")
 
 
 def clear_rejected_push(
@@ -1327,8 +1331,8 @@ def clear_rejected_push(
     the marker; a stale owner must never erase another runner's recovery evidence.
     """
 
-    ids = [int(job_id) for job_id in job_ids]
-    if not ids or not claim_token:
+    ids = list(dict.fromkeys(int(job_id) for job_id in job_ids))
+    if not ids:
         return
     placeholders = ",".join("?" for _ in ids)
     with immediate(conn):
@@ -1495,23 +1499,48 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
         requested_at = utc_now()
         cancel_note = note or "cancellation requested by user"
         with immediate(conn):
+            current = conn.execute(
+                "SELECT status, claim_token FROM deploy_queue WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if (
+                current is None
+                or str(current["status"]) != "in_progress"
+                or str(current["claim_token"] or "") != job.claim_token
+            ):
+                raise QueueError(
+                    f"job {job_id} left 'in_progress' before the cancellation "
+                    "request was recorded"
+                )
             if job.claim_token:
-                conn.execute(
+                expected = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM deploy_queue "
+                        "WHERE status = 'in_progress' AND claim_token = ?",
+                        (job.claim_token,),
+                    ).fetchone()[0]
+                )
+                cur = conn.execute(
                     """
-                    UPDATE deploy_queue
-                    SET cancel_requested_at = ?, note = ?
+                    UPDATE deploy_queue SET cancel_requested_at = ?,
+                        note = CASE WHEN id = ? THEN ? ELSE note END
                     WHERE status = 'in_progress' AND claim_token = ?
                     """,
-                    (requested_at, cancel_note, job.claim_token),
+                    (requested_at, job_id, cancel_note, job.claim_token),
                 )
             else:
-                conn.execute(
+                expected = 1
+                cur = conn.execute(
                     """
                     UPDATE deploy_queue
                     SET cancel_requested_at = ?, note = ?
                     WHERE id = ? AND status = 'in_progress'
                     """,
                     (requested_at, cancel_note, job_id),
+                )
+            if cur.rowcount != expected:
+                raise QueueError(
+                    f"active train changed while canceling job {job_id}"
                 )
         return get_job(conn, job_id)
     if job.status == "validated" and job.train_id:
@@ -1558,6 +1587,7 @@ def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job
         job_id,
         status="canceled",
         note=note or f"dismissed superseded {job.status} job",
+        expected_status=job.status,
     )
 
 
