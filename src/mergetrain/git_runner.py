@@ -12,6 +12,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
@@ -46,6 +47,14 @@ from .store import (
 
 Pulse = Callable[[], None]
 GateProgress = Callable[[str, str, int, int, str], None]
+
+
+@dataclass(slots=True)
+class _PushVerifyState:
+    push_status: str = "not_run"
+    verify_status: str = "not_run"
+    warning: str = ""
+
 
 def _render_command(command: Sequence[str] | str) -> str:
     if isinstance(command, str):
@@ -977,6 +986,153 @@ class GitRunner:
         clear_rejected_push(conn, job_ids=job_ids, claim_token=lease_token)
         self._clear_pending_refs(job_ids, log=log)
 
+    def _gate_progress_callback(
+        self,
+        conn,
+        *,
+        lease_token: str,
+        job_id: int | None = None,
+    ) -> GateProgress:
+        def report(
+            name: str, state: str, index: int, total: int, command: str
+        ) -> None:
+            verb = {"active": "Running", "reused": "Reused"}.get(
+                state, "Passed"
+            )
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=job_id,
+                phase="gating",
+                state=state,
+                message=f"{verb} gate {index}/{total}: {name}",
+                detail=command,
+            )
+
+        return report
+
+    def _push_and_verify(
+        self,
+        conn,
+        *,
+        job_ids: list[int],
+        deploy_sha: str,
+        lease_token: str,
+        worktree: Path,
+        log: IO[str],
+        before_push: Pulse,
+        ownership_pulse: Pulse,
+        state: _PushVerifyState,
+        event_job_id: int | None = None,
+    ) -> None:
+        """Run the shared marker, push classification, and verify sequence."""
+
+        before_push()
+        self._event(
+            conn,
+            lease_token=lease_token,
+            job_id=event_job_id,
+            phase="pushing",
+            state="active",
+            message="Pushing verified HEAD atomically",
+        )
+        try:
+            self._push_with_marker(
+                conn,
+                job_ids=job_ids,
+                deploy_sha=deploy_sha,
+                lease_token=lease_token,
+                worktree=worktree,
+                log=log,
+                pulse=ownership_pulse,
+            )
+        except CommandFailed as exc:
+            state.push_status = "failed"
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=event_job_id,
+                phase="pushing",
+                state="error",
+                message="Atomic push failed",
+                detail=f"exit_code={exc.returncode}",
+            )
+            if is_push_rejection(exc.stderr):
+                self._clear_rejected_push(
+                    conn,
+                    job_ids=job_ids,
+                    lease_token=lease_token,
+                    log=log,
+                )
+                raise PushRejected(
+                    "remote rejected the push (protected branch, required "
+                    "pull request, or ref permission) — a repo-config issue, "
+                    f"not a code failure: {exc.stderr.strip() or exc}"
+                ) from exc
+            # The marker is durable but the remote outcome is unknown. Preserve
+            # it and park the job(s) for remote-truth reconciliation.
+            raise AmbiguousPush(
+                "atomic push failed after the write-ahead marker was "
+                f"recorded (exit {exc.returncode}); outcome ambiguous — "
+                f"parked for reconcile: {exc.stderr.strip() or exc}"
+            ) from exc
+
+        state.push_status = "succeeded"
+        self._event(
+            conn,
+            lease_token=lease_token,
+            job_id=event_job_id,
+            phase="pushing",
+            state="success",
+            message="Atomic push completed",
+        )
+        if not self.config.deploy.verify:
+            state.verify_status = "not_configured"
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=event_job_id,
+                phase="verifying",
+                state="success",
+                message="No post-push verification configured",
+            )
+            return
+
+        try:
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=event_job_id,
+                phase="verifying",
+                state="active",
+                message="Running post-push verification",
+            )
+            self._run_verify_hooks(
+                worktree=worktree, log=log, pulse=ownership_pulse
+            )
+            state.verify_status = "succeeded"
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=event_job_id,
+                phase="verifying",
+                state="success",
+                message="Post-push verification passed",
+            )
+        except CommandFailed as exc:
+            state.verify_status = "failed"
+            state.warning = f"post-push verify warning: {exc}"
+            log.write(f"\nWARNING: {state.warning}\n")
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=event_job_id,
+                phase="verifying",
+                state="warning",
+                message="Post-push verification needs attention",
+                detail=f"exit_code={exc.returncode}",
+            )
+
     def _prepare_worktree(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None
     ) -> None:
@@ -1037,8 +1193,7 @@ class GitRunner:
         deploy_sha = ""
         integration_base_sha = ""
         merge_sha = ""
-        push_status = "not_run"
-        verify_status = "not_run"
+        deploy_state = _PushVerifyState()
         deploying_validated = deploy and bool(job.train_id)
 
         def pulse(*, check_cancel: bool = True) -> None:
@@ -1058,28 +1213,17 @@ class GitRunner:
         def ownership_pulse() -> None:
             pulse(check_cancel=False)
 
-        def gate_progress(name: str, state: str, index: int, total: int, command: str) -> None:
-            verb = {
-                "active": "Running",
-                "reused": "Reused",
-            }.get(state, "Passed")
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=job.id,
-                phase="gating",
-                state=state,
-                message=f"{verb} gate {index}/{total}: {name}",
-                detail=command,
-            )
+        gate_progress = self._gate_progress_callback(
+            conn, lease_token=lease_token, job_id=job.id
+        )
 
         def finish_after_error(*, status: str, note: str) -> Job:
-            if push_status == "succeeded":
+            if deploy_state.push_status == "succeeded":
                 status = "deployed"
                 note = f"post-push completion warning: {note}"
                 post_push_verify_status = "failed"
             else:
-                post_push_verify_status = verify_status
+                post_push_verify_status = deploy_state.verify_status
             result = self._finish_job(
                 conn,
                 job.id,
@@ -1088,7 +1232,7 @@ class GitRunner:
                 deploy_sha=deploy_sha,
                 log_path=str(log_path),
                 note=note,
-                push_status=push_status,
+                push_status=deploy_state.push_status,
                 verify_status=post_push_verify_status,
             )
             if result.status == "deployed":
@@ -1187,116 +1331,21 @@ class GitRunner:
                     state="success",
                     message="All train gates passed",
                 )
-                verify_warning = ""
                 if deploy:
-                    normal_pulse()
-                    self._event(
+                    self._push_and_verify(
                         conn,
+                        job_ids=[job.id],
+                        deploy_sha=deploy_sha,
                         lease_token=lease_token,
-                        job_id=job.id,
-                        phase="pushing",
-                        state="active",
-                        message="Pushing verified HEAD atomically",
+                        worktree=worktree,
+                        log=log,
+                        before_push=normal_pulse,
+                        ownership_pulse=ownership_pulse,
+                        state=deploy_state,
+                        event_job_id=job.id,
                     )
-                    try:
-                        self._push_with_marker(
-                            conn,
-                            job_ids=[job.id],
-                            deploy_sha=deploy_sha,
-                            lease_token=lease_token,
-                            worktree=worktree,
-                            log=log,
-                            pulse=ownership_pulse,
-                        )
-                    except CommandFailed as exc:
-                        push_status = "failed"
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            job_id=job.id,
-                            phase="pushing",
-                            state="error",
-                            message="Atomic push failed",
-                            detail=f"exit_code={exc.returncode}",
-                        )
-                        if is_push_rejection(exc.stderr):
-                            self._clear_rejected_push(
-                                conn,
-                                job_ids=[job.id],
-                                lease_token=lease_token,
-                                log=log,
-                            )
-                            raise PushRejected(
-                                "remote rejected the push (protected branch, required "
-                                "pull request, or ref permission) — a repo-config issue, "
-                                f"not a code failure: {exc.stderr.strip() or exc}"
-                            ) from exc
-                        # Non-rejection failure AFTER the marker was recorded: the
-                        # remote may have accepted the atomic push, so the outcome
-                        # is ambiguous. Park needs_reconcile (marker preserved) so
-                        # reconcile establishes remote truth and no later deploy
-                        # re-pushes over a ref that may already have advanced.
-                        raise AmbiguousPush(
-                            "atomic push failed after the write-ahead marker was "
-                            f"recorded (exit {exc.returncode}); outcome ambiguous — "
-                            f"parked for reconcile: {exc.stderr.strip() or exc}"
-                        ) from exc
-                    push_status = "succeeded"
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=job.id,
-                        phase="pushing",
-                        state="success",
-                        message="Atomic push completed",
-                    )
-                    if not self.config.deploy.verify:
-                        verify_status = "not_configured"
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            job_id=job.id,
-                            phase="verifying",
-                            state="success",
-                            message="No post-push verification configured",
-                        )
-                    else:
-                        try:
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                job_id=job.id,
-                                phase="verifying",
-                                state="active",
-                                message="Running post-push verification",
-                            )
-                            self._run_verify_hooks(
-                                worktree=worktree, log=log, pulse=ownership_pulse
-                            )
-                            verify_status = "succeeded"
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                job_id=job.id,
-                                phase="verifying",
-                                state="success",
-                                message="Post-push verification passed",
-                            )
-                        except CommandFailed as exc:
-                            verify_status = "failed"
-                            verify_warning = f"post-push verify warning: {exc}"
-                            log.write(f"\nWARNING: {verify_warning}\n")
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                job_id=job.id,
-                                phase="verifying",
-                                state="warning",
-                                message="Post-push verification needs attention",
-                                detail=f"exit_code={exc.returncode}",
-                            )
                 status = "deployed" if deploy else "validated"
-                note = verify_warning or "ok"
+                note = deploy_state.warning or "ok"
                 validation_fields = {}
                 if not deploy:
                     train_id = uuid.uuid4().hex
@@ -1325,8 +1374,8 @@ class GitRunner:
                     deploy_sha=deploy_sha,
                     log_path=str(log_path),
                     note=note,
-                    push_status=push_status,
-                    verify_status=verify_status,
+                    push_status=deploy_state.push_status,
+                    verify_status=deploy_state.verify_status,
                     **validation_fields,
                 )
                 if deploy and result.status == "deployed":
@@ -1639,8 +1688,7 @@ class GitRunner:
         merge_shas: dict[int, str] = {}
         deploy_sha = ""
         integration_base_sha = ""
-        push_status = "not_run"
-        verify_status = "not_run"
+        deploy_state = _PushVerifyState()
         reused_validation_sha = ""
         reuse_fallback_reason = ""
         reuse_authorized = reuse_validated or self.config.deploy.reuse.enabled
@@ -1662,19 +1710,9 @@ class GitRunner:
         def ownership_pulse() -> None:
             pulse(check_cancel=False)
 
-        def gate_progress(name: str, state: str, index: int, total: int, command: str) -> None:
-            verb = {
-                "active": "Running",
-                "reused": "Reused",
-            }.get(state, "Passed")
-            self._event(
-                conn,
-                lease_token=lease_token,
-                phase="gating",
-                state=state,
-                message=f"{verb} gate {index}/{total}: {name}",
-                detail=command,
-            )
+        gate_progress = self._gate_progress_callback(
+            conn, lease_token=lease_token
+        )
 
         def finish(item: Job, **values) -> Job:
             return self._finish_job(
@@ -1700,12 +1738,12 @@ class GitRunner:
 
         def finish_active_after_error(*, status: str, note: str) -> list[Job]:
             affected_jobs = jobs if deploying_validated else merged_jobs or jobs
-            if push_status == "succeeded":
+            if deploy_state.push_status == "succeeded":
                 status = "deployed"
                 note = f"post-push completion warning: {note}"
                 post_push_verify_status = "failed"
             else:
-                post_push_verify_status = verify_status
+                post_push_verify_status = deploy_state.verify_status
             deployed_ids: list[int] = []
             for item in affected_jobs:
                 current = get_job(conn, item.id)
@@ -1716,7 +1754,7 @@ class GitRunner:
                         deploy_sha=deploy_sha,
                         log_path=str(log_path),
                         note=note,
-                        push_status=push_status,
+                        push_status=deploy_state.push_status,
                         verify_status=post_push_verify_status,
                         reused_validation_sha=reused_validation_sha,
                     )
@@ -2046,109 +2084,20 @@ class GitRunner:
                         )
                     )
                     return results
-                verify_warning = ""
                 if deploy:
-                    normal_pulse()
-                    self._event(
+                    self._push_and_verify(
                         conn,
+                        job_ids=[job.id for job in merged_jobs],
+                        deploy_sha=deploy_sha,
                         lease_token=lease_token,
-                        phase="pushing",
-                        state="active",
-                        message="Pushing verified HEAD atomically",
+                        worktree=worktree,
+                        log=log,
+                        before_push=normal_pulse,
+                        ownership_pulse=ownership_pulse,
+                        state=deploy_state,
                     )
-                    try:
-                        self._push_with_marker(
-                            conn,
-                            job_ids=[job.id for job in merged_jobs],
-                            deploy_sha=deploy_sha,
-                            lease_token=lease_token,
-                            worktree=worktree,
-                            log=log,
-                            pulse=ownership_pulse,
-                        )
-                    except CommandFailed as exc:
-                        push_status = "failed"
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            phase="pushing",
-                            state="error",
-                            message="Atomic push failed",
-                            detail=f"exit_code={exc.returncode}",
-                        )
-                        if is_push_rejection(exc.stderr):
-                            self._clear_rejected_push(
-                                conn,
-                                job_ids=[job.id for job in merged_jobs],
-                                lease_token=lease_token,
-                                log=log,
-                            )
-                            raise PushRejected(
-                                "remote rejected the push (protected branch, required "
-                                "pull request, or ref permission) — a repo-config issue, "
-                                f"not a code failure: {exc.stderr.strip() or exc}"
-                            ) from exc
-                        # Non-rejection failure AFTER the marker was recorded: the
-                        # remote may have accepted the atomic push, so the outcome
-                        # is ambiguous. Park needs_reconcile (marker preserved) so
-                        # reconcile establishes remote truth and no later deploy
-                        # re-pushes over a ref that may already have advanced.
-                        raise AmbiguousPush(
-                            "atomic push failed after the write-ahead marker was "
-                            f"recorded (exit {exc.returncode}); outcome ambiguous — "
-                            f"parked for reconcile: {exc.stderr.strip() or exc}"
-                        ) from exc
-                    push_status = "succeeded"
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        phase="pushing",
-                        state="success",
-                        message="Atomic push completed",
-                    )
-                    if not self.config.deploy.verify:
-                        verify_status = "not_configured"
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            phase="verifying",
-                            state="success",
-                            message="No post-push verification configured",
-                        )
-                    else:
-                        try:
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                phase="verifying",
-                                state="active",
-                                message="Running post-push verification",
-                            )
-                            self._run_verify_hooks(
-                                worktree=worktree, log=log, pulse=ownership_pulse
-                            )
-                            verify_status = "succeeded"
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                phase="verifying",
-                                state="success",
-                                message="Post-push verification passed",
-                            )
-                        except CommandFailed as exc:
-                            verify_status = "failed"
-                            verify_warning = f"post-push verify warning: {exc}"
-                            log.write(f"\nWARNING: {verify_warning}\n")
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                phase="verifying",
-                                state="warning",
-                                message="Post-push verification needs attention",
-                                detail=f"exit_code={exc.returncode}",
-                            )
                 status = "deployed" if deploy else "validated"
-                note = verify_warning or (
+                note = deploy_state.warning or (
                     f"batch ok; reused validation {reused_validation_sha}"
                     if reused_validation_sha
                     else f"batch ok; merged {len(merged_jobs)} job(s)"
@@ -2185,8 +2134,8 @@ class GitRunner:
                             deploy_sha=deploy_sha,
                             log_path=str(log_path),
                             note=note,
-                            push_status=push_status,
-                            verify_status=verify_status,
+                            push_status=deploy_state.push_status,
+                            verify_status=deploy_state.verify_status,
                             reused_validation_sha=reused_validation_sha,
                             **validation_fields,
                         )
@@ -2199,7 +2148,7 @@ class GitRunner:
             except LostLease:
                 raise
             except CancellationRequested:
-                if push_status == "succeeded":
+                if deploy_state.push_status == "succeeded":
                     return finish_active_after_error(
                         status="canceled",
                         note="canceled by user while the train was running",

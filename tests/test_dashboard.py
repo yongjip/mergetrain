@@ -25,6 +25,15 @@ class DashboardTests(unittest.TestCase):
     def make_config(self, root: Path):
         return load_config(repo=root, db_override=root / "queue.sqlite")
 
+    def test_snapshot_points_too_new_config_at_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+            payload = build_dashboard_snapshot(self.make_config(root))
+            self.assertEqual(payload["next_action"], "upgrade_mergetrain")
+
     def test_snapshot_is_live_and_omits_local_paths_and_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

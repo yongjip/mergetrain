@@ -217,7 +217,7 @@ ref update only; it does not by itself prove or authorize a provider release.
 Because a push already updates the remote, a verify-hook failure after push does
 **not** mark jobs `failed`. The jobs stay `deployed` with
 `push_status=succeeded` and `verify_status=failed`. CLI results use
-`result=warning`/`ok=false`, and the terminal completion event stays in warning
+`result=warning`/`ok=true`, and the terminal completion event stays in warning
 state so it cannot visually erase the unresolved verification result. A schema
 v4 migration backfills legacy `deployed` rows as pushed and recognizes the
 canonical warning-note prefix when available; otherwise historical verification

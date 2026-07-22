@@ -358,6 +358,10 @@ class StoreTests(unittest.TestCase):
         self.assertIn("reused_validation_sha", columns)
         self.assertIn("pending_deploy_sha", columns)
         self.assertIn("conflict_with", columns)
+        self.assertIn("pending_deploy_remote", columns)
+        self.assertIn("pending_deploy_refs", columns)
+        self.assertEqual(migrated.pending_deploy_remote, "")
+        self.assertEqual(migrated.pending_deploy_refs, "")
         migrated_db = sqlite3.connect(db)
         try:
             self.assertEqual(
@@ -372,6 +376,44 @@ class StoreTests(unittest.TestCase):
             })
         finally:
             migrated_db.close()
+
+    def test_partially_applied_v8_migration_adds_only_missing_column(self) -> None:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        db = Path(td.name) / "partial-v8.sqlite"
+        conn = connect(db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            conn.execute(
+                "UPDATE deploy_queue SET pending_deploy_remote = 'upstream' "
+                "WHERE id = ?",
+                (job.id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        partial = sqlite3.connect(db)
+        partial.execute("ALTER TABLE deploy_queue DROP COLUMN pending_deploy_refs")
+        partial.execute("PRAGMA user_version = 7")
+        partial.commit()
+        partial.close()
+
+        migrated = connect(db)
+        try:
+            restored = get_job(migrated, job.id)
+            columns = {
+                row[1]
+                for row in migrated.execute("PRAGMA table_info(deploy_queue)")
+            }
+            version = migrated.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            migrated.close()
+
+        self.assertEqual(restored.pending_deploy_remote, "upstream")
+        self.assertEqual(restored.pending_deploy_refs, "")
+        self.assertIn("pending_deploy_refs", columns)
+        self.assertEqual(version, SCHEMA_VERSION)
 
     def test_newer_schema_version_is_rejected(self) -> None:
         td = tempfile.TemporaryDirectory()
