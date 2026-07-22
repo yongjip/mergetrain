@@ -7,7 +7,7 @@ import subprocess
 from importlib import metadata
 from pathlib import Path, PurePath
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
 
@@ -32,7 +32,10 @@ def _file_url_path(value: object) -> Path | None:
     if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
         return None
     try:
-        return Path(url2pathname(unquote(parsed.path))).expanduser().resolve()
+        # url2pathname owns percent decoding as well as platform-specific path
+        # conversion. Decoding first would turn a literal `%2F` path segment
+        # (encoded as `%252F` in the URL) into a slash on the second pass.
+        return Path(url2pathname(parsed.path)).expanduser().resolve()
     except (OSError, ValueError):
         return None
 
