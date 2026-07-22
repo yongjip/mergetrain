@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from .config import MergetrainConfig, load_config
+from .config import MergetrainConfig, load_config, validate_mutating_config
 from .daemon import ProcessBatch, Say, daemon_tick
 from .hub import display_path
 from .notify import (
@@ -102,9 +102,7 @@ def hub_sweep(
                 return out
             config = load_config(repo=repo)
             out["name"] = config.project.name
-            if not config.config_exists:
-                out.update(ok=False, outcome="error", error="no .mergetrain.yaml in this repo")
-                return out
+            validate_mutating_config(config)
             if not Path(config.state.db).is_file():
                 # No queue database means no auto work can exist — and the
                 # scheduler must not create the database to find out.

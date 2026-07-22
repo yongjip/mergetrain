@@ -45,13 +45,15 @@ def rmtree(path: Path | str) -> None:
 
 from mergetrain.cli import main
 from mergetrain.config import load_config
-from mergetrain.errors import CommandFailed, redact_secrets
+from mergetrain.errors import CommandFailed, LockHeld, redact_secrets
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.store import (
+    acquire_runner_lock,
     cancel_job,
     claim_all_queued,
     claim_deploy_batch,
     connect,
+    default_owner,
     enqueue_job,
     get_job,
     get_lock,
@@ -149,6 +151,25 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_gate_cannot_change_the_candidate_sha_before_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(
+                root, gate_command="git commit --allow-empty -m gate-mutated-head"
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_one(conn, job, deploy=True)
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(result.push_status, "not_run")
+            self.assertIn("gate changed HEAD", result.note)
+            with self.assertRaises(AssertionError):
+                git(root / "remote.git", "show", "main:a.txt")
+
     def test_unchanged_validated_train_reuses_gates_and_still_verifies(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -289,17 +310,26 @@ class GitRunnerTests(unittest.TestCase):
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
+                enqueue_job(conn, task="a", branch="feature/a")
+                owner = default_owner()
+                claimed = claim_all_queued(conn, owner=owner)
                 runner = GitRunner(config)
                 failure = CommandFailed(
                     ["git", "push"], 1, stderr="remote rejected the update"
                 )
                 with patch.object(runner, "push_verified_head", side_effect=failure):
-                    result = runner.process_one(conn, job, deploy=True)
+                    result = runner.process_one(
+                        conn,
+                        claimed[0],
+                        deploy=True,
+                        owner=owner,
+                        ttl_minutes=1,
+                    )
             finally:
                 conn.close()
-            self.assertEqual(result.status, "failed")
-            self.assertEqual(result.push_status, "failed")
+            self.assertEqual(result.status, "needs_reconcile")
+            self.assertEqual(result.push_status, "pending")
+            self.assertNotEqual(result.pending_deploy_sha, "")
             self.assertEqual(result.verify_status, "not_run")
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
@@ -1088,6 +1118,36 @@ class PushRejectionTests(unittest.TestCase):
 
 
 class GcWorktreeGuardTests(unittest.TestCase):
+    def test_gc_apply_serializes_against_a_live_runner(self) -> None:
+        from mergetrain.git_runner import apply_gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            wt_root = config.state.worktree_root
+            wt_root.mkdir(parents=True, exist_ok=True)
+            live = wt_root / f"{config.project.name}-mergetrain-1-live"
+            orphan = wt_root / f"{config.project.name}-mergetrain-2-orphan"
+            live.mkdir()
+            orphan.mkdir()
+            conn = connect(config.state.db)
+            owner = default_owner()
+            lock = acquire_runner_lock(
+                conn,
+                owner=owner,
+                ttl_minutes=1,
+                worktree_path=str(live),
+            )
+            try:
+                with self.assertRaises(LockHeld):
+                    apply_gc(config)
+                self.assertTrue(live.exists())
+                self.assertTrue(orphan.exists())
+            finally:
+                release_runner_lock(conn, owner=owner, token=lock.token)
+                conn.close()
+
     def test_gc_never_removes_a_live_runners_worktree(self) -> None:
         # Blocker: gc --apply force-removed the worktree a running deploy was
         # merging/gating inside. A live runner's worktree must be protected.

@@ -22,6 +22,7 @@ from .errors import (
     LostLease,
     MergeBlocked,
     MergetrainError,
+    PushOutcomeUnknown,
     PushRejected,
     redact_secrets,
 )
@@ -34,11 +35,16 @@ from .reuse import (
     validation_age_minutes,
 )
 from .store import (
+    acquire_runner_lock,
+    clear_pending_push,
+    connect,
+    default_owner,
     get_job,
     mark_job,
     record_pending_push,
     record_run_event,
     refresh_runner_lock,
+    release_runner_lock,
     utc_now,
 )
 
@@ -489,6 +495,11 @@ class GitRunner:
             "blocked": ("blocked", "error", f"Job #{job_id} blocked"),
             "failed": ("failed", "error", f"Job #{job_id} failed"),
             "canceled": ("canceled", "warning", f"Job #{job_id} canceled"),
+            "needs_reconcile": (
+                "pushing",
+                "warning",
+                f"Job #{job_id} push outcome requires reconcile",
+            ),
         }
         if result.status == "deployed":
             completed = self.config.terminology.completed
@@ -874,7 +885,12 @@ class GitRunner:
             self._cleanup_worktree(worktree, log=log, keep_worktree=False)
 
     def push_verified_head(
-        self, *, worktree: Path, log: IO[str] | None = None, pulse: Pulse | None = None
+        self,
+        *,
+        worktree: Path,
+        deploy_sha: str,
+        log: IO[str] | None = None,
+        pulse: Pulse | None = None,
     ) -> None:
         if not self.config.git.push_refs:
             raise MergetrainError(
@@ -882,7 +898,7 @@ class GitRunner:
                 f"{self.config.terminology.action} mode"
             )
         push_args = ["git", "push", "--atomic", self.config.git.remote]
-        push_args.extend(f"HEAD:{ref}" for ref in self.config.git.push_refs)
+        push_args.extend(f"{deploy_sha}:{ref}" for ref in self.config.git.push_refs)
         run_command(
             push_args,
             cwd=worktree,
@@ -915,7 +931,13 @@ class GitRunner:
         touch the remote without first recording intent (0.3.0 Phase 1).
         """
         record_pending_push(
-            conn, job_ids=job_ids, deploy_sha=deploy_sha, claim_token=lease_token
+            conn,
+            job_ids=job_ids,
+            deploy_sha=deploy_sha,
+            claim_token=lease_token,
+            remote=self.config.git.remote,
+            push_refs=self.config.git.push_refs,
+            strict=True,
         )
         for job_id in job_ids:
             run_command(
@@ -924,7 +946,27 @@ class GitRunner:
                 log=log,
                 check=False,
             )
-        self.push_verified_head(worktree=worktree, log=log, pulse=pulse)
+        self.push_verified_head(
+            worktree=worktree,
+            deploy_sha=deploy_sha,
+            log=log,
+            pulse=pulse,
+        )
+
+    def _assert_candidate_unchanged(self, *, worktree: Path, deploy_sha: str) -> None:
+        """Prove gates did not change the exact commit or leave filesystem dirt."""
+
+        current_sha = git_rev_parse(worktree, "HEAD")
+        if current_sha != deploy_sha:
+            raise MergeBlocked(
+                "a gate changed HEAD after candidate selection "
+                f"(expected {deploy_sha}, found {current_sha}); refusing to push"
+            )
+        if not git_worktree_clean(worktree):
+            raise MergeBlocked(
+                "a gate left the integration worktree dirty; refusing to push an "
+                "untested filesystem state"
+            )
 
     def _clear_pending_refs(
         self, job_ids: list[int], *, log: IO[str] | None = None
@@ -1138,6 +1180,9 @@ class GitRunner:
                     state="success",
                     message="All train gates passed",
                 )
+                self._assert_candidate_unchanged(
+                    worktree=worktree, deploy_sha=deploy_sha
+                )
                 verify_warning = ""
                 if deploy:
                     normal_pulse()
@@ -1160,23 +1205,39 @@ class GitRunner:
                             pulse=ownership_pulse,
                         )
                     except CommandFailed as exc:
-                        push_status = "failed"
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            job_id=job.id,
-                            phase="pushing",
-                            state="error",
-                            message="Atomic push failed",
-                            detail=f"exit_code={exc.returncode}",
-                        )
                         if is_push_rejection(exc.stderr):
+                            push_status = "failed"
+                            clear_pending_push(
+                                conn,
+                                job_ids=[job.id],
+                                claim_token=lease_token,
+                            )
+                            self._clear_pending_refs([job.id], log=log)
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                job_id=job.id,
+                                phase="pushing",
+                                state="error",
+                                message="Atomic push rejected",
+                                detail=f"exit_code={exc.returncode}",
+                            )
                             raise PushRejected(
                                 "remote rejected the push (protected branch, required "
                                 "pull request, or ref permission) — a repo-config issue, "
                                 f"not a code failure: {exc.stderr.strip() or exc}"
                             ) from exc
-                        raise
+                        push_status = "pending"
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            job_id=job.id,
+                            phase="pushing",
+                            state="warning",
+                            message="Atomic push outcome unknown; reconcile required",
+                            detail=f"exit_code={exc.returncode}",
+                        )
+                        raise PushOutcomeUnknown(str(exc)) from exc
                     push_status = "succeeded"
                     self._event(
                         conn,
@@ -1275,6 +1336,8 @@ class GitRunner:
                     status="canceled",
                     note="canceled by user while the train was running",
                 )
+            except PushOutcomeUnknown as exc:
+                return finish_after_error(status="needs_reconcile", note=str(exc))
             except MergeBlocked as exc:
                 return finish_after_error(status="blocked", note=str(exc))
             except CommandFailed as exc:
@@ -1975,6 +2038,9 @@ class GitRunner:
                         )
                     )
                     return results
+                self._assert_candidate_unchanged(
+                    worktree=worktree, deploy_sha=deploy_sha
+                )
                 verify_warning = ""
                 if deploy:
                     normal_pulse()
@@ -1996,22 +2062,38 @@ class GitRunner:
                             pulse=ownership_pulse,
                         )
                     except CommandFailed as exc:
-                        push_status = "failed"
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            phase="pushing",
-                            state="error",
-                            message="Atomic push failed",
-                            detail=f"exit_code={exc.returncode}",
-                        )
                         if is_push_rejection(exc.stderr):
+                            push_status = "failed"
+                            ids = [job.id for job in merged_jobs]
+                            clear_pending_push(
+                                conn,
+                                job_ids=ids,
+                                claim_token=lease_token,
+                            )
+                            self._clear_pending_refs(ids, log=log)
+                            self._event(
+                                conn,
+                                lease_token=lease_token,
+                                phase="pushing",
+                                state="error",
+                                message="Atomic push rejected",
+                                detail=f"exit_code={exc.returncode}",
+                            )
                             raise PushRejected(
                                 "remote rejected the push (protected branch, required "
                                 "pull request, or ref permission) — a repo-config issue, "
                                 f"not a code failure: {exc.stderr.strip() or exc}"
                             ) from exc
-                        raise
+                        push_status = "pending"
+                        self._event(
+                            conn,
+                            lease_token=lease_token,
+                            phase="pushing",
+                            state="warning",
+                            message="Atomic push outcome unknown; reconcile required",
+                            detail=f"exit_code={exc.returncode}",
+                        )
+                        raise PushOutcomeUnknown(str(exc)) from exc
                     push_status = "succeeded"
                     self._event(
                         conn,
@@ -2119,6 +2201,10 @@ class GitRunner:
                         note="canceled by user while the train was running",
                     )
                 return cancel_active_jobs()
+            except PushOutcomeUnknown as exc:
+                return finish_active_after_error(
+                    status="needs_reconcile", note=str(exc)
+                )
             except CommandFailed as exc:
                 return finish_active_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
@@ -2163,7 +2249,7 @@ def current_branch(repo: Path) -> str:
     return git_current_branch(repo)
 
 
-def apply_gc(
+def _apply_gc_unlocked(
     config: MergetrainConfig,
     *,
     delete_branches: Iterable[str] = (),
@@ -2197,3 +2283,29 @@ def apply_gc(
         else:
             failed.append({"branch": branch, "reason": completed.stderr.strip() or "delete failed"})
     return {"removed_worktrees": removed_worktrees, "deleted_branches": deleted_branches, "failed": failed}
+
+
+def apply_gc(
+    config: MergetrainConfig,
+    *,
+    delete_branches: Iterable[str] = (),
+    protect: Iterable[str] = (),
+) -> dict[str, list[dict[str, str]]]:
+    """Apply GC while holding the same serialization lease as a deploy runner."""
+
+    conn = connect(config.state.db)
+    owner = default_owner()
+    lock = acquire_runner_lock(
+        conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes
+    )
+    try:
+        return _apply_gc_unlocked(
+            config,
+            delete_branches=tuple(delete_branches),
+            protect=tuple(protect),
+        )
+    finally:
+        try:
+            release_runner_lock(conn, owner=owner, token=lock.token)
+        finally:
+            conn.close()

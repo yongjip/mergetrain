@@ -15,6 +15,7 @@ from .store import (
     default_owner,
     deploy_reconcile_pending,
     has_queued_auto,
+    release_claimed_jobs_after_error,
     release_runner_lock,
 )
 
@@ -121,7 +122,15 @@ def daemon_tick(
             if jobs:
                 lease_token = jobs[0].claim_token
                 say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
-                results = process_batch(conn, jobs)
+                try:
+                    results = process_batch(conn, jobs)
+                except Exception:
+                    release_claimed_jobs_after_error(
+                        conn,
+                        job_ids=[job.id for job in jobs],
+                        claim_token=lease_token,
+                    )
+                    raise
                 return _grade_batch(results, len(jobs), say)
             if deploy_reconcile_pending(conn):
                 # The claim itself parked orphans as needs_reconcile and

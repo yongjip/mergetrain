@@ -18,6 +18,7 @@ from .config import (
     TerminologyConfig,
     load_config,
     render_default_config,
+    validate_mutating_config,
 )
 from .contract import CONTRACT_VERSION
 from .daemon import daemon_loop
@@ -271,13 +272,7 @@ def _preflight_config(config: MergetrainConfig) -> None:
     ship code against a config an older binary may misread.
     """
 
-    if config.config_version > CONFIG_VERSION:
-        raise ConfigError(
-            f"config version {config.config_version} is newer than this "
-            f"mergetrain understands (supports {CONFIG_VERSION}); upgrade "
-            "mergetrain before enqueuing or deploying. Recovery and read-only "
-            "commands still work."
-        )
+    validate_mutating_config(config)
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
@@ -825,7 +820,12 @@ def cmd_run_next(args: argparse.Namespace) -> int:
             pending = deploy_reconcile_pending(conn)
             if pending:
                 return _emit_deploy_reconcile_block(args, pending)
-        job = claim_next_job(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
+        job = claim_next_job(
+            conn,
+            owner=owner,
+            ttl_minutes=config.queue.lock_ttl_minutes,
+            require_reconcile_clear=deploy,
+        )
         if job is None:
             payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
@@ -954,6 +954,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
 
 def cmd_daemon(args: argparse.Namespace) -> int:
     config = config_from_args(args)
+    _preflight_config(config)
     runner = GitRunner(config)
     owner = default_owner()
 

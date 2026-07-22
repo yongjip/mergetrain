@@ -30,6 +30,7 @@ from mergetrain.git_runner import GitRunner, pending_ref_name
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
     acquire_runner_lock,
+    cancel_job,
     claim_deploy_batch,
     claim_next_job,
     connect,
@@ -250,6 +251,79 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(outcome.exit_code, 10)
             self.assertEqual(healed.status, "blocked")
 
+    def test_reconcile_uses_recorded_refs_after_config_expands(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            git(repo, "push", "origin", "main:release")
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                pending = _pending_commit(repo)
+                _pin(repo, job.id, pending)
+                _stage_in_progress(conn, job.id, "push-token")
+                record_pending_push(
+                    conn,
+                    job_ids=[job.id],
+                    deploy_sha=pending,
+                    claim_token="push-token",
+                    remote="origin",
+                    push_refs=["main"],
+                    strict=True,
+                )
+                git(repo, "push", "origin", f"{pending}:main")
+                conn.execute(
+                    "UPDATE deploy_queue SET status='needs_reconcile', claim_token='' "
+                    "WHERE id=?",
+                    (job.id,),
+                )
+                conn.commit()
+                marked = get_job(conn, job.id)
+                self.assertEqual(marked.pending_push_remote, "origin")
+                self.assertEqual(marked.pending_push_refs, ["main"])
+
+                cfg_path = repo / ".mergetrain.yaml"
+                cfg_path.write_text(
+                    cfg_path.read_text(encoding="utf-8").replace(
+                        "  push_refs:\n    - main\n",
+                        "  push_refs:\n    - main\n    - release\n",
+                    ),
+                    encoding="utf-8",
+                )
+                expanded = load_config(repo=repo)
+                outcome = reconcile(expanded, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(outcome.exit_code, 0)
+            self.assertEqual(healed.status, "deployed")
+
+    def test_reconcile_cas_does_not_overwrite_concurrent_cancel(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            try:
+                git(repo, "push", "origin", f"{pending}:main")
+                _set_needs_reconcile(conn, job.id, pending)
+                from mergetrain.recovery import _classify as real_classify
+
+                def classify_then_cancel(config, observed, ref_shas):
+                    decision = real_classify(config, observed, ref_shas)
+                    cancel_job(conn, observed.id, note="cancel raced reconcile")
+                    return decision
+
+                with patch(
+                    "mergetrain.recovery._classify",
+                    side_effect=classify_then_cancel,
+                ):
+                    outcome = reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(healed.status, "canceled")
+            self.assertFalse(outcome.jobs[0]["applied"])
+
     def test_remote_unreachable_is_a_no_op(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -329,8 +403,13 @@ class CrashRecoveryTests(unittest.TestCase):
     def _crash_after_push(self, runner: GitRunner):
         real_push = runner.push_verified_head
 
-        def push_then_crash(*, worktree, log=None, pulse=None):
-            real_push(worktree=worktree, log=log, pulse=pulse)  # the push lands
+        def push_then_crash(*, worktree, deploy_sha, log=None, pulse=None):
+            real_push(
+                worktree=worktree,
+                deploy_sha=deploy_sha,
+                log=log,
+                pulse=pulse,
+            )  # the push lands
             raise _Crash()
 
         return patch.object(runner, "push_verified_head", side_effect=push_then_crash)
@@ -406,6 +485,31 @@ class CrashRecoveryTests(unittest.TestCase):
 
 
 class DeployGateTests(unittest.TestCase):
+    def test_manual_claim_rechecks_reconcile_after_orphan_split(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                orphan = enqueue_job(conn, task="orphan", branch="feature/orphan")
+                queued = enqueue_job(conn, task="a", branch="feature/a")
+                _stage_in_progress(conn, orphan.id, "dead-token")
+                record_pending_push(
+                    conn,
+                    job_ids=[orphan.id],
+                    deploy_sha="c" * 40,
+                    claim_token="dead-token",
+                    strict=True,
+                )
+                claimed = claim_deploy_batch(conn, owner=DEAD_OWNER)
+                self.assertEqual(claimed, [])
+                self.assertEqual(get_job(conn, orphan.id).status, "needs_reconcile")
+                self.assertEqual(get_job(conn, queued.id).status, "queued")
+                self.assertIsNone(get_lock(conn))
+            finally:
+                conn.close()
+
     def test_run_batch_deploy_hard_blocked_while_needs_reconcile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

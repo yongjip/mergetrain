@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import json
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated", "needs_reconcile")
@@ -44,10 +45,22 @@ class Job:
     claim_token: str = ""
     cancel_requested_at: str = ""
     pending_deploy_sha: str = ""
+    pending_push_remote: str = ""
+    pending_push_refs: list[str] = field(default_factory=list)
     conflict_with: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> Job:
+        raw_pending_refs = str(row["pending_push_refs"] or "")
+        try:
+            decoded_pending_refs = json.loads(raw_pending_refs) if raw_pending_refs else []
+        except (TypeError, ValueError):
+            decoded_pending_refs = []
+        pending_push_refs = (
+            [str(ref) for ref in decoded_pending_refs if isinstance(ref, str)]
+            if isinstance(decoded_pending_refs, list)
+            else []
+        )
         return cls(
             id=int(row["id"]),
             task=str(row["task"]),
@@ -83,12 +96,15 @@ class Job:
             claim_token=str(row["claim_token"] or ""),
             cancel_requested_at=str(row["cancel_requested_at"] or ""),
             pending_deploy_sha=str(row["pending_deploy_sha"] or ""),
+            pending_push_remote=str(row["pending_push_remote"] or ""),
+            pending_push_refs=pending_push_refs,
             conflict_with=str(row["conflict_with"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["auto_deploy"] = bool(self.auto_deploy)
+        data["pending_push_refs"] = list(self.pending_push_refs)
         data.pop("claim_token", None)
         return data
 

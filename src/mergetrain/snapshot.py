@@ -60,7 +60,7 @@ def next_action(payload: dict[str, Any]) -> str:
     # until reconcile resolves it, so this dominates the deploy/validate tail.
     if count_data.get("needs_reconcile", 0) or (
         count_data.get("in_progress_with_marker", 0) and liveness != "alive"
-    ):
+    ) or count_data.get("failed_with_marker", 0):
         return "reconcile_pending_deploy"
     # A blocked job that still carries its marker is a reconcile conflict needing
     # git inspection, distinct from a plain gate/assembly failure.

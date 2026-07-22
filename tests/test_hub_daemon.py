@@ -117,6 +117,35 @@ class HubSweepTests(unittest.TestCase):
             self.assertEqual(outcomes[1]["outcome"], "processed:1")
             self.assertEqual(len(log), 1)
 
+    def test_sweep_rejects_future_config_before_processing_auto_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root, "future")
+            job_id = seed_jobs(repo, auto=True)
+            (repo / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+            add_repo(repo, registry)
+            seen: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(seen),
+            )
+            self.assertEqual(outcomes[0]["outcome"], "error")
+            self.assertIn("newer", outcomes[0]["error"])
+            self.assertEqual(seen, [])
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                self.assertEqual(
+                    {job.id: job for job in list_jobs(conn)}[job_id].status,
+                    "queued",
+                )
+            finally:
+                conn.close()
+
     def test_sweep_excludes_opted_out_repos_even_with_auto_work(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

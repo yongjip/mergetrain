@@ -9,7 +9,15 @@ from pathlib import Path
 from mergetrain.daemon import _grade_batch, daemon_loop, daemon_tick
 from mergetrain.errors import QueueError
 from mergetrain.models import Job
-from mergetrain.store import claim_all_queued, connect, enqueue_job, get_job, list_jobs
+from mergetrain.store import (
+    claim_all_queued,
+    connect,
+    enqueue_job,
+    get_job,
+    get_lock,
+    list_jobs,
+    mark_job,
+)
 
 
 class GradeBatchTests(unittest.TestCase):
@@ -33,6 +41,54 @@ class GradeBatchTests(unittest.TestCase):
 
 
 class DaemonTests(unittest.TestCase):
+    def test_batch_exception_cas_releases_claimed_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(
+                conn, task="auto", branch="auto", auto_deploy=True
+            )
+            conn.close()
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=lambda _conn, _jobs: (_ for _ in ()).throw(
+                        RuntimeError("boom")
+                    ),
+                    owner="daemon:999999",
+                    say=lambda _: None,
+                )
+
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, job.id).status, "queued")
+                self.assertIsNone(get_lock(conn))
+            finally:
+                conn.close()
+
+            def finish(conn, jobs):  # type: ignore[no-untyped-def]
+                return [
+                    mark_job(
+                        conn,
+                        item.id,
+                        status="failed",
+                        note="deterministic test finish",
+                        expected_claim_token=item.claim_token,
+                    )
+                    for item in jobs
+                ]
+
+            self.assertEqual(
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=finish,
+                    owner="daemon:999999",
+                    say=lambda _: None,
+                ),
+                "no_landing:1",
+            )
+
     def test_daemon_once_processes_only_auto_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"

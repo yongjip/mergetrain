@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import sqlite3
 import uuid
@@ -32,7 +33,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Liveness:
@@ -71,22 +72,37 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
         conn.commit()
 
 
-def _self_ignore(state_dir: Path) -> None:
-    """Drop a ``.gitignore`` of ``*`` inside mergetrain's state directory.
+def _self_ignore(state_dir: Path, *, database_name: str) -> None:
+    """Ignore only mergetrain-owned runtime artifacts in its state directory.
 
     The queue DB, logs, and worktrees live in-repo (``.mergetrain/`` by
     default). Without this, the first command that opens the DB leaves that
     directory untracked, so the *next* ``enqueue`` fails the clean-worktree
-    check — the tool's own state breaks its own precondition. A cargo-style
-    self-ignoring directory keeps the whole thing invisible to git wherever
-    the user points ``state.db``.
+    check. The old implementation wrote ``*`` wherever ``state.db`` happened
+    to live; when that was the repository root it hid every user file from Git.
+    Exact runtime paths preserve self-ignore without weakening Git visibility.
     """
 
     marker = state_dir / ".gitignore"
-    if marker.exists():
-        return
+    database_entries = [
+        f"/{database_name}",
+        f"/{database_name}-shm",
+        f"/{database_name}-wal",
+    ]
+    if state_dir.name == ".mergetrain":
+        database_entries.extend(["/logs/", "/worktrees/"])
+    content = (
+        "# Managed by mergetrain — exact local runtime artifacts only.\n"
+        + "\n".join(database_entries)
+        + "\n"
+    )
     try:
-        marker.write_text("# Managed by mergetrain — local queue state.\n*\n", encoding="utf-8")
+        if marker.exists():
+            existing = marker.read_text(encoding="utf-8")
+            legacy = "# Managed by mergetrain — local queue state.\n*\n"
+            if existing != legacy:
+                return
+        marker.write_text(content, encoding="utf-8")
     except OSError:
         pass  # best-effort; never fail a connect over an ignore file
 
@@ -135,7 +151,7 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
         return conn
     if path != Path(":memory:"):
         path.parent.mkdir(parents=True, exist_ok=True)
-        _self_ignore(path.parent)
+        _self_ignore(path.parent, database_name=path.name)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
@@ -197,6 +213,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           claim_token TEXT NOT NULL DEFAULT '',
           cancel_requested_at TEXT NOT NULL DEFAULT '',
           pending_deploy_sha TEXT NOT NULL DEFAULT '',
+          pending_push_remote TEXT NOT NULL DEFAULT '',
+          pending_push_refs TEXT NOT NULL DEFAULT '',
           conflict_with TEXT NOT NULL DEFAULT ''
         )
         """
@@ -279,6 +297,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ),
             7: (
                 ("deploy_queue", "conflict_with", "TEXT NOT NULL DEFAULT ''"),
+            ),
+            8: (
+                ("deploy_queue", "pending_push_remote", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "pending_push_refs", "TEXT NOT NULL DEFAULT ''"),
             ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
@@ -520,6 +542,12 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
             "WHERE status = 'blocked' AND pending_deploy_sha != ''"
         ).fetchone()["n"]
     )
+    result["failed_with_marker"] = int(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM deploy_queue "
+            "WHERE status = 'failed' AND pending_deploy_sha != ''"
+        ).fetchone()["n"]
+    )
     result["deployed_verify_unknown"] = int(
         conn.execute(
             "SELECT COUNT(*) AS n FROM deploy_queue "
@@ -534,8 +562,27 @@ def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:
     marker-bearing orphans. A deploy targets the same push refs, so every deploy
     entrypoint (``run-batch``, ``run-next``, and the daemon) must refuse while
     this is non-zero (0.3.0 Phase 2, decision Q4)."""
-    data = counts(conn)
-    return data.get("needs_reconcile", 0) + data.get("in_progress_with_marker", 0)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM deploy_queue "
+        "WHERE pending_deploy_sha != '' AND status NOT IN ('deployed', 'canceled')"
+    ).fetchone()
+    return int(row["n"])
+
+
+def list_reconcile_jobs(conn: sqlite3.Connection) -> list[Job]:
+    """Return every nonterminal row carrying durable push intent.
+
+    Older releases could leave markers on ``failed``/``blocked`` rows. Those
+    markers must remain deploy-blocking and reconcilable instead of becoming
+    invisible merely because the status was finalized incorrectly.
+    """
+
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue "
+        "WHERE pending_deploy_sha != '' AND status NOT IN ('deployed', 'canceled') "
+        "ORDER BY id ASC"
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
 
 
 def has_queued_auto(conn: sqlite3.Connection) -> bool:
@@ -772,10 +819,17 @@ def claim_next_job(
     *,
     owner: str | None = None,
     ttl_minutes: int = 30,
+    require_reconcile_clear: bool = False,
 ) -> Job | None:
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+        if require_reconcile_clear and deploy_reconcile_pending(conn):
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
+            return None
         row = conn.execute(
             "SELECT * FROM deploy_queue WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
         ).fetchone()
@@ -812,11 +866,12 @@ def claim_all_queued(
     owner: str | None = None,
     ttl_minutes: int = 30,
     auto_only: bool = False,
+    require_reconcile_clear: bool = False,
 ) -> list[Job]:
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
-        if auto_only and deploy_reconcile_pending(conn):
+        if (auto_only or require_reconcile_clear) and deploy_reconcile_pending(conn):
             # Acquiring the lock can itself park marker-bearing orphans as
             # needs_reconcile (dead-owner requeue). An unattended deploy must
             # observe that inside the same claim transaction — checking only
@@ -984,6 +1039,12 @@ def claim_deploy_batch(
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+        if deploy_reconcile_pending(conn):
+            conn.execute(
+                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+                (RUNNER_LOCK_NAME, owner, lock.token),
+            )
+            return []
         selected, validated_jobs = select_validated_train(conn, train_id=train_id)
         if selected is not None:
             jobs = validated_jobs
@@ -1157,6 +1218,9 @@ def record_pending_push(
     job_ids: Sequence[int],
     deploy_sha: str,
     claim_token: str,
+    remote: str = "origin",
+    push_refs: Sequence[str] = ("main",),
+    strict: bool = False,
 ) -> None:
     """Durably record intent to push ``deploy_sha`` before the remote is touched.
 
@@ -1167,19 +1231,98 @@ def record_pending_push(
     see docs/proposals/0.3.0-recovery.md).
     """
     ids = [int(job_id) for job_id in job_ids]
-    if not ids or not deploy_sha or not claim_token:
+    refs = [str(ref) for ref in push_refs]
+    if not ids or not deploy_sha or not claim_token or not remote or not refs:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with immediate(conn):
+        cur = conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET pending_deploy_sha = ?, pending_push_remote = ?,
+                pending_push_refs = ?, push_status = 'pending'
+            WHERE id IN ({placeholders})
+              AND status = 'in_progress'
+              AND claim_token = ?
+            """,
+            (deploy_sha, remote, json.dumps(refs), *ids, claim_token),
+        )
+        if strict and cur.rowcount != len(ids):
+            raise LostLease("pending push intent could not be recorded for every claimed job")
+
+
+def clear_pending_push(
+    conn: sqlite3.Connection,
+    *,
+    job_ids: Sequence[int],
+    claim_token: str,
+) -> None:
+    """Clear durable intent after a definitive server-side push rejection."""
+
+    ids = [int(job_id) for job_id in job_ids]
+    if not ids or not claim_token:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with immediate(conn):
+        cur = conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET pending_deploy_sha = '', pending_push_remote = '',
+                pending_push_refs = ''
+            WHERE id IN ({placeholders})
+              AND status = 'in_progress'
+              AND claim_token = ?
+            """,
+            (*ids, claim_token),
+        )
+        if cur.rowcount != len(ids):
+            raise LostLease("pending push intent could not be cleared for every claimed job")
+
+
+def release_claimed_jobs_after_error(
+    conn: sqlite3.Connection,
+    *,
+    job_ids: Sequence[int],
+    claim_token: str,
+) -> None:
+    """CAS-release every job stranded by an exception outside the batch runner."""
+
+    ids = [int(job_id) for job_id in job_ids]
+    if not ids or not claim_token:
         return
     placeholders = ",".join("?" for _ in ids)
     with immediate(conn):
         conn.execute(
             f"""
             UPDATE deploy_queue
-            SET pending_deploy_sha = ?, push_status = 'pending'
-            WHERE id IN ({placeholders})
-              AND status = 'in_progress'
+            SET status = 'canceled', finished_at = ?, claim_token = '',
+                note = 'canceled after daemon batch exception'
+            WHERE id IN ({placeholders}) AND status = 'in_progress'
+              AND claim_token = ? AND cancel_requested_at != ''
+              AND pending_deploy_sha = ''
+            """,
+            (utc_now(), *ids, claim_token),
+        )
+        conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET status = 'needs_reconcile', claim_token = '',
+                note = 'daemon batch exception after push intent; reconcile required'
+            WHERE id IN ({placeholders}) AND status = 'in_progress'
+              AND claim_token = ? AND pending_deploy_sha != ''
+            """,
+            (*ids, claim_token),
+        )
+        conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET status = 'queued', started_at = '', claim_token = '',
+                cancel_requested_at = '',
+                note = 're-queued after daemon batch exception'
+            WHERE id IN ({placeholders}) AND status = 'in_progress'
               AND claim_token = ?
             """,
-            (deploy_sha, *ids, claim_token),
+            (*ids, claim_token),
         )
 
 
@@ -1206,6 +1349,8 @@ def mark_job(
     reused_validation_sha: str = "",
     conflict_with: str = "",
     expected_claim_token: str | None = None,
+    expected_status: str | None = None,
+    expected_pending_deploy_sha: str | None = None,
 ) -> Job:
     if status not in ALL_STATUSES:
         raise QueueError(f"unknown job status: {status}")
@@ -1221,8 +1366,14 @@ def mark_job(
             raise LostLease("job claim token is missing")
         where += " AND status = 'in_progress' AND claim_token = ?"
         where_values.append(expected_claim_token)
-        if status not in {"canceled", "deployed"}:
+        if status not in {"canceled", "deployed", "needs_reconcile"}:
             where += " AND cancel_requested_at = ''"
+    if expected_status is not None:
+        where += " AND status = ?"
+        where_values.append(expected_status)
+    if expected_pending_deploy_sha is not None:
+        where += " AND pending_deploy_sha = ?"
+        where_values.append(expected_pending_deploy_sha)
     with immediate(conn):
         cur = conn.execute(
             f"""
@@ -1245,12 +1396,20 @@ def mark_job(
                 conflict_with = ?,
                 claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
                 cancel_requested_at = CASE
-                    WHEN ? IN ('in_progress', 'canceled') THEN cancel_requested_at
+                    WHEN ? IN ('in_progress', 'canceled', 'needs_reconcile') THEN cancel_requested_at
                     ELSE ''
                 END,
                 pending_deploy_sha = CASE
                     WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
                     ELSE pending_deploy_sha
+                END,
+                pending_push_remote = CASE
+                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
+                    ELSE pending_push_remote
+                END,
+                pending_push_refs = CASE
+                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
+                    ELSE pending_push_refs
                 END
             WHERE {where}
             """,
@@ -1274,6 +1433,8 @@ def mark_job(
                 validation_train_sha,
                 reused_validation_sha,
                 conflict_with,
+                status,
+                status,
                 status,
                 status,
                 status,

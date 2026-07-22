@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -93,6 +94,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_job(conn, other.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, other.id).push_status, "not_run")
 
+        self.assertEqual(get_job(conn, a.id).pending_push_remote, "origin")
+        self.assertEqual(get_job(conn, a.id).pending_push_refs, ["main"])
+
         # A landed deploy clears the marker; a failure preserves it for forensics.
         mark_job(conn, a.id, status="deployed", expected_claim_token=token)
         mark_job(conn, b.id, status="failed", expected_claim_token=token)
@@ -100,8 +104,8 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
 
     def test_state_dir_self_ignores(self) -> None:
-        # First DB open drops a .gitignore of '*' so the in-repo state dir
-        # never trips the enqueue clean-worktree check on the next command.
+        # First DB open ignores only exact runtime artifacts. A wildcard here
+        # would hide user files if state.db were configured at repo root.
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
         db = Path(td.name) / ".mergetrain" / "queue.sqlite"
@@ -109,7 +113,28 @@ class StoreTests(unittest.TestCase):
         conn.close()
         ignore = db.parent / ".gitignore"
         self.assertTrue(ignore.is_file())
-        self.assertIn("*", ignore.read_text(encoding="utf-8"))
+        content = ignore.read_text(encoding="utf-8")
+        self.assertNotIn("\n*\n", content)
+        self.assertIn("/queue.sqlite", content)
+        self.assertIn("/logs/", content)
+
+    def test_root_state_db_never_hides_untracked_user_files(self) -> None:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        repo = Path(td.name)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        conn = connect(repo / "queue.sqlite")
+        conn.close()
+        (repo / "user.txt").write_text("visible\n", encoding="utf-8")
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout
+        self.assertIn("user.txt", status)
+        self.assertNotIn("\n*\n", (repo / ".gitignore").read_text(encoding="utf-8"))
 
     def test_dismiss_clears_blocked_failed_but_refuses_live_work(self) -> None:
         conn = self.make_conn()
@@ -208,6 +233,8 @@ class StoreTests(unittest.TestCase):
         self.assertIn("validation_train_sha", columns)
         self.assertIn("reused_validation_sha", columns)
         self.assertIn("pending_deploy_sha", columns)
+        self.assertIn("pending_push_remote", columns)
+        self.assertIn("pending_push_refs", columns)
         self.assertIn("conflict_with", columns)
         migrated_db = sqlite3.connect(db)
         try:

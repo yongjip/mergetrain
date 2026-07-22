@@ -6,7 +6,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -281,6 +281,28 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["next_action"], "upgrade_mergetrain")
             self.assertEqual(payload["config_version_supported"], 1)
+
+    def test_missing_config_fails_closed_for_run_and_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "run-batch", "--deploy", "--json"]
+                )
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "config_error")
+            self.assertIn("no .mergetrain.yaml", payload["error"]["message"])
+
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(out):
+                code = main(["--repo", str(repo), "daemon", "--once"])
+            self.assertEqual(code, 1)
+            self.assertIn("no .mergetrain.yaml", out.getvalue())
+            self.assertFalse((repo / ".mergetrain").exists())
 
     def test_global_option_after_subcommand_is_normalized(self) -> None:
         normalized = normalize_global_options(["doctor", "--json", "--repo", "/tmp/example"])

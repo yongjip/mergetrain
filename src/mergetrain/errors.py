@@ -65,6 +65,14 @@ class PushRejected(MergetrainError):
     error.code == "push_rejected"."""
 
 
+class PushOutcomeUnknown(MergetrainError):
+    """Raised when a push was attempted but the client cannot prove whether it landed.
+
+    The durable marker must be reconciled against the recorded remote target;
+    this outcome is never safe to collapse into a normal ``failed`` job.
+    """
+
+
 class RemoteUnreachable(MergetrainError):
     """Raised when reconcile cannot reach the remote to establish deploy truth.
 

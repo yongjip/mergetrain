@@ -606,6 +606,28 @@ def load_config(
     )
 
 
+def validate_mutating_config(config: MergetrainConfig) -> None:
+    """Require an initialized, supported config before queue or deploy writes.
+
+    Loading remains permissive so read-only inspection and crash recovery can
+    still operate after a rollback. Every path that can enqueue or deploy must
+    call this boundary before it opens or mutates queue state.
+    """
+
+    if not config.config_exists:
+        raise ConfigError(
+            f"no {DEFAULT_CONFIG_NAME} in {config.repo}; run 'mergetrain init --write' "
+            "and review the generated deploy policy before enqueuing or deploying"
+        )
+    if config.config_version > CONFIG_VERSION:
+        raise ConfigError(
+            f"config version {config.config_version} is newer than this "
+            f"mergetrain understands (supports {CONFIG_VERSION}); upgrade "
+            "mergetrain before enqueuing or deploying. Recovery and read-only "
+            "commands still work."
+        )
+
+
 def _read_config_version(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """Return ``(config_version, migrated_data)``.
 

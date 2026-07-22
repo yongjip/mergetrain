@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import MergetrainConfig
-from .errors import RemoteUnreachable
+from .errors import LostLease, RemoteUnreachable
 from .git_runner import (
     PENDING_REF_PREFIX,
     apply_gc,
@@ -35,7 +35,7 @@ from .store import (
     default_owner,
     force_clear_lock_and_split,
     get_lock,
-    list_jobs_fifo,
+    list_reconcile_jobs,
     mark_job,
     record_run_event,
     release_runner_lock,
@@ -47,26 +47,28 @@ from .store import (
 # --------------------------------------------------------------------------- #
 
 
-def _fetch(config: MergetrainConfig) -> bool:
-    """``git fetch`` the configured remote; ``True`` iff it is reachable."""
+def _fetch(config: MergetrainConfig, remote: str) -> bool:
+    """``git fetch`` a recorded remote; ``True`` iff it is reachable."""
     completed = run_command(
-        ["git", "fetch", config.git.remote], cwd=config.repo, check=False
+        ["git", "fetch", remote], cwd=config.repo, check=False
     )
     return completed.returncode == 0
 
 
-def _localize_ref(config: MergetrainConfig, ref: str) -> None:
+def _localize_ref(config: MergetrainConfig, remote: str, ref: str) -> None:
     """Best-effort: bring a push ref's current remote tip into the local object
     store so ``merge-base --is-ancestor`` can resolve it. A bare ``git fetch``
     only downloads ``refs/heads/*``; a push ref under any other namespace
     (``refs/deploy/*``, a tag, …) would otherwise be a non-local object and the
     ancestry test would error. Absent refs simply no-op (``check=False``)."""
     run_command(
-        ["git", "fetch", config.git.remote, ref], cwd=config.repo, check=False
+        ["git", "fetch", remote, ref], cwd=config.repo, check=False
     )
 
 
-def _ls_remote(config: MergetrainConfig, ref: str) -> tuple[bool, str]:
+def _ls_remote(
+    config: MergetrainConfig, remote: str, ref: str
+) -> tuple[bool, str]:
     """Resolve ``ref`` on the remote by **exact** name.
 
     Returns ``(reachable, remote_sha)``. A reachable remote that does not carry
@@ -78,7 +80,7 @@ def _ls_remote(config: MergetrainConfig, ref: str) -> tuple[bool, str]:
     fully-qualified ``ref``) counts; peeled ``^{}`` tag lines are skipped.
     """
     completed = run_command(
-        ["git", "ls-remote", config.git.remote, ref], cwd=config.repo, check=False
+        ["git", "ls-remote", remote, ref], cwd=config.repo, check=False
     )
     if completed.returncode != 0:
         return False, ""
@@ -219,28 +221,59 @@ def _classify(
     )
 
 
-def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision) -> None:
+def _apply(
+    config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision
+) -> bool:
     job = decision.job
-    if decision.decision == "deployed":
-        mark_job(
-            conn,
-            job.id,
-            status="deployed",
-            deploy_sha=decision.pending_sha,
-            push_status="succeeded",
-            verify_status="unknown",
-            note=f"reconciled: {decision.reason}",
-        )
-        delete_pending_ref(config.repo, job.id)
-    elif decision.decision == "queued":
-        # mark_job clears pending_deploy_sha on 'queued'; delete the pin ref too.
-        mark_job(conn, job.id, status="queued", note=f"reconciled: {decision.reason}")
-        delete_pending_ref(config.repo, job.id)
-    elif decision.decision == "canceled":
-        mark_job(conn, job.id, status="canceled", note=f"reconciled: {decision.reason}")
-        delete_pending_ref(config.repo, job.id)
-    else:  # blocked — PRESERVE the marker and pin ref for forensics.
-        mark_job(conn, job.id, status="blocked", note=f"reconcile conflict: {decision.reason}")
+    try:
+        if decision.decision == "deployed":
+            mark_job(
+                conn,
+                job.id,
+                status="deployed",
+                deploy_sha=decision.pending_sha,
+                push_status="succeeded",
+                verify_status="unknown",
+                note=f"reconciled: {decision.reason}",
+                expected_status=job.status,
+                expected_pending_deploy_sha=decision.pending_sha,
+            )
+            delete_pending_ref(config.repo, job.id)
+        elif decision.decision == "queued":
+            # mark_job clears pending_deploy_sha on 'queued'; delete the pin ref too.
+            mark_job(
+                conn,
+                job.id,
+                status="queued",
+                note=f"reconciled: {decision.reason}",
+                expected_status=job.status,
+                expected_pending_deploy_sha=decision.pending_sha,
+            )
+            delete_pending_ref(config.repo, job.id)
+        elif decision.decision == "canceled":
+            mark_job(
+                conn,
+                job.id,
+                status="canceled",
+                note=f"reconciled: {decision.reason}",
+                expected_status=job.status,
+                expected_pending_deploy_sha=decision.pending_sha,
+            )
+            delete_pending_ref(config.repo, job.id)
+        else:  # blocked — PRESERVE the marker and pin ref for forensics.
+            mark_job(
+                conn,
+                job.id,
+                status="blocked",
+                note=f"reconcile conflict: {decision.reason}",
+                expected_status=job.status,
+                expected_pending_deploy_sha=decision.pending_sha,
+            )
+    except LostLease:
+        # State changed after the remote probe (for example, a concurrent
+        # cancel). The stale remote decision must never overwrite that change.
+        return False
+    return True
 
 
 def _decision_dict(decision: JobDecision, *, applied: bool) -> dict[str, Any]:
@@ -249,6 +282,7 @@ def _decision_dict(decision: JobDecision, *, applied: bool) -> dict[str, Any]:
         "branch": decision.job.branch,
         "train_id": decision.job.train_id,
         "pending_deploy_sha": decision.pending_sha,
+        "push_remote": decision.job.pending_push_remote,
         "resolvable": decision.resolvable,
         "push_refs": [
             {"ref": v.ref, "remote_sha": v.remote_sha, "contains": v.contains}
@@ -299,29 +333,46 @@ def reconcile(
         conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes
     )
     try:
-        jobs = list_jobs_fifo(conn, status="needs_reconcile")
+        jobs = list_reconcile_jobs(conn)
         if not jobs:
             return ReconcileOutcome(jobs=[], applied=apply, summary=_summarize([]), exit_code=0)
-        if not _fetch(config):
-            raise RemoteUnreachable(
-                f"cannot reach remote '{config.git.remote}' to reconcile"
-            )
-        ref_shas: dict[str, str] = {}
-        for ref in config.git.push_refs:
-            _localize_ref(config, ref)  # bring the tip local so ancestry resolves
-            reachable, remote_sha = _ls_remote(config, ref)
-            if not reachable:
+        targets: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
+        for job in jobs:
+            remote = job.pending_push_remote or config.git.remote
+            refs = tuple(job.pending_push_refs or config.git.push_refs)
+            targets.setdefault((remote, refs), {})
+        for (remote, refs), ref_shas in targets.items():
+            if not _fetch(config, remote):
                 raise RemoteUnreachable(
-                    f"cannot ls-remote '{ref}' on '{config.git.remote}'"
+                    f"cannot reach recorded remote '{remote}' to reconcile"
                 )
-            ref_shas[ref] = remote_sha
-        decisions = [_classify(config, job, ref_shas) for job in jobs]
+            for ref in refs:
+                _localize_ref(
+                    config, remote, ref
+                )  # bring the tip local so ancestry resolves
+                reachable, remote_sha = _ls_remote(config, remote, ref)
+                if not reachable:
+                    raise RemoteUnreachable(
+                        f"cannot ls-remote '{ref}' on recorded remote '{remote}'"
+                    )
+                ref_shas[ref] = remote_sha
+        decisions = []
+        for job in jobs:
+            remote = job.pending_push_remote or config.git.remote
+            refs = tuple(job.pending_push_refs or config.git.push_refs)
+            decisions.append(_classify(config, job, targets[(remote, refs)]))
+        applied_by_job: dict[int, bool] = {}
         if apply:
             for decision in decisions:
-                _apply(config, conn, decision)
+                applied_by_job[decision.job.id] = _apply(config, conn, decision)
         summary = _summarize(decisions)
         return ReconcileOutcome(
-            jobs=[_decision_dict(d, applied=apply) for d in decisions],
+            jobs=[
+                _decision_dict(
+                    d, applied=bool(apply and applied_by_job.get(d.job.id))
+                )
+                for d in decisions
+            ],
             applied=apply,
             summary=summary,
             exit_code=10 if summary["conflicts"] else 0,
