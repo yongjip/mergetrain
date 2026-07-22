@@ -101,8 +101,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
 
     def test_state_dir_self_ignores(self) -> None:
-        # First DB open drops a .gitignore of '*' so the in-repo state dir
-        # never trips the enqueue clean-worktree check on the next command.
+        # First DB open drops a .gitignore of '*' inside the dedicated state
+        # dir mergetrain creates, so it never trips the enqueue clean-worktree
+        # check on the next command.
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
         db = Path(td.name) / ".mergetrain" / "queue.sqlite"
@@ -111,6 +112,51 @@ class StoreTests(unittest.TestCase):
         ignore = db.parent / ".gitignore"
         self.assertTrue(ignore.is_file())
         self.assertIn("*", ignore.read_text(encoding="utf-8"))
+
+    def test_state_db_at_repo_root_never_hides_the_repo(self) -> None:
+        # #84 defect 7: state.db pointing at a pre-existing (shared) directory —
+        # e.g. the repo root — must NOT drop a '*' .gitignore. A '*' there would
+        # ignore every untracked project file and make the clean-worktree guard
+        # return a false clean. Only the exact queue artifacts are ignored.
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        (root / "app.py").write_text("print('hi')\n", encoding="utf-8")
+        conn = connect(root / "queue.sqlite")
+        conn.close()
+        ignore = root / ".gitignore"
+        self.assertTrue(ignore.is_file())
+        text = ignore.read_text(encoding="utf-8")
+        self.assertNotIn("*", text)
+        patterns = {
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+        # Exactly the DB and its sidecars — nothing that could hide app.py.
+        self.assertEqual(
+            patterns,
+            {
+                "queue.sqlite",
+                "queue.sqlite-wal",
+                "queue.sqlite-shm",
+                "queue.sqlite-journal",
+            },
+        )
+
+    def test_self_ignore_never_clobbers_an_existing_gitignore(self) -> None:
+        # A user's own root .gitignore is never overwritten (defensively: even
+        # the safe scoped form is skipped when a marker already exists).
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        existing = "node_modules/\n"
+        (root / ".gitignore").write_text(existing, encoding="utf-8")
+        conn = connect(root / "queue.sqlite")
+        conn.close()
+        self.assertEqual(
+            (root / ".gitignore").read_text(encoding="utf-8"), existing
+        )
 
     def test_dismiss_clears_blocked_failed_but_refuses_live_work(self) -> None:
         conn = self.make_conn()

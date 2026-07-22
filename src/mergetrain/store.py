@@ -71,22 +71,44 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
         conn.commit()
 
 
-def _self_ignore(state_dir: Path) -> None:
-    """Drop a ``.gitignore`` of ``*`` inside mergetrain's state directory.
+def _self_ignore(state_dir: Path, *, db_name: str, dedicated: bool) -> None:
+    """Keep mergetrain's own state out of Git's view without ever hiding the repo.
 
     The queue DB, logs, and worktrees live in-repo (``.mergetrain/`` by
-    default). Without this, the first command that opens the DB leaves that
-    directory untracked, so the *next* ``enqueue`` fails the clean-worktree
-    check — the tool's own state breaks its own precondition. A cargo-style
-    self-ignoring directory keeps the whole thing invisible to git wherever
-    the user points ``state.db``.
+    default). Without an ignore, the first command that opens the DB leaves
+    that state untracked, so the *next* ``enqueue`` fails the clean-worktree
+    check — the tool's own state breaks its own precondition.
+
+    When mergetrain created the directory itself (the default dedicated
+    ``.mergetrain/``), a ``*`` wildcard cleanly covers the DB, logs, and
+    worktrees. But ``state.db`` can point anywhere, including the repo root: a
+    ``*`` there would ignore every untracked project file and make the
+    clean-worktree guard return a *false* clean. So a directory mergetrain did
+    not create only ever ignores the exact queue artifacts it holds — the DB
+    and its WAL/SHM/journal sidecars — never ``*`` (#84, defect 7).
+
+    Never clobbers a ``.gitignore`` that is already present (it may be the
+    user's).
     """
 
     marker = state_dir / ".gitignore"
     if marker.exists():
         return
+    if dedicated:
+        body = "# Managed by mergetrain — local queue state.\n*\n"
+    else:
+        artifacts = "\n".join(
+            db_name + suffix for suffix in ("", "-wal", "-shm", "-journal")
+        )
+        body = (
+            "# Managed by mergetrain — local queue state.\n"
+            "# state.db is not in a mergetrain-owned directory, so only the exact\n"
+            "# queue artifacts are ignored — never a wildcard, which would hide\n"
+            "# the whole directory and fake a clean worktree.\n"
+            f"{artifacts}\n"
+        )
     try:
-        marker.write_text("# Managed by mergetrain — local queue state.\n*\n", encoding="utf-8")
+        marker.write_text(body, encoding="utf-8")
     except OSError:
         pass  # best-effort; never fail a connect over an ignore file
 
@@ -134,8 +156,13 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
             raise
         return conn
     if path != Path(":memory:"):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _self_ignore(path.parent)
+        state_dir = path.parent
+        # A directory mergetrain has to create is its own and safe to blanket
+        # ignore; a pre-existing one (e.g. the repo root, when state.db points
+        # there) is shared and must never be hidden behind '*'.
+        dedicated = not state_dir.exists()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        _self_ignore(state_dir, db_name=path.name, dedicated=dedicated)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
