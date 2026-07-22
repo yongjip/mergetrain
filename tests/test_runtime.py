@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from importlib import metadata
@@ -27,6 +30,34 @@ class FakeDistribution:
 
 
 class RuntimeProvenanceTests(unittest.TestCase):
+    def test_cli_import_does_not_load_cold_provenance_dependencies(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        pythonpath = [str(root / "src")]
+        if env.get("PYTHONPATH"):
+            pythonpath.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+        code = (
+            "import json, sys; import mergetrain.cli; "
+            "print(json.dumps({"
+            "'metadata': 'importlib.metadata' in sys.modules, "
+            "'request': 'urllib.request' in sys.modules}))"
+        )
+
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=root,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {"metadata": False, "request": False},
+        )
+
     def test_file_url_path_decodes_literal_percent_sequence_once(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             source = Path(td) / "checkout%2Farchive"
@@ -40,7 +71,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
             package_path = site_packages / "mergetrain"
             package_path.mkdir()
             distribution = FakeDistribution(site_packages)
-            with patch("mergetrain.runtime.metadata.distribution", return_value=distribution):
+            with patch("importlib.metadata.distribution", return_value=distribution):
                 payload = runtime_provenance(package_path=package_path)
         self.assertEqual(payload["distribution_version"], "0.1.0")
         self.assertEqual(payload["install_mode"], "wheel")
@@ -57,7 +88,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
                 direct_url={"url": source.as_uri(), "dir_info": {"editable": True}},
             )
             with (
-                patch("mergetrain.runtime.metadata.distribution", return_value=distribution),
+                patch("importlib.metadata.distribution", return_value=distribution),
                 patch("mergetrain.runtime._git_provenance", return_value=("a" * 40, True)),
             ):
                 payload = runtime_provenance(package_path=package_path)
@@ -78,7 +109,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
                     "vcs_info": {"vcs": "git", "commit_id": "b" * 40},
                 },
             )
-            with patch("mergetrain.runtime.metadata.distribution", return_value=distribution):
+            with patch("importlib.metadata.distribution", return_value=distribution):
                 payload = runtime_provenance(package_path=package_path)
         self.assertEqual(payload["install_mode"], "wheel")
         self.assertEqual(payload["source_commit"], "b" * 40)
@@ -88,7 +119,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
             package_path = Path(td) / "source" / "mergetrain"
             package_path.mkdir(parents=True)
             distribution = FakeDistribution(Path(td) / "site-packages")
-            with patch("mergetrain.runtime.metadata.distribution", return_value=distribution):
+            with patch("importlib.metadata.distribution", return_value=distribution):
                 payload = runtime_provenance(package_path=package_path)
         self.assertEqual(payload["install_mode"], "unknown")
         self.assertIsNone(payload["source_commit"])
@@ -101,7 +132,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
             package_path.mkdir(parents=True)
             with (
                 patch(
-                    "mergetrain.runtime.metadata.distribution",
+                    "importlib.metadata.distribution",
                     side_effect=metadata.PackageNotFoundError("mergetrain"),
                 ),
                 patch("mergetrain.runtime._source_checkout_path", return_value=source),
