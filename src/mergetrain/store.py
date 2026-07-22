@@ -32,7 +32,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Liveness:
@@ -224,7 +224,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           claim_token TEXT NOT NULL DEFAULT '',
           cancel_requested_at TEXT NOT NULL DEFAULT '',
           pending_deploy_sha TEXT NOT NULL DEFAULT '',
-          conflict_with TEXT NOT NULL DEFAULT ''
+          conflict_with TEXT NOT NULL DEFAULT '',
+          pending_deploy_remote TEXT NOT NULL DEFAULT '',
+          pending_deploy_refs TEXT NOT NULL DEFAULT ''
         )
         """
         )
@@ -306,6 +308,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ),
             7: (
                 ("deploy_queue", "conflict_with", "TEXT NOT NULL DEFAULT ''"),
+            ),
+            8: (
+                ("deploy_queue", "pending_deploy_remote", "TEXT NOT NULL DEFAULT ''"),
+                ("deploy_queue", "pending_deploy_refs", "TEXT NOT NULL DEFAULT ''"),
             ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
@@ -1252,12 +1258,24 @@ def list_run_events(
     return [RunEvent.from_row(row) for row in reversed(rows)]
 
 
+def pack_push_refs(push_refs: Sequence[str]) -> str:
+    """Normalize a push-ref set into the durable marker's newline-joined form."""
+    return "\n".join(str(ref) for ref in push_refs)
+
+
+def unpack_push_refs(packed: str) -> list[str]:
+    """Inverse of :func:`pack_push_refs`; ``[]`` for an empty/legacy marker."""
+    return [ref for ref in packed.split("\n") if ref] if packed else []
+
+
 def record_pending_push(
     conn: sqlite3.Connection,
     *,
     job_ids: Sequence[int],
     deploy_sha: str,
     claim_token: str,
+    remote: str = "",
+    push_refs: Sequence[str] = (),
 ) -> None:
     """Durably record intent to push ``deploy_sha`` before the remote is touched.
 
@@ -1266,6 +1284,11 @@ def record_pending_push(
     ``PRAGMA synchronous=FULL`` the commit is fsync-durable before ``git push``,
     so a later crash can prove a push was attempted for this sha (0.3.0 Phase 1;
     see docs/proposals/0.3.0-recovery.md).
+
+    The push *target* — the remote and the normalized push-ref set — is recorded
+    alongside the sha so a later ``reconcile`` evaluates the refs the interrupted
+    push actually targeted, not whatever the current config now says (#84,
+    defect 3).
     """
     ids = [int(job_id) for job_id in job_ids]
     if not ids or not deploy_sha or not claim_token:
@@ -1275,12 +1298,13 @@ def record_pending_push(
         conn.execute(
             f"""
             UPDATE deploy_queue
-            SET pending_deploy_sha = ?, push_status = 'pending'
+            SET pending_deploy_sha = ?, push_status = 'pending',
+                pending_deploy_remote = ?, pending_deploy_refs = ?
             WHERE id IN ({placeholders})
               AND status = 'in_progress'
               AND claim_token = ?
             """,
-            (deploy_sha, *ids, claim_token),
+            (deploy_sha, remote, pack_push_refs(push_refs), *ids, claim_token),
         )
 
 
@@ -1359,6 +1383,14 @@ def mark_job(
                 pending_deploy_sha = CASE
                     WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
                     ELSE pending_deploy_sha
+                END,
+                pending_deploy_remote = CASE
+                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
+                    ELSE pending_deploy_remote
+                END,
+                pending_deploy_refs = CASE
+                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
+                    ELSE pending_deploy_refs
                 END
             WHERE {where}
             """,
@@ -1382,6 +1414,8 @@ def mark_job(
                 validation_train_sha,
                 reused_validation_sha,
                 conflict_with,
+                status,
+                status,
                 status,
                 status,
                 status,

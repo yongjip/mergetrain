@@ -45,6 +45,8 @@ class Job:
     cancel_requested_at: str = ""
     pending_deploy_sha: str = ""
     conflict_with: str = ""
+    pending_deploy_remote: str = ""
+    pending_deploy_refs: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> Job:
@@ -84,12 +86,18 @@ class Job:
             cancel_requested_at=str(row["cancel_requested_at"] or ""),
             pending_deploy_sha=str(row["pending_deploy_sha"] or ""),
             conflict_with=str(row["conflict_with"] or ""),
+            pending_deploy_remote=str(row["pending_deploy_remote"] or ""),
+            pending_deploy_refs=str(row["pending_deploy_refs"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["auto_deploy"] = bool(self.auto_deploy)
         data.pop("claim_token", None)
+        # Internal recovery bookkeeping — the durable push target is not part of
+        # the public job surface (keeps the contract fingerprint stable).
+        data.pop("pending_deploy_remote", None)
+        data.pop("pending_deploy_refs", None)
         return data
 
 

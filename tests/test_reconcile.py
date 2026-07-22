@@ -420,6 +420,65 @@ class CrashRecoveryTests(unittest.TestCase):
             self.assertEqual(after, before)  # reconcile never re-pushed
             self.assertEqual(_pending_refs(repo), "")
 
+    def test_reconcile_uses_the_marker_target_not_the_current_config(self) -> None:
+        # #84 defect 3 (durable target): the config's remote/push_refs can change
+        # between a crashed push and the reconcile. Reconcile must evaluate the
+        # target the interrupted push actually used — captured in the marker —
+        # not whatever the config now says.
+        from dataclasses import replace
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                ttl = config.queue.lock_ttl_minutes
+                claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
+                runner = GitRunner(config)
+                real_push = runner.push_verified_head
+
+                def land_then_drop(*, worktree, deploy_sha="", log=None, pulse=None):
+                    real_push(worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse)
+                    raise CommandFailed(
+                        ["git", "push"], 1,
+                        stderr="fatal: the remote end hung up unexpectedly",
+                    )
+
+                with patch.object(runner, "push_verified_head", side_effect=land_then_drop):
+                    runner.process_batch(
+                        conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
+                    )
+                parked = get_job(conn, job.id)
+                self.assertEqual(parked.status, "needs_reconcile")
+                # The marker captured the real push target.
+                self.assertEqual(parked.pending_deploy_remote, config.git.remote)
+                self.assertEqual(parked.pending_deploy_refs, "main")
+            finally:
+                conn.close()
+
+            # The config now points at a bogus remote AND a ref the push never
+            # touched. Trusting the config, reconcile could not even reach the
+            # remote; trusting the marker it reaches origin/main, sees the sha,
+            # and deploys.
+            drifted = replace(
+                config,
+                git=replace(
+                    config.git,
+                    remote="nonexistent-remote",
+                    push_refs=("deploy-elsewhere",),
+                ),
+            )
+            conn = connect(config.state.db)
+            try:
+                outcome = reconcile(drifted, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(outcome.summary["reconciled_deployed"], 1)
+
     def test_isolation_push_site_writes_marker(self) -> None:
         # Proves the one-by-one process_one push site is instrumented too.
         with tempfile.TemporaryDirectory() as td:

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .config import MergetrainConfig
@@ -40,6 +40,7 @@ from .store import (
     mark_job,
     record_run_event,
     release_runner_lock,
+    unpack_push_refs,
 )
 
 # --------------------------------------------------------------------------- #
@@ -289,6 +290,20 @@ def _summarize(decisions: list[JobDecision]) -> dict[str, int]:
     }
 
 
+def _job_push_target(
+    config: MergetrainConfig, job: Job
+) -> tuple[str, tuple[str, ...]]:
+    """The remote + push-ref set the job's interrupted push actually targeted.
+
+    Read from the durable marker so reconcile asks the right remote even if the
+    config's remote or push_refs changed after the crash. A legacy marker
+    (recorded before the target was persisted) falls back to the current config
+    so old parked jobs still reconcile (#84, defect 3)."""
+    remote = job.pending_deploy_remote or config.git.remote
+    refs = unpack_push_refs(job.pending_deploy_refs) or list(config.git.push_refs)
+    return remote, tuple(refs)
+
+
 # --------------------------------------------------------------------------- #
 # engine — reconcile / recover / unlock
 # --------------------------------------------------------------------------- #
@@ -322,20 +337,31 @@ def reconcile(
         jobs = list_jobs_fifo(conn, status="needs_reconcile")
         if not jobs:
             return ReconcileOutcome(jobs=[], applied=apply, summary=_summarize([]), exit_code=0)
-        if not _fetch(config):
-            raise RemoteUnreachable(
-                f"cannot reach remote '{config.git.remote}' to reconcile"
+        # One interrupted push parks jobs bound for a single target, but two
+        # separate crashes can park jobs bound for different remotes/refs. Ask
+        # each group's own recorded target for truth — the refs the push actually
+        # used, not whatever the current config now says (#84, defect 3).
+        groups: dict[tuple[str, tuple[str, ...]], list[Job]] = {}
+        for job in jobs:
+            groups.setdefault(_job_push_target(config, job), []).append(job)
+        decisions_by_id: dict[int, JobDecision] = {}
+        for (remote, refs), group in groups.items():
+            effective = replace(
+                config, git=replace(config.git, remote=remote, push_refs=refs)
             )
-        ref_shas: dict[str, str] = {}
-        for ref in config.git.push_refs:
-            _localize_ref(config, ref)  # bring the tip local so ancestry resolves
-            reachable, remote_sha = _ls_remote(config, ref)
-            if not reachable:
-                raise RemoteUnreachable(
-                    f"cannot ls-remote '{ref}' on '{config.git.remote}'"
-                )
-            ref_shas[ref] = remote_sha
-        decisions = [_classify(config, job, ref_shas) for job in jobs]
+            if not _fetch(effective):
+                raise RemoteUnreachable(f"cannot reach remote '{remote}' to reconcile")
+            ref_shas: dict[str, str] = {}
+            for ref in refs:
+                _localize_ref(effective, ref)  # bring the tip local so ancestry resolves
+                reachable, remote_sha = _ls_remote(effective, ref)
+                if not reachable:
+                    raise RemoteUnreachable(f"cannot ls-remote '{ref}' on '{remote}'")
+                ref_shas[ref] = remote_sha
+            for job in group:
+                decisions_by_id[job.id] = _classify(effective, job, ref_shas)
+        # Emit in the original FIFO order, independent of target grouping.
+        decisions = [decisions_by_id[job.id] for job in jobs]
         if apply:
             for decision in decisions:
                 _apply(config, conn, decision)
