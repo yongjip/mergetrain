@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a balanced PR-first comparison guide: explain why committed agent
+  branches are integration units rather than automatic review units, document
+  mergetrain's throughput and combined-validation advantages alongside its
+  local-runner/review/governance costs, and describe direct, one-PR, split, and
+  validation-only hybrid workflows.
+
 - Preserve remote truth across push and cancellation races (#94). Any
   non-policy push failure after the durable marker is written now parks the
   job in `needs_reconcile` instead of terminal `failed`, because the remote may
