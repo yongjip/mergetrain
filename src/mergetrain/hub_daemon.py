@@ -81,9 +81,9 @@ def hub_sweep(
         # Belt-and-braces for the `--no-daemon` guarantee: if ANY roster entry
         # naming the same physical directory is excluded (case aliases on
         # macOS, symlinks, historical duplicates), this entry is excluded too.
-        return any(
-            other != raw and same_repo(other, raw) for other in excluded_paths
-        )
+        # Do not skip equal strings: an exact hand-edited duplicate can carry a
+        # conflicting daemon flag just as an aliased duplicate can.
+        return any(same_repo(other, raw) for other in excluded_paths)
 
     def tick_one(item: dict[str, Any]) -> dict[str, Any]:
         raw = str(item.get("path") or "")
