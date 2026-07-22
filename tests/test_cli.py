@@ -242,6 +242,31 @@ class CliTests(unittest.TestCase):
             # The two mandated reads (status/doctor) are now symmetric.
             self.assertIn("next_action", payload)
 
+    def test_status_rejects_non_positive_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            for limit in ("0", "-5"):
+                with self.subTest(limit=limit):
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        code = main(
+                            [
+                                "--repo",
+                                str(repo),
+                                "status",
+                                "--limit",
+                                limit,
+                                "--json",
+                            ]
+                        )
+                    payload = json.loads(out.getvalue())
+                    self.assertEqual(code, 1)
+                    self.assertEqual(payload["error"]["code"], "queue_error")
+                    self.assertIn(
+                        "--limit must be 1 or greater", payload["error"]["message"]
+                    )
+
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

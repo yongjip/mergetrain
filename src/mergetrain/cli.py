@@ -347,6 +347,8 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    if args.limit < 1:
+        raise QueueError("--limit must be 1 or greater")
     config = config_from_args(args)
     conn = connect(config.state.db)
     try:
