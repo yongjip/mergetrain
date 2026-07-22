@@ -39,6 +39,7 @@ from mergetrain.store import (
     refresh_runner_lock,
     release_runner_lock,
     terminal_branch_candidates,
+    unpack_push_refs,
     validated_train_summaries,
 )
 
@@ -100,6 +101,31 @@ class StoreTests(unittest.TestCase):
         mark_job(conn, b.id, status="failed", expected_claim_token=token)
         self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
+
+    def test_pending_marker_records_the_push_target(self) -> None:
+        # #84 defect 3: the marker persists the remote + normalized push-ref set
+        # so a later reconcile evaluates the target the push actually used.
+        conn = self.make_conn()
+        token = "runner:9"
+        job = enqueue_job(conn, task="a", branch="a")
+        conn.execute(
+            "UPDATE deploy_queue SET status='in_progress', claim_token=? WHERE id=?",
+            (token, job.id),
+        )
+        conn.commit()
+        record_pending_push(
+            conn,
+            job_ids=[job.id],
+            deploy_sha="deadbeef",
+            claim_token=token,
+            remote="upstream",
+            push_refs=("main", "refs/deploy/prod"),
+        )
+        marked = get_job(conn, job.id)
+        self.assertEqual(marked.pending_deploy_remote, "upstream")
+        self.assertEqual(
+            unpack_push_refs(marked.pending_deploy_refs), ["main", "refs/deploy/prod"]
+        )
 
     def test_state_dir_self_ignores(self) -> None:
         # First DB open drops a .gitignore of '*' inside the dedicated state

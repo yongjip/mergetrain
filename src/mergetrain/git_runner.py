@@ -939,7 +939,12 @@ class GitRunner:
         touch the remote without first recording intent (0.3.0 Phase 1).
         """
         record_pending_push(
-            conn, job_ids=job_ids, deploy_sha=deploy_sha, claim_token=lease_token
+            conn,
+            job_ids=job_ids,
+            deploy_sha=deploy_sha,
+            claim_token=lease_token,
+            remote=self.config.git.remote,
+            push_refs=self.config.git.push_refs,
         )
         for job_id in job_ids:
             run_command(
