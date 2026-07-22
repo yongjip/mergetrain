@@ -302,7 +302,10 @@ def git_current_branch(path: str | Path) -> str:
 
 
 def git_worktree_clean(path: str | Path) -> bool:
-    return git_output_or_empty(["status", "--porcelain"], cwd=path) == ""
+    # Cleanliness is a deploy safety control, not a best-effort diagnostic.
+    # A failed status command is unknown state and must propagate instead of
+    # collapsing to the same empty string as a clean worktree.
+    return git_output(["status", "--porcelain"], cwd=path) == ""
 
 
 # Remote responses that mean "you are not allowed to update this ref" rather
@@ -889,7 +892,13 @@ class GitRunner:
         sha was recorded. Gates are verification, not mutation — the exact sha
         that passed gates must be the sha that is pushed and recorded (#1)."""
         head = git_rev_parse(worktree, "HEAD")
-        clean = git_worktree_clean(worktree)
+        try:
+            clean = git_worktree_clean(worktree)
+        except CommandFailed as exc:
+            raise MergeBlocked(
+                "could not verify that the gated worktree is clean; blocking "
+                "because unknown worktree state must never be pushed"
+            ) from exc
         if head != deploy_sha or not clean:
             detail = "left the worktree dirty" if not clean else f"moved HEAD to {head[:12]}"
             raise MergeBlocked(
