@@ -103,6 +103,49 @@ class HubSnapshotTests(unittest.TestCase):
 
 
 class HubSnapshotCacheTests(unittest.TestCase):
+    def test_warm_cache_preserves_upgrade_next_action(self) -> None:
+        from mergetrain.hub import HubSnapshotCache
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "future")
+            seed_queue(live)
+            (live / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+            add_repo(live, registry)
+            cache = HubSnapshotCache()
+
+            cold = build_hub_snapshot(load_registry(registry), cache=cache)
+            warm = build_hub_snapshot(load_registry(registry), cache=cache)
+
+            self.assertEqual(
+                cold["repos"][0]["snapshot"]["next_action"],
+                "upgrade_mergetrain",
+            )
+            self.assertEqual(
+                warm["repos"][0]["snapshot"]["next_action"],
+                "upgrade_mergetrain",
+            )
+
+    def test_served_snapshot_cannot_mutate_cached_nested_state(self) -> None:
+        from mergetrain.hub import HubSnapshotCache
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+            cache = HubSnapshotCache()
+
+            first = build_hub_snapshot(load_registry(registry), cache=cache)
+            first["repos"][0]["snapshot"]["counts"]["queued"] = 999
+            second = build_hub_snapshot(load_registry(registry), cache=cache)
+
+            self.assertEqual(second["repos"][0]["snapshot"]["counts"]["queued"], 1)
+
     def test_cache_skips_rebuilds_until_queue_or_config_changes(self) -> None:
         from unittest import mock
 

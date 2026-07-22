@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import threading
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -92,11 +93,15 @@ class HubSnapshotCache:
     def get(self, raw_path: str, config_fp: tuple[Any, ...]) -> dict[str, Any] | None:
         with self._lock:
             cached = self._entries.get(raw_path)
-        if cached is None or cached["config_fp"] != config_fp:
+            if cached is None or cached["config_fp"] != config_fp:
+                return None
+            db = str(cached["db"])
+            db_fp = cached["db_fp"]
+            config_version = int(cached["config_version"])
+            entry = deepcopy(cached["entry"])
+        if _db_fingerprint(db) != db_fp:
             return None
-        if _db_fingerprint(cached["db"]) != cached["db_fp"]:
-            return None
-        return _refresh_volatile(dict(cached["entry"]))
+        return _refresh_volatile(entry, config_version=config_version)
 
     def put(
         self,
@@ -105,6 +110,7 @@ class HubSnapshotCache:
         config_fp: tuple[Any, ...],
         db: str,
         db_fp: tuple[Any, ...],
+        config_version: int,
         entry: dict[str, Any],
     ) -> None:
         with self._lock:
@@ -112,7 +118,8 @@ class HubSnapshotCache:
                 "config_fp": config_fp,
                 "db": db,
                 "db_fp": db_fp,
-                "entry": dict(entry),
+                "config_version": config_version,
+                "entry": deepcopy(entry),
             }
 
     def retain(self, live_paths: set[str]) -> None:
@@ -128,7 +135,9 @@ class HubSnapshotCache:
                 del self._entries[stale]
 
 
-def _refresh_volatile(entry: dict[str, Any]) -> dict[str, Any]:
+def _refresh_volatile(
+    entry: dict[str, Any], *, config_version: int
+) -> dict[str, Any]:
     """Recompute process/clock-dependent fields on a cache hit.
 
     Lock liveness (an ``os.kill`` probe) and ``next_action`` (compares the
@@ -146,7 +155,9 @@ def _refresh_volatile(entry: dict[str, Any]) -> dict[str, Any]:
         # re-probe liveness.
         pid_suffix = str(lock["owner"]).rsplit(":", 1)[-1]
         lock["liveness"] = owner_liveness(f"local:{pid_suffix}")
-    snapshot["next_action"] = next_action(snapshot)
+    snapshot["next_action"] = next_action(
+        snapshot, config_version=config_version
+    )
     return entry
 
 
@@ -204,6 +215,7 @@ def _repo_entry(raw_path: str, cache: HubSnapshotCache | None) -> dict[str, Any]
                 config_fp=config_fp,
                 db=str(db),
                 db_fp=db_fp,
+                config_version=config.config_version,
                 entry=entry,
             )
         return entry
