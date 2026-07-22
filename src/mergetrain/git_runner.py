@@ -794,6 +794,17 @@ class GitRunner:
                         pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
                         timeout_seconds=self.config.queue.command_timeout_seconds,
                     )
+                    # Fingerprint adapters are arbitrary shell commands. Keep
+                    # their untracked caches/artifacts from poisoning either
+                    # the exact-reuse restore or the reassembly fallback.
+                    run_command(
+                        ["git", "clean", "-fdx"],
+                        cwd=worktree,
+                        log=log,
+                        pulse=pulse,
+                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                        timeout_seconds=self.config.queue.command_timeout_seconds,
+                    )
 
         eligible = not reasons
         action = "reuse" if eligible else self.config.deploy.reuse.on_mismatch

@@ -290,6 +290,32 @@ class GitRunnerTests(unittest.TestCase):
             )
             self.assertIn("environment or toolchain fingerprint changed", fallback.detail)
 
+    def test_fingerprint_side_effect_does_not_dirty_reused_deploy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(
+                root,
+                reuse_enabled=True,
+                fingerprint_command=(
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "Path('fingerprint.tmp').write_text('side effect'); "
+                    "print('tool-a')\""
+                ),
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                validated = runner.process_batch(conn, [job], deploy=False)[0]
+                deployed = runner.process_batch(conn, [validated], deploy=True)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(deployed.status, "deployed")
+            self.assertEqual(deployed.reused_validation_sha, validated.validation_sha)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+
     def test_push_failure_is_not_reported_as_deployed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
