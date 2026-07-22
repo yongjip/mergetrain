@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .errors import redact_secrets
+
 ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated", "needs_reconcile")
 TERMINAL_STATUSES = ("deployed", "canceled")
 ALL_STATUSES = ACTIVE_STATUSES + TERMINAL_STATUSES
@@ -93,6 +95,7 @@ class Job:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["auto_deploy"] = bool(self.auto_deploy)
+        data["note"] = redact_secrets(self.note)
         data.pop("claim_token", None)
         # Internal recovery bookkeeping — the durable push target is not part of
         # the public job surface (keeps the contract fingerprint stable).

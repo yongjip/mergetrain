@@ -86,6 +86,7 @@ def next_action(payload: dict[str, Any]) -> str:
 
 def _public_job(job: Job) -> dict[str, Any]:
     data = job.to_dict()
+    worktree_path = str(data.get("worktree_path") or "")
     # The dashboard needs queue identity and reasons, not local filesystem paths.
     data.pop("worktree_path", None)
     data.pop("log_path", None)
@@ -95,7 +96,10 @@ def _public_job(job: Job) -> dict[str, Any]:
     # guard — or by any future non-CommandFailed path — is never served in clear.
     note = data.get("note")
     if note:
-        data["note"] = redact_secrets(note)
+        public_note = redact_secrets(note)
+        if worktree_path:
+            public_note = public_note.replace(worktree_path, "[worktree]")
+        data["note"] = public_note
     return data
 
 

@@ -166,6 +166,11 @@ def _parse_scalar(value: str) -> Any:
         return []
     if value == "{}":
         return {}
+    if value.startswith(("[", "{")):
+        raise ConfigError(
+            "flow-style YAML collections are unsupported without PyYAML; "
+            "use block-style lists or mappings"
+        )
     if lowered in {"true", "false"}:
         return lowered == "true"
     if lowered in {"null", "none", "~"}:
@@ -440,7 +445,7 @@ def _positive_int(value: Any, *, key: str) -> int:
         raise ConfigError(f"{key} must be a positive integer")
     if isinstance(value, int):
         parsed = value
-    elif isinstance(value, str) and value.strip().isdigit():
+    elif isinstance(value, str) and value.strip().isdecimal():
         parsed = int(value.strip())
     else:
         raise ConfigError(f"{key} must be a positive integer")
@@ -455,8 +460,13 @@ def _boolean(value: Any, *, key: str) -> bool:
     return value
 
 
-def _resolve_path(repo: Path, value: Any, default: str) -> Path:
-    raw = str(value or default)
+def _resolve_path(repo: Path, value: Any, default: str, *, key: str) -> Path:
+    if value is None:
+        raw = default
+    elif isinstance(value, (str, Path)):
+        raw = str(value)
+    else:
+        raise ConfigError(f"{key} must be a path string")
     path = Path(raw).expanduser()
     if not path.is_absolute():
         path = repo / path
@@ -482,14 +492,28 @@ def load_config(
     config_version, data = _read_config_version(data)
 
     project_data = _as_mapping(data, "project")
-    project_name = str(project_data.get("name") or repo_path.name or "example-app")
+    project_name_value = project_data.get("name")
+    project_name = (
+        (repo_path.name or "example-app")
+        if project_name_value is None
+        else _nonempty_string(project_name_value, key="project.name")
+    )
 
     state_data = _as_mapping(data, "state")
     db_value = db_override if db_override is not None else state_data.get("db")
     state = StateConfig(
-        db=_resolve_path(repo_path, db_value, ".mergetrain/queue.sqlite"),
-        logs=_resolve_path(repo_path, state_data.get("logs"), ".mergetrain/logs"),
-        worktree_root=_resolve_path(repo_path, state_data.get("worktree_root"), ".mergetrain/worktrees"),
+        db=_resolve_path(
+            repo_path, db_value, ".mergetrain/queue.sqlite", key="state.db"
+        ),
+        logs=_resolve_path(
+            repo_path, state_data.get("logs"), ".mergetrain/logs", key="state.logs"
+        ),
+        worktree_root=_resolve_path(
+            repo_path,
+            state_data.get("worktree_root"),
+            ".mergetrain/worktrees",
+            key="state.worktree_root",
+        ),
     )
 
     git_data = _as_mapping(data, "git")

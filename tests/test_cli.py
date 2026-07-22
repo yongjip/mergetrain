@@ -145,6 +145,32 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["runtime"], runtime)
 
+    def test_doctor_json_redacts_remote_url_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://x-access-token:fixture-secret@example.com/repo.git",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            payload["git"]["remote_url"],
+            "https://x-access-token:[redacted]@example.com/repo.git",
+        )
+        self.assertNotIn("fixture-secret", out.getvalue())
+
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
         # ok stays true (the run executed); the outcome is graded in `result`.
         failed = _results_payload([Job(id=1, task="a", branch="a", status="failed")])
@@ -160,6 +186,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(partial["result"], "partial")
         self.assertEqual(partial["counts"], {"blocked": 1, "validated": 1})
         self.assertNotIn("claim_token", partial["jobs"][0])
+
+    def test_job_json_redacts_legacy_url_credentials(self) -> None:
+        job = Job(
+            id=1,
+            task="a",
+            branch="a",
+            status="failed",
+            note="push https://user:fixture-secret@example.com/repo.git failed",
+        )
+        payload = _results_payload([job])
+        self.assertNotIn("fixture-secret", json.dumps(payload))
+        self.assertIn("https://user:[redacted]@example.com", payload["jobs"][0]["note"])
 
     def test_json_mode_emits_structured_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -45,7 +45,7 @@ def rmtree(path: Path | str) -> None:
 
 from mergetrain.cli import main
 from mergetrain.config import load_config
-from mergetrain.errors import CommandFailed, redact_secrets
+from mergetrain.errors import AmbiguousPush, CommandFailed, PushRejected, redact_secrets
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.snapshot import next_action
 from mergetrain.store import (
@@ -496,6 +496,16 @@ class GitRunnerTests(unittest.TestCase):
         self.assertNotIn("sk-secret-xyz", rendered)
         self.assertIn("--token [redacted]", rendered)
         self.assertIn("boom", rendered)
+        url = "https://x-access-token:fixture-secret@example.com/repo.git"
+        self.assertEqual(
+            redact_secrets(url),
+            "https://x-access-token:[redacted]@example.com/repo.git",
+        )
+        for error_type in (AmbiguousPush, PushRejected):
+            with self.subTest(error_type=error_type.__name__):
+                rendered = str(error_type(f"push stderr: {url}"))
+                self.assertNotIn("fixture-secret", rendered)
+                self.assertIn("[redacted]", rendered)
 
     def test_failed_gate_note_redacts_inline_command_secret(self) -> None:
         with tempfile.TemporaryDirectory() as td:

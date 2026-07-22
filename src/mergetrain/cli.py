@@ -29,6 +29,7 @@ from .errors import (
     MergetrainError,
     QueueError,
     RemoteUnreachable,
+    redact_secrets,
 )
 from .git_runner import (
     GitRunner,
@@ -630,7 +631,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         validated_trains = validated_train_summaries(conn)
     finally:
         conn.close()
-    remote_url = git_remote_url(config.repo, config.git.remote)
+    remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
     payload: dict[str, Any] = {
         "ok": True,
         "version": __version__,
