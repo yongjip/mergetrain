@@ -507,6 +507,32 @@ class GitRunnerTests(unittest.TestCase):
                 self.assertNotIn("fixture-secret", rendered)
                 self.assertIn("[redacted]", rendered)
 
+    def test_redact_secrets_covers_token_userinfo_and_quoted_values(self) -> None:
+        cases = {
+            "https://ghp_fixture-secret@example.com/org/repo.git": (
+                "https://[redacted]@example.com/org/repo.git"
+            ),
+            'mysql --password="p@ss word" -h db': (
+                "mysql --password=[redacted] -h db"
+            ),
+            "deploy --auth-token 'fixture secret' --access-token=second": (
+                "deploy --auth-token [redacted] --access-token=[redacted]"
+            ),
+            'DB_PASS="fixture secret" PGPASS=second GITHUB_PAT=third': (
+                "DB_PASS=[redacted] PGPASS=[redacted] GITHUB_PAT=[redacted]"
+            ),
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                redacted = redact_secrets(raw)
+                self.assertEqual(redacted, expected)
+                self.assertEqual(redact_secrets(redacted), expected)
+
+        self.assertEqual(
+            redact_secrets("MODE=release https://example.com/org/repo.git"),
+            "MODE=release https://example.com/org/repo.git",
+        )
+
     def test_failed_gate_note_redacts_inline_command_secret(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
