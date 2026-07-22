@@ -590,8 +590,22 @@ def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:
     marker-bearing orphans. A deploy targets the same push refs, so every deploy
     entrypoint (``run-batch``, ``run-next``, and the daemon) must refuse while
     this is non-zero (0.3.0 Phase 2, decision Q4)."""
-    data = counts(conn)
-    return data.get("needs_reconcile", 0) + data.get("in_progress_with_marker", 0)
+    active = active_runner_lock(conn)
+    active_token = active.token if active is not None else ""
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS n
+        FROM deploy_queue
+        WHERE status = 'needs_reconcile'
+           OR (
+                status = 'in_progress'
+                AND pending_deploy_sha != ''
+                AND (? = '' OR claim_token != ?)
+           )
+        """,
+        (active_token, active_token),
+    ).fetchone()
+    return int(row["n"])
 
 
 def has_queued_auto(conn: sqlite3.Connection) -> bool:
@@ -606,6 +620,29 @@ def get_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> Runne
     if row is None:
         return None
     return RunnerLock.from_row(row, liveness=owner_liveness(str(row["owner"])))
+
+
+def active_runner_lock(
+    conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME
+) -> RunnerLock | None:
+    """Return the lock that still fences work as an active runner.
+
+    A live local process remains authoritative even if its wall-clock lease is
+    stale while it owns in-progress work. An owner whose liveness cannot be
+    proved remains authoritative only until its heartbeat-derived expiry. This
+    mirrors the lock-acquisition policy and prevents a healthy marker-bearing
+    push from being misreported as crash evidence.
+    """
+
+    lock = get_lock(conn, name=name)
+    if lock is None or not lock.token:
+        return None
+    expired = _parse_utc(lock.expires_at) <= datetime.now(timezone.utc)
+    if lock.liveness == Liveness.ALIVE:
+        return lock
+    if lock.liveness == Liveness.UNKNOWN and not expired:
+        return lock
+    return None
 
 
 def _delete_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> None:
