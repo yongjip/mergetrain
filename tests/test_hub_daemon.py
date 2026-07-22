@@ -200,6 +200,33 @@ class HubSweepTests(unittest.TestCase):
             )
             self.assertEqual(log, [])
 
+    def test_sweep_excludes_exact_duplicate_of_opted_out_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root, "duplicate")
+            seed_jobs(repo, auto=True)
+            resolved = str(repo.resolve())
+            save_registry(
+                [
+                    {"path": resolved, "added_at": "t", "daemon": False},
+                    {"path": resolved, "added_at": "t", "daemon": True},
+                ],
+                registry,
+            )
+
+            log: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(log),
+            )
+
+            self.assertEqual(
+                [item["outcome"] for item in outcomes], ["excluded", "excluded"]
+            )
+            self.assertEqual(log, [])
+
     def test_serial_concurrency_never_overlaps_repo_runs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
