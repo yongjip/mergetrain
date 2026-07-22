@@ -117,6 +117,131 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(outcome, "reconcile_paused")
 
 
+class OrphanSelfHealTests(unittest.TestCase):
+    def test_batch_exception_requeues_the_claim_and_next_tick_is_not_idle(self) -> None:
+        # #84 defect 1: a batch that raises used to release only the lock, so
+        # the claimed row stranded in_progress and every later tick reported
+        # idle. The exception must requeue the claim; the next tick reprocesses.
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(conn, task="a", branch="a", auto_deploy=True)
+            conn.close()
+
+            calls = {"n": 0}
+
+            def blow_up(conn, jobs):  # type: ignore[no-untyped-def]
+                calls["n"] += 1
+                raise RuntimeError("batch blew up")
+
+            with self.assertRaises(RuntimeError):
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=blow_up,
+                    owner="daemon:1",
+                    say=lambda _: None,
+                )
+            self.assertEqual(calls["n"], 1)
+            conn = connect(db)
+            try:
+                # Requeued (a recoverable state), not stranded in_progress, and
+                # the lease was dropped.
+                self.assertEqual(get_job(conn, job.id).status, "queued")
+                self.assertEqual(conn.execute("SELECT * FROM locks").fetchall(), [])
+            finally:
+                conn.close()
+
+            seen: list[int] = []
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: seen.extend(j.id for j in jobs),
+                owner="daemon:1",
+                say=lambda _: None,
+            )
+            self.assertEqual(seen, [job.id])
+            self.assertNotEqual(outcome, "idle")
+
+    def test_idle_tick_self_heals_a_dead_runners_stranded_claim(self) -> None:
+        # A hard crash (no finally ran): a dead runner left a job in_progress
+        # with its claim token and an expired lock, no queued work, and no
+        # marker. Nothing else flags it, so the tick itself must recover it.
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(conn, task="a", branch="a", auto_deploy=True)
+            conn.execute(
+                """
+                INSERT INTO locks (name, owner, acquired_at, heartbeat_at, expires_at, token)
+                VALUES ('runner', 'ghost:999999', '2000-01-01T00:00:00Z',
+                        '2000-01-01T00:00:00Z', '2000-01-01T00:00:01Z', 'dead-token')
+                """
+            )
+            conn.execute(
+                "UPDATE deploy_queue SET status='in_progress', claim_token='dead-token' WHERE id = ?",
+                (job.id,),
+            )
+            conn.commit()
+            conn.close()
+
+            seen: list[int] = []
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: seen.extend(j.id for j in jobs),
+                owner="daemon:1",
+                say=lambda _: None,
+            )
+            # The orphan is recovered and reprocessed in the same tick — never
+            # left idle — and the dead runner's lock is gone.
+            self.assertEqual(seen, [job.id])
+            self.assertNotEqual(outcome, "idle")
+            conn = connect(db)
+            try:
+                self.assertEqual(conn.execute("SELECT * FROM locks").fetchall(), [])
+            finally:
+                conn.close()
+
+    def test_idle_tick_leaves_a_live_runners_in_progress_job_untouched(self) -> None:
+        # The heal must never reap a live runner's train: a job in_progress
+        # under a live lease (this process's own pid) with no queued work stays
+        # in_progress, and the tick reports idle without disturbing it.
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(conn, task="a", branch="a", auto_deploy=True)
+            live = f"host:{os.getpid()}"
+            conn.execute(
+                """
+                INSERT INTO locks (name, owner, acquired_at, heartbeat_at, expires_at, token)
+                VALUES ('runner', ?, '2999-01-01T00:00:00Z',
+                        '2999-01-01T00:00:00Z', '2999-01-01T00:00:01Z', 'live-token')
+                """,
+                (live,),
+            )
+            conn.execute(
+                "UPDATE deploy_queue SET status='in_progress', claim_token='live-token' WHERE id = ?",
+                (job.id,),
+            )
+            conn.commit()
+            conn.close()
+
+            seen: list[int] = []
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: seen.extend(j.id for j in jobs),
+                owner="daemon:1",
+                say=lambda _: None,
+            )
+            self.assertEqual(seen, [])
+            self.assertEqual(outcome, "idle")
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, job.id).status, "in_progress")
+                locks = conn.execute("SELECT owner FROM locks").fetchall()
+            finally:
+                conn.close()
+            self.assertEqual([row["owner"] for row in locks], [live])
+
+
 class ReadOnlyTickTests(unittest.TestCase):
     def test_non_sovereign_tick_never_creates_or_migrates(self) -> None:
         with tempfile.TemporaryDirectory() as td:

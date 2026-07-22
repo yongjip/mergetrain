@@ -563,6 +563,12 @@ def _in_progress_count(conn: sqlite3.Connection) -> int:
     return int(row["n"])
 
 
+def has_in_progress(conn: sqlite3.Connection) -> bool:
+    """Read-only probe: are any jobs currently ``in_progress``? A daemon tick
+    uses this to notice stranded orphans before deciding it is idle (#84.1)."""
+    return _in_progress_count(conn) > 0
+
+
 def _requeue_orphans(conn: sqlite3.Connection) -> None:
     """Recover a previous runner's orphaned ``in_progress`` jobs, marker-aware.
 
@@ -765,6 +771,49 @@ def force_clear_lock_and_split(
             _delete_lock(conn, name=name)
         _requeue_orphans(conn)
         return True
+
+
+def recover_orphans(
+    conn: sqlite3.Connection,
+    *,
+    owner: str | None = None,
+    ttl_minutes: int = 30,
+    name: str = RUNNER_LOCK_NAME,
+) -> int:
+    """Heal a dead or absent runner's stranded ``in_progress`` jobs without
+    claiming new work.
+
+    A daemon tick that finds ``in_progress`` jobs but nothing queued must still
+    recover a runner that crashed — or a batch that raised after its lease was
+    already released — so the claimed rows reach ``queued`` / ``needs_reconcile``
+    / ``canceled`` instead of stranding forever while every later tick reports
+    idle (#84, defect 1).
+
+    Reuses the claim path's liveness logic: acquiring the lock steals it only
+    from a dead or absent owner and runs the marker-aware split as a side
+    effect, while a live owner raises ``LockHeld`` and nothing is touched. The
+    lock taken to drive the split is dropped again — this recovers, it does not
+    claim. Returns how many jobs the split moved out of ``in_progress`` (0 when
+    there is nothing to recover, or a live runner holds the lock)."""
+    owner = owner or default_owner()
+    with immediate(conn):
+        before = _in_progress_count(conn)
+        if before == 0:
+            return 0
+        try:
+            lock = _acquire_runner_lock(
+                conn, owner=owner, ttl_minutes=ttl_minutes, name=name
+            )
+        except LockHeld:
+            # A live (or expired-but-not-dead) owner still holds the lock; its
+            # in-progress train is not ours to reap. Leave it for its own
+            # runner or an operator `unlock`.
+            return 0
+        conn.execute(
+            "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+            (name, owner, lock.token),
+        )
+        return before - _in_progress_count(conn)
 
 
 def claim_next_job(

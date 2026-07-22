@@ -14,7 +14,10 @@ from .store import (
     connect,
     default_owner,
     deploy_reconcile_pending,
+    force_clear_lock_and_split,
+    has_in_progress,
     has_queued_auto,
+    recover_orphans,
     release_runner_lock,
 )
 
@@ -75,6 +78,10 @@ def daemon_tick(
 
     lease_token = ""
     probe_failed: QueueError | None = None
+    # Skipped-probe default (sovereign first run): assume there may be orphans
+    # so the writable path runs the heal, which is a cheap no-op when there are
+    # none.
+    has_orphans = True
     try:
         probe = connect(db_path, read_only=True)
     except QueueError as exc:
@@ -97,13 +104,25 @@ def daemon_tick(
                 )
                 return "reconcile_paused"
             has_work = has_queued_auto(probe)
+            # A dead runner (or a batch that raised) can leave a job stranded
+            # in_progress with no queued work to trigger a heal. Notice it here
+            # so the writable path recovers it instead of reporting idle forever
+            # (#84, defect 1).
+            has_orphans = has_in_progress(probe)
         finally:
             probe.close()
-        if not has_work:
+        if not has_work and not has_orphans:
             say("mergetrain daemon tick: no auto-approved queued jobs")
             return "idle"
     conn = connect(db_path)
     try:
+        if has_orphans:
+            # Recover a dead/absent runner's stranded claims before deciding
+            # what to do: clean orphans return to `queued`, marker-bearing ones
+            # park as `needs_reconcile`, cancels finalize; a live runner's train
+            # is never disturbed. This is what stops a claimed-then-orphaned job
+            # from stranding while every later tick reports idle (#84, defect 1).
+            recover_orphans(conn, owner=owner, ttl_minutes=lock_ttl_minutes)
         pending = deploy_reconcile_pending(conn)
         if pending:
             say(
@@ -121,7 +140,17 @@ def daemon_tick(
             if jobs:
                 lease_token = jobs[0].claim_token
                 say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
-                results = process_batch(conn, jobs)
+                try:
+                    results = process_batch(conn, jobs)
+                except Exception:
+                    # The batch escaped without finalizing every claimed job.
+                    # Atomically drop our lease and run the marker-aware split
+                    # so the claimed rows reach queued/needs_reconcile/canceled
+                    # instead of stranding in_progress; then re-raise so the loop
+                    # surfaces the underlying error (#84, defect 1).
+                    force_clear_lock_and_split(conn, owner=owner, token=lease_token)
+                    lease_token = ""
+                    raise
                 return _grade_batch(results, len(jobs), say)
             if deploy_reconcile_pending(conn):
                 # The claim itself parked orphans as needs_reconcile and
