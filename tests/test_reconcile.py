@@ -31,6 +31,7 @@ from mergetrain.git_runner import GitRunner, pending_ref_name
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
     acquire_runner_lock,
+    cancel_job,
     claim_deploy_batch,
     claim_next_job,
     connect,
@@ -418,6 +419,59 @@ class CrashRecoveryTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.push_status, "succeeded")
             self.assertEqual(after, before)  # reconcile never re-pushed
+            self.assertEqual(_pending_refs(repo), "")
+
+    def test_ambiguous_push_with_late_cancel_preserves_remote_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                ttl = config.queue.lock_ttl_minutes
+                claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
+                runner = GitRunner(config)
+                real_push = runner.push_verified_head
+
+                def land_cancel_then_drop(*, worktree, deploy_sha="", log=None, pulse=None):
+                    real_push(
+                        worktree=worktree,
+                        deploy_sha=deploy_sha,
+                        log=log,
+                        pulse=pulse,
+                    )
+                    control = connect(config.state.db)
+                    try:
+                        cancel_job(control, job.id)
+                    finally:
+                        control.close()
+                    raise CommandFailed(
+                        ["git", "push"],
+                        1,
+                        stderr="fatal: the remote end hung up unexpectedly",
+                    )
+
+                with patch.object(
+                    runner, "push_verified_head", side_effect=land_cancel_then_drop
+                ):
+                    runner.process_batch(
+                        conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
+                    )
+                parked = get_job(conn, job.id)
+                self.assertEqual(parked.status, "needs_reconcile")
+                self.assertNotEqual(parked.pending_deploy_sha, "")
+                self.assertTrue(parked.cancel_requested_at)
+                self.assertNotEqual(_pending_refs(repo), "")
+
+                outcome = reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(outcome.exit_code, 0)
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(healed.push_status, "succeeded")
+            self.assertIn("late cancel ignored", healed.note)
             self.assertEqual(_pending_refs(repo), "")
 
     def test_reconcile_uses_the_marker_target_not_the_current_config(self) -> None:

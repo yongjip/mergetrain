@@ -35,6 +35,7 @@ from .reuse import (
     validation_age_minutes,
 )
 from .store import (
+    clear_rejected_push,
     get_job,
     mark_job,
     record_pending_push,
@@ -963,6 +964,19 @@ class GitRunner:
         for job_id in job_ids:
             delete_pending_ref(self.repo, job_id, log=log)
 
+    def _clear_rejected_push(
+        self,
+        conn,
+        *,
+        job_ids: list[int],
+        lease_token: str,
+        log: IO[str] | None = None,
+    ) -> None:
+        """Drop DB and pin markers after a push rejection proves no ref landed."""
+
+        clear_rejected_push(conn, job_ids=job_ids, claim_token=lease_token)
+        self._clear_pending_refs(job_ids, log=log)
+
     def _prepare_worktree(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None
     ) -> None:
@@ -1066,7 +1080,7 @@ class GitRunner:
                 post_push_verify_status = "failed"
             else:
                 post_push_verify_status = verify_status
-            return self._finish_job(
+            result = self._finish_job(
                 conn,
                 job.id,
                 lease_token=lease_token,
@@ -1077,6 +1091,9 @@ class GitRunner:
                 push_status=push_status,
                 verify_status=post_push_verify_status,
             )
+            if result.status == "deployed":
+                self._clear_pending_refs([job.id], log=log)
+            return result
 
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain job {job.id}: {job.task}\n")
@@ -1203,6 +1220,12 @@ class GitRunner:
                             detail=f"exit_code={exc.returncode}",
                         )
                         if is_push_rejection(exc.stderr):
+                            self._clear_rejected_push(
+                                conn,
+                                job_ids=[job.id],
+                                lease_token=lease_token,
+                                log=log,
+                            )
                             raise PushRejected(
                                 "remote rejected the push (protected branch, required "
                                 "pull request, or ref permission) — a repo-config issue, "
@@ -1683,21 +1706,25 @@ class GitRunner:
                 post_push_verify_status = "failed"
             else:
                 post_push_verify_status = verify_status
+            deployed_ids: list[int] = []
             for item in affected_jobs:
                 current = get_job(conn, item.id)
                 if current.status == "in_progress" and current.claim_token == lease_token:
-                    results.append(
-                        finish(
-                            item,
-                            status=status,
-                            deploy_sha=deploy_sha,
-                            log_path=str(log_path),
-                            note=note,
-                            push_status=push_status,
-                            verify_status=post_push_verify_status,
-                            reused_validation_sha=reused_validation_sha,
-                        )
+                    result = finish(
+                        item,
+                        status=status,
+                        deploy_sha=deploy_sha,
+                        log_path=str(log_path),
+                        note=note,
+                        push_status=push_status,
+                        verify_status=post_push_verify_status,
+                        reused_validation_sha=reused_validation_sha,
                     )
+                    results.append(result)
+                    if result.status == "deployed":
+                        deployed_ids.append(item.id)
+            if deployed_ids:
+                self._clear_pending_refs(deployed_ids, log=log)
             return results
 
         with log_path.open("w", encoding="utf-8") as log:
@@ -2050,6 +2077,12 @@ class GitRunner:
                             detail=f"exit_code={exc.returncode}",
                         )
                         if is_push_rejection(exc.stderr):
+                            self._clear_rejected_push(
+                                conn,
+                                job_ids=[job.id for job in merged_jobs],
+                                lease_token=lease_token,
+                                log=log,
+                            )
                             raise PushRejected(
                                 "remote rejected the push (protected branch, required "
                                 "pull request, or ref permission) — a repo-config issue, "
