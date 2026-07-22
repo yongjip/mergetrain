@@ -45,17 +45,22 @@ enqueue a fresh job.
 
 ## Push failure
 
-A push that fails for a transient/infrastructure reason marks the job `failed`
-with `push_status=failed` and `verify_status=not_run`; `mergetrain inspect
-<job-id> --json` reports the stable `push_failed` category.
-
 A push the remote **rejects for policy/permission** — a protected branch, a
 required pull request, a denied ref update, a declined pre-receive hook — is a
 repo-configuration issue, not bad code. mergetrain parks that job **`blocked`**
 (not `failed`, which would tell an agent to rebase and re-enqueue) with
 `push_status=failed`, and `inspect` reports the `push_rejected` category. Fix
 the branch protection / push permission (or point `git.push_refs` at a branch
-you can push, and land through your forge's own flow), then re-deploy.
+you can push, and land through your forge's own flow), then re-deploy. Because
+this rejection proves that no ref update landed, mergetrain clears the durable
+push marker and its pending pin.
+
+Any other push error after the write-ahead marker is durable — including a
+transport drop or timeout — has an **ambiguous remote outcome**. The remote may
+have accepted the atomic update before the client lost the response, so the job
+is parked `needs_reconcile` with `push_status=failed` and its marker/pin intact;
+it is never made terminal `failed` and blindly pushed again. All deploy paths
+pause until `mergetrain reconcile --apply` checks the remote and resolves it.
 
 Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 
@@ -123,9 +128,13 @@ If an orphan already had `cancel_requested_at`, recovery finalizes it as
 
 Cancellation is cooperative until atomic push begins. `cancel` records a
 request for the whole active claim; the runner heartbeat terminates the process
-group and records `canceled`. Once push begins, the runner continues to renew
-ownership without interrupting the irreversible remote update and records the
-actual deployed result.
+group and records `canceled`. Once the durable marker exists, cancellation no
+longer overrides remote truth: the runner continues to renew ownership without
+interrupting the irreversible remote update. If the push outcome is ambiguous,
+the job remains `needs_reconcile` with the cancellation request preserved;
+reconcile records `deployed` when every ref landed or `canceled` when none did.
+Calling `cancel` directly on a `needs_reconcile` job is refused until that
+remote check is applied.
 
 ## Command timeout
 
@@ -169,4 +178,6 @@ recovery then reads the marker as *what we intended* and asks the remote for
 *what actually happened*. A train is marked deployed only when the push ref
 really carries its SHA; a landed train is never pushed twice; and when the
 remote is unreachable, reconcile refuses to guess and exits with its own code
-instead.
+instead. A successful deploy or an unambiguous policy rejection clears both the
+DB marker and pending pin; an ambiguous outcome and a reconcile conflict retain
+them as recovery evidence.

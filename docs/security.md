@@ -13,6 +13,14 @@
 - Logs may contain command output. Gate and verify commands should avoid printing
   secrets.
 
+Structured surfaces apply one best-effort redaction policy to expected error
+messages, persisted job notes, status JSON, `doctor` remote URLs, and dashboard
+snapshots. It masks sensitive `NAME=value` assignments, sensitive command
+options such as `--token`, and passwords in URL userinfo
+(`https://user:password@host`); the username is retained for diagnostics. This
+is defense in depth, not a general secret scanner. Raw command logs can still
+contain anything the subprocess printed, so the rules above remain mandatory.
+
 ## CLI observability boundaries
 
 `events --jsonl` and `inspect --json` expose structured phases, bounded/redacted
@@ -56,8 +64,8 @@ endpoints. Its payload omits lease tokens, local worktree paths, log paths, and
 the username portion of the runner owner. Status notes and Git branch names are
 still visible to anyone who can reach the server. Active gate events also include
 the configured command template; obvious token/password assignments and flags are
-masked, but command authors should never embed credentials directly in gate
-configuration.
+masked by the same policy described above, but command authors should never
+embed credentials directly in gate configuration.
 
 Runtime provenance from `version` and `doctor` is intentionally CLI-only because
 it can include an imported package path, editable source path, and source-control

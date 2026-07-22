@@ -11,7 +11,7 @@ Rules:
 - Use `--auto` only after explicit unattended-deploy approval.
 - Use `run-batch --validate-only` for validation and `run-batch --deploy` for deployment.
 - After validation, deploy the exact `validated_trains` entry shown by status; do not assume newer queued jobs are included.
-- After a crash, resolve `needs_reconcile` jobs with `reconcile`/`recover` against the remote; deploy is refused while any job needs reconciling.
+- After a crash or ambiguous push response, resolve `needs_reconcile` jobs with `reconcile`/`recover` against the remote; deploy is refused while any job needs reconciling.
 - Across several repos, read the whole machine with `mergetrain hub status --json`; the hub is read-only and owns no queue state.
 - A job `blocked` with a non-empty `conflict_with` is a semantic conflict: it passes gates alone but fails combined with the listed job IDs. Rebase onto the integration branch with the partner's change merged, fix the joint breakage, and enqueue a fresh job.
 - Every `--json` payload and the `stream_start` JSONL frame carry `contract_version` (currently 1; separate from the product version). `ok` means only "the command ran without an error envelope" — branch outcomes on `result`, repo health on `health`, failures on `error.code`. Ignore unknown keys; dispatch JSONL on `type`. See `docs/contract.md`.

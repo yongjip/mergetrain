@@ -52,9 +52,10 @@ a separate action.
 `next_action` is advisory. It does not replace user approval for deploy,
 unattended auto deploy, or destructive cleanup.
 
-After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the
-remote (never re-pushing a landed deploy); `run-batch --deploy` is refused while
-any job is `needs_reconcile`. See the [failure modes guide](failure-modes.md).
+After a crash or ambiguous push response, `reconcile`/`recover` resolve
+`needs_reconcile` jobs against the remote (never re-pushing a landed deploy);
+`run-batch --deploy` is refused while any job is `needs_reconcile`. See the
+[failure modes guide](failure-modes.md).
 
 When `validated_trains` is non-empty, approval applies to the displayed train
 identity and member HEADs. A later deploy must not silently include newer

@@ -128,7 +128,8 @@ and log paths and reduces the owner identity to `local:<pid>`.
 
 ## Job lifecycle
 
-**Active states:** `queued`, `in_progress`, `blocked`, `failed`, `validated`.
+**Active states:** `queued`, `in_progress`, `blocked`, `failed`, `validated`,
+`needs_reconcile`.
 **Terminal states:** `deployed`, `canceled`.
 
 | State | Meaning |
@@ -138,6 +139,7 @@ and log paths and reduces the owner identity to `local:<pid>`.
 | `blocked` | Merge conflict or a policy situation needing human action. |
 | `failed` | Command failure or unexpected error. |
 | `validated` | A `--validate-only` run succeeded; the exact train remains deployable and nothing was pushed. |
+| `needs_reconcile` | A durable push marker exists but the remote outcome is not yet proven; deploy remains paused until reconcile resolves it. |
 | `deployed` | A `--deploy` push succeeded; inspect `verify_status` for the independent post-push outcome. |
 | `canceled` | Cancelled by a user. |
 

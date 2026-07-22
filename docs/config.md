@@ -6,6 +6,17 @@ Default config file name:
 .mergetrain.yaml
 ```
 
+## Parser support
+
+PyYAML is optional. Without it, mergetrain uses a dependency-free YAML subset
+parser for the block-style shape emitted by `mergetrain init`. Empty `[]` and
+`{}` values are supported, but non-empty flow-style collections such as
+`[main, release]` or `{name: tests}` require PyYAML; the fallback rejects them
+with `config_error` instead of guessing. Invalid mapping, list, string,
+boolean, path, and positive-integer values also fail closed during config
+validation. See [installation](install.md#optional-yaml-dependency) to enable
+full YAML parsing.
+
 ## `version`
 
 ```yaml
