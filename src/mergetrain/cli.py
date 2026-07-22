@@ -217,10 +217,15 @@ def cmd_init(args: argparse.Namespace) -> int:
         repo / "AGENTS.mergetrain.md": render_agent_contract(),
         repo / "CLAUDE.mergetrain.md": render_agent_contract(),
     }
+    if not args.force:
+        conflicts = [path for path in files if path.exists()]
+        if conflicts:
+            rendered = ", ".join(str(path) for path in conflicts)
+            raise ConfigError(
+                "refusing to overwrite existing file without --force: " + rendered
+            )
     written: list[str] = []
     for path, content in files.items():
-        if path.exists() and not args.force:
-            raise ConfigError(f"refusing to overwrite existing file without --force: {path}")
         path.write_text(content, encoding="utf-8")
         written.append(str(path))
     # The scaffold is meant to be committed; the .mergetrain/ runtime dir
