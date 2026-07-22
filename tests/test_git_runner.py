@@ -45,7 +45,13 @@ def rmtree(path: Path | str) -> None:
 
 from mergetrain.cli import main
 from mergetrain.config import load_config
-from mergetrain.errors import AmbiguousPush, CommandFailed, PushRejected, redact_secrets
+from mergetrain.errors import (
+    AmbiguousPush,
+    CommandFailed,
+    MergeBlocked,
+    PushRejected,
+    redact_secrets,
+)
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
 from mergetrain.snapshot import next_action
 from mergetrain.store import (
@@ -366,6 +372,26 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(pending, "")  # never reached the push / marker
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
+
+    def test_gate_tripwire_blocks_when_worktree_status_cannot_be_read(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            runner = GitRunner(load_config(repo=repo))
+            deploy_sha = git(repo, "rev-parse", "HEAD")
+            status_error = CommandFailed(
+                ["git", "status", "--porcelain"],
+                128,
+                stderr="fatal: index file is unreadable",
+                cwd=str(repo),
+            )
+
+            with patch(
+                "mergetrain.git_runner.git_worktree_clean",
+                side_effect=status_error,
+            ):
+                with self.assertRaisesRegex(MergeBlocked, "could not verify.*clean"):
+                    runner._assert_tree_unchanged_by_gates(repo, deploy_sha)
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
 
