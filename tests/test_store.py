@@ -378,6 +378,93 @@ class StoreTests(unittest.TestCase):
         requeued = mark_job(conn, job.id, status="queued")
         self.assertEqual(requeued.conflict_with, "")
 
+    def test_mark_job_requeue_clears_previous_attempt_identity(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="a", auto_deploy=True)
+        conn.execute(
+            """
+            UPDATE deploy_queue
+            SET status = 'needs_reconcile', started_at = '2026-01-01T00:00:00Z',
+                deploy_sha = 'deploy', push_status = 'pending', verify_status = 'failed',
+                train_id = 'train-1', train_size = 2,
+                validated_at = '2026-01-01T00:00:01Z',
+                validation_base_sha = 'base', validation_sha = 'validation',
+                validated_head_sha = 'head', validation_tree_sha = 'tree',
+                validation_gate_policy_sha = 'gates',
+                validation_environment_sha = 'environment',
+                validation_train_sha = 'train', reused_validation_sha = 'reuse'
+            WHERE id = ?
+            """,
+            (job.id,),
+        )
+        conn.commit()
+
+        requeued = mark_job(
+            conn, job.id, status="queued", expected_status="needs_reconcile"
+        )
+
+        self.assertEqual(requeued.status, "queued")
+        self.assertEqual(requeued.started_at, "")
+        self.assertEqual(requeued.deploy_sha, "")
+        self.assertEqual(requeued.push_status, "not_run")
+        self.assertEqual(requeued.verify_status, "not_run")
+        self.assertEqual(requeued.train_id, "")
+        self.assertEqual(requeued.train_size, 0)
+        self.assertEqual(requeued.validated_at, "")
+        self.assertEqual(requeued.validation_base_sha, "")
+        self.assertEqual(requeued.validation_sha, "")
+        self.assertEqual(requeued.validated_head_sha, "")
+        self.assertEqual(requeued.validation_tree_sha, "")
+        self.assertEqual(requeued.validation_gate_policy_sha, "")
+        self.assertEqual(requeued.validation_environment_sha, "")
+        self.assertEqual(requeued.validation_train_sha, "")
+        self.assertEqual(requeued.reused_validation_sha, "")
+
+    def test_orphan_requeue_clears_validated_train_identity(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="a", auto_deploy=True)
+        conn.execute(
+            """
+            UPDATE deploy_queue
+            SET status = 'in_progress', claim_token = 'dead-token',
+                started_at = '2026-01-01T00:00:00Z',
+                train_id = 'train-1', train_size = 1,
+                validated_at = '2026-01-01T00:00:01Z',
+                validation_sha = 'validation', validated_head_sha = 'head'
+            WHERE id = ?
+            """,
+            (job.id,),
+        )
+        conn.commit()
+
+        lock = acquire_runner_lock(conn, owner=default_owner())
+        requeued = get_job(conn, job.id)
+
+        self.assertEqual(requeued.status, "queued")
+        self.assertEqual(requeued.train_id, "")
+        self.assertEqual(requeued.train_size, 0)
+        self.assertEqual(requeued.validated_at, "")
+        self.assertEqual(requeued.validation_sha, "")
+        self.assertEqual(requeued.validated_head_sha, "")
+
+        release_runner_lock(
+            conn, owner=default_owner(), token=lock.token
+        )
+        fresh = enqueue_job(
+            conn, task="fresh", branch="fresh", auto_deploy=True
+        )
+        claimed = claim_all_queued(
+            conn, owner=default_owner(), auto_only=True
+        )
+        self.addCleanup(
+            release_runner_lock,
+            conn,
+            owner=default_owner(),
+            token=claimed[0].claim_token,
+        )
+        self.assertEqual([item.id for item in claimed], [job.id, fresh.id])
+        self.assertEqual([item.train_id for item in claimed], ["", ""])
+
     def test_legacy_database_migrates_validation_train_columns(self) -> None:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -939,10 +1026,10 @@ class ConcurrencyAndTransitionTests(unittest.TestCase):
         self.assertEqual(reopened.status, "queued")
         # ...unconditionally WIPES the free-form note (a real footgun)...
         self.assertEqual(reopened.note, "")
-        # ...but COALESCE-protected artifacts SURVIVE, so a reopened job still
-        # carries stale terminal shas.
-        self.assertEqual(reopened.deploy_sha, "d" * 40)
-        self.assertEqual(reopened.validated_head_sha, "h" * 40)
+        # ...and queued is treated as a fresh attempt, so stale outcome and
+        # validation identity cannot leak into a later batch.
+        self.assertEqual(reopened.deploy_sha, "")
+        self.assertEqual(reopened.validated_head_sha, "")
 
         # By contrast the higher-level entrypoint DOES guard terminal state.
         mark_job(conn, job.id, status="deployed")

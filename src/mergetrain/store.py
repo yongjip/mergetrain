@@ -695,7 +695,13 @@ def _requeue_orphans(conn: sqlite3.Connection) -> None:
         """
         UPDATE deploy_queue
         SET status = 'queued', started_at = '', claim_token = '', cancel_requested_at = '',
-            note = 're-queued by mergetrain (previous runner gone)'
+            note = 're-queued by mergetrain (previous runner gone)',
+            deploy_sha = '', push_status = 'not_run', verify_status = 'not_run',
+            train_id = '', train_size = 0, validated_at = '',
+            validation_base_sha = '', validation_sha = '', validated_head_sha = '',
+            validation_tree_sha = '', validation_gate_policy_sha = '',
+            validation_environment_sha = '', validation_train_sha = '',
+            reused_validation_sha = ''
         WHERE status = 'in_progress'
         """
     )
@@ -1511,6 +1517,25 @@ def mark_job(
                     "(raced by a concurrent transition)"
                 )
             raise LostLease(f"job {job_id} is no longer owned by this runner")
+        if status == "queued":
+            # Queued means a fresh attempt. Validation identity and outcome
+            # fields belong to the previous attempt and must not leak into a
+            # later batch, where a stale train_id can collateral-block new work.
+            conn.execute(
+                """
+                UPDATE deploy_queue
+                SET started_at = '', deploy_sha = '',
+                    push_status = 'not_run', verify_status = 'not_run',
+                    train_id = '', train_size = 0, validated_at = '',
+                    validation_base_sha = '', validation_sha = '',
+                    validated_head_sha = '', validation_tree_sha = '',
+                    validation_gate_policy_sha = '',
+                    validation_environment_sha = '', validation_train_sha = '',
+                    reused_validation_sha = ''
+                WHERE id = ?
+                """,
+                (job_id,),
+            )
     return get_job(conn, job_id)
 
 
