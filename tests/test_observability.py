@@ -119,6 +119,11 @@ class StreamTerminalTests(unittest.TestCase):
 
     def test_terminal_reasons(self) -> None:
         cases = [
+            ([job(status="needs_reconcile")], "needs_reconcile", 1),
+            ([job(id=1, branch="a", status="needs_reconcile"),
+              job(id=2, branch="b", status="validated")], "needs_reconcile", 1),
+            ([job(id=1, branch="a", status="needs_reconcile"),
+              job(id=2, branch="b", status="failed")], "needs_reconcile", 1),
             ([job(status="failed")], "failure", 1),
             ([job(status="blocked")], "failure", 1),
             ([job(status="canceled")], "canceled", 1),
