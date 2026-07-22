@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from .config import MergetrainConfig
+from .config import CONFIG_VERSION, MergetrainConfig
 from .errors import redact_secrets
 from .models import Job, RunnerLock
 from .store import (
@@ -41,7 +41,11 @@ def _lock_expired(lock: dict[str, Any] | None) -> bool:
     return _parse_utc(str(lock["expires_at"])) <= datetime.now(timezone.utc)
 
 
-def next_action(payload: dict[str, Any]) -> str:
+def next_action(
+    payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
+) -> str:
+    if config_version > CONFIG_VERSION:
+        return "upgrade_mergetrain"
     lock = payload.get("lock")
     count_data = payload.get("counts") or {}
     liveness = lock.get("liveness") if lock else None
@@ -305,7 +309,9 @@ def build_dashboard_snapshot(
             gate_names,
             config.terminology.noun,
         )
-        payload["next_action"] = next_action(payload)
+        payload["next_action"] = next_action(
+            payload, config_version=config.config_version
+        )
         return payload
     finally:
         conn.close()

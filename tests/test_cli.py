@@ -18,7 +18,7 @@ from mergetrain.cli import (
     main,
     normalize_global_options,
 )
-from mergetrain.config import render_default_config
+from mergetrain.config import load_config, render_default_config
 from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
@@ -26,6 +26,7 @@ from mergetrain.store import (
     claim_next_job,
     connect,
     enqueue_job,
+    get_job,
     mark_job,
     record_run_event,
     release_runner_lock,
@@ -319,6 +320,49 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["next_action"], "upgrade_mergetrain")
             self.assertEqual(payload["config_version_supported"], 1)
+
+            # status is the other mandated agent read and must give the same
+            # fail-closed direction as doctor.
+            code, payload = run(["status"])
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["next_action"], "upgrade_mergetrain")
+
+    def test_dismiss_all_reaches_blocked_jobs_older_than_display_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                old = enqueue_job(conn, task="old", branch="feature/old")
+                mark_job(conn, old.id, status="blocked", note="old failure")
+                conn.executemany(
+                    "INSERT INTO deploy_queue "
+                    "(task, branch, status, requested_at) VALUES (?, ?, 'canceled', ?)",
+                    [
+                        (f"done-{index}", f"feature/done-{index}", "2026-01-01T00:00:00Z")
+                        for index in range(1000)
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "dismiss", "--all", "--json"])
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual([item["id"] for item in payload["dismissed"]], [old.id])
+            conn = connect(config.state.db)
+            try:
+                self.assertEqual(get_job(conn, old.id).status, "canceled")
+            finally:
+                conn.close()
 
     def test_missing_config_fails_deploy_path_but_permits_recovery(self) -> None:
         # #84 defect 6: with no .mergetrain.yaml, deploy-capable paths must not

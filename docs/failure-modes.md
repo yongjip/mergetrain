@@ -73,7 +73,7 @@ general mismatch policy is rerun.
 Verify hooks run after push. The remote ref is already updated, so jobs remain
 `deployed` with `push_status=succeeded` and `verify_status=failed` instead of
 being rewritten as a pre-push failure. Run JSON returns `result=warning` and
-`ok=false`, human output names both outcomes, the final completion event remains
+`ok=true`, human output names both outcomes, the final completion event remains
 a warning, and the dashboard keeps the job in its Attention history.
 
 ## Stale lock

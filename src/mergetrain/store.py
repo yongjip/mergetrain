@@ -465,6 +465,16 @@ def list_jobs(conn: sqlite3.Connection, *, limit: int = 50) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
+def list_dismissable_jobs(conn: sqlite3.Connection) -> list[Job]:
+    """Return every blocked/failed job, without the status display cap."""
+
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue WHERE status IN ('blocked', 'failed') "
+        "ORDER BY id ASC"
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
+
+
 def list_verify_unknown_jobs(conn: sqlite3.Connection) -> list[Job]:
     """Deployed jobs whose post-push verify never resolved (crash recovery)."""
     rows = conn.execute(
@@ -587,6 +597,22 @@ def get_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> Runne
 
 def _delete_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> None:
     conn.execute("DELETE FROM locks WHERE name = ?", (name,))
+
+
+def _release_lock_token(
+    conn: sqlite3.Connection,
+    *,
+    owner: str,
+    token: str,
+    name: str = RUNNER_LOCK_NAME,
+) -> bool:
+    """Release one exact lease inside the caller's current transaction."""
+
+    cur = conn.execute(
+        "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
+        (name, owner, token),
+    )
+    return cur.rowcount > 0
 
 
 def live_worktree_path(
@@ -776,9 +802,8 @@ def release_runner_lock(
         if owner is None:
             cur = conn.execute("DELETE FROM locks WHERE name = ?", (name,))
         elif token is not None:
-            cur = conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (name, owner, token),
+            return _release_lock_token(
+                conn, owner=owner, token=token, name=name
             )
         else:
             raise LostLease("runner lease token is required for owner-guarded release")
@@ -808,11 +833,9 @@ def force_clear_lock_and_split(
     """
     with immediate(conn):
         if owner is not None and token is not None:
-            cur = conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (name, owner, token),
-            )
-            if cur.rowcount == 0:
+            if not _release_lock_token(
+                conn, owner=owner, token=token, name=name
+            ):
                 return False
         else:
             _delete_lock(conn, name=name)
@@ -856,10 +879,7 @@ def recover_orphans(
             # in-progress train is not ours to reap. Leave it for its own
             # runner or an operator `unlock`.
             return 0
-        conn.execute(
-            "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-            (name, owner, lock.token),
-        )
+        _release_lock_token(conn, owner=owner, token=lock.token, name=name)
         return before - _in_progress_count(conn)
 
 
@@ -876,10 +896,7 @@ def claim_next_job(
             "SELECT * FROM deploy_queue WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
         ).fetchone()
         if row is None:
-            conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (RUNNER_LOCK_NAME, owner, lock.token),
-            )
+            _release_lock_token(conn, owner=owner, token=lock.token)
             return None
         job_id = int(row["id"])
         conn.execute(
@@ -918,10 +935,7 @@ def claim_all_queued(
             # observe that inside the same claim transaction — checking only
             # before the claim leaves a TOCTOU window where the daemon pushes
             # over a pending reconcile.
-            conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (RUNNER_LOCK_NAME, owner, lock.token),
-            )
+            _release_lock_token(conn, owner=owner, token=lock.token)
             return []
         if auto_only:
             rows = conn.execute(
@@ -933,10 +947,7 @@ def claim_all_queued(
             ).fetchall()
         job_ids = [int(row["id"]) for row in rows]
         if not job_ids:
-            conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (RUNNER_LOCK_NAME, owner, lock.token),
-            )
+            _release_lock_token(conn, owner=owner, token=lock.token)
             return []
         placeholders = ",".join("?" for _ in job_ids)
         conn.execute(
@@ -1086,10 +1097,7 @@ def claim_deploy_batch(
         # pre-check — and refuse fail-closed if a reconcile is now pending
         # (mirrors claim_all_queued's guard, closing the claim/reconcile TOCTOU).
         if deploy_reconcile_pending(conn):
-            conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (RUNNER_LOCK_NAME, owner, lock.token),
-            )
+            _release_lock_token(conn, owner=owner, token=lock.token)
             return []
         selected, validated_jobs = select_validated_train(conn, train_id=train_id)
         if selected is not None:
@@ -1097,10 +1105,7 @@ def claim_deploy_batch(
         else:
             jobs = list_jobs_fifo(conn, status="queued")
         if not jobs:
-            conn.execute(
-                "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-                (RUNNER_LOCK_NAME, owner, lock.token),
-            )
+            _release_lock_token(conn, owner=owner, token=lock.token)
             return []
         job_ids = [job.id for job in jobs]
         expected_status = "validated" if selected is not None else "queued"

@@ -68,6 +68,7 @@ from .store import (
     enqueue_job,
     get_job,
     get_lock,
+    list_dismissable_jobs,
     list_jobs,
     list_run_events,
     list_train_jobs,
@@ -366,7 +367,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                     "counts": counts(conn),
                     "validated_trains": validated_trains,
                     "gc": {"worktree_candidates": []},
-                }
+                },
+                config_version=config.config_version,
             ),
         }
     finally:
@@ -671,12 +673,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # the repo-health verdict moves to its own field so a healthy-but-unconfigured
     # repo no longer reads as ok:false.
     payload["health"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
-    payload["next_action"] = _doctor_next_action(payload)
+    payload["next_action"] = _doctor_next_action(
+        payload, config_version=config.config_version
+    )
     if config.config_version > CONFIG_VERSION:
         # A too-new config: the deploy path is fail-closed, but doctor still
         # runs and points the operator at the fix (recovery stays permitted).
         payload["config_version_supported"] = CONFIG_VERSION
-        payload["next_action"] = "upgrade_mergetrain"
     if args.json:
         dump_json(payload)
     else:
@@ -1217,10 +1220,7 @@ def cmd_dismiss(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         if args.all:
-            targets = [
-                job for job in list_jobs(conn, limit=1000)
-                if job.status in {"blocked", "failed"}
-            ]
+            targets = list_dismissable_jobs(conn)
         else:
             if args.job_id is None:
                 raise QueueError("dismiss requires a job id or --all")
