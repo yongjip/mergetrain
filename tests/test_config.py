@@ -15,6 +15,49 @@ from mergetrain.errors import ConfigError
 
 
 class ConfigTests(unittest.TestCase):
+    def test_notify_webhook_is_validated_and_redacted_from_public_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """project:
+  name: demo
+notify:
+  webhook_url: https://notify.example.invalid/hook/super-secret
+  transitions:
+    - landed
+    - needs_reconcile
+  timeout_seconds: 4
+""",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+
+            self.assertEqual(
+                config.notify.webhook_url,
+                "https://notify.example.invalid/hook/super-secret",
+            )
+            self.assertEqual(config.notify.transitions, ("landed", "needs_reconcile"))
+            public = config.to_dict()["notify"]
+            self.assertTrue(public["webhook_configured"])
+            self.assertNotIn("webhook_url", public)
+            self.assertNotIn("super-secret", str(public))
+
+    def test_notify_rejects_non_http_url_and_unknown_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                "notify:\n  webhook_url: file:///tmp/hook\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ConfigError, "http or https"):
+                load_config(repo=repo)
+            config_path.write_text(
+                "notify:\n  transitions:\n    - landed\n    - surprise\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, r"notify.transitions\[1\]"):
+                load_config(repo=repo)
+
     def test_simple_yaml_shape_loads_without_required_dependency(self) -> None:
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")

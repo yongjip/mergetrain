@@ -30,6 +30,7 @@ from .registry import load_registry, same_repo
 from .store import default_owner
 
 ProcessBatchFactory = Callable[[MergetrainConfig, str], ProcessBatch]
+NotifierResolver = Callable[[str, str], Notifier | None]
 
 
 def _default_factory(keep_worktree: bool) -> ProcessBatchFactory:
@@ -153,6 +154,7 @@ def hub_daemon_loop(
     install_signal_handlers: bool = True,
     process_batch_factory: ProcessBatchFactory | None = None,
     notifier: Notifier | None = None,
+    notifier_resolver: NotifierResolver | None = None,
 ) -> list[dict[str, Any]]:
     """Sweep every registered repo on an interval until stopped.
 
@@ -177,7 +179,9 @@ def hub_daemon_loop(
     # Persisted across invocations so --once/cron mode does not re-notify
     # every persistent error on every run, and a restart resumes dedup.
     last_outcomes: dict[str, str] = (
-        load_notify_state(registry) if notifier is not None else {}
+        load_notify_state(registry)
+        if notifier is not None or notifier_resolver is not None
+        else {}
     )
     try:
         while True:
@@ -207,7 +211,7 @@ def hub_daemon_loop(
                         f"mergetrain hub sweep: {len(outcomes)} repo(s), "
                         f"{processed} with work processed"
                     )
-                    if notifier is not None:
+                    if notifier is not None or notifier_resolver is not None:
                         messages, settled = sweep_notifications(outcomes, last_outcomes)
                         # Commit no-delivery outcomes immediately; a message's
                         # key is committed only once its notifier succeeds, so
@@ -216,7 +220,13 @@ def hub_daemon_loop(
                         next_state = dict(settled)
                         for path, key, title, message in messages:
                             try:
-                                notifier(title, message)
+                                delivery = (
+                                    notifier_resolver(path, key)
+                                    if notifier_resolver is not None
+                                    else notifier
+                                )
+                                if delivery is not None:
+                                    delivery(title, message)
                                 next_state[path] = key
                             except Exception as exc:  # noqa: BLE001 - never break a sweep
                                 say(f"mergetrain hub notify error: {exc}")

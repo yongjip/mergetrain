@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add cross-platform, provider-neutral JSON webhooks and single-repo
+  `daemon --notify` parity (#167). Notification chains retain the macOS desktop
+  backend, filter/deduplicate configured transitions across restarts, and never
+  expose credential-bearing webhook URLs in public config or delivery errors.
+
 - Add `mergetrain retry <job-id>` (#166) to atomically replace a fixed
   blocked/failed outcome with a fresh SHA-pinned job while preserving task,
   note, worktree, and auto eligibility. Optional `--rebase` fetches and rebases

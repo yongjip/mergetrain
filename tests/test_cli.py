@@ -35,6 +35,26 @@ from mergetrain.store import (
 
 
 class CliTests(unittest.TestCase):
+    def test_single_repo_daemon_accepts_notify_and_builds_configured_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "project:\n  name: demo\nnotify:\n  webhook_url: https://example.invalid/hook\n",
+                encoding="utf-8",
+            )
+            with patch("mergetrain.cli.daemon_loop") as loop:
+                code = main(
+                    ["--repo", str(repo), "daemon", "--once", "--notify"]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIsNotNone(loop.call_args.kwargs["notifier"])
+            self.assertEqual(loop.call_args.kwargs["notification_name"], "demo")
+            self.assertEqual(
+                loop.call_args.kwargs["notification_transitions"],
+                ("landed", "blocked", "needs_reconcile", "daemon_paused"),
+            )
+
     def test_results_payload_exposes_exact_reused_validation_sha(self) -> None:
         sha = "a" * 40
         job = Job(

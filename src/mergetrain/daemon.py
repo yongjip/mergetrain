@@ -5,10 +5,18 @@ from __future__ import annotations
 import signal
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .errors import QueueError
 from .models import Job
+from .notify import (
+    Notifier,
+    load_notify_state_file,
+    repo_notify_state_path,
+    save_notify_state_file,
+    sweep_notifications,
+)
 from .store import (
     claim_all_queued,
     connect,
@@ -185,6 +193,11 @@ def daemon_loop(
     once: bool = False,
     say: Say = print,
     install_signal_handlers: bool = True,
+    notifier: Notifier | None = None,
+    notification_name: str = "",
+    notification_path: str = "",
+    notification_transitions: tuple[str, ...] | None = None,
+    notification_state_path: str | Path | None = None,
 ) -> None:
     """Run an auto-only mergetrain daemon loop.
 
@@ -195,6 +208,10 @@ def daemon_loop(
 
     actual_owner = owner or default_owner()
     stop = threading.Event()
+    state_path = Path(notification_state_path) if notification_state_path else repo_notify_state_path(db_path)
+    last_outcomes = load_notify_state_file(state_path) if notifier is not None else {}
+    outcome_path = notification_path or db_path
+    outcome_name = notification_name or Path(outcome_path).name
 
     def request_stop(signum, frame):  # type: ignore[no-untyped-def]
         stop.set()
@@ -215,7 +232,7 @@ def daemon_loop(
             if stop.is_set():
                 break
             try:
-                daemon_tick(
+                outcome = daemon_tick(
                     db_path=db_path,
                     process_batch=process_batch,
                     owner=actual_owner,
@@ -227,6 +244,32 @@ def daemon_loop(
                 )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")
+                outcome = "error"
+                error = str(exc) or exc.__class__.__name__
+            else:
+                error = ""
+            if notifier is not None:
+                messages, settled = sweep_notifications(
+                    [
+                        {
+                            "path": outcome_path,
+                            "name": outcome_name,
+                            "outcome": outcome,
+                            "error": error,
+                        }
+                    ],
+                    last_outcomes,
+                    transitions=notification_transitions,
+                )
+                next_state = dict(settled)
+                for path, key, title, message in messages:
+                    try:
+                        notifier(title, message)
+                        next_state[path] = key
+                    except Exception as exc:  # noqa: BLE001 - never break a daemon tick
+                        say(f"mergetrain notify error: {exc}")
+                last_outcomes = next_state
+                save_notify_state_file(last_outcomes, state_path)
             if once or stop.is_set():
                 break
             stop.wait(max(1, int(interval_seconds)))

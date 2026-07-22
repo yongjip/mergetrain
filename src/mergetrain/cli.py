@@ -1092,6 +1092,8 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:
+    from .notify import configured_notifier, repo_notify_state_path
+
     config = config_from_args(args)
     # An unattended daemon is the most dangerous place to ship against a config
     # this binary cannot honor (too new) or against guessed defaults (absent).
@@ -1119,6 +1121,11 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         lock_ttl_minutes=config.queue.lock_ttl_minutes,
         once=args.once,
         say=print,
+        notifier=configured_notifier(config.notify) if args.notify else None,
+        notification_name=config.project.name,
+        notification_path=str(config.repo),
+        notification_transitions=config.notify.transitions,
+        notification_state_path=repo_notify_state_path(config.state.db),
     )
     return 0
 
@@ -1521,11 +1528,23 @@ def cmd_hub_status(args: argparse.Namespace) -> int:
 
 def cmd_hub_daemon(args: argparse.Namespace) -> int:
     from .hub_daemon import hub_daemon_loop
-    from .notify import system_notifier
+    from .notify import configured_notifier, notification_transition, system_notifier
 
     if args.concurrency < 1:
         raise QueueError("hub daemon --concurrency must be at least 1")
     say = (lambda message: None) if args.json and args.once else print
+
+    def resolve_notifier(path: str, key: str):
+        try:
+            config = load_config(repo=path)
+        except Exception:
+            # A broken config is itself worth surfacing; its webhook cannot be
+            # trusted, but the existing desktop path remains available.
+            return system_notifier
+        if notification_transition(key) not in config.notify.transitions:
+            return None
+        return configured_notifier(config.notify)
+
     outcomes = hub_daemon_loop(
         registry=args.registry,
         interval_seconds=args.interval,
@@ -1533,7 +1552,7 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
         keep_worktree=args.keep_worktree,
         once=args.once,
         say=say,
-        notifier=system_notifier if args.notify else None,
+        notifier_resolver=resolve_notifier if args.notify else None,
     )
     if args.json and args.once:
         dump_json({"ok": True, "outcomes": outcomes})
@@ -1713,6 +1732,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_daemon = subparsers.add_parser("daemon", help="Run foreground auto-only daemon")
     p_daemon.add_argument("--interval", type=int)
     p_daemon.add_argument("--once", action="store_true")
+    p_daemon.add_argument(
+        "--notify",
+        action="store_true",
+        help="Notify configured transitions via webhook and desktop backends",
+    )
     p_daemon.add_argument("--keep-worktree", action="store_true")
     p_daemon.set_defaults(func=cmd_daemon)
 
@@ -1855,7 +1879,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_hub_daemon.add_argument(
         "--notify",
         action="store_true",
-        help="Desktop notification on landed/blocked/reconcile transitions (macOS osascript; silent no-op elsewhere)",
+        help="Notify each repo's configured transitions via webhook and desktop backends",
     )
     p_hub_daemon.add_argument("--keep-worktree", action="store_true")
     p_hub_daemon.add_argument("--registry", help="Override the hub registry file path")

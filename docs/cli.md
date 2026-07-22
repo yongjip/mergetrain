@@ -34,7 +34,7 @@ mergetrain doctor [--json]
 mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
 mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
-mergetrain daemon [--interval SECONDS] [--once] [--keep-worktree]
+mergetrain daemon [--interval SECONDS] [--once] [--notify] [--keep-worktree]
 mergetrain gc [--json] [--apply] [--delete-branches]
 mergetrain reconcile [--apply] [--json]
 mergetrain recover [--gc] [--json]
@@ -314,9 +314,9 @@ Run the auto-only daemon across every registered repo:
 mergetrain hub daemon [--interval 15] [--concurrency 1] [--notify] [--once [--json]] [--keep-worktree] [--registry PATH]
 ```
 
-`--notify` posts macOS desktop notifications on landed trains, sweep errors,
-and reconcile pauses (transition-deduplicated); it is a silent no-op off
-macOS.
+`--notify` sends each repo's configured transitions through its optional JSON
+webhook and the macOS desktop backend. Without a webhook it remains a silent
+desktop no-op off macOS. Delivery is persisted and transition-deduplicated.
 
 Each repo is processed by the same per-tick policy as the single-repo
 `daemon` — only `--auto` jobs, behind that repo's own lock, gates, and
@@ -384,9 +384,13 @@ Run an unattended, auto-only worker.
 ```sh
 mergetrain daemon --interval 15
 mergetrain daemon --once
+mergetrain daemon --once --notify
 ```
 
-Claims only jobs enqueued with `--auto`. See the [daemon guide](daemon.md).
+Claims only jobs enqueued with `--auto`. `--notify` uses the same persisted
+landed/blocked/reconcile/error transition dedup as `hub daemon`, plus the
+provider-neutral webhook configured under `notify`. See the
+[daemon guide](daemon.md) and [config reference](config.md#notify).
 
 ## `gc`
 

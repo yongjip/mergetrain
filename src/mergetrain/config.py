@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .errors import ConfigError
 
@@ -24,6 +25,7 @@ DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 # permissive) — not done inside load_config, so a version mismatch after a
 # rollback can never lock an operator out of crash recovery.
 CONFIG_VERSION = 1
+NOTIFY_TRANSITIONS = ("landed", "blocked", "needs_reconcile", "daemon_paused")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,22 @@ class AgentConfig:
     require_clean_worktree_before_enqueue: bool = True
     require_explicit_auto_approval: bool = True
     prefer_json_status: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class NotifyConfig:
+    webhook_url: str = ""
+    transitions: tuple[str, ...] = NOTIFY_TRANSITIONS
+    timeout_seconds: int = 10
+
+    def to_dict(self) -> dict[str, Any]:
+        # A webhook commonly embeds a secret token. Observation surfaces only
+        # reveal whether one is configured, never the credential-bearing URL.
+        return {
+            "webhook_configured": bool(self.webhook_url),
+            "transitions": list(self.transitions),
+            "timeout_seconds": self.timeout_seconds,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +160,7 @@ class MergetrainConfig:
     repo: Path
     config_path: Path
     config_exists: bool
+    notify: NotifyConfig = NotifyConfig()
     config_version: int = CONFIG_VERSION
 
     def to_dict(self) -> dict[str, Any]:
@@ -151,6 +170,7 @@ class MergetrainConfig:
         data["config_path"] = str(self.config_path)
         data["git"]["integration_ref"] = self.git.integration_ref
         data["terminology"] = self.terminology.to_dict()
+        data["notify"] = self.notify.to_dict()
         return data
 
 
@@ -379,6 +399,11 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "require_explicit_auto_approval": True,
             "prefer_json_status": True,
         },
+        "notify": {
+            "webhook_url": "",
+            "transitions": list(NOTIFY_TRANSITIONS),
+            "timeout_seconds": 10,
+        },
         "terminology": {"git_operation": "deploy"},
         "gates": [{"name": "diff-check", "run": "git diff --check ${integration_ref}..HEAD"}],
         "deploy": {"verify": []},
@@ -412,6 +437,16 @@ agent:
   require_clean_worktree_before_enqueue: true
   require_explicit_auto_approval: true
   prefer_json_status: true
+
+notify:
+  # Optional provider-neutral JSON webhook; this URL may contain a secret.
+  webhook_url: ""
+  transitions:
+    - landed
+    - blocked
+    - needs_reconcile
+    - daemon_paused
+  timeout_seconds: 10
 
 terminology:
   # Human-facing label only. Machine status remains `deployed`.
@@ -620,6 +655,40 @@ def load_config(
         prefer_json_status=bool(agent_data.get("prefer_json_status", True)),
     )
 
+    notify_data = _as_mapping(data, "notify")
+    webhook_value = notify_data.get("webhook_url", "")
+    if webhook_value is None:
+        webhook_url = ""
+    elif isinstance(webhook_value, str):
+        webhook_url = webhook_value.strip()
+    else:
+        raise ConfigError("notify.webhook_url must be a string")
+    if webhook_url:
+        parsed_webhook = urlsplit(webhook_url)
+        if parsed_webhook.scheme not in {"http", "https"} or not parsed_webhook.hostname:
+            raise ConfigError("notify.webhook_url must be an http or https URL")
+    transitions_value = notify_data.get("transitions", list(NOTIFY_TRANSITIONS))
+    if not isinstance(transitions_value, list):
+        raise ConfigError("notify.transitions must be a list")
+    transitions: list[str] = []
+    for index, value in enumerate(transitions_value):
+        transition = _nonempty_string(value, key=f"notify.transitions[{index}]")
+        if transition not in NOTIFY_TRANSITIONS:
+            allowed = ", ".join(NOTIFY_TRANSITIONS)
+            raise ConfigError(
+                f"notify.transitions[{index}] must be one of: {allowed}"
+            )
+        if transition not in transitions:
+            transitions.append(transition)
+    notify = NotifyConfig(
+        webhook_url=webhook_url,
+        transitions=tuple(transitions),
+        timeout_seconds=_positive_int(
+            notify_data.get("timeout_seconds", 10),
+            key="notify.timeout_seconds",
+        ),
+    )
+
     terminology_data = _as_mapping(data, "terminology")
     git_operation = _nonempty_string(
         terminology_data.get("git_operation", "deploy"),
@@ -677,6 +746,7 @@ def load_config(
         git=git,
         queue=queue,
         agent=agent,
+        notify=notify,
         terminology=terminology,
         gates=gates,
         deploy=deploy,

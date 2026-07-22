@@ -3,14 +3,18 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+from urllib.error import HTTPError
 
 from mergetrain import notify as notify_module
 from mergetrain.notify import (
     load_notify_state,
+    notification_transition,
     save_notify_state,
     sweep_notifications,
     system_notifier,
+    webhook_notifier,
 )
 
 
@@ -32,6 +36,24 @@ def deliver(outcomes, prev, *, fail_paths=()):
 
 
 class SweepNotificationTests(unittest.TestCase):
+    def test_transition_filter_settles_disabled_outcomes(self) -> None:
+        messages, settled = sweep_notifications(
+            [
+                outcome("/w/a", "landed:1"),
+                outcome("/w/b", "no_landing:1"),
+                outcome("/w/c", "reconcile_paused"),
+                outcome("/w/d", "error", error="boom"),
+            ],
+            {},
+            transitions=("landed",),
+        )
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0][2:], ("mergetrain · a", "Train landed (1 job)"))
+        self.assertEqual(set(settled), {"/w/b", "/w/c", "/w/d"})
+        self.assertEqual(notification_transition("no_landing:1"), "blocked")
+        self.assertEqual(notification_transition("reconcile_paused"), "needs_reconcile")
+        self.assertEqual(notification_transition("error:disk full"), "daemon_paused")
+
     def test_processed_notifies_every_time_transitions_only_once(self) -> None:
         prev: dict[str, str] = {}
         first, prev = deliver(
@@ -149,6 +171,80 @@ class SystemNotifierTests(unittest.TestCase):
             notify_module.subprocess, "run", side_effect=AssertionError("must not run")
         ):
             system_notifier("t", "m")
+
+
+class WebhookNotifierTests(unittest.TestCase):
+    def test_posts_provider_neutral_json_with_timeout(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 204
+        response.__enter__.return_value.read.return_value = b""
+        with mock.patch.object(
+            notify_module.urllib_request, "urlopen", return_value=response
+        ) as urlopen:
+            webhook_notifier(
+                "https://notify.example.invalid/hook/token",
+                timeout_seconds=7,
+            )("Train", "landed")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 7)
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(
+            request.data,
+            b'{"title":"Train","message":"landed"}',
+        )
+        self.assertEqual(request.get_header("Content-type"), "application/json")
+
+    def test_failure_never_exposes_secret_webhook_url(self) -> None:
+        url = "https://notify.example.invalid/hook/super-secret"
+        failure = HTTPError(url, 401, "unauthorized", {}, None)
+        with mock.patch.object(
+            notify_module.urllib_request, "urlopen", side_effect=failure
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                webhook_notifier(url)("Train", "failed")
+        self.assertNotIn("super-secret", str(raised.exception))
+        self.assertEqual(str(raised.exception), "webhook delivery returned HTTP 401")
+
+
+class SingleDaemonNotifyIntegrationTests(unittest.TestCase):
+    def test_once_daemon_delivers_landed_notification(self) -> None:
+        from mergetrain.daemon import daemon_loop
+        from mergetrain.store import connect, enqueue_job
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db = root / "queue.sqlite"
+            conn = connect(db)
+            try:
+                enqueue_job(
+                    conn,
+                    task="t",
+                    branch="agent/t",
+                    worktree_path=str(root),
+                    auto_deploy=True,
+                )
+            finally:
+                conn.close()
+            received = []
+            daemon_loop(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: [
+                    SimpleNamespace(status="deployed") for _ in jobs
+                ],
+                once=True,
+                say=lambda _: None,
+                install_signal_handlers=False,
+                notifier=lambda title, message: received.append((title, message)),
+                notification_name="svc",
+                notification_path=str(root),
+                notification_transitions=("landed",),
+                notification_state_path=root / "notify.json",
+            )
+            self.assertEqual(
+                received,
+                [("mergetrain · svc", "Train landed (1 job)")],
+            )
 
 
 class HubDaemonNotifyIntegrationTests(unittest.TestCase):

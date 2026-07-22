@@ -144,6 +144,33 @@ changes nothing. Actual readiness gating is enforced by `enqueue` options
 (`--allow-dirty`, `--allow-branch-mismatch`, `--no-ready-check`, `--auto`), not by
 these keys.
 
+## `notify`
+
+```yaml
+notify:
+  webhook_url: "https://notify.example.invalid/hook/secret-token"
+  transitions:
+    - landed
+    - blocked
+    - needs_reconcile
+    - daemon_paused
+  timeout_seconds: 10
+```
+
+`daemon --notify` and `hub daemon --notify` send transition-deduplicated
+notifications through a provider-neutral JSON webhook and the existing macOS
+desktop backend. The webhook receives an HTTP `POST` with
+`{"title":"...","message":"..."}` and `Content-Type: application/json`.
+Slack/Discord-specific message shaping belongs in an adapter or relay; core does
+not embed provider credentials or schemas.
+
+`transitions` selects `landed`, `blocked`/partial, `needs_reconcile`, and daemon
+error/pause messages. A disabled transition is recorded as settled so enabling
+it later does not replay old history. `timeout_seconds` must be positive, and
+the URL must use HTTP(S). Treat `webhook_url` as a secret: doctor/config JSON
+reports only `webhook_configured`, never the URL. Delivery errors likewise omit
+the credential-bearing URL.
+
 ## `gates`
 
 ```yaml

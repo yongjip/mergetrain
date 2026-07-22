@@ -166,6 +166,11 @@
           "push_refs": "[]",
           "remote": null
         },
+        "notify": {
+          "timeout_seconds": null,
+          "transitions": "[]",
+          "webhook_configured": null
+        },
         "project": {
           "name": null
         },
