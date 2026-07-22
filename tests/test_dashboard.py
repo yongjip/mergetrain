@@ -12,7 +12,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mergetrain.config import load_config
-from mergetrain.dashboard import _create_from_snapshot_fn, create_server
+from mergetrain.dashboard import (
+    DashboardSnapshotCache,
+    _create_from_snapshot_fn,
+    create_server,
+)
 from mergetrain.snapshot import build_dashboard_snapshot
 from mergetrain.store import (
     claim_all_queued,
@@ -27,6 +31,36 @@ from mergetrain.store import (
 class DashboardTests(unittest.TestCase):
     def make_config(self, root: Path):
         return load_config(repo=root, db_override=root / "queue.sqlite")
+
+    def test_single_repo_cache_rebuilds_only_when_queue_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            conn = connect(config.state.db)
+            try:
+                enqueue_job(conn, task="first", branch="codex/first")
+            finally:
+                conn.close()
+            cache = DashboardSnapshotCache(config)
+
+            with patch(
+                "mergetrain.dashboard.build_dashboard_snapshot",
+                wraps=build_dashboard_snapshot,
+            ) as build:
+                first = cache()
+                first["counts"]["queued"] = 999
+                second = cache()
+                self.assertEqual(build.call_count, 1)
+                self.assertEqual(second["counts"]["queued"], 1)
+
+                conn = connect(config.state.db)
+                try:
+                    enqueue_job(conn, task="second", branch="codex/second")
+                finally:
+                    conn.close()
+                third = cache()
+                self.assertEqual(build.call_count, 2)
+                self.assertEqual(third["counts"]["queued"], 2)
 
     def test_snapshot_points_too_new_config_at_upgrade(self) -> None:
         with tempfile.TemporaryDirectory() as td:
