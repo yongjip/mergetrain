@@ -888,10 +888,17 @@ def claim_next_job(
     *,
     owner: str | None = None,
     ttl_minutes: int = 30,
+    deploy: bool = False,
 ) -> Job | None:
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
+        if deploy and deploy_reconcile_pending(conn):
+            # Lock acquisition can park a marker-bearing orphan in this same
+            # transaction. Refuse the new deploy claim after that state change,
+            # just like the daemon and batch claim paths do.
+            _release_lock_token(conn, owner=owner, token=lock.token)
+            return None
         row = conn.execute(
             "SELECT * FROM deploy_queue WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
         ).fetchone()

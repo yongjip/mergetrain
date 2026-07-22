@@ -845,8 +845,17 @@ def cmd_run_next(args: argparse.Namespace) -> int:
             pending = deploy_reconcile_pending(conn)
             if pending:
                 return _emit_deploy_reconcile_block(args, pending)
-        job = claim_next_job(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
+        job = claim_next_job(
+            conn,
+            owner=owner,
+            ttl_minutes=config.queue.lock_ttl_minutes,
+            deploy=deploy,
+        )
         if job is None:
+            if deploy:
+                pending = deploy_reconcile_pending(conn)
+                if pending:
+                    return _emit_deploy_reconcile_block(args, pending)
             payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
             lease_token = job.claim_token
