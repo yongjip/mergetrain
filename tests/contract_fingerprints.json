@@ -298,6 +298,70 @@
       "result": null,
       "worktree_candidates": "[]?"
     },
+    "history": {
+      "contract_version": null,
+      "coverage": {
+        "gate_events": null,
+        "queue_history": null
+      },
+      "items": {
+        "[]": {
+          "duration_seconds": null,
+          "finished_at": null,
+          "gates": {
+            "[]": {
+              "elapsed_seconds": null,
+              "finished_at": null,
+              "index": null,
+              "name": null,
+              "started_at": null,
+              "state": null,
+              "total": null
+            }
+          },
+          "jobs": {
+            "[]": {
+              "branch": null,
+              "duration_seconds": null,
+              "finished_at": null,
+              "id": null,
+              "outcome": {
+                "category": null,
+                "failure_category": null,
+                "message": null,
+                "severity": null,
+                "warning_categories": "[]?"
+              },
+              "queue_seconds": null,
+              "requested_at": null,
+              "started_at": null,
+              "status": null,
+              "task": null
+            }
+          },
+          "key": null,
+          "outcome": {
+            "category": null,
+            "failure_categories": "[]?",
+            "failures": "[]?",
+            "severity": null,
+            "status_counts": {
+              "deployed": null
+            },
+            "warning_categories": "[]?",
+            "warnings": "[]?"
+          },
+          "queue_seconds": null,
+          "requested_at": null,
+          "started_at": null,
+          "status": null,
+          "train_id": null
+        }
+      },
+      "limit": null,
+      "ok": null,
+      "since": null
+    },
     "hub_status": {
       "contract_version": null,
       "generated_at": null,
@@ -633,6 +697,42 @@
       "result": null,
       "reused_validation_shas": "[]?",
       "verify_counts": {}
+    },
+    "stats": {
+      "average_queue_seconds": null,
+      "contract_version": null,
+      "coverage": {
+        "gate_events": null,
+        "queue_history": null
+      },
+      "duration_seconds": {
+        "median": null,
+        "p95": null
+      },
+      "gates": {
+        "[]": {
+          "median_seconds": null,
+          "name": null,
+          "p95_seconds": null,
+          "runs": null,
+          "states": {
+            "success": null
+          }
+        }
+      },
+      "jobs": {
+        "total": null
+      },
+      "ok": null,
+      "since": null,
+      "trains": {
+        "blocked": null,
+        "completed": null,
+        "failed": null,
+        "land_rate": null,
+        "landed": null,
+        "total": null
+      }
     },
     "status": {
       "contract_version": null,

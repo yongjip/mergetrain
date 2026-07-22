@@ -35,6 +35,25 @@ from mergetrain.store import (
 
 
 class CliTests(unittest.TestCase):
+    def test_history_rejects_invalid_since_with_typed_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        td,
+                        "history",
+                        "--since",
+                        "yesterday",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "queue_error")
+            self.assertIn("ISO-8601", payload["error"]["message"])
+
     def test_single_repo_daemon_accepts_notify_and_builds_configured_chain(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

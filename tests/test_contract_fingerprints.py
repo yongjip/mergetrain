@@ -143,6 +143,39 @@ def _cap_inspect(repo):
     return _run_json(["--repo", str(repo), "inspect", str(job.id)])
 
 
+def _seed_history(repo):
+    conn = connect(_db(repo))
+    job = enqueue_job(conn, task="a", branch="feature/a")
+    conn.execute(
+        "UPDATE deploy_queue SET status='deployed', train_id='train-1', train_size=1, "
+        "requested_at='2026-07-22T00:00:00Z', started_at='2026-07-22T00:01:00Z', "
+        "finished_at='2026-07-22T00:02:00Z', push_status='succeeded', "
+        "verify_status='succeeded' WHERE id=?",
+        (job.id,),
+    )
+    conn.executemany(
+        "INSERT INTO run_events "
+        "(claim_token, phase, state, message, detail, created_at) "
+        "VALUES ('metrics', 'gating', ?, ?, '', ?)",
+        [
+            ("active", "Running gate 1/1: tests", "2026-07-22T00:01:10Z"),
+            ("success", "Passed gate 1/1: tests", "2026-07-22T00:01:20Z"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def _cap_history(repo):
+    _seed_history(repo)
+    return _run_json(["--repo", str(repo), "history"])
+
+
+def _cap_stats(repo):
+    _seed_history(repo)
+    return _run_json(["--repo", str(repo), "stats"])
+
+
 def _cap_failure_envelope(repo):
     # A config_error routes through main()'s unified failure envelope.
     (repo / ".mergetrain.yaml").write_text(
@@ -292,6 +325,8 @@ SURFACES = {
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
     "inspect": _cap_inspect,
+    "history": _cap_history,
+    "stats": _cap_stats,
     "failure_envelope": _cap_failure_envelope,
 }
 

@@ -29,6 +29,8 @@ mergetrain retry JOB_ID [--rebase] [--json]
 mergetrain status [--json] [--limit N]
 mergetrain events [--job ID | --train-id ID] [--after EVENT_ID] [--follow] [--jsonl]
 mergetrain inspect JOB_ID [--event-limit N] [--json]
+mergetrain history [--since TIMESTAMP] [--limit N] [--json]
+mergetrain stats [--since TIMESTAMP] [--json]
 mergetrain logs JOB_ID [--follow] [--tail N]
 mergetrain doctor [--json]
 mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
@@ -187,6 +189,34 @@ heartbeat, lease liveness, and lost-lease state. `outcome` has a stable severity
 category, nullable `failure_category`, and `warning_categories`. A train snapshot
 aggregates status counts and per-job failure/warning categories, so callers do
 not need to classify free-text notes.
+
+## `history`
+
+Read recent durable train/job history without opening the queue for writes:
+
+```sh
+mergetrain history --limit 50 --json
+mergetrain history --since 2026-07-01T00:00:00Z
+```
+
+Jobs sharing a non-empty `train_id` remain one complete item even at the limit;
+legacy/single jobs use `job:<id>`. Each item includes status, queue wait,
+duration, structured outcome, member jobs, and retained gate runs. `--since`
+accepts ISO-8601 timestamps and is inclusive.
+
+## `stats`
+
+Aggregate the same read-only history:
+
+```sh
+mergetrain stats --since 2026-07-01T00:00:00Z --json
+```
+
+The payload reports landed/blocked/failed trains, land rate, median and p95
+train duration, average queue wait, and per-gate run states and timing. Queue
+rows are not automatically pruned, so their history is unbounded. Gate timing
+is explicitly marked as covering the latest 5,000 retained runner events; it
+never pretends an older truncated event tail is complete.
 
 ## `logs`
 

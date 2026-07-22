@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
+from mergetrain.config import load_config
 from mergetrain.models import Job, RunnerLock
 from mergetrain.observability import (
     _lease_context,
+    history_payload,
     job_outcome,
+    normalize_since,
+    stats_payload,
     stream_terminal,
     train_outcome,
 )
+from mergetrain.store import connect, enqueue_job
 
 
 def job(**kwargs) -> Job:
@@ -57,6 +64,8 @@ class JobOutcomeTests(unittest.TestCase):
         warning = job_outcome(job(status="deployed", verify_status="failed"))
         self.assertIsNone(warning["failure_category"])
         self.assertEqual(warning["warning_categories"], ["post_push_verification_failed"])
+        secret = job_outcome(job(status="failed", note="API_TOKEN=do-not-leak"))
+        self.assertNotIn("do-not-leak", secret["message"])
 
 
 class TrainOutcomeTests(unittest.TestCase):
@@ -153,6 +162,85 @@ class LeaseContextTests(unittest.TestCase):
         # a non-running job is "inactive", never "lost"
         inactive = _lease_context(job(status="queued"), live)
         self.assertEqual((inactive["liveness"], inactive["lost"]), ("inactive", False))
+
+
+class HistoryStatsTests(unittest.TestCase):
+    def test_groups_complete_trains_and_aggregates_retained_gate_timing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = load_config(repo=root, db_override=root / "queue.sqlite")
+            conn = connect(config.state.db)
+            try:
+                failed = enqueue_job(conn, task="old", branch="agent/old")
+                first = enqueue_job(conn, task="a", branch="agent/a")
+                second = enqueue_job(conn, task="b", branch="agent/b")
+                conn.execute(
+                    "UPDATE deploy_queue SET status='failed', "
+                    "requested_at='2026-07-22T00:03:30Z', "
+                    "started_at='2026-07-22T00:04:00Z', "
+                    "finished_at='2026-07-22T00:05:00Z' WHERE id=?",
+                    (failed.id,),
+                )
+                conn.execute(
+                    "UPDATE deploy_queue SET status='deployed', train_id='train-1', "
+                    "train_size=2, requested_at='2026-07-22T00:00:00Z', "
+                    "started_at='2026-07-22T00:01:00Z', "
+                    "finished_at='2026-07-22T00:03:00Z', "
+                    "push_status='succeeded', verify_status='succeeded' "
+                    "WHERE id IN (?, ?)",
+                    (first.id, second.id),
+                )
+                conn.executemany(
+                    "INSERT INTO run_events "
+                    "(claim_token, phase, state, message, detail, created_at) "
+                    "VALUES ('train-token', 'gating', ?, ?, '', ?)",
+                    [
+                        (
+                            "active",
+                            "Running gate 1/1: tests",
+                            "2026-07-22T00:01:10Z",
+                        ),
+                        (
+                            "success",
+                            "Passed gate 1/1: tests",
+                            "2026-07-22T00:01:20Z",
+                        ),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            history = history_payload(config, limit=1)
+            self.assertEqual(len(history["items"]), 1)
+            train = history["items"][0]
+            self.assertEqual(train["train_id"], "train-1")
+            self.assertEqual(len(train["jobs"]), 2)
+            self.assertEqual(train["duration_seconds"], 120.0)
+            self.assertEqual(train["queue_seconds"], 60.0)
+            self.assertEqual(train["gates"][0]["elapsed_seconds"], 10.0)
+
+            stats = stats_payload(config)
+            self.assertEqual(stats["trains"]["total"], 2)
+            self.assertEqual(stats["trains"]["landed"], 1)
+            self.assertEqual(stats["trains"]["failed"], 1)
+            self.assertEqual(stats["trains"]["land_rate"], 0.5)
+            self.assertEqual(stats["jobs"]["total"], 3)
+            self.assertEqual(stats["duration_seconds"], {"median": 90.0, "p95": 120.0})
+            self.assertEqual(stats["average_queue_seconds"], 45.0)
+            self.assertEqual(stats["gates"][0]["name"], "tests")
+            self.assertEqual(stats["gates"][0]["median_seconds"], 10.0)
+            empty = stats_payload(config, since="2026-07-23T00:00:00Z")
+            self.assertEqual(empty["trains"]["total"], 0)
+            self.assertIsNone(empty["trains"]["land_rate"])
+
+    def test_since_normalization_rejects_invalid_timestamp(self) -> None:
+        self.assertEqual(
+            normalize_since("2026-07-22T09:00:00+09:00"),
+            "2026-07-22T00:00:00Z",
+        )
+        with self.assertRaisesRegex(ValueError, "ISO-8601"):
+            normalize_since("yesterday")
 
 
 if __name__ == "__main__":

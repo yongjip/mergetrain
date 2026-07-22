@@ -554,6 +554,64 @@ def list_jobs(conn: sqlite3.Connection, *, limit: int = 50) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
+def list_history_jobs(
+    conn: sqlite3.Connection,
+    *,
+    since: str = "",
+    limit: int | None = None,
+) -> list[Job]:
+    """Read durable job history, optionally keeping complete recent trains."""
+
+    observed_at = (
+        "COALESCE(NULLIF(finished_at, ''), NULLIF(started_at, ''), requested_at)"
+    )
+    if limit is None:
+        where = f"WHERE {observed_at} >= ?" if since else ""
+        values: tuple[Any, ...] = (since,) if since else ()
+        rows = conn.execute(
+            f"SELECT * FROM deploy_queue {where} ORDER BY id DESC",
+            values,
+        ).fetchall()
+        return [Job.from_row(row) for row in rows]
+
+    since_clause = "WHERE observed_at >= ?" if since else ""
+    values = (since, int(limit)) if since else (int(limit),)
+    rows = conn.execute(
+        f"""
+        WITH history AS (
+          SELECT *, {observed_at} AS observed_at,
+                 CASE WHEN train_id != '' THEN 'train:' || train_id
+                      ELSE 'job:' || id END AS history_key
+          FROM deploy_queue
+        ), recent AS (
+          SELECT history_key, MAX(id) AS latest_id
+          FROM history
+          {since_clause}
+          GROUP BY history_key
+          ORDER BY latest_id DESC
+          LIMIT ?
+        )
+        SELECT history.*
+        FROM history JOIN recent USING (history_key)
+        ORDER BY recent.latest_id DESC, history.id ASC
+        """,
+        values,
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
+
+
+def list_history_events(
+    conn: sqlite3.Connection, *, since: str = ""
+) -> list[RunEvent]:
+    where = "WHERE created_at >= ?" if since else ""
+    values: tuple[Any, ...] = (since,) if since else ()
+    rows = conn.execute(
+        f"SELECT * FROM run_events {where} ORDER BY id ASC",
+        values,
+    ).fetchall()
+    return [RunEvent.from_row(row) for row in rows]
+
+
 def list_dismissable_jobs(conn: sqlite3.Connection) -> list[Job]:
     """Return every blocked/failed job, without the status display cap."""
 

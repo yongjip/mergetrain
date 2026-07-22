@@ -50,7 +50,10 @@ from .models import Job
 from .observability import (
     event_record,
     heartbeat_record,
+    history_payload,
     inspect_job_payload,
+    normalize_since,
+    stats_payload,
     stream_terminal,
 )
 from .recovery import force_unlock, reconcile, recover, sweep_pending_refs
@@ -662,6 +665,65 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             f"outcome: {payload['outcome']['severity']} / "
             f"{_human_category(payload['outcome']['category'], config.terminology)}"
         )
+    return 0
+
+
+def _normalized_since(value: str) -> str:
+    try:
+        return normalize_since(value)
+    except ValueError as exc:
+        raise QueueError(str(exc)) from exc
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    if not 1 <= args.limit <= 1000:
+        raise QueueError("--limit must be between 1 and 1000")
+    config = config_from_args(args)
+    payload = history_payload(
+        config,
+        since=_normalized_since(args.since),
+        limit=args.limit,
+    )
+    if args.json:
+        dump_json(payload)
+    else:
+        if not payload["items"]:
+            print("no history in the selected window")
+        for item in payload["items"]:
+            duration = item["duration_seconds"]
+            duration_text = f"{duration:.3f}s" if duration is not None else "n/a"
+            label = item["train_id"] or item["key"]
+            print(
+                f"{label} {item['status']} jobs={len(item['jobs'])} "
+                f"duration={duration_text}"
+            )
+    return 0
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    config = config_from_args(args)
+    payload = stats_payload(config, since=_normalized_since(args.since))
+    if args.json:
+        dump_json(payload)
+    else:
+        trains = payload["trains"]
+        rate = trains["land_rate"]
+        rate_text = f"{rate * 100:.1f}%" if rate is not None else "n/a"
+        print(
+            f"trains: {trains['total']} total · {trains['landed']} landed · "
+            f"{trains['blocked']} blocked · {trains['failed']} failed"
+        )
+        print(f"land rate: {rate_text}")
+        duration = payload["duration_seconds"]
+        print(
+            f"duration: median={duration['median']}s p95={duration['p95']}s · "
+            f"average queue={payload['average_queue_seconds']}s"
+        )
+        for gate in payload["gates"]:
+            print(
+                f"gate {gate['name']}: runs={gate['runs']} "
+                f"median={gate['median_seconds']}s p95={gate['p95_seconds']}s"
+            )
     return 0
 
 
@@ -1691,6 +1753,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--event-limit", type=int, default=100)
     p_inspect.add_argument("--json", action="store_true")
     p_inspect.set_defaults(func=cmd_inspect)
+
+    p_history = subparsers.add_parser(
+        "history", help="Show retained train/job history and gate outcomes"
+    )
+    p_history.add_argument("--since", default="", help="ISO-8601 lower time bound")
+    p_history.add_argument("--limit", type=int, default=50)
+    p_history.add_argument("--json", action="store_true")
+    p_history.set_defaults(func=cmd_history)
+
+    p_stats = subparsers.add_parser(
+        "stats", help="Aggregate land rate, latency, queue time, and gate timing"
+    )
+    p_stats.add_argument("--since", default="", help="ISO-8601 lower time bound")
+    p_stats.add_argument("--json", action="store_true")
+    p_stats.set_defaults(func=cmd_stats)
 
     p_logs = subparsers.add_parser("logs", help="Read or follow one job's runner log")
     p_logs.add_argument("job_id", type=int)

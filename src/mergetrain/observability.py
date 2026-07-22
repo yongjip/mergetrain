@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from math import ceil
+from statistics import mean, median
 from typing import Any
 
 from .config import MergetrainConfig
+from .errors import redact_secrets
 from .models import Job, RunEvent, RunnerLock
-from .store import connect, get_job, get_lock, list_run_events, list_train_jobs, utc_now
+from .store import (
+    connect,
+    get_job,
+    get_lock,
+    list_history_events,
+    list_history_jobs,
+    list_run_events,
+    list_train_jobs,
+    utc_now,
+)
 
 GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
 COMPLETED_STATUSES = {"validated", "deployed", "blocked", "failed", "canceled"}
@@ -36,6 +48,288 @@ def elapsed_seconds(start: str, end: str = "") -> float | None:
     return round(max(0.0, (finished - started).total_seconds()), 3)
 
 
+def normalize_since(value: str) -> str:
+    if not value:
+        return ""
+    parsed = _timestamp(value)
+    if parsed is None:
+        raise ValueError("--since must be an ISO-8601 timestamp")
+    return parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _time_edge(values: Sequence[str], *, latest: bool = False) -> str:
+    valid: list[tuple[str, datetime]] = []
+    for stamp in values:
+        instant = _timestamp(stamp)
+        if instant is not None:
+            valid.append((stamp, instant))
+    if not valid:
+        return ""
+    return (max if latest else min)(valid, key=lambda item: item[1])[0]
+
+
+def _percentile(values: Sequence[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, ceil(percentile * len(ordered)) - 1)
+    return round(ordered[index], 3)
+
+
+def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
+    active: dict[tuple[str, int, str], tuple[RunEvent, int]] = {}
+    last_by_token: dict[str, RunEvent] = {}
+    runs: list[dict[str, Any]] = []
+    for event in events:
+        if event.claim_token:
+            last_by_token[event.claim_token] = event
+        if event.phase != "gating":
+            continue
+        matched = GATE_EVENT.match(event.message)
+        if matched is None:
+            continue
+        index, total, name = int(matched.group(1)), int(matched.group(2)), matched.group(3)
+        key = (event.claim_token, index, name)
+        if event.state == "active":
+            previous = active.get(key)
+            if previous is not None:
+                prior, prior_total = previous
+                runs.append(
+                    {
+                        "name": name,
+                        "index": index,
+                        "total": prior_total,
+                        "state": "failed",
+                        "started_at": prior.created_at,
+                        "finished_at": event.created_at,
+                        "elapsed_seconds": elapsed_seconds(
+                            prior.created_at, event.created_at
+                        ),
+                    }
+                )
+            active[key] = (event, total)
+            continue
+        active_run = active.pop(key, None)
+        started = active_run[0] if active_run else None
+        runs.append(
+            {
+                "name": name,
+                "index": index,
+                "total": total,
+                "state": "reused" if event.state == "reused" else event.state,
+                "started_at": started.created_at if started else "",
+                "finished_at": event.created_at,
+                "elapsed_seconds": (
+                    elapsed_seconds(started.created_at, event.created_at)
+                    if started
+                    else None
+                ),
+            }
+        )
+    for (token, index, name), (started, total) in active.items():
+        terminal = last_by_token.get(token)
+        failed = bool(
+            terminal
+            and terminal.id > started.id
+            and terminal.state in {"error", "warning"}
+        )
+        runs.append(
+            {
+                "name": name,
+                "index": index,
+                "total": total,
+                "state": "failed" if failed else "incomplete",
+                "started_at": started.created_at,
+                "finished_at": terminal.created_at if failed and terminal else "",
+                "elapsed_seconds": (
+                    elapsed_seconds(started.created_at, terminal.created_at)
+                    if failed and terminal
+                    else None
+                ),
+            }
+        )
+    return runs
+
+
+def _history_status(jobs: Sequence[Job]) -> str:
+    statuses = {job.status for job in jobs}
+    for status in (
+        "needs_reconcile",
+        "in_progress",
+        "failed",
+        "blocked",
+        "queued",
+        "validated",
+        "canceled",
+        "deployed",
+    ):
+        if status in statuses:
+            return status
+    return "unknown"
+
+
+def _group_history(
+    jobs: Sequence[Job], events: Sequence[RunEvent]
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Job]] = {}
+    for job in jobs:
+        key = f"train:{job.train_id}" if job.train_id else f"job:{job.id}"
+        grouped.setdefault(key, []).append(job)
+
+    event_times = [(event, _timestamp(event.created_at)) for event in events]
+    items: list[dict[str, Any]] = []
+    for key, members in grouped.items():
+        requested_at = _time_edge([job.requested_at for job in members])
+        started_at = _time_edge([job.started_at for job in members])
+        finished_at = _time_edge(
+            [job.finished_at for job in members], latest=True
+        )
+        start = _timestamp(started_at)
+        end = _timestamp(finished_at or utc_now())
+        scoped_events = [
+            event
+            for event, created in event_times
+            if start is not None
+            and created is not None
+            and created >= start
+            and (end is None or created <= end)
+        ]
+        items.append(
+            {
+                "key": key,
+                "train_id": members[0].train_id,
+                "status": _history_status(members),
+                "requested_at": requested_at,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "queue_seconds": elapsed_seconds(requested_at, started_at)
+                if started_at
+                else None,
+                "duration_seconds": elapsed_seconds(started_at, finished_at)
+                if started_at
+                else None,
+                "outcome": train_outcome(members),
+                "gates": _gate_runs(scoped_events),
+                "jobs": [
+                    {
+                        "id": job.id,
+                        "task": job.task,
+                        "branch": job.branch,
+                        "status": job.status,
+                        "requested_at": job.requested_at,
+                        "started_at": job.started_at,
+                        "finished_at": job.finished_at,
+                        "queue_seconds": elapsed_seconds(
+                            job.requested_at, job.started_at
+                        )
+                        if job.started_at
+                        else None,
+                        "duration_seconds": elapsed_seconds(
+                            job.started_at, job.finished_at
+                        )
+                        if job.started_at
+                        else None,
+                        "outcome": job_outcome(job),
+                    }
+                    for job in members
+                ],
+            }
+        )
+    return items
+
+
+def history_payload(
+    config: MergetrainConfig, *, since: str = "", limit: int = 50
+) -> dict[str, Any]:
+    conn = connect(config.state.db, read_only=True)
+    try:
+        jobs = list_history_jobs(conn, since=since, limit=limit)
+        events = list_history_events(conn, since=since)
+    finally:
+        conn.close()
+    return {
+        "ok": True,
+        "since": since,
+        "limit": limit,
+        "items": _group_history(jobs, events),
+        "coverage": {
+            "queue_history": "unbounded",
+            "gate_events": "latest_5000",
+        },
+    }
+
+
+def stats_payload(
+    config: MergetrainConfig, *, since: str = ""
+) -> dict[str, Any]:
+    conn = connect(config.state.db, read_only=True)
+    try:
+        jobs = list_history_jobs(conn, since=since)
+        events = list_history_events(conn, since=since)
+    finally:
+        conn.close()
+    items = _group_history(jobs, events)
+    landed = sum(item["status"] == "deployed" for item in items)
+    blocked = sum(item["status"] == "blocked" for item in items)
+    failed = sum(item["status"] == "failed" for item in items)
+    completed = landed + blocked + failed
+    durations = [
+        float(item["duration_seconds"])
+        for item in items
+        if item["duration_seconds"] is not None
+        and item["status"] in {"deployed", "blocked", "failed"}
+    ]
+    queue_times = [
+        float(item["queue_seconds"])
+        for item in items
+        if item["queue_seconds"] is not None
+    ]
+    gate_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for run in _gate_runs(events):
+        gate_groups[str(run["name"])].append(run)
+    per_gate: list[dict[str, Any]] = []
+    for name in sorted(gate_groups):
+        runs = gate_groups[name]
+        elapsed = [
+            float(run["elapsed_seconds"])
+            for run in runs
+            if run["elapsed_seconds"] is not None
+        ]
+        states = Counter(str(run["state"]) for run in runs)
+        per_gate.append(
+            {
+                "name": name,
+                "runs": len(runs),
+                "states": dict(sorted(states.items())),
+                "median_seconds": round(median(elapsed), 3) if elapsed else None,
+                "p95_seconds": _percentile(elapsed, 0.95),
+            }
+        )
+    return {
+        "ok": True,
+        "since": since,
+        "trains": {
+            "total": len(items),
+            "landed": landed,
+            "blocked": blocked,
+            "failed": failed,
+            "completed": completed,
+            "land_rate": round(landed / completed, 4) if completed else None,
+        },
+        "jobs": {"total": len(jobs)},
+        "duration_seconds": {
+            "median": round(median(durations), 3) if durations else None,
+            "p95": _percentile(durations, 0.95),
+        },
+        "average_queue_seconds": round(mean(queue_times), 3) if queue_times else None,
+        "gates": per_gate,
+        "coverage": {
+            "queue_history": "unbounded",
+            "gate_events": "latest_5000",
+        },
+    }
+
+
 def gate_details(event: RunEvent | None) -> dict[str, Any] | None:
     if event is None:
         return None
@@ -53,7 +347,7 @@ def gate_details(event: RunEvent | None) -> dict[str, Any] | None:
 def job_outcome(job: Job) -> dict[str, Any]:
     category = job.status
     severity = "pending"
-    message = job.note or job.status
+    message = redact_secrets(job.note or job.status)
 
     if job.status == "deployed":
         severity = "success"

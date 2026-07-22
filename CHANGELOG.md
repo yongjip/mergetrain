@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add read-only `mergetrain history` and `mergetrain stats` commands (#168).
+  Durable jobs are grouped into complete trains for status, queue wait,
+  duration, land-rate, median/p95 latency, and retained per-gate timing. Queue
+  history remains unpruned; payloads disclose the existing 5,000-event gate
+  coverage limit instead of silently presenting a truncated tail as complete.
+
 - Add cross-platform, provider-neutral JSON webhooks and single-repo
   `daemon --notify` parity (#167). Notification chains retain the macOS desktop
   backend, filter/deduplicate configured transitions across restarts, and never
