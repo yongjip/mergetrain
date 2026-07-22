@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reframe the documentation around the integration requirement behind parallel
+  agent coding: worktrees provide parallel execution lanes, while one train
+  provides the serialized boundary that assembles, proves, and ships their
+  combined result. Clarify that this layer preserves end-to-end throughput but
+  does not replace task design, meaningful gates, or human-review policy.
+
 - Add a balanced PR-first comparison guide: explain why committed agent
   branches are integration units rather than automatic review units, document
   mergetrain's throughput and combined-validation advantages alongside its
