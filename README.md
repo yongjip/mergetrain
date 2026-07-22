@@ -3,14 +3,14 @@
 [![CI](https://github.com/yongjip/mergetrain/actions/workflows/ci.yml/badge.svg)](https://github.com/yongjip/mergetrain/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mergetrain)](https://pypi.org/project/mergetrain/)
 [![Python](https://img.shields.io/pypi/pyversions/mergetrain)](https://pypi.org/project/mergetrain/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/yongjip/mergetrain/blob/main/LICENSE)
 
 **Parallel agents need a serial integration spine.**
 
 Let agents code in parallel. Let one train prove and ship the result.
 
 <p align="center">
-  <img src="./docs/images/mergetrain-explainer.gif"
+  <img src="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/mergetrain-explainer.gif"
        alt="What happens when 3 AI agents push to main at once. Without a queue they collide and break main. With a merge train they enqueue, one runner assembles main + A + B + C, gates run once on the combination, and one atomic push keeps main green."
        width="720">
 </p>
@@ -24,7 +24,7 @@ enqueue; one local runner serializes their branches, validates the exact train,
 and pushes only after explicit approval. No hosted merge-queue service or CI
 provider is required.
 
-![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](./docs/images/hub-overview.png)
+![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/hub-overview.png)
 
 Four guarantees shape the design: an **exact validated train identity** (the
 train you approved is the train that ships, byte for byte), a **lease-fenced
@@ -37,7 +37,7 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: alpha (`v0.8.0`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
+> Status: alpha (`v0.8.1`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
 
 ---
 
@@ -125,7 +125,7 @@ validated and landed as one train.
 The two can coexist: use mergetrain for direct integration where that is the
 policy, push a validated train to a review branch and open one PR, or reserve
 individual PRs for changes that need human discussion. See the
-[PR-first comparison and decision guide](./docs/pr-workflows.md) for the full
+[PR-first comparison and decision guide](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md) for the full
 pros, cons, and hybrid patterns.
 
 Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, bors) solve a related problem, but they are PR-first, remote-CI-first, and platform-first. mergetrain is for the other workflow: **local-agent, worktree-first, deploy-branch-first.**
@@ -206,7 +206,7 @@ that repo's own SQLite database, opened read-only, so observing a repo never
 creates or migrates anything inside it. `mergetrain hub daemon` runs your
 `--auto` work across those repos too, with a machine-wide concurrency cap
 (default: one repo's gates at a time — parallel agents, but never parallel
-engine builds). See [hub](./docs/hub.md).
+engine builds). See [hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md).
 
 Non-interactive callers can observe the same runner without starting a browser:
 
@@ -241,7 +241,7 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 - **Verify hook** — a command run *after* push to confirm the deploy is live.
 - **Auto job** — a job enqueued with `--auto`, the only kind the unattended daemon will touch. Manual jobs are left for a human-initiated runner.
 
-Full reference in [docs/design.md](./docs/design.md) and the [CLI reference](./docs/cli.md).
+Full reference in [docs/design.md](https://github.com/yongjip/mergetrain/blob/main/docs/design.md) and the [CLI reference](https://github.com/yongjip/mergetrain/blob/main/docs/cli.md).
 
 ## Alternatives — and what's different here
 
@@ -272,7 +272,7 @@ push ref carries its SHA, a landed train is never pushed twice, and deploys
 are refused while any job still needs reconciling. As far as we can tell, no
 other merge queue — hosted or local — documents an exactly-once push contract
 at all; the full failure catalogue is in
-[failure modes](./docs/failure-modes.md).
+[failure modes](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md).
 
 mergetrain is **not** a general-purpose job queue (it won't replace Celery/RQ/Sidekiq), a CI provider, or a deploy provider. The core is provider-neutral: your push targets, test commands, and deploy checks live in config, not in mergetrain.
 
@@ -309,7 +309,7 @@ deploy:
       run: curl -fsS https://example.invalid/health
 ```
 
-See the [config reference](./docs/config.md) for the full schema, placeholders, and environment variables.
+See the [config reference](https://github.com/yongjip/mergetrain/blob/main/docs/config.md) for the full schema, placeholders, and environment variables.
 
 ## For AI agents
 
@@ -330,22 +330,22 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 
 ## Documentation
 
-- [Quickstart](./docs/quickstart.md) · [Install](./docs/install.md)
-- [CLI reference](./docs/cli.md) — every command and flag
-- [Config reference](./docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
-- [Design & architecture](./docs/design.md) — the model, data model, and safety guarantees
-- [PR-first comparison](./docs/pr-workflows.md) — pros, cons, decision rules, and hybrid workflows
-- [Daemon](./docs/daemon.md) · [Failure modes](./docs/failure-modes.md) — operating it day to day
-- [Hub](./docs/hub.md) — every repo on one read-only board
-- [Manage from your phone](./docs/mobile.md) — drive mergetrain via Cowork Dispatch
-- [Agent contract](./docs/agent-contract.md) — the rules agents follow
-- [Machine contract](./docs/contract.md) — the versioned JSON/config shape agents parse
-- [Security](./docs/security.md) · [Adapter pattern](./docs/adapter-pattern.md) · [Development](./docs/development.md) · [Release](./docs/release.md)
+- [Quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md) · [Install](https://github.com/yongjip/mergetrain/blob/main/docs/install.md)
+- [CLI reference](https://github.com/yongjip/mergetrain/blob/main/docs/cli.md) — every command and flag
+- [Config reference](https://github.com/yongjip/mergetrain/blob/main/docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
+- [Design & architecture](https://github.com/yongjip/mergetrain/blob/main/docs/design.md) — the model, data model, and safety guarantees
+- [PR-first comparison](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md) — pros, cons, decision rules, and hybrid workflows
+- [Daemon](https://github.com/yongjip/mergetrain/blob/main/docs/daemon.md) · [Failure modes](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md) — operating it day to day
+- [Hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md) — every repo on one read-only board
+- [Manage from your phone](https://github.com/yongjip/mergetrain/blob/main/docs/mobile.md) — drive mergetrain via Cowork Dispatch
+- [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) — the rules agents follow
+- [Machine contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md) — the versioned JSON/config shape agents parse
+- [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) · [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) · [Development](https://github.com/yongjip/mergetrain/blob/main/docs/development.md) · [Release](https://github.com/yongjip/mergetrain/blob/main/docs/release.md)
 
 ## Status
 
-`v0.8.0`, alpha. The core — queue, runner lock, merge train, gates (with bisected joint-failure isolation and semantic-conflict reporting), atomic push, crash-safe reconciliation/recovery (`reconcile`/`recover`/`unlock`/`verify`/`dismiss`), auto-only daemon, resumable CLI events/inspection/log following, a [versioned machine contract](./docs/contract.md) across every JSON/JSONL surface, the local read-only dashboard, and the multi-repo hub (registry, aggregated board, `hub status`, auto-only `hub daemon` with a machine-wide concurrency cap and desktop notifications) — is implemented with a passing test suite on macOS, Linux, and Windows. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](./docs/security.md).
+`v0.8.1`, alpha. The core — queue, runner lock, merge train, gates (with bisected joint-failure isolation and semantic-conflict reporting), atomic push, crash-safe reconciliation/recovery (`reconcile`/`recover`/`unlock`/`verify`/`dismiss`), auto-only daemon, resumable CLI events/inspection/log following, a [versioned machine contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md) across every JSON/JSONL surface, the local read-only dashboard, and the multi-repo hub (registry, aggregated board, `hub status`, auto-only `hub daemon` with a machine-wide concurrency cap and desktop notifications) — is implemented with a passing test suite on macOS, Linux, and Windows. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md).
 
 ## License
 
-Released under the [MIT License](./LICENSE).
+Released under the [MIT License](https://github.com/yongjip/mergetrain/blob/main/LICENSE).
