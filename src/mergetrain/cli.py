@@ -14,6 +14,7 @@ from typing import Any
 from . import __version__
 from .config import (
     CONFIG_VERSION,
+    DEFAULT_CONFIG_NAME,
     MergetrainConfig,
     TerminologyConfig,
     load_config,
@@ -263,12 +264,19 @@ def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
 
 
 def _preflight_config(config: MergetrainConfig) -> None:
-    """Fail closed on a too-new config for the state-shipping path (#44).
+    """Fail closed before any state-shipping work (#44, #84 defect 6).
 
-    Enforced only on ``enqueue``/``run-batch``/``run-next`` — never inside
-    ``load_config`` — so a version mismatch after a rollback can still run
-    ``reconcile``/``recover``/``unlock`` and every read-only command. Never
-    ship code against a config an older binary may misread.
+    Enforced on the deploy-capable paths — ``enqueue``/``run-batch``/
+    ``run-next`` and both daemons — never inside ``load_config``, so a version
+    mismatch or a missing file after a rollback can still run
+    ``reconcile``/``recover``/``unlock`` and every read-only command.
+
+    Two configs are unsafe to ship against:
+
+    - Newer than this binary understands: an older mergetrain may misread it.
+    - Absent: ``load_config`` otherwise falls back to ``origin/main`` and
+      minimal default gates, so a deploy would run against guessed settings.
+      Require an explicit ``mergetrain init`` instead.
     """
 
     if config.config_version > CONFIG_VERSION:
@@ -276,6 +284,13 @@ def _preflight_config(config: MergetrainConfig) -> None:
             f"config version {config.config_version} is newer than this "
             f"mergetrain understands (supports {CONFIG_VERSION}); upgrade "
             "mergetrain before enqueuing or deploying. Recovery and read-only "
+            "commands still work."
+        )
+    if not config.config_exists:
+        raise ConfigError(
+            f"no {DEFAULT_CONFIG_NAME} in this repo; run 'mergetrain init' before "
+            "enqueuing or deploying. mergetrain will not ship against guessed "
+            "defaults (origin/main and minimal gates). Recovery and read-only "
             "commands still work."
         )
 
@@ -954,6 +969,11 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
 
 def cmd_daemon(args: argparse.Namespace) -> int:
     config = config_from_args(args)
+    # An unattended daemon is the most dangerous place to ship against a config
+    # this binary cannot honor (too new) or against guessed defaults (absent).
+    # Reject both before the loop can claim and deploy a single auto job (#84,
+    # defect 6).
+    _preflight_config(config)
     runner = GitRunner(config)
     owner = default_owner()
 

@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from .config import MergetrainConfig, load_config
+from .config import CONFIG_VERSION, MergetrainConfig, load_config
 from .daemon import ProcessBatch, Say, daemon_tick
 from .hub import display_path
 from .notify import (
@@ -104,6 +104,18 @@ def hub_sweep(
             out["name"] = config.project.name
             if not config.config_exists:
                 out.update(ok=False, outcome="error", error="no .mergetrain.yaml in this repo")
+                return out
+            if config.config_version > CONFIG_VERSION:
+                # An older hub binary must never deploy a repo whose config it
+                # cannot read; report and skip, like a missing config (#84, defect 6).
+                out.update(
+                    ok=False,
+                    outcome="error",
+                    error=(
+                        f"config version {config.config_version} is newer than this "
+                        f"mergetrain (supports {CONFIG_VERSION}); upgrade before deploying"
+                    ),
+                )
                 return out
             if not Path(config.state.db).is_file():
                 # No queue database means no auto work can exist — and the
