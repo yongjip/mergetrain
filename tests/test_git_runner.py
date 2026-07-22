@@ -15,6 +15,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import mergetrain.git_runner as git_runner_module
+
 
 def py_path(path: Path | str) -> str:
     """A filesystem path safe to embed inside a Python string literal.
@@ -525,6 +527,36 @@ class GitRunnerTests(unittest.TestCase):
             # and a clean deploy leaves no pin ref behind.
             pending = git(repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/")
             self.assertEqual(pending, "")
+
+    def test_pin_ref_failure_blocks_before_push_and_preserves_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                original_run_command = git_runner_module.run_command
+
+                def fail_pending_ref(command, **kwargs):
+                    if list(command[:2]) == ["git", "update-ref"]:
+                        raise CommandFailed(command, 1, stderr="cannot lock ref")
+                    return original_run_command(command, **kwargs)
+
+                with patch.object(
+                    git_runner_module,
+                    "run_command",
+                    side_effect=fail_pending_ref,
+                ), patch.object(runner, "push_verified_head") as push:
+                    result = runner.process_one(conn, job, deploy=True)
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "blocked")
+            self.assertTrue(result.pending_deploy_sha)
+            self.assertIn("push was not attempted", result.note)
+            push.assert_not_called()
 
     def test_dashboard_command_masks_obvious_secret_values(self) -> None:
         rendered = _dashboard_command(

@@ -995,12 +995,24 @@ class GitRunner:
             push_refs=self.config.git.push_refs,
         )
         for job_id in job_ids:
-            run_command(
-                ["git", "update-ref", self._pending_ref(job_id), deploy_sha],
-                cwd=self.repo,
-                log=log,
-                check=False,
-            )
+            pending_ref = self._pending_ref(job_id)
+            try:
+                run_command(
+                    ["git", "update-ref", pending_ref, deploy_sha],
+                    cwd=self.repo,
+                    log=log,
+                    check=True,
+                )
+            except CommandFailed as exc:
+                raise MergetrainError(
+                    f"could not create recovery pin {pending_ref}; push was not attempted"
+                ) from exc
+            pinned_sha = resolve_pending_ref(self.repo, job_id)
+            if pinned_sha != deploy_sha:
+                raise MergetrainError(
+                    f"recovery pin {pending_ref} resolved to {pinned_sha or 'nothing'}, "
+                    f"expected {deploy_sha}; push was not attempted"
+                )
         self.push_verified_head(
             worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse
         )
