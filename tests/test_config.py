@@ -56,6 +56,39 @@ class ConfigTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigError, "flow-style YAML"):
                     _parse_simple_yaml(f"value: {value}\n")
 
+    def test_yaml_parsers_reject_ambiguous_or_tab_indented_scalars(self) -> None:
+        cases = {
+            "git:\n\tremote: upstream\n": "tab indentation",
+            "agent:\n  require_explicit_auto_approval: no\n": "true/false",
+            "queue:\n  lock_ttl_minutes: 010\n": "quote it",
+            "queue:\n  lock_ttl_minutes: 0x10\n": "quote it",
+        }
+        for document, message in cases.items():
+            for parser in (_parse_simple_yaml, load_yaml):
+                with self.subTest(document=document, parser=parser.__name__):
+                    with self.assertRaisesRegex(ConfigError, message):
+                        parser(document)
+
+    def test_fallback_parser_matches_plain_yaml_shapes_used_by_config(self) -> None:
+        document = (
+            "project:\n"
+            "    name: bob's app  # comment\n"
+            "git:\n"
+            "    push_refs:\n"
+            "        - HEAD:main\n"
+            "empty:\n"
+        )
+        parsed = _parse_simple_yaml(document)
+        self.assertEqual(parsed["project"]["name"], "bob's app")
+        self.assertEqual(parsed["git"]["push_refs"], ["HEAD:main"])
+        self.assertIsNone(parsed["empty"])
+
+        try:
+            import yaml
+        except Exception:  # pragma: no cover - only when PyYAML is absent
+            return
+        self.assertEqual(parsed, yaml.safe_load(document))
+
     def test_relative_paths_resolve_from_repo(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             # Resolve symlinks (e.g. macOS /var -> /private/var) so the expected
