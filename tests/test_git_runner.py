@@ -1169,6 +1169,53 @@ class BisectIsolationTests(unittest.TestCase):
             messages = [event.message for event in events]
             self.assertIn("Bisect inconclusive; isolating jobs one-by-one", messages)
 
+    def test_bisect_fallback_stops_after_ambiguous_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            counter = root / "count.txt"
+            gate = (
+                f"{sys.executable} -c \"import pathlib, sys; "
+                f"p = pathlib.Path('{py_path(counter)}'); "
+                "n = (int(p.read_text()) + 1) if p.exists() else 1; "
+                "p.write_text(str(n)); sys.exit(1 if n == 1 else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            for name in ("b", "c", "d"):
+                add_branch(repo, f"agent/{name}", f"{name}.txt")
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            token = ""
+            try:
+                for task, branch in (
+                    ("a", "feature/a"),
+                    ("b", "agent/b"),
+                    ("c", "agent/c"),
+                    ("d", "agent/d"),
+                ):
+                    enqueue_job(conn, task=task, branch=branch)
+                claimed = claim_deploy_batch(conn, owner=owner)
+                token = claimed[0].claim_token
+                failure = CommandFailed(
+                    ["git", "push"], 1, stderr="transport timed out"
+                )
+                runner = GitRunner(config)
+                with patch.object(
+                    runner, "push_verified_head", side_effect=failure
+                ) as push:
+                    runner.process_batch(conn, claimed, deploy=True, owner=owner)
+                stored = [get_job(conn, job.id) for job in claimed]
+            finally:
+                if token:
+                    release_runner_lock(conn, owner=owner, token=token)
+                conn.close()
+
+            self.assertEqual(push.call_count, 1)
+            self.assertEqual(
+                [job.status for job in stored],
+                ["needs_reconcile", "queued", "queued", "queued"],
+            )
+
     def test_small_train_keeps_linear_isolation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1196,6 +1243,57 @@ class BisectIsolationTests(unittest.TestCase):
             messages = [event.message for event in events]
             self.assertIn("Train gate failed; isolating jobs", messages)
             self.assertNotIn("Train gate failed; bisecting 3 jobs", messages)
+
+    def test_linear_isolation_stops_after_ambiguous_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f"{sys.executable} -c \"import pathlib, sys; p=pathlib.Path; "
+                "sys.exit(1 if sum(p(name).exists() for name in "
+                "('a.txt', 'b.txt', 'c.txt')) > 1 else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            add_branch(repo, "agent/b", "b.txt")
+            add_branch(repo, "agent/c", "c.txt")
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            token = ""
+            try:
+                for task, branch in (
+                    ("a", "feature/a"),
+                    ("b", "agent/b"),
+                    ("c", "agent/c"),
+                ):
+                    enqueue_job(conn, task=task, branch=branch)
+                claimed = claim_deploy_batch(conn, owner=owner)
+                token = claimed[0].claim_token
+                failure = CommandFailed(
+                    ["git", "push"], 1, stderr="transport timed out"
+                )
+                runner = GitRunner(config)
+                with patch.object(
+                    runner, "push_verified_head", side_effect=failure
+                ) as push:
+                    results = runner.process_batch(
+                        conn, claimed, deploy=True, owner=owner
+                    )
+                stored = [get_job(conn, job.id) for job in claimed]
+            finally:
+                if token:
+                    release_runner_lock(conn, owner=owner, token=token)
+                conn.close()
+
+            self.assertEqual(push.call_count, 1)
+            self.assertEqual(
+                [job.status for job in stored],
+                ["needs_reconcile", "queued", "queued"],
+            )
+            self.assertEqual(
+                [job.status for job in results],
+                ["needs_reconcile", "queued", "queued"],
+            )
+            self.assertTrue(all("reconcile" in job.note for job in stored))
 
 
 class PushRejectionTests(unittest.TestCase):
