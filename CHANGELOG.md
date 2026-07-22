@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- Preserve remote truth across push and cancellation races (#94). Any
+  non-policy push failure after the durable marker is written now parks the
+  job in `needs_reconcile` instead of terminal `failed`, because the remote may
+  already have accepted the atomic update. A concurrent cancellation request
+  is retained for reconcile to honor when no ref landed. An unambiguous remote
+  policy/permission rejection still becomes `blocked`, but now clears its DB
+  marker and pending pin; successful deploys clear their pins as well. These
+  transitions are claim-token/CAS fenced so a stale runner cannot erase newer
+  recovery evidence.
+
+- Harden dependency-free config parsing and secret redaction (#95). The built-in
+  YAML subset parser rejects unsupported non-empty flow-style collections
+  instead of silently treating them as strings, and invalid scalar/container
+  types consistently produce `config_error`. Expected errors, persisted job
+  notes, `doctor` remote URLs, status JSON, and dashboard snapshots now mask
+  passwords embedded in URL userinfo in addition to sensitive assignments and
+  command options.
+
+- Expand fail-closed regression coverage for reconcile, recovery/GC, daemon
+  TOCTOU guards, and dirty integration cleanup (#96). Consolidate the duplicated
+  single/batch marker → push classification → post-push verification sequence
+  into one safety path (#97). `status`, `doctor`, and the dashboard now use the
+  same config-aware `next_action`, and `dismiss --all` processes every eligible
+  blocked/failed row rather than a display-limited subset.
+
 ## 0.7.0 - 2026-07-21
 
 - Never gc a live runner's worktree (0.9.0-prep). `gc --apply` listed and

@@ -201,7 +201,9 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 
 - `unlock_wedged_runner` — an expired lease is held by an owner that still looks alive with in-progress work; run `unlock --force` (0.3.0).
 - `wait_for_runner` — a live runner already holds the lock.
-- `reconcile_pending_deploy` — a crash left jobs `needs_reconcile` (or a marker-bearing orphan); resolve with `reconcile` before deploying (0.3.0).
+- `reconcile_pending_deploy` — a crash or ambiguous push response left jobs
+  `needs_reconcile` (or a marker-bearing orphan); resolve with `reconcile`
+  before deploying (0.3.0).
 - `reconcile_conflict_manual` — `reconcile` left a job `blocked` with its marker; git inspection is required (0.3.0).
 - `fix_blocked_job` — there are `blocked`/`failed` jobs to resolve first.
 - `verify_reconciled_deploy` — a reconciled deploy landed but its post-push verify could not be proven (`verify_status='unknown'`); run `mergetrain verify` to re-run the `deploy.verify` hooks against the recorded `deploy_sha` (or `mergetrain verify --ack succeeded|failed` for hooks that cannot be re-run). This clears the state.
@@ -390,7 +392,8 @@ whose owning job is terminal/failed/missing is deleted (reported under
 
 ## `reconcile`
 
-Resolve every `needs_reconcile` job against the **remote** after a crash (0.3.0).
+Resolve every `needs_reconcile` job against the **remote** after a crash or
+ambiguous push response (0.3.0).
 Reads the durable per-job `pending_deploy_sha` marker written before the push,
 then asks the remote (`git fetch` + `ls-remote` + `merge-base --is-ancestor`)
 whether the deploy actually landed. **Never pushes.** Dry-run by default.
@@ -465,6 +468,9 @@ remote, so it is safe to run unattended.
 mergetrain dismiss 12 --note "fixed on a rebased branch"
 mergetrain dismiss --all      # every blocked/failed job
 ```
+
+`--all` selects every eligible row directly from the queue; it is not limited by
+the default `status --limit` display window.
 
 ## `verify`
 

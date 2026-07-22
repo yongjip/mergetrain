@@ -29,9 +29,9 @@ Agents should:
 - `validated`: validation succeeded without push; the exact train remains deployable after approval.
 - `deployed`: deploy push succeeded; inspect `push_status` and `verify_status`
   for the independent push and post-push verification outcomes.
-- `needs_reconcile`: a crash left a possibly-landed push; run `reconcile`
-  (dry-run) then `reconcile --apply` or `recover`. Every deploy entrypoint is
-  refused while any job is in this state.
+- `needs_reconcile`: a crash or ambiguous push response left a possibly-landed
+  push; run `reconcile` (dry-run) then `reconcile --apply` or `recover`. Every
+  deploy entrypoint is refused while any job is in this state.
 - `canceled`: user canceled the item.
 
 ## Safe commands
