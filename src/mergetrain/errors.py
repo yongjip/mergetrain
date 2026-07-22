@@ -65,6 +65,18 @@ class PushRejected(MergetrainError):
     error.code == "push_rejected"."""
 
 
+class AmbiguousPush(MergetrainError):
+    """Raised when the atomic push fails for a NON-rejection reason (transport
+    drop, timeout) after the write-ahead marker was already recorded.
+
+    The remote may or may not have accepted the refs, so the outcome is
+    ambiguous. The job is parked ``needs_reconcile`` (not ``failed``) with its
+    marker preserved, so a later ``reconcile`` establishes remote truth and every
+    deploy entrypoint refuses in the meantime — the exactly-once invariant
+    (guarantee #4) must never re-push over a ref that may already have advanced.
+    """
+
+
 class RemoteUnreachable(MergetrainError):
     """Raised when reconcile cannot reach the remote to establish deploy truth.
 

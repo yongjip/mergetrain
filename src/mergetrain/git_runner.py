@@ -17,6 +17,7 @@ from typing import IO
 
 from .config import GateConfig, MergetrainConfig
 from .errors import (
+    AmbiguousPush,
     CancellationRequested,
     CommandFailed,
     LostLease,
@@ -1176,7 +1177,16 @@ class GitRunner:
                                 "pull request, or ref permission) — a repo-config issue, "
                                 f"not a code failure: {exc.stderr.strip() or exc}"
                             ) from exc
-                        raise
+                        # Non-rejection failure AFTER the marker was recorded: the
+                        # remote may have accepted the atomic push, so the outcome
+                        # is ambiguous. Park needs_reconcile (marker preserved) so
+                        # reconcile establishes remote truth and no later deploy
+                        # re-pushes over a ref that may already have advanced.
+                        raise AmbiguousPush(
+                            "atomic push failed after the write-ahead marker was "
+                            f"recorded (exit {exc.returncode}); outcome ambiguous — "
+                            f"parked for reconcile: {exc.stderr.strip() or exc}"
+                        ) from exc
                     push_status = "succeeded"
                     self._event(
                         conn,
@@ -1277,6 +1287,8 @@ class GitRunner:
                 )
             except MergeBlocked as exc:
                 return finish_after_error(status="blocked", note=str(exc))
+            except AmbiguousPush as exc:
+                return finish_after_error(status="needs_reconcile", note=str(exc))
             except CommandFailed as exc:
                 return finish_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
@@ -2011,7 +2023,16 @@ class GitRunner:
                                 "pull request, or ref permission) — a repo-config issue, "
                                 f"not a code failure: {exc.stderr.strip() or exc}"
                             ) from exc
-                        raise
+                        # Non-rejection failure AFTER the marker was recorded: the
+                        # remote may have accepted the atomic push, so the outcome
+                        # is ambiguous. Park needs_reconcile (marker preserved) so
+                        # reconcile establishes remote truth and no later deploy
+                        # re-pushes over a ref that may already have advanced.
+                        raise AmbiguousPush(
+                            "atomic push failed after the write-ahead marker was "
+                            f"recorded (exit {exc.returncode}); outcome ambiguous — "
+                            f"parked for reconcile: {exc.stderr.strip() or exc}"
+                        ) from exc
                     push_status = "succeeded"
                     self._event(
                         conn,
@@ -2119,6 +2140,8 @@ class GitRunner:
                         note="canceled by user while the train was running",
                     )
                 return cancel_active_jobs()
+            except AmbiguousPush as exc:
+                return finish_active_after_error(status="needs_reconcile", note=str(exc))
             except CommandFailed as exc:
                 return finish_active_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:

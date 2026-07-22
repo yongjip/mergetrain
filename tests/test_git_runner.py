@@ -298,9 +298,37 @@ class GitRunnerTests(unittest.TestCase):
                     result = runner.process_one(conn, job, deploy=True)
             finally:
                 conn.close()
-            self.assertEqual(result.status, "failed")
+            # A non-rejection push failure is AMBIGUOUS (the remote may have
+            # accepted it), so it parks needs_reconcile — never a terminal
+            # 'failed' that a later deploy would silently push over (guarantee #4).
+            # (Marker preservation with a real claim is covered end-to-end in
+            # test_reconcile.test_ambiguous_push_parks_needs_reconcile_*.)
+            self.assertEqual(result.status, "needs_reconcile")
             self.assertEqual(result.push_status, "failed")
             self.assertEqual(result.verify_status, "not_run")
+
+    def test_real_push_rejection_still_blocks_not_reconciles(self) -> None:
+        # Benign check: a genuine PushRejected (protected branch / permission —
+        # the remote definitely did NOT accept the push) must still finalize
+        # 'blocked', NOT needs_reconcile, so the ambiguous-push fix never
+        # mislabels a real rejection as an ambiguous outcome.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                rejection = CommandFailed(
+                    ["git", "push"], 1,
+                    stderr="! [remote rejected] main -> main (protected branch hook declined)",
+                )
+                with patch.object(runner, "push_verified_head", side_effect=rejection):
+                    result = runner.process_one(conn, job, deploy=True)
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "blocked")
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
 
