@@ -6,7 +6,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import mergetrain.store as store_module
 from mergetrain.errors import (
     CancellationRequested,
     DuplicateActiveBranch,
@@ -126,6 +128,52 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(
             unpack_push_refs(marked.pending_deploy_refs), ["main", "refs/deploy/prod"]
         )
+
+    def test_cancel_refuses_needs_reconcile_and_preserves_marker(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="a")
+        conn.execute(
+            "UPDATE deploy_queue SET status='needs_reconcile', "
+            "pending_deploy_sha=?, pending_deploy_remote='origin', "
+            "pending_deploy_refs='main', push_status='pending' WHERE id=?",
+            ("a" * 40, job.id),
+        )
+        conn.commit()
+
+        with self.assertRaisesRegex(QueueError, "reconcile --apply"):
+            cancel_job(conn, job.id)
+
+        preserved = get_job(conn, job.id)
+        self.assertEqual(preserved.status, "needs_reconcile")
+        self.assertEqual(preserved.pending_deploy_sha, "a" * 40)
+        self.assertEqual(preserved.pending_deploy_remote, "origin")
+        self.assertEqual(preserved.pending_deploy_refs, "main")
+
+    def test_cancel_queued_job_does_not_overwrite_concurrent_claim(self) -> None:
+        conn = self.make_conn()
+        job = enqueue_job(conn, task="a", branch="a")
+        real_get_job = store_module.get_job
+        raced = False
+
+        def get_then_claim(current_conn, job_id):  # type: ignore[no-untyped-def]
+            nonlocal raced
+            snapshot = real_get_job(current_conn, job_id)
+            if not raced:
+                raced = True
+                current_conn.execute(
+                    "UPDATE deploy_queue SET status='in_progress', claim_token=? WHERE id=?",
+                    ("new-owner-token", job_id),
+                )
+                current_conn.commit()
+            return snapshot
+
+        with patch("mergetrain.store.get_job", side_effect=get_then_claim):
+            with self.assertRaisesRegex(QueueError, "raced by a concurrent transition"):
+                cancel_job(conn, job.id)
+
+        claimed = real_get_job(conn, job.id)
+        self.assertEqual(claimed.status, "in_progress")
+        self.assertEqual(claimed.claim_token, "new-owner-token")
 
     def test_state_dir_self_ignores(self) -> None:
         # First DB open drops a .gitignore of '*' inside the dedicated state

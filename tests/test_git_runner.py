@@ -47,11 +47,13 @@ from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.errors import CommandFailed, redact_secrets
 from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
+from mergetrain.snapshot import next_action
 from mergetrain.store import (
     cancel_job,
     claim_all_queued,
     claim_deploy_batch,
     connect,
+    counts,
     enqueue_job,
     get_job,
     get_lock,
@@ -318,17 +320,28 @@ class GitRunnerTests(unittest.TestCase):
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
+                enqueue_job(conn, task="a", branch="feature/a")
+                owner = f"runner:{os.getpid()}"
+                claimed = claim_deploy_batch(conn, owner=owner)
                 runner = GitRunner(config)
                 rejection = CommandFailed(
                     ["git", "push"], 1,
                     stderr="! [remote rejected] main -> main (protected branch hook declined)",
                 )
                 with patch.object(runner, "push_verified_head", side_effect=rejection):
-                    result = runner.process_one(conn, job, deploy=True)
+                    result = runner.process_one(
+                        conn, claimed[0], deploy=True, owner=owner
+                    )
+                action = next_action({"counts": counts(conn)})
             finally:
                 conn.close()
             self.assertEqual(result.status, "blocked")
+            self.assertEqual(result.pending_deploy_sha, "")
+            self.assertEqual(action, "fix_blocked_job")
+            pending = git(
+                repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/"
+            )
+            self.assertEqual(pending, "")
 
     def test_a_gate_that_mutates_the_worktree_blocks_the_deploy(self) -> None:
         # Guarantee #1: gates are verification, not mutation. A gate that dirties
@@ -357,31 +370,43 @@ class GitRunnerTests(unittest.TestCase):
                 git(root / "remote.git", "show", "main:a.txt")
 
     def test_unexpected_post_push_error_preserves_deployed_truth(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            verify = f'{sys.executable} -c "import sys; sys.exit(0)"'
-            repo, _marker = make_demo_repo(root, verify_command=verify)
-            config = load_config(repo=repo)
-            conn = connect(config.state.db)
-            try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
-                runner = GitRunner(config)
-                with patch.object(
-                    runner,
-                    "_run_verify_hooks",
-                    side_effect=RuntimeError("verification crashed"),
-                ):
-                    result = runner.process_one(conn, job, deploy=True)
-                events = list_run_events(conn)
-            finally:
-                conn.close()
-            self.assertEqual(result.status, "deployed")
-            self.assertEqual(result.push_status, "succeeded")
-            self.assertEqual(result.verify_status, "failed")
-            self.assertIn("post-push completion warning", result.note)
-            self.assertEqual(events[-1].phase, "complete")
-            self.assertEqual(events[-1].state, "warning")
-            self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+        for batch in (False, True):
+            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                verify = f'{sys.executable} -c "import sys; sys.exit(0)"'
+                repo, _marker = make_demo_repo(root, verify_command=verify)
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    job = enqueue_job(conn, task="a", branch="feature/a")
+                    runner = GitRunner(config)
+                    with patch.object(
+                        runner,
+                        "_run_verify_hooks",
+                        side_effect=RuntimeError("verification crashed"),
+                    ):
+                        result = (
+                            runner.process_batch(conn, [job], deploy=True)[0]
+                            if batch
+                            else runner.process_one(conn, job, deploy=True)
+                        )
+                    events = list_run_events(conn)
+                finally:
+                    conn.close()
+                self.assertEqual(result.status, "deployed")
+                self.assertEqual(result.push_status, "succeeded")
+                self.assertEqual(result.verify_status, "failed")
+                self.assertIn("post-push completion warning", result.note)
+                self.assertEqual(events[-1].phase, "complete")
+                self.assertEqual(events[-1].state, "warning")
+                self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+                pending = git(
+                    repo,
+                    "for-each-ref",
+                    "--format=%(refname)",
+                    "refs/mergetrain/pending/",
+                )
+                self.assertEqual(pending, "")
 
     def test_single_deploy_records_verify_success_and_failure(self) -> None:
         for returncode, expected_verify, expected_event_state in [

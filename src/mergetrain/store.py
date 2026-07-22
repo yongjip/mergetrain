@@ -1308,6 +1308,40 @@ def record_pending_push(
         )
 
 
+def clear_rejected_push(
+    conn: sqlite3.Connection,
+    *,
+    job_ids: Sequence[int],
+    claim_token: str,
+) -> None:
+    """Clear a pending marker after an unambiguous remote rejection.
+
+    A protected-branch or permission rejection proves that no ref update landed,
+    so retaining the write-ahead marker would misclassify the eventual ``blocked``
+    row as a reconcile conflict.  Fence the cleanup to the runner that recorded
+    the marker; a stale owner must never erase another runner's recovery evidence.
+    """
+
+    ids = [int(job_id) for job_id in job_ids]
+    if not ids or not claim_token:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with immediate(conn):
+        cur = conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET pending_deploy_sha = '', pending_deploy_remote = '',
+                pending_deploy_refs = '', push_status = 'failed'
+            WHERE id IN ({placeholders})
+              AND status = 'in_progress'
+              AND claim_token = ?
+            """,
+            (*ids, claim_token),
+        )
+        if cur.rowcount != len(ids):
+            raise LostLease("pending push is no longer owned by this runner")
+
+
 def mark_job(
     conn: sqlite3.Connection,
     job_id: int,
@@ -1347,7 +1381,11 @@ def mark_job(
             raise LostLease("job claim token is missing")
         where += " AND status = 'in_progress' AND claim_token = ?"
         where_values.append(expected_claim_token)
-        if status not in {"canceled", "deployed"}:
+        # A marker-bearing ambiguous push must park for reconcile even when a
+        # cancel arrived during remote I/O.  Reconcile, not the cancel request,
+        # decides whether the push landed.  Preserve the request below so an
+        # unlanded push can still honor it.
+        if status not in {"canceled", "deployed", "needs_reconcile"}:
             where += " AND cancel_requested_at = ''"
     if expected_status:
         # Compare-and-swap on the source status, so a concurrent transition (e.g.
@@ -1377,7 +1415,8 @@ def mark_job(
                 conflict_with = ?,
                 claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
                 cancel_requested_at = CASE
-                    WHEN ? IN ('in_progress', 'canceled') THEN cancel_requested_at
+                    WHEN ? IN ('in_progress', 'canceled', 'needs_reconcile')
+                    THEN cancel_requested_at
                     ELSE ''
                 END,
                 pending_deploy_sha = CASE
@@ -1442,6 +1481,11 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
     job = get_job(conn, job_id)
     if job.status in TERMINAL_STATUSES:
         raise QueueError(f"terminal job cannot be canceled: {job_id}")
+    if job.status == "needs_reconcile":
+        raise QueueError(
+            f"job {job_id} has an unresolved push; run 'mergetrain reconcile --apply' "
+            "before canceling"
+        )
     if job.status == "in_progress":
         requested_at = utc_now()
         cancel_note = note or "cancellation requested by user"
@@ -1477,7 +1521,13 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
                 (cancel_note, utc_now(), job.train_id),
             )
         return get_job(conn, job_id)
-    return mark_job(conn, job_id, status="canceled", note=note or "canceled by user")
+    return mark_job(
+        conn,
+        job_id,
+        status="canceled",
+        note=note or "canceled by user",
+        expected_status=job.status,
+    )
 
 
 def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
