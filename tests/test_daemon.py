@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mergetrain.daemon import _grade_batch, daemon_loop, daemon_tick
 from mergetrain.errors import QueueError
@@ -115,6 +116,92 @@ class DaemonTests(unittest.TestCase):
                 say=lambda _: None,
             )
             self.assertEqual(outcome, "reconcile_paused")
+
+    def test_tick_rechecks_reconcile_after_orphan_heal(self) -> None:
+        from mergetrain.store import recover_orphans as real_recover_orphans
+
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            orphan = enqueue_job(conn, task="orphan", branch="orphan")
+            conn.execute(
+                "UPDATE deploy_queue SET status='in_progress', claim_token='old' "
+                "WHERE id = ?",
+                (orphan.id,),
+            )
+            conn.commit()
+            conn.close()
+
+            def marker_arrives_during_heal(conn_arg, **kwargs):  # type: ignore[no-untyped-def]
+                healed = real_recover_orphans(conn_arg, **kwargs)
+                conn_arg.execute(
+                    "UPDATE deploy_queue SET status='needs_reconcile', "
+                    "pending_deploy_sha='deadbeef' WHERE id = ?",
+                    (orphan.id,),
+                )
+                conn_arg.commit()
+                return healed
+
+            seen: list[int] = []
+            with patch(
+                "mergetrain.daemon.recover_orphans",
+                side_effect=marker_arrives_during_heal,
+            ):
+                outcome = daemon_tick(
+                    db_path=str(db),
+                    process_batch=lambda conn, jobs: seen.extend(j.id for j in jobs),
+                    owner="daemon:1",
+                    say=lambda _: None,
+                )
+
+            self.assertEqual(outcome, "reconcile_paused")
+            self.assertEqual(seen, [])
+
+    def test_tick_rechecks_reconcile_after_claim_race(self) -> None:
+        from mergetrain.store import claim_all_queued as real_claim_all_queued
+
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            auto = enqueue_job(
+                conn, task="auto", branch="auto", auto_deploy=True
+            )
+            raced = enqueue_job(conn, task="raced", branch="raced")
+            conn.close()
+
+            def orphan_appears_before_claim(conn_arg, **kwargs):  # type: ignore[no-untyped-def]
+                control = connect(db)
+                try:
+                    control.execute(
+                        "UPDATE deploy_queue SET status='in_progress', "
+                        "claim_token='old', pending_deploy_sha='deadbeef' WHERE id = ?",
+                        (raced.id,),
+                    )
+                    control.commit()
+                finally:
+                    control.close()
+                return real_claim_all_queued(conn_arg, **kwargs)
+
+            seen: list[int] = []
+            with patch(
+                "mergetrain.daemon.claim_all_queued",
+                side_effect=orphan_appears_before_claim,
+            ):
+                outcome = daemon_tick(
+                    db_path=str(db),
+                    process_batch=lambda conn, jobs: seen.extend(j.id for j in jobs),
+                    owner="daemon:1",
+                    say=lambda _: None,
+                )
+
+            self.assertEqual(outcome, "reconcile_paused")
+            self.assertEqual(seen, [])
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, auto.id).status, "queued")
+                self.assertEqual(get_job(conn, raced.id).status, "needs_reconcile")
+            finally:
+                conn.close()
 
 
 class OrphanSelfHealTests(unittest.TestCase):

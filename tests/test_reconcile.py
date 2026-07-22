@@ -50,7 +50,7 @@ from mergetrain.store import (
 # during recovery (the test process itself is alive, so it cannot be the owner).
 DEAD_OWNER = "ghost:999999"
 
-from test_git_runner import git, make_demo_repo, rmtree
+from test_git_runner import git, make_demo_repo, py_path, rmtree
 
 
 class _Crash(BaseException):
@@ -188,6 +188,41 @@ class ReconcileClassifierTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(outcome.summary["canceled"], 1)
             self.assertEqual(healed.status, "canceled")
+
+    def test_concurrent_transition_during_remote_probe_survives_apply(self) -> None:
+        """A newer state must win the classify/apply CAS race."""
+        from mergetrain import recovery as recovery_module
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            real_apply = recovery_module._apply
+
+            def cancel_then_apply(config_arg, conn_arg, decision):  # type: ignore[no-untyped-def]
+                control = connect(config.state.db)
+                try:
+                    mark_job(
+                        control,
+                        decision.job.id,
+                        status="canceled",
+                        note="concurrent transition won",
+                    )
+                finally:
+                    control.close()
+                real_apply(config_arg, conn_arg, decision)
+
+            try:
+                _set_needs_reconcile(conn, job.id, pending)
+                with patch(
+                    "mergetrain.recovery._apply", side_effect=cancel_then_apply
+                ):
+                    reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            self.assertEqual(healed.status, "canceled")
+            self.assertEqual(healed.note, "concurrent transition won")
 
     def test_pruned_pending_sha_without_pin_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -669,6 +704,80 @@ class DoctorNextActionTests(unittest.TestCase):
             self.assertEqual(self._doctor(repo)["next_action"], "unlock_wedged_runner")
 
 
+class VerifyRerunTests(unittest.TestCase):
+    def _stage_unknown_deploy(self, repo: Path) -> tuple[int, str]:
+        config = load_config(repo=repo)
+        deploy_sha = git(repo, "rev-parse", "feature/a")
+        conn = connect(config.state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            mark_job(
+                conn,
+                job.id,
+                status="deployed",
+                deploy_sha=deploy_sha,
+                push_status="succeeded",
+                verify_status="unknown",
+            )
+        finally:
+            conn.close()
+        return job.id, deploy_sha
+
+    def test_verify_without_ack_reruns_hook_at_deploy_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker = root / "verify-rerun.txt"
+            command = (
+                f'{sys.executable} -c "from pathlib import Path; '
+                f"Path('{py_path(marker)}').write_text("
+                "Path('a.txt').read_text())\""
+            )
+            repo, _ = make_demo_repo(root, verify_command=command)
+            job_id, deploy_sha = self._stage_unknown_deploy(repo)
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "verify", "--json"])
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "a\n")
+            self.assertEqual(
+                payload["resolved"],
+                [{"job_id": job_id, "verify_status": "succeeded"}],
+            )
+            conn = connect(load_config(repo=repo).state.db)
+            try:
+                resolved = get_job(conn, job_id)
+            finally:
+                conn.close()
+            self.assertEqual(resolved.verify_status, "succeeded")
+            self.assertIn(deploy_sha, resolved.note)
+
+    def test_verify_without_ack_returns_one_when_hook_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker = root / "verify-failed.txt"
+            command = (
+                f'{sys.executable} -c "from pathlib import Path; '
+                f"Path('{py_path(marker)}').write_text('ran'); "
+                "raise SystemExit(1)\""
+            )
+            repo, _ = make_demo_repo(root, verify_command=command)
+            job_id, _ = self._stage_unknown_deploy(repo)
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "verify", "--json"])
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 1)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "ran")
+            self.assertEqual(
+                payload["resolved"],
+                [{"job_id": job_id, "verify_status": "failed"}],
+            )
+
 class CommandExitCodeTests(unittest.TestCase):
     def _run(self, repo: Path, *argv: str) -> tuple[int, dict]:
         out = io.StringIO()
@@ -928,6 +1037,79 @@ class ReviewHardeningTests(unittest.TestCase):
             self.assertIn(pending_ref_name(blocked.id), refs)
             self.assertNotIn(pending_ref_name(deployed.id), refs)
             self.assertTrue(any(s["job_id"] == deployed.id for s in swept))
+
+    def test_recover_gc_removes_orphans_sweeps_pins_and_spares_new_runner(self) -> None:
+        from mergetrain.git_runner import apply_gc as real_apply_gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            worktree_root = config.state.worktree_root
+            worktree_root.mkdir(parents=True, exist_ok=True)
+            orphan = worktree_root / f"{config.project.name}-mergetrain-1-orphan"
+            live = worktree_root / f"{config.project.name}-mergetrain-2-live"
+            orphan.mkdir()
+            live.mkdir()
+            conn = connect(config.state.db)
+            live_lock = None
+            try:
+                stale = enqueue_job(conn, task="stale", branch="feature/a")
+                deploy_sha = git(repo, "rev-parse", "feature/a")
+                _pin(repo, stale.id, deploy_sha)
+                mark_job(
+                    conn,
+                    stale.id,
+                    status="deployed",
+                    deploy_sha=deploy_sha,
+                    push_status="succeeded",
+                    verify_status="unknown",
+                )
+
+                def runner_starts_after_snapshot(
+                    config_arg, *, delete_branches=(), protect=(), live_worktree_now=None
+                ):  # type: ignore[no-untyped-def]
+                    nonlocal live_lock
+                    control = connect(config.state.db)
+                    try:
+                        live_lock = acquire_runner_lock(
+                            control,
+                            owner=f"runner:{os.getpid()}",
+                            ttl_minutes=30,
+                            worktree_path=str(live),
+                        )
+                    finally:
+                        control.close()
+                    return real_apply_gc(
+                        config_arg,
+                        delete_branches=delete_branches,
+                        protect=protect,
+                        live_worktree_now=live_worktree_now,
+                    )
+
+                with patch(
+                    "mergetrain.recovery.apply_gc",
+                    side_effect=runner_starts_after_snapshot,
+                ):
+                    outcome = recover(config, conn, gc=True)
+            finally:
+                if live_lock is not None:
+                    release_runner_lock(
+                        conn, owner=f"runner:{os.getpid()}", token=live_lock.token
+                    )
+                conn.close()
+
+            self.assertIsNotNone(outcome.gc)
+            assert outcome.gc is not None
+            self.assertFalse(orphan.exists())
+            self.assertTrue(live.exists())
+            self.assertTrue(
+                any(
+                    item["job_id"] == stale.id
+                    for item in outcome.gc["swept_pending_refs"]
+                )
+            )
+            self.assertNotIn(pending_ref_name(stale.id), _pending_refs(repo))
 
 
 if __name__ == "__main__":  # pragma: no cover

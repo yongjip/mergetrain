@@ -1316,6 +1316,59 @@ class MergeConflictTests(unittest.TestCase):
             # only the sibling's change reached the remote
             self.assertEqual(git(root / "remote.git", "show", "main:app.txt"), "x-change")
 
+    def test_successful_merge_that_dirties_worktree_is_reset_and_isolated(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+
+            # The custom driver reports a successful content merge but mutates
+            # another tracked file after Git built the merge index. The merge
+            # commit therefore succeeds while the integration worktree is dirty.
+            (repo / ".gitattributes").write_text(
+                "app.txt merge=dirty\n", encoding="utf-8"
+            )
+            (repo / "sentinel.txt").write_text("clean\n", encoding="utf-8")
+            git(repo, "add", ".gitattributes", "sentinel.txt")
+            git(repo, "commit", "-m", "configure dirty merge driver")
+            git(repo, "push", "origin", "main")
+            git(repo, "config", "merge.dirty.driver", "echo dirty > sentinel.txt")
+
+            git(repo, "switch", "-c", "agent/dirty", "main")
+            (repo / "app.txt").write_text("dirty-branch\n", encoding="utf-8")
+            git(repo, "add", "app.txt")
+            git(repo, "commit", "-m", "dirty branch")
+            git(repo, "switch", "main")
+            (repo / "app.txt").write_text("main-moved\n", encoding="utf-8")
+            git(repo, "add", "app.txt")
+            git(repo, "commit", "-m", "move main")
+            git(repo, "push", "origin", "main")
+            add_branch(repo, "agent/clean", "clean.txt")
+
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [
+                    enqueue_job(conn, task="dirty", branch="agent/dirty"),
+                    enqueue_job(conn, task="clean", branch="agent/clean"),
+                ]
+                GitRunner(config).process_batch(conn, jobs, deploy=True)
+                stored = {job.branch: get_job(conn, job.id) for job in jobs}
+            finally:
+                conn.close()
+
+            self.assertEqual(stored["agent/dirty"].status, "blocked")
+            self.assertIn("dirty after merge", stored["agent/dirty"].note)
+            self.assertEqual(stored["agent/clean"].status, "deployed")
+            self.assertEqual(
+                git(root / "remote.git", "show", "main:app.txt"), "main-moved"
+            )
+            self.assertEqual(
+                git(root / "remote.git", "show", "main:sentinel.txt"), "clean"
+            )
+            self.assertEqual(
+                git(root / "remote.git", "show", "main:clean.txt"), "agent/clean"
+            )
+
 
 class JobOutcomeCategoryTests(unittest.TestCase):
     def test_gate_named_push_is_not_mislabeled_push_failed(self) -> None:
