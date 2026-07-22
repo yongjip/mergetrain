@@ -751,6 +751,32 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_lock(conn).token, "replacement-token")
         self.assertEqual(get_job(conn, job.id).status, "in_progress")
 
+    def test_refresh_runner_lock_preserves_omitted_metadata(self) -> None:
+        conn = self.make_conn()
+        owner = f"runner:{os.getpid()}"
+        lock = acquire_runner_lock(
+            conn,
+            owner=owner,
+            worktree_path="/worktrees/live",
+            head_sha="a" * 40,
+        )
+
+        refresh_runner_lock(conn, owner=owner, token=lock.token)
+        preserved = get_lock(conn)
+        self.assertEqual(preserved.worktree_path, "/worktrees/live")
+        self.assertEqual(preserved.head_sha, "a" * 40)
+
+        refresh_runner_lock(
+            conn,
+            owner=owner,
+            token=lock.token,
+            worktree_path="/worktrees/moved",
+            head_sha="b" * 40,
+        )
+        updated = get_lock(conn)
+        self.assertEqual(updated.worktree_path, "/worktrees/moved")
+        self.assertEqual(updated.head_sha, "b" * 40)
+
     def test_auto_only_batch_claim_skips_manual_jobs(self) -> None:
         conn = self.make_conn()
         manual = enqueue_job(conn, task="manual", branch="manual")

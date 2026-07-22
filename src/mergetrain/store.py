@@ -774,8 +774,8 @@ def refresh_runner_lock(
     token: str,
     ttl_minutes: int = 30,
     name: str = RUNNER_LOCK_NAME,
-    worktree_path: str = "",
-    head_sha: str = "",
+    worktree_path: str | None = None,
+    head_sha: str | None = None,
     check_cancel: bool = True,
 ) -> None:
     if not token:
@@ -784,7 +784,9 @@ def refresh_runner_lock(
         cur = conn.execute(
             """
             UPDATE locks
-            SET heartbeat_at = ?, expires_at = ?, worktree_path = ?, head_sha = ?
+            SET heartbeat_at = ?, expires_at = ?,
+                worktree_path = COALESCE(?, worktree_path),
+                head_sha = COALESCE(?, head_sha)
             WHERE name = ? AND owner = ? AND token = ?
             """,
             (utc_now(), _plus_minutes(ttl_minutes), worktree_path, head_sha, name, owner, token),
