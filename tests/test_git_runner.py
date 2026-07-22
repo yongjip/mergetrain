@@ -13,7 +13,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import mergetrain.git_runner as git_runner_module
 
@@ -168,6 +168,70 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_windows_stop_uses_taskkill_for_the_process_tree(self) -> None:
+        process = Mock()
+        process.pid = 4321
+        process.poll.return_value = None
+        process.wait.return_value = 0
+        completed = subprocess.CompletedProcess([], 0)
+
+        with (
+            patch("mergetrain.git_runner.os.name", "nt"),
+            patch("mergetrain.git_runner.subprocess.run", return_value=completed) as run,
+        ):
+            stopped = git_runner_module._stop_process(process)
+
+        self.assertTrue(stopped)
+        run.assert_called_once_with(
+            ["taskkill", "/PID", "4321", "/T", "/F"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "Windows process-tree regression")
+    def test_timeout_kills_windows_grandchild_process_tree(self) -> None:
+        import ctypes
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pid_file = root / "grandchild.pid"
+            grandchild = "import time; time.sleep(60)"
+            parent = (
+                "import pathlib, subprocess, sys, time; "
+                f"p=subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+                f"pathlib.Path({str(pid_file)!r}).write_text(str(p.pid)); "
+                "time.sleep(60)"
+            )
+
+            completed = git_runner_module.run_command(
+                [sys.executable, "-c", parent],
+                cwd=root,
+                check=False,
+                timeout_seconds=2,
+            )
+
+            self.assertEqual(completed.returncode, 124)
+            self.assertTrue(pid_file.is_file())
+            pid = int(pid_file.read_text(encoding="utf-8"))
+            synchronize = 0x00100000
+            wait_timeout = 0x00000102
+            handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+            if not handle:
+                running = False
+            else:
+                try:
+                    running = (
+                        ctypes.windll.kernel32.WaitForSingleObject(handle, 0)
+                        == wait_timeout
+                    )
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
+            self.assertFalse(running, f"grandchild process {pid} survived timeout")
+
     def test_shell_command_uses_git_for_windows_sh_without_cmd_fallback(self) -> None:
         with (
             patch("mergetrain.git_runner.Path.exists", return_value=False),
