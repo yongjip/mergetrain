@@ -214,6 +214,11 @@ ${repo}
 ${worktree}
 ```
 
+`${repo}` and `${worktree}` are escaped for their surrounding shell quote
+context, so each expands to exactly one path argument even when the path contains
+spaces or shell metacharacters. They may be used unquoted or inside matching
+single or double quotes.
+
 Equivalent environment variables:
 
 ```text

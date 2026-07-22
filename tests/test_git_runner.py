@@ -52,7 +52,13 @@ from mergetrain.errors import (
     PushRejected,
     redact_secrets,
 )
-from mergetrain.git_runner import GitRunner, _dashboard_command, run_shell
+from mergetrain.git_runner import (
+    GitRunner,
+    _dashboard_command,
+    command_env,
+    expand_command,
+    run_shell,
+)
 from mergetrain.snapshot import next_action
 from mergetrain.store import (
     cancel_job,
@@ -157,6 +163,36 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_path_placeholders_are_shell_safe_in_all_quote_contexts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "root $(touch injected)"
+            root.mkdir()
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            worktree = root / "worktree $(touch worktree-injected)"
+            command = expand_command(
+                (
+                    f'{sys.executable} -c "import json,sys; '
+                    'print(json.dumps(sys.argv[1:]))" '
+                    '${repo} "${repo}" ${worktree} \'${worktree}\''
+                ),
+                config=config,
+                worktree=worktree,
+            )
+
+            completed = run_shell(
+                command,
+                cwd=repo,
+                env=command_env(config=config, worktree=worktree),
+            )
+
+            self.assertEqual(
+                json.loads(completed.stdout),
+                [str(config.repo), str(config.repo), str(worktree), str(worktree)],
+            )
+            self.assertFalse((repo / "injected").exists())
+            self.assertFalse((repo / "worktree-injected").exists())
+
     def test_unchanged_validated_train_reuses_gates_and_still_verifies(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
