@@ -41,9 +41,14 @@ hub `REGISTRY_VERSION`.
 
 - **`ok` means exactly one thing:** the command executed without raising an
   error envelope. It is *not* a health verdict and *not* an outcome grade.
-  - Read `result` (`success`/`warning`/`partial`/`failed`) for a run's outcome —
-    a completed deploy with a post-push verify warning is `ok:true,
-    result:"warning"`.
+  - For `run-next` and `run-batch`, read `result`
+    (`success`/`warning`/`partial`/`failed`) for the run outcome — a completed
+    deploy with a post-push verify warning is `ok:true, result:"warning"`.
+  - Other contract-1 `result` fields are command-specific legacy surfaces:
+    `verify` uses `success`/`failed`, `reconcile` and `recover` use
+    `success`/`conflict`, and `gc` carries `null` for a dry run or the applied
+    cleanup detail object. Consumers must dispatch by command before reading
+    these values; normalizing them would require a contract-version bump.
   - Read `health` (on `doctor`) for the repo-configured-and-git-present verdict.
   - Read `removed` (on `hub remove`) for found-or-not.
 - **`next_action`** is present on both `doctor` and `status` — the two reads an
@@ -52,6 +57,9 @@ hub `REGISTRY_VERSION`.
   next_action?}`. Branch on `error.code`. (The deploy-while-reconcile block is
   `error.code:"reconcile_pending_deploy"` with a top-level `next_action` and
   `needs_reconcile` count.)
+  JSONL failures carry the same `ok:false` and `error` object inside a terminal
+  `stream_end` frame, so a stream that emitted `stream_start` always terminates
+  with a machine-readable record.
 
 ## Compatibility policy
 

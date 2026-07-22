@@ -814,6 +814,8 @@ class VerifyRerunTests(unittest.TestCase):
             payload = json.loads(out.getvalue())
 
             self.assertEqual(code, 1)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["result"], "failed")
             self.assertEqual(marker.read_text(encoding="utf-8"), "ran")
             self.assertEqual(
                 payload["resolved"],
