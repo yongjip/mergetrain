@@ -1282,7 +1282,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
         next_action = _recovery_next_action(conn)
     finally:
         conn.close()
-    payload = {"ok": True, "resolved": resolved, "next_action": next_action}
+    result = (
+        "failed"
+        if any(item["verify_status"] == "failed" for item in resolved)
+        else "success"
+    )
+    payload = {
+        "ok": True,
+        "result": result,
+        "resolved": resolved,
+        "next_action": next_action,
+    }
     if args.json:
         dump_json(payload)
     else:
@@ -1732,25 +1742,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except KeyboardInterrupt:
+        error_payload = _error_payload(
+            "interrupted", "interrupted", retryable=False
+        )
         if getattr(args, "json", False):
             # Route through the single builder so Ctrl-C emits the same
             # {code,message,retryable} shape as every other failure — a consumer
             # doing resp["error"]["retryable"] must not KeyError on interrupt.
-            dump_json(_error_payload("interrupted", "interrupted", retryable=False))
+            dump_json(error_payload)
+        elif getattr(args, "jsonl", False):
+            _dump_jsonl(
+                {
+                    "type": "stream_end",
+                    "reason": "interrupted",
+                    "exit_code": 130,
+                    "ok": False,
+                    "error": error_payload["error"],
+                }
+            )
         else:
             print("mergetrain: interrupted", file=sys.stderr)
         return 130
     except (MergetrainError, CommandFailed, ConfigError, QueueError) as exc:
+        code = "".join(
+            [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]
+        ).lstrip("_")
+        error_payload = _error_payload(
+            code,
+            str(exc),
+            retryable=type(exc).__name__ in {"LockHeld", "LostLease"},
+        )
         if getattr(args, "json", False):
-            code = "".join(
-                [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]
-            ).lstrip("_")
-            dump_json(
-                _error_payload(
-                    code,
-                    str(exc),
-                    retryable=type(exc).__name__ in {"LockHeld", "LostLease"},
-                )
+            dump_json(error_payload)
+        elif getattr(args, "jsonl", False):
+            _dump_jsonl(
+                {
+                    "type": "stream_end",
+                    "reason": "error",
+                    "exit_code": 1,
+                    "ok": False,
+                    "error": error_payload["error"],
+                }
             )
         else:
             print(f"mergetrain: error: {exc}", file=sys.stderr)

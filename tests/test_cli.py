@@ -6,7 +6,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -723,6 +723,36 @@ terminology:
             self.assertNotIn("claim_token", records[1])
             self.assertEqual(records[-1]["type"], "stream_end")
             self.assertEqual(records[-1]["reason"], "success")
+
+    def test_events_jsonl_error_ends_with_machine_readable_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            connect(db).close()
+            out = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "events",
+                        "--train-id",
+                        "missing",
+                        "--jsonl",
+                    ]
+                )
+
+            records = [json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(code, 1)
+            self.assertEqual(err.getvalue(), "")
+            self.assertEqual(records[0]["type"], "stream_start")
+            self.assertEqual(records[-1]["type"], "stream_end")
+            self.assertEqual(records[-1]["reason"], "error")
+            self.assertFalse(records[-1]["ok"])
+            self.assertEqual(records[-1]["error"]["code"], "queue_error")
 
     def test_events_follow_reports_lost_lease_and_interrupt(self) -> None:
         with tempfile.TemporaryDirectory() as td:

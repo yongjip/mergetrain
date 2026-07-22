@@ -589,7 +589,8 @@
           "job_id": null,
           "verify_status": null
         }
-      }
+      },
+      "result": null
     },
     "version": {
       "contract_version": null,
