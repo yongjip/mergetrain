@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import mergetrain.registry as registry_module
 from mergetrain.errors import QueueError
 from mergetrain.registry import (
     add_repo,
@@ -118,6 +120,97 @@ class RegistryTests(unittest.TestCase):
             loaded = {entry["path"]: entry["daemon"] for entry in load_registry(registry)}
             # Non-boolean values are never truthy-coerced into eligibility.
             self.assertEqual(loaded, {"/a": False, "/b": False, "/c": True})
+
+    def test_mutations_preserve_unknown_and_invalid_registry_data(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            first = make_repo(root, "first")
+            second = make_repo(root, "second")
+            invalid_entries = [
+                {"path": 42, "note": "keep invalid type"},
+                {"path": "", "note": "keep empty path"},
+                "keep non-object entry",
+            ]
+            payload = {
+                "version": 1,
+                "operator_note": "preserve top-level data",
+                "repos": [
+                    {
+                        "path": str(first.resolve()),
+                        "added_at": "t",
+                        "daemon": True,
+                        "owner": "hand-maintained",
+                    },
+                    *invalid_entries,
+                ],
+            }
+            registry.write_text(json.dumps(payload), encoding="utf-8")
+
+            add_repo(second, registry)
+            add_repo(first, registry, daemon=False)
+            remove_repo(second, registry)
+
+            saved = json.loads(registry.read_text(encoding="utf-8"))
+            self.assertEqual(saved["operator_note"], "preserve top-level data")
+            self.assertEqual(saved["repos"][0]["owner"], "hand-maintained")
+            self.assertFalse(saved["repos"][0]["daemon"])
+            self.assertEqual(saved["repos"][1:], invalid_entries)
+            self.assertEqual(load_registry(registry)[0]["path"], str(first.resolve()))
+
+    @unittest.skipIf(registry_module.fcntl is None, "fcntl unavailable")
+    def test_mutation_lock_serializes_concurrent_adds(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            first = make_repo(root, "first")
+            second = make_repo(root, "second")
+            first_read = threading.Event()
+            release_first = threading.Event()
+            second_read = threading.Event()
+            original_read = registry_module._read_registry
+
+            def observed_read(target):
+                if threading.current_thread().name == "first-add":
+                    payload = original_read(target)
+                    first_read.set()
+                    release_first.wait(timeout=5)
+                    return payload
+                second_read.set()
+                return original_read(target)
+
+            errors: list[BaseException] = []
+
+            def add(path):
+                try:
+                    add_repo(path, registry)
+                except BaseException as exc:  # pragma: no cover - assertion aid
+                    errors.append(exc)
+
+            with mock.patch.object(
+                registry_module, "_read_registry", side_effect=observed_read
+            ):
+                first_thread = threading.Thread(
+                    target=add, args=(first,), name="first-add"
+                )
+                second_thread = threading.Thread(
+                    target=add, args=(second,), name="second-add"
+                )
+                first_thread.start()
+                self.assertTrue(first_read.wait(timeout=5))
+                second_thread.start()
+                self.assertFalse(second_read.wait(timeout=0.2))
+                release_first.set()
+                first_thread.join(timeout=5)
+                second_thread.join(timeout=5)
+
+            self.assertFalse(first_thread.is_alive())
+            self.assertFalse(second_thread.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(
+                {entry["path"] for entry in load_registry(registry)},
+                {str(first.resolve()), str(second.resolve())},
+            )
 
     def test_save_is_atomic_json_and_bad_shapes_fail_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as td:

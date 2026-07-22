@@ -87,39 +87,56 @@ def load_registry(path: str | Path | None = None) -> list[dict[str, Any]]:
     """Return registered repo entries, oldest first. A missing file is empty."""
 
     target = Path(path) if path else registry_path()
+    data = _read_registry(target)
+    entries: list[dict[str, Any]] = []
+    for item in data["repos"]:
+        normalized = _normalize_entry(item)
+        if normalized is not None:
+            entries.append(normalized)
+    return entries
+
+
+def _read_registry(target: Path) -> dict[str, Any]:
     if not target.is_file():
-        return []
+        return {"version": REGISTRY_VERSION, "repos": []}
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise QueueError(f"hub registry is unreadable: {target}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("repos"), list):
         raise QueueError(f"hub registry has an unexpected shape: {target}")
-    entries: list[dict[str, Any]] = []
-    for item in data["repos"]:
-        if isinstance(item, dict) and isinstance(item.get("path"), str) and item["path"]:
-            raw_daemon = item.get("daemon", True)
-            entries.append(
-                {
-                    "path": item["path"],
-                    "added_at": str(item.get("added_at") or ""),
-                    # Pre-flag rosters default to daemon-eligible, matching the
-                    # behavior those entries already had. A hand-edited
-                    # non-boolean value (e.g. the string "false") fails SAFE to
-                    # excluded rather than being truthy-coerced into eligible.
-                    "daemon": raw_daemon if isinstance(raw_daemon, bool) else False,
-                }
-            )
-    return entries
+    return data
 
 
-def save_registry(entries: list[dict[str, Any]], path: str | Path | None = None) -> Path:
-    target = Path(path) if path else registry_path()
+def _normalize_entry(item: Any) -> dict[str, Any] | None:
+    if (
+        not isinstance(item, dict)
+        or not isinstance(item.get("path"), str)
+        or not item["path"]
+    ):
+        return None
+    raw_daemon = item.get("daemon", True)
+    return {
+        "path": item["path"],
+        "added_at": str(item.get("added_at") or ""),
+        # Pre-flag rosters default to daemon-eligible, matching the behavior
+        # those entries already had. A hand-edited non-boolean value (e.g. the
+        # string "false") fails SAFE to excluded rather than being truthy-
+        # coerced into eligible.
+        "daemon": raw_daemon if isinstance(raw_daemon, bool) else False,
+    }
+
+
+def _write_registry(target: Path, payload: dict[str, Any]) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": REGISTRY_VERSION, "repos": entries}
     # Atomic replace so a crash mid-write can never truncate the roster.
     handle = tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=target.parent, prefix=".repos-", suffix=".tmp", delete=False
+        "w",
+        encoding="utf-8",
+        dir=target.parent,
+        prefix=".repos-",
+        suffix=".tmp",
+        delete=False,
     )
     try:
         with handle:
@@ -130,6 +147,12 @@ def save_registry(entries: list[dict[str, Any]], path: str | Path | None = None)
         Path(handle.name).unlink(missing_ok=True)
         raise
     return target
+
+
+def save_registry(entries: list[dict[str, Any]], path: str | Path | None = None) -> Path:
+    target = Path(path) if path else registry_path()
+    payload = {"version": REGISTRY_VERSION, "repos": entries}
+    return _write_registry(target, payload)
 
 
 def add_repo(
@@ -157,20 +180,27 @@ def add_repo(
         )
     target = Path(path) if path else registry_path()
     with _mutation_lock(target):
-        entries = load_registry(target)
-        for entry in entries:
+        payload = _read_registry(target)
+        raw_entries = payload["repos"]
+        for index, raw_entry in enumerate(raw_entries):
+            entry = _normalize_entry(raw_entry)
+            if entry is None:
+                continue
             if same_repo(entry["path"], resolved):
                 if daemon is not None and entry.get("daemon", True) != daemon:
+                    updated = dict(raw_entry)
+                    updated["daemon"] = daemon
+                    raw_entries[index] = updated
+                    _write_registry(target, payload)
                     entry["daemon"] = daemon
-                    save_registry(entries, target)
                 return entry
         entry = {
             "path": str(resolved),
             "added_at": utc_now(),
             "daemon": True if daemon is None else daemon,
         }
-        entries.append(entry)
-        save_registry(entries, target)
+        raw_entries.append(entry)
+        _write_registry(target, payload)
         return entry
 
 
@@ -180,9 +210,17 @@ def remove_repo(repo: str | Path, path: str | Path | None = None) -> bool:
     resolved = _normalize(repo)
     target = Path(path) if path else registry_path()
     with _mutation_lock(target):
-        entries = load_registry(target)
-        remaining = [entry for entry in entries if not same_repo(entry["path"], resolved)]
-        if len(remaining) == len(entries):
+        payload = _read_registry(target)
+        remaining: list[Any] = []
+        removed = False
+        for raw_entry in payload["repos"]:
+            entry = _normalize_entry(raw_entry)
+            if entry is not None and same_repo(entry["path"], resolved):
+                removed = True
+                continue
+            remaining.append(raw_entry)
+        if not removed:
             return False
-        save_registry(remaining, target)
+        payload["repos"] = remaining
+        _write_registry(target, payload)
         return True

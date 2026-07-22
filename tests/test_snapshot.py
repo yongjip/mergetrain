@@ -5,6 +5,7 @@ import unittest
 from mergetrain.snapshot import next_action
 
 PAST = "2000-01-01T00:00:00Z"  # any past ISO timestamp -> the lease is expired
+FUTURE = "2999-01-01T00:00:00Z"
 
 
 class NextActionTests(unittest.TestCase):
@@ -12,7 +13,13 @@ class NextActionTests(unittest.TestCase):
         cases = [
             ({"lock": {"liveness": "alive", "expires_at": PAST}, "counts": {"in_progress": 1}},
              "unlock_wedged_runner"),
-            ({"lock": {"liveness": "alive"}, "counts": {}}, "wait_for_runner"),
+            ({"lock": {"liveness": "alive", "expires_at": FUTURE}, "counts": {}},
+             "wait_for_runner"),
+            ({"lock": {"liveness": "alive", "expires_at": "not-a-timestamp"},
+              "counts": {"in_progress": 1}},
+             "unlock_wedged_runner"),
+            ({"lock": {"liveness": "alive"}, "counts": {"in_progress": 1}},
+             "unlock_wedged_runner"),
             ({"lock": None, "counts": {"needs_reconcile": 1}}, "reconcile_pending_deploy"),
             ({"lock": None, "counts": {"in_progress_with_marker": 1}}, "reconcile_pending_deploy"),
             ({"lock": None, "counts": {"blocked_with_marker": 1}}, "reconcile_conflict_manual"),
@@ -52,14 +59,16 @@ class NextActionTests(unittest.TestCase):
             ({"lock": None, "counts": {"queued": 2, "auto_queued": 1}},
              "run_daemon_or_run_batch_deploy_when_approved"),
             # a live, unexpired lock beats the reconcile signal
-            ({"lock": {"liveness": "alive"}, "counts": {"needs_reconcile": 1}},
+            ({"lock": {"liveness": "alive", "expires_at": FUTURE},
+              "counts": {"needs_reconcile": 1}},
              "wait_for_runner"),
             # a wedged (expired, still-alive-looking) runner with in-progress work
             ({"lock": {"liveness": "alive", "expires_at": PAST},
               "counts": {"in_progress": 1, "needs_reconcile": 1}},
              "unlock_wedged_runner"),
             # the marker reconcile path is gated on liveness != "alive"
-            ({"lock": {"liveness": "alive"}, "counts": {"in_progress_with_marker": 1}},
+            ({"lock": {"liveness": "alive", "expires_at": FUTURE},
+              "counts": {"in_progress_with_marker": 1}},
              "wait_for_runner"),
             # expired+alive but in_progress == 0 and only a marker -> falls through
             ({"lock": {"liveness": "alive", "expires_at": PAST},

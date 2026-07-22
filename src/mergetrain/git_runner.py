@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -68,6 +69,37 @@ def _dashboard_command(command: Sequence[str] | str) -> str:
 
     rendered = redact_secrets(_render_command(command))
     return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
+
+
+def _posix_shell() -> str:
+    """Return the POSIX shell used by gate and verify commands.
+
+    Git for Windows ships ``sh.exe`` even though Windows has no ``/bin/sh``.
+    Never fall back to ``cmd.exe``: command expansion and the documented gate
+    contract both use POSIX shell syntax.
+    """
+
+    if Path("/bin/sh").exists():
+        return "/bin/sh"
+    shell = shutil.which("sh")
+    if shell:
+        return shell
+    git = shutil.which("git")
+    if git:
+        git_root = Path(git).parent.parent
+        for candidate in (
+            git_root / "bin" / "sh.exe",
+            git_root / "usr" / "bin" / "sh.exe",
+        ):
+            if candidate.exists():
+                return str(candidate)
+    raise MergetrainError(
+        "A POSIX sh executable is required to run gate and verify commands"
+    )
+
+
+def _shell_command(command: str) -> list[str]:
+    return [_posix_shell(), "-c", command]
 
 
 def _stop_process(process: subprocess.Popen[str]) -> bool:
@@ -273,19 +305,18 @@ def run_shell(
         timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
     if pulse is not None or timeout_seconds is not None:
         return _run_managed(
-            command,
+            _shell_command(command),
             cwd=cwd,
             env=env,
             log=log,
             check=check,
-            shell=True,
+            shell=False,
             pulse=pulse,
             pulse_interval_seconds=pulse_interval_seconds,
             timeout_seconds=timeout_seconds,
         )
     completed = subprocess.run(
-        command, cwd=str(cwd), env=env, shell=True,
-        executable="/bin/sh" if Path("/bin/sh").exists() else None,
+        _shell_command(command), cwd=str(cwd), env=env, shell=False,
         text=True, encoding="utf-8", errors="replace",
         stdin=subprocess.DEVNULL, capture_output=True,
     )
@@ -410,15 +441,53 @@ def delete_pending_ref(
 
 
 def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) -> str:
+    expanded = command
+
+    def replace_path(placeholder: str, value: str) -> None:
+        nonlocal expanded
+        rendered: list[str] = []
+        quote: str | None = None
+        escaped = False
+        index = 0
+        while index < len(expanded):
+            if not escaped and expanded.startswith(placeholder, index):
+                if quote == "'":
+                    replacement = value.replace("'", "'\"'\"'")
+                elif quote == '"':
+                    replacement = (
+                        value.replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("$", "\\$")
+                        .replace("`", "\\`")
+                    )
+                else:
+                    replacement = shlex.quote(value)
+                rendered.append(replacement)
+                index += len(placeholder)
+                continue
+
+            char = expanded[index]
+            rendered.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char in {"'", '"'}:
+                if quote is None:
+                    quote = char
+                elif quote == char:
+                    quote = None
+            index += 1
+        expanded = "".join(rendered)
+
     replacements = {
         "${integration_ref}": config.git.integration_ref,
         "${project}": config.project.name,
-        "${repo}": str(config.repo),
-        "${worktree}": str(worktree),
     }
-    expanded = command
     for key, value in replacements.items():
         expanded = expanded.replace(key, value)
+    replace_path("${repo}", str(config.repo))
+    replace_path("${worktree}", str(worktree))
     return expanded
 
 
