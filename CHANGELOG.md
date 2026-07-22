@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-07-23
+
 - Reframe the documentation around the integration requirement behind parallel
   agent coding: worktrees provide parallel execution lanes, while one train
   provides the serialized boundary that assembles, proves, and ships their
@@ -38,6 +40,43 @@
   into one safety path (#97). `status`, `doctor`, and the dashboard now use the
   same config-aware `next_action`, and `dismiss --all` processes every eligible
   blocked/failed row rather than a display-limited subset.
+
+- Close the two post-0.7 adversarial hardening passes across the process, SQLite,
+  and Git boundaries (#104–#118, #135–#146). Queue mutations and schema migration
+  are fenced against stale owners; runner heartbeats preserve lock identity;
+  replaced claims surface as typed lost leases; and registry edits preserve
+  forward-compatible fields instead of rewriting data lossily.
+
+- Make ambiguous pushes and crash recovery fail closed. Managed subprocesses
+  receive bounded execution context, failed validation fingerprints cannot leak
+  side effects into deploys, joint-failure isolation stops after uncertain remote
+  state, definitive policy rejections remain distinguishable from ambiguous
+  transport failures, and recovery verifies the expected ref pin before pushing.
+
+- Harden every newly audited input boundary: gate commands run through the
+  documented POSIX `/bin/sh`; substituted paths are shell-quoted; global CLI
+  options honor `--`; status limits reject non-positive values; `init` detects
+  scaffold collisions before writing; malformed lock timestamps fail soft; and
+  file URLs are decoded exactly once.
+
+- Keep machine-readable observation truthful under failure. Stream consumers now
+  receive terminal error frames, pending reconcile ends inspection streams,
+  dashboard request parsing rejects malformed and traversal-shaped input, and
+  the hub cache preserves config-aware `next_action` state across snapshots.
+
+- Apply one redaction and error taxonomy across CLI output, persisted notes,
+  dashboards, and streams. Credential-bearing URL variants are masked, expected
+  failures use stable machine codes, and branch resolution accepts qualified refs
+  without silently selecting an ambiguous name.
+
+- Raise the release-quality baseline with Ruff, mypy, coverage reporting,
+  dedicated race/conflict state-machine tests, installed-wheel smoke tests,
+  pinned publishing actions, Dependabot, `SECURITY.md`, and contributor guidance.
+  CI continues to block on macOS, Linux, and Windows.
+
+- Add an animated merge-train explainer, a static fallback, and updated recovery,
+  configuration, agent-contract, and workflow documentation so the shipped safety
+  model and its PR-first tradeoffs are visible before unattended use.
 
 ## 0.7.0 - 2026-07-21
 
