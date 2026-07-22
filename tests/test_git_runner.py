@@ -1166,6 +1166,41 @@ class GcWorktreeGuardTests(unittest.TestCase):
             self.assertTrue(live.is_dir(), "live runner worktree was destroyed")
             self.assertFalse(orphan.exists(), "orphan worktree should be gc'd")
 
+    def test_gc_rechecks_a_runner_that_started_after_the_snapshot(self) -> None:
+        # #84 defect 5: the protect list is a snapshot taken before apply_gc
+        # runs. A runner that acquires the lock AFTER it is built is absent from
+        # protect — but a per-deletion recheck of the live lock still spares its
+        # worktree, while a genuine orphan is still swept.
+        from mergetrain.git_runner import apply_gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            wt_root = config.state.worktree_root
+            wt_root.mkdir(parents=True, exist_ok=True)
+            started_late = wt_root / f"{config.project.name}-mergetrain-9-late"
+            orphan = wt_root / f"{config.project.name}-mergetrain-2-def"
+            started_late.mkdir()
+            orphan.mkdir()
+
+            # protect is empty (the snapshot predates the runner), but the live
+            # lock now points at started_late.
+            result = apply_gc(
+                config,
+                protect=[],
+                live_worktree_now=lambda: str(started_late),
+            )
+            self.assertTrue(
+                started_late.is_dir(),
+                "a runner that started after the snapshot was destroyed",
+            )
+            self.assertFalse(orphan.exists(), "the genuine orphan should still be gc'd")
+            self.assertNotIn(
+                str(started_late),
+                [c["path"] for c in result["removed_worktrees"]],
+            )
+
 
 class MergeConflictTests(unittest.TestCase):
     """Real git-level merge conflicts during assembly (the BisectIsolation

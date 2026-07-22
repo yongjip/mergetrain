@@ -2218,6 +2218,7 @@ def apply_gc(
     *,
     delete_branches: Iterable[str] = (),
     protect: Iterable[str] = (),
+    live_worktree_now: Callable[[], str | None] | None = None,
 ) -> dict[str, list[dict[str, str]]]:
     removed_worktrees: list[dict[str, str]] = []
     deleted_branches: list[dict[str, str]] = []
@@ -2226,6 +2227,14 @@ def apply_gc(
         if candidate.get("protected"):
             continue  # a live runner is merging/gating here — never remove it
         path = Path(candidate["path"])
+        # The protect list is a snapshot taken before this loop. A runner that
+        # acquired the lock since then holds a worktree absent from it. Re-read
+        # the live lock immediately before each removal and never delete a tree a
+        # running deploy is now inside (#84, defect 5).
+        if live_worktree_now is not None:
+            active = live_worktree_now()
+            if active and Path(active) == path:
+                continue
         try:
             run_command(["git", "worktree", "remove", "--force", str(path)], cwd=config.repo, check=True)
         except Exception:

@@ -583,6 +583,20 @@ def _delete_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> N
     conn.execute("DELETE FROM locks WHERE name = ?", (name,))
 
 
+def live_worktree_path(
+    conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME
+) -> str | None:
+    """The integration worktree of the currently live runner, or ``None``.
+
+    Read fresh from the lock table so GC can re-check it immediately before each
+    deletion — a runner that acquired the lock after GC's protect snapshot was
+    built is invisible to that snapshot but visible here (#84, defect 5)."""
+    lock = get_lock(conn, name=name)
+    if lock and lock.worktree_path and lock.liveness != Liveness.DEAD:
+        return lock.worktree_path
+    return None
+
+
 def _in_progress_count(conn: sqlite3.Connection) -> int:
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM deploy_queue WHERE status = 'in_progress'"
