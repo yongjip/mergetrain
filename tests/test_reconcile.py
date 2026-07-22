@@ -602,6 +602,48 @@ class CrashRecoveryTests(unittest.TestCase):
 
 
 class DeployGateTests(unittest.TestCase):
+    def test_run_next_claim_rechecks_reconcile_after_reaping_dead_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            try:
+                orphan = enqueue_job(conn, task="pushing", branch="feature/pushing")
+                queued = enqueue_job(conn, task="next", branch="feature/next")
+                old_lock = acquire_runner_lock(conn, owner=DEAD_OWNER)
+                conn.execute(
+                    "UPDATE deploy_queue SET status='in_progress', claim_token=?, "
+                    "pending_deploy_sha=?, push_status='pending' WHERE id=?",
+                    (old_lock.token, "a" * 40, orphan.id),
+                )
+                conn.commit()
+
+                claimed = claim_next_job(
+                    conn,
+                    owner=f"replacement:{os.getpid()}",
+                    deploy=True,
+                )
+
+                self.assertIsNone(claimed)
+                self.assertEqual(get_job(conn, orphan.id).status, "needs_reconcile")
+                self.assertEqual(get_job(conn, queued.id).status, "queued")
+                self.assertIsNone(get_lock(conn))
+
+                # Validation remains safe and available while remote deploy
+                # truth is unresolved; only a deploy claim is refused.
+                validation = claim_next_job(
+                    conn,
+                    owner=f"validator:{os.getpid()}",
+                    deploy=False,
+                )
+                self.assertEqual(validation.id, queued.id)
+                release_runner_lock(
+                    conn,
+                    owner=f"validator:{os.getpid()}",
+                    token=validation.claim_token,
+                )
+            finally:
+                conn.close()
+
     def test_run_batch_deploy_hard_blocked_while_needs_reconcile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
