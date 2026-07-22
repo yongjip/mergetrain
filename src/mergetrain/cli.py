@@ -406,34 +406,33 @@ def _dump_jsonl(payload: dict[str, Any]) -> None:
     )
 
 
-def _event_scope(config: MergetrainConfig, args: argparse.Namespace, after_id: int | None):
-    conn = connect(config.state.db)
-    try:
-        if args.job_id is not None:
-            jobs = [get_job(conn, args.job_id)]
-            event_job_ids: list[int] | None = [args.job_id]
-        elif args.train_id:
-            jobs = list_train_jobs(conn, args.train_id)
-            if not jobs:
-                raise QueueError(f"train not found: {args.train_id}")
-            event_job_ids = [job.id for job in jobs]
-        else:
-            jobs = list_jobs(conn, limit=200)
-            event_job_ids = None
-        events = list_run_events(
-            conn,
-            limit=args.limit,
-            after_id=after_id,
-            job_ids=event_job_ids,
-        )
-        latest = events[-1] if events else None
-        if latest is None and args.follow:
-            recent = list_run_events(conn, limit=1, job_ids=event_job_ids)
-            latest = recent[-1] if recent else None
-        lock = get_lock(conn)
-        return jobs, events, latest, lock
-    finally:
-        conn.close()
+def _resolve_event_scope(conn, args: argparse.Namespace):
+    if args.job_id is not None:
+        jobs = [get_job(conn, args.job_id)]
+        event_job_ids: list[int] | None = [args.job_id]
+    elif args.train_id:
+        jobs = list_train_jobs(conn, args.train_id)
+        if not jobs:
+            raise QueueError(f"train not found: {args.train_id}")
+        event_job_ids = [job.id for job in jobs]
+    else:
+        jobs = list_jobs(conn, limit=200)
+        event_job_ids = None
+    return jobs, event_job_ids
+
+
+def _event_scope(conn, args: argparse.Namespace, after_id: int | None, event_job_ids):
+    events = list_run_events(
+        conn,
+        limit=args.limit,
+        after_id=after_id,
+        job_ids=event_job_ids,
+    )
+    latest = events[-1] if events else None
+    if latest is None and args.follow:
+        recent = list_run_events(conn, limit=1, job_ids=event_job_ids)
+        latest = recent[-1] if recent else None
+    return events, latest, get_lock(conn)
 
 
 def _print_event_record(payload: dict[str, Any], *, jsonl: bool) -> None:
@@ -470,6 +469,7 @@ def cmd_events(args: argparse.Namespace) -> int:
     if not 0.05 <= args.poll_interval <= 60:
         raise QueueError("--poll-interval must be between 0.05 and 60 seconds")
     config = config_from_args(args)
+    conn = None
     cursor = args.after
     last_heartbeat = ""
     scoped = args.job_id is not None or bool(args.train_id)
@@ -486,8 +486,24 @@ def cmd_events(args: argparse.Namespace) -> int:
             }
         )
     try:
+        conn = connect(config.state.db, read_only=True)
+        jobs, event_job_ids = _resolve_event_scope(conn, args)
         while True:
-            jobs, events, latest, lock = _event_scope(config, args, cursor)
+            if scoped:
+                # The ID scope is immutable for the stream, while job state is
+                # refreshed so terminal transitions are still observed.
+                jobs = [get_job(conn, job_id) for job_id in event_job_ids or []]
+            events, latest, lock = _event_scope(
+                conn, args, cursor, event_job_ids
+            )
+            if not scoped:
+                known_ids = {job.id for job in jobs}
+                for job_id in dict.fromkeys(
+                    event.job_id for event in events if event.job_id is not None
+                ):
+                    if job_id not in known_ids:
+                        jobs.append(get_job(conn, job_id))
+                        known_ids.add(job_id)
             for event in events:
                 payload = event_record(event, jobs, lock)
                 _print_event_record(payload, jsonl=args.jsonl)
@@ -533,6 +549,9 @@ def cmd_events(args: argparse.Namespace) -> int:
         }
         _print_event_record(payload, jsonl=args.jsonl)
         return 130
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
@@ -568,12 +587,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_job_and_lock(config: MergetrainConfig, job_id: int):
-    conn = connect(config.state.db)
-    try:
-        return get_job(conn, job_id), get_lock(conn)
-    finally:
-        conn.close()
+def _read_job_and_lock(conn, job_id: int):
+    return get_job(conn, job_id), get_lock(conn)
 
 
 def _safe_log_path(config: MergetrainConfig, job: Job) -> Path | None:
@@ -594,9 +609,10 @@ def cmd_logs(args: argparse.Namespace) -> int:
     if not 0.05 <= args.poll_interval <= 60:
         raise QueueError("--poll-interval must be between 0.05 and 60 seconds")
     config = config_from_args(args)
+    conn = connect(config.state.db, read_only=True)
     try:
         while True:
-            job, lock = _read_job_and_lock(config, args.job_id)
+            job, lock = _read_job_and_lock(conn, args.job_id)
             log_path = _safe_log_path(config, job)
             if log_path is not None and log_path.exists():
                 break
@@ -617,7 +633,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
                 if chunk:
                     sys.stdout.write(chunk)
                     sys.stdout.flush()
-                job, lock = _read_job_and_lock(config, args.job_id)
+                job, lock = _read_job_and_lock(conn, args.job_id)
                 terminal = stream_terminal([job], lock)
                 if terminal is not None:
                     quiet_polls = 0
@@ -635,6 +651,8 @@ def cmd_logs(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("mergetrain: log follow interrupted", file=sys.stderr)
         return 130
+    finally:
+        conn.close()
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
