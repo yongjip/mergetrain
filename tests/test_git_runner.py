@@ -341,11 +341,11 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(result.push_status, "failed")
             self.assertEqual(result.verify_status, "not_run")
 
-    def test_real_push_rejection_still_blocks_not_reconciles(self) -> None:
-        # Benign check: a genuine PushRejected (protected branch / permission —
-        # the remote definitely did NOT accept the push) must still finalize
-        # 'blocked', NOT needs_reconcile, so the ambiguous-push fix never
-        # mislabels a real rejection as an ambiguous outcome.
+    def test_definitive_push_rejection_blocks_not_reconciles(self) -> None:
+        # A structured rejection record proves the remote did NOT accept the
+        # push, including the normal race where the target advanced first.
+        # It must finalize 'blocked', NOT needs_reconcile, so the ambiguous-push
+        # fix never mislabels a real rejection as an ambiguous outcome.
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _marker = make_demo_repo(root)
@@ -358,7 +358,7 @@ class GitRunnerTests(unittest.TestCase):
                 runner = GitRunner(config)
                 rejection = CommandFailed(
                     ["git", "push"], 1,
-                    stderr="! [remote rejected] main -> main (protected branch hook declined)",
+                    stderr="! [rejected] main -> main (fetch first)",
                 )
                 with patch.object(runner, "push_verified_head", side_effect=rejection):
                     result = runner.process_one(
@@ -1374,8 +1374,11 @@ class PushRejectionTests(unittest.TestCase):
 
         self.assertTrue(is_push_rejection("remote: error: GH006 Protected branch update failed"))
         self.assertTrue(is_push_rejection("! [remote rejected] main -> main (protected branch hook declined)"))
-        self.assertTrue(is_push_rejection("remote: Changes must be made through a pull request."))
-        self.assertFalse(is_push_rejection("! [rejected] main -> main (non-fast-forward)"))
+        self.assertTrue(is_push_rejection("! [rejected] main -> main (fetch first)"))
+        self.assertTrue(is_push_rejection("! [rejected] main -> main (non-fast-forward)"))
+        self.assertTrue(is_push_rejection("remote: Permission to org/repo denied to user."))
+        self.assertFalse(is_push_rejection("remote: Changes must be made through a pull request."))
+        self.assertFalse(is_push_rejection("remote: advice: use a pull request after reconnecting"))
         self.assertFalse(is_push_rejection("fatal: could not read from remote repository"))
 
     def test_inspect_categorizes_a_push_blocked_job_as_push_rejected(self) -> None:

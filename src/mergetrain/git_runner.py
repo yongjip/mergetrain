@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -326,29 +327,32 @@ def git_worktree_clean(path: str | Path) -> bool:
     return git_output(["status", "--porcelain"], cwd=path) == ""
 
 
-# Remote responses that mean "you are not allowed to update this ref" rather
-# than "your code/merge is wrong" — protected branches, required PRs, denied
-# non-fast-forward-by-policy, forge rulesets.
-_PUSH_REJECTION_MARKERS = (
-    "protected branch",
-    "pull request",
-    "GH006",
-    "GH013",
-    "denied to",
-    "not permitted",
-    "not allowed to",
-    "refusing to allow",
-    "pre-receive hook declined",
-    "required status check",
-    "ruleset",
-    "permission to",
+# Git prints one of these structured status records only after the remote has
+# definitively refused a ref update. Match the record itself instead of scanning
+# arbitrary hook/advice prose, which may mention words such as "pull request"
+# even when the transport outcome is unknown.
+_REF_REJECTION = re.compile(
+    r"^\s*!\s+\[(?:remote\s+)?rejected\]\s+.+\s+\(.+\)\s*$",
+    re.IGNORECASE,
+)
+_FORGE_POLICY_REJECTION = re.compile(
+    r"^\s*remote:\s+(?:error:\s+)?GH(?:006|013)\b",
+    re.IGNORECASE,
+)
+_PERMISSION_REJECTION = re.compile(
+    r"^\s*(?:remote:\s+)?(?:error:\s+|fatal:\s+)?permission to .+ denied",
+    re.IGNORECASE,
 )
 
 
 def is_push_rejection(stderr: str) -> bool:
-    """True when a failed push was refused for a permission/policy reason."""
-    low = (stderr or "").lower()
-    return any(marker.lower() in low for marker in _PUSH_REJECTION_MARKERS)
+    """True when stderr proves the remote refused the attempted ref update."""
+    return any(
+        _REF_REJECTION.match(line)
+        or _FORGE_POLICY_REJECTION.match(line)
+        or _PERMISSION_REJECTION.match(line)
+        for line in (stderr or "").splitlines()
+    )
 
 
 def git_dirty_paths(path: str | Path, *, limit: int = 5) -> list[str]:
@@ -1103,9 +1107,9 @@ class GitRunner:
                     log=log,
                 )
                 raise PushRejected(
-                    "remote rejected the push (protected branch, required "
-                    "pull request, or ref permission) — a repo-config issue, "
-                    f"not a code failure: {exc.stderr.strip() or exc}"
+                    "remote definitively rejected the push (policy, permission, "
+                    "or non-fast-forward); no ref update landed: "
+                    f"{exc.stderr.strip() or exc}"
                 ) from exc
             # The marker is durable but the remote outcome is unknown. Preserve
             # it and park the job(s) for remote-truth reconciliation.
