@@ -900,6 +900,26 @@ class ConcurrencyAndTransitionTests(unittest.TestCase):
         with self.assertRaises(LostLease):
             mark_job(conn, job.id, status="validated", expected_claim_token="")
 
+    def test_mark_job_reports_lost_lease_when_canceled_claim_was_replaced(self) -> None:
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="agent/a")
+        claimed = claim_all_queued(conn, owner=f"runnerA:{os.getpid()}")[0]
+        cancel_job(conn, job.id, note="stop")
+        conn.execute(
+            "UPDATE deploy_queue SET claim_token = ? WHERE id = ?",
+            ("replacement-token", job.id),
+        )
+        conn.commit()
+
+        with self.assertRaises(LostLease):
+            mark_job(
+                conn,
+                job.id,
+                status="failed",
+                expected_claim_token=claimed.claim_token,
+            )
+
     def test_mark_job_has_no_transition_graph_documents_current_behavior(self) -> None:
         # DOCUMENTS CURRENT BEHAVIOR (not a desired invariant): mark_job enforces
         # no legal-transition graph and no terminal guard at the store layer —
