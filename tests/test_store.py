@@ -41,6 +41,7 @@ from mergetrain.store import (
     record_run_event,
     refresh_runner_lock,
     release_runner_lock,
+    retry_job,
     terminal_branch_candidates,
     unpack_push_refs,
     validated_train_summaries,
@@ -361,6 +362,36 @@ class StoreTests(unittest.TestCase):
         self.assertIn("--allow-duplicate", msg)
         # --allow-duplicate still bypasses it.
         enqueue_job(conn, task="a3", branch="feature/a", allow_duplicate=True)
+
+    def test_retry_atomically_replaces_failed_job_and_preserves_metadata(self) -> None:
+        conn = self.make_conn()
+        original = enqueue_job(
+            conn,
+            task="fix gate",
+            branch="feature/retry",
+            worktree_path="/tmp/retry",
+            note="original context",
+            auto_deploy=True,
+        )
+        mark_job(conn, original.id, status="failed", note="gate failed")
+
+        dismissed, replacement = retry_job(
+            conn,
+            original.id,
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+        )
+
+        self.assertEqual(dismissed.status, "canceled")
+        self.assertEqual(dismissed.note, f"retried as job {replacement.id}")
+        self.assertEqual(replacement.status, "queued")
+        self.assertEqual(replacement.task, "fix gate")
+        self.assertEqual(replacement.branch, "feature/retry")
+        self.assertEqual(replacement.worktree_path, "/tmp/retry")
+        self.assertEqual(replacement.note, "gate failed")
+        self.assertTrue(replacement.auto_deploy)
+        self.assertEqual(replacement.base_sha, "a" * 40)
+        self.assertEqual(replacement.head_sha, "b" * 40)
 
     def test_conflict_with_is_set_on_block_and_cleared_on_requeue(self) -> None:
         conn = self.make_conn()

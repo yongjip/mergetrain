@@ -25,6 +25,7 @@ mergetrain init [--project NAME] [--write] [--force]
 mergetrain agent-contract [--json]
 mergetrain version [--json]
 mergetrain enqueue --task TASK --branch BRANCH [options]
+mergetrain retry JOB_ID [--rebase] [--json]
 mergetrain status [--json] [--limit N]
 mergetrain events [--job ID | --train-id ID] [--after EVENT_ID] [--follow] [--jsonl]
 mergetrain inspect JOB_ID [--event-limit N] [--json]
@@ -108,6 +109,22 @@ mergetrain enqueue --task feature-a --branch agent/feature-a --capture-sha
 | `--json` | Emit the created job as JSON. |
 
 Defaults are safe: enqueue fails if the worktree is missing or dirty, if the current branch differs from `--branch`, or if the branch already has an active job.
+
+## `retry`
+
+Replace a fixed `blocked`/`failed` job with a fresh queue job without retyping
+its metadata:
+
+```sh
+mergetrain retry 12 --json
+mergetrain retry 12 --rebase
+```
+
+The replacement inherits the original task, note, worktree, branch, and `--auto`
+eligibility, and always captures fresh integration/base and branch/head SHAs.
+Dismissal and insertion are one SQLite transaction. With `--rebase`, Git fetch
+and rebase run first; any fetch error or rebase conflict leaves the old queue row
+untouched. The worktree must be clean and checked out on the job's branch.
 
 ## `status`
 

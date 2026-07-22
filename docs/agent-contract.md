@@ -14,7 +14,7 @@ Agents interacting with mergetrain must follow this contract.
    authorization.
 7. Let one runner or daemon own merge, test, push, and verify.
 8. Fix blocked or failed work in the owning branch, commit a clean result, then
-   enqueue a new job.
+   run `mergetrain retry <job-id>` to enqueue a fresh SHA-pinned job.
 
 ## Machine-readable contract
 

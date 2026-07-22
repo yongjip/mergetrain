@@ -25,6 +25,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -239,6 +240,28 @@ def _cap_dismiss(repo):
     return _run_json(["--repo", str(repo), "dismiss", str(job.id)])
 
 
+def _cap_retry(repo):
+    from mergetrain.store import mark_job
+
+    subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "track config for retry capture"],
+        cwd=repo,
+        check=True,
+    )
+    conn = connect(_db(repo))
+    job = enqueue_job(
+        conn,
+        task="a",
+        branch="main",
+        worktree_path=str(repo),
+        note="retry me",
+    )
+    mark_job(conn, job.id, status="failed", note="gate failed")
+    conn.close()
+    return _run_json(["--repo", str(repo), "retry", str(job.id)])
+
+
 def _cap_hub_status(repo):
     # Seed a one-repo registry with a live queue so repos[] has a
     # representative entry carrying an embedded snapshot.
@@ -265,6 +288,7 @@ SURFACES = {
     "unlock": _cap_unlock,
     "verify": _cap_verify,
     "dismiss": _cap_dismiss,
+    "retry": _cap_retry,
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
     "inspect": _cap_inspect,

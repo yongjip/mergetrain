@@ -12,15 +12,15 @@ git rebase <remote>/<integration-branch>
 # resolve conflicts
 git add .
 git commit --amend
-# The branch still holds its blocked job; clear it (non-destructive) so the
-# re-enqueue is not refused as a duplicate, then enqueue the fix:
-mergetrain dismiss <blocked-job-id>
-mergetrain enqueue --task "rebased task" --branch <blocked-branch> --capture-sha
+# Atomically dismiss the old outcome and enqueue a fresh SHA-pinned job:
+mergetrain retry <blocked-job-id>
 ```
 
-`dismiss` only touches a blocked/failed job (never queued or in-progress work),
-so it is safe to run unattended. It also clears the `fix_blocked_job`
-`next_action` that a superseded blocked job would otherwise pin forever.
+Or let mergetrain fetch and start the rebase with
+`mergetrain retry <blocked-job-id> --rebase`. A rebase conflict leaves the
+worktree ready for manual resolution and does not dismiss the old job. `retry`
+only replaces a blocked/failed job (never queued or in-progress work), inherits
+its task, note, and `--auto` eligibility, and captures fresh base/head SHAs.
 
 ## Gate failure
 

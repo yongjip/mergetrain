@@ -463,6 +463,82 @@ def enqueue_job(
     return get_job(conn, job_id)
 
 
+def retry_job(
+    conn: sqlite3.Connection,
+    job_id: int,
+    *,
+    base_sha: str,
+    head_sha: str,
+) -> tuple[Job, Job]:
+    """Atomically dismiss a failed outcome and enqueue its fresh replacement."""
+
+    with immediate(conn):
+        row = conn.execute(
+            "SELECT * FROM deploy_queue WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            raise QueueError(f"job not found: {job_id}")
+        original = Job.from_row(row)
+        if original.status not in {"blocked", "failed"}:
+            raise QueueError(
+                f"only a blocked or failed job can be retried (job {job_id} is "
+                f"{original.status})"
+            )
+        placeholders = _status_placeholders(ACTIVE_STATUSES)
+        other_active = conn.execute(
+            f"SELECT COUNT(*) AS n FROM deploy_queue "
+            f"WHERE branch = ? AND id != ? AND status IN ({placeholders})",
+            (original.branch, original.id, *ACTIVE_STATUSES),
+        ).fetchone()
+        if int(other_active["n"]):
+            raise DuplicateActiveBranch(
+                f"branch '{original.branch}' already has an active replacement job"
+            )
+
+        now = utc_now()
+        cur = conn.execute(
+            """
+            INSERT INTO deploy_queue (
+              task, branch, worktree_path, status, base_sha, head_sha,
+              requested_at, note, auto_deploy
+            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+            """,
+            (
+                original.task,
+                original.branch,
+                original.worktree_path,
+                base_sha,
+                head_sha,
+                now,
+                original.note,
+                1 if original.auto_deploy else 0,
+            ),
+        )
+        replacement_id = cur.lastrowid
+        assert replacement_id is not None
+        dismissed = conn.execute(
+            """
+            UPDATE deploy_queue
+            SET status = 'canceled', finished_at = ?,
+                note = ?, claim_token = '', cancel_requested_at = '',
+                pending_deploy_sha = '', pending_deploy_remote = '',
+                pending_deploy_refs = '', conflict_with = ''
+            WHERE id = ? AND status = ?
+            """,
+            (
+                now,
+                f"retried as job {replacement_id}",
+                job_id,
+                original.status,
+            ),
+        )
+        if dismissed.rowcount != 1:
+            raise QueueError(
+                f"job {job_id} left '{original.status}' before retry was recorded"
+            )
+    return get_job(conn, job_id), get_job(conn, replacement_id)
+
+
 def get_job(conn: sqlite3.Connection, job_id: int) -> Job:
     row = conn.execute("SELECT * FROM deploy_queue WHERE id = ?", (job_id,)).fetchone()
     if row is None:

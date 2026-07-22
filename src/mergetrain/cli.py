@@ -44,6 +44,7 @@ from .git_runner import (
     git_repo_root,
     git_rev_parse,
     git_worktree_clean,
+    run_command,
 )
 from .models import Job
 from .observability import (
@@ -76,6 +77,7 @@ from .store import (
     live_worktree_path,
     release_runner_lock,
     resolve_verify_status,
+    retry_job,
     select_validated_train,
     terminal_branch_candidates,
     validated_train_summaries,
@@ -151,7 +153,7 @@ def agent_contract_payload(
             f"Use --auto only after explicit unattended-{words.noun} approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
-            "Fix blocked or failed work in the owning branch and commit a clean result; a branch keeps its blocked/failed job, so dismiss it (mergetrain dismiss <id> — non-destructive, clears the stuck next_action) or re-enqueue with --allow-duplicate, then enqueue the fix.",
+            "Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.",
             "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
         ],
         "boundary": {
@@ -309,26 +311,43 @@ def _preflight_config(config: MergetrainConfig) -> None:
         )
 
 
+def _validate_enqueue_worktree(
+    worktree: Path,
+    branch: str,
+    *,
+    allow_dirty: bool = False,
+    allow_branch_mismatch: bool = False,
+) -> None:
+    if not worktree.exists():
+        raise QueueError(f"worktree does not exist: {worktree}")
+    if not git_repo_root(worktree):
+        raise QueueError(f"not a git worktree: {worktree}")
+    if not allow_dirty and not git_worktree_clean(worktree):
+        dirty = git_dirty_paths(worktree)
+        hint = f" ({', '.join(dirty)})" if dirty else ""
+        raise QueueError(
+            f"worktree has uncommitted changes{hint}; commit or stash them, "
+            "or pass --allow-dirty. (mergetrain's own .mergetrain/ state is "
+            "self-ignored — if it appears here, upgrade mergetrain.)"
+        )
+    current = git_current_branch(worktree)
+    if not allow_branch_mismatch and current != branch:
+        raise QueueError(
+            f"current branch {current!r} does not match --branch {branch!r}"
+        )
+
+
 def cmd_enqueue(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     _preflight_config(config)
     worktree = Path(args.worktree or Path.cwd()).expanduser().resolve()
     if not args.no_ready_check:
-        if not worktree.exists():
-            raise QueueError(f"worktree does not exist: {worktree}")
-        if not git_repo_root(worktree):
-            raise QueueError(f"not a git worktree: {worktree}")
-        if not args.allow_dirty and not git_worktree_clean(worktree):
-            dirty = git_dirty_paths(worktree)
-            hint = f" ({', '.join(dirty)})" if dirty else ""
-            raise QueueError(
-                f"worktree has uncommitted changes{hint}; commit or stash them, "
-                "or pass --allow-dirty. (mergetrain's own .mergetrain/ state is "
-                "self-ignored — if it appears here, upgrade mergetrain.)"
-            )
-        current = git_current_branch(worktree)
-        if not args.allow_branch_mismatch and current != args.branch:
-            raise QueueError(f"current branch {current!r} does not match --branch {args.branch!r}")
+        _validate_enqueue_worktree(
+            worktree,
+            args.branch,
+            allow_dirty=args.allow_dirty,
+            allow_branch_mismatch=args.allow_branch_mismatch,
+        )
     base_sha = args.base_sha or ""
     head_sha = args.head_sha or ""
     if args.capture_sha:
@@ -354,6 +373,66 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         dump_json(payload)
     else:
         print(f"queued job {job.id}: {job.task} ({job.branch})")
+    return 0
+
+
+def cmd_retry(args: argparse.Namespace) -> int:
+    """Replace a blocked/failed row with a freshly SHA-pinned queue job."""
+
+    config = config_from_args(args)
+    _preflight_config(config)
+    conn = connect(config.state.db)
+    try:
+        original = get_job(conn, args.job_id)
+        if original.status not in {"blocked", "failed"}:
+            raise QueueError(
+                f"only a blocked or failed job can be retried (job {original.id} "
+                f"is {original.status})"
+            )
+        if not original.worktree_path:
+            raise QueueError(
+                f"job {original.id} has no recorded worktree path; enqueue its "
+                "fixed branch manually"
+            )
+        worktree = Path(original.worktree_path).expanduser().resolve()
+        _validate_enqueue_worktree(worktree, original.branch)
+        if args.rebase:
+            # Fetch/rebase before any queue mutation. A conflict intentionally
+            # leaves the worktree in rebase state for the user to resolve, while
+            # the original blocked/failed row remains untouched.
+            run_command(["git", "fetch", config.git.remote], cwd=worktree)
+            run_command(["git", "rebase", config.git.integration_ref], cwd=worktree)
+            _validate_enqueue_worktree(worktree, original.branch)
+
+        base_sha = _capture_sha_or_error(
+            config.repo, config.git.integration_ref, label="base"
+        )
+        head_sha = _capture_sha_or_error(
+            worktree, original.branch, label="head"
+        )
+        dismissed, replacement = retry_job(
+            conn,
+            original.id,
+            base_sha=base_sha,
+            head_sha=head_sha,
+        )
+        next_action = _recovery_next_action(conn)
+    finally:
+        conn.close()
+    payload = {
+        "ok": True,
+        "dismissed": dismissed.to_dict(),
+        "job": replacement.to_dict(),
+        "next_action": next_action,
+    }
+    if args.json:
+        dump_json(payload)
+    else:
+        print(
+            f"retried job {dismissed.id} as {replacement.id}: "
+            f"{replacement.task} ({replacement.branch})"
+        )
+        print(f"next action: {next_action}")
     return 0
 
 
@@ -1550,6 +1629,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_enqueue.add_argument("--no-ready-check", action="store_true")
     p_enqueue.add_argument("--json", action="store_true")
     p_enqueue.set_defaults(func=cmd_enqueue)
+
+    p_retry = subparsers.add_parser(
+        "retry",
+        help="Dismiss a fixed blocked/failed job and enqueue a fresh SHA-pinned job",
+    )
+    p_retry.add_argument("job_id", type=int)
+    p_retry.add_argument(
+        "--rebase",
+        action="store_true",
+        help="Fetch and rebase the owning branch before replacing the queue job",
+    )
+    p_retry.add_argument("--json", action="store_true")
+    p_retry.set_defaults(func=cmd_retry)
 
     p_status = subparsers.add_parser("status", help="Show queue and lock status")
     p_status.add_argument("--json", action="store_true")

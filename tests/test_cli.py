@@ -20,6 +20,7 @@ from mergetrain.cli import (
 )
 from mergetrain.config import load_config, render_default_config
 from mergetrain.contract import CONTRACT_VERSION
+from mergetrain.errors import CommandFailed
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
 from mergetrain.store import (
@@ -315,6 +316,137 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             # Agents branch on error.code, not the free-text message.
             self.assertEqual(payload["error"]["code"], "duplicate_active_branch")
+
+    def test_retry_captures_fresh_shas_and_inherits_job_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            (repo / "app.txt").write_text("fixed\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixed"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "branch", "-M", "feature/retry"], cwd=repo, check=True
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", head],
+                cwd=repo,
+                check=True,
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                original = enqueue_job(
+                    conn,
+                    task="fix retry",
+                    branch="feature/retry",
+                    worktree_path=str(repo),
+                    note="operator context",
+                    auto_deploy=True,
+                )
+                mark_job(conn, original.id, status="failed", note="gate failed")
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "retry", str(original.id), "--json"]
+                )
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["dismissed"]["status"], "canceled")
+            self.assertEqual(payload["job"]["status"], "queued")
+            self.assertEqual(payload["job"]["task"], "fix retry")
+            self.assertEqual(payload["job"]["note"], "gate failed")
+            self.assertTrue(payload["job"]["auto_deploy"])
+            self.assertEqual(payload["job"]["base_sha"], head)
+            self.assertEqual(payload["job"]["head_sha"], head)
+
+    def test_retry_rebase_error_does_not_dismiss_original_job(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "branch", "-M", "feature/retry"], cwd=repo, check=True
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                original = enqueue_job(
+                    conn,
+                    task="conflict",
+                    branch="feature/retry",
+                    worktree_path=str(repo),
+                )
+                mark_job(conn, original.id, status="blocked", note="merge conflict")
+            finally:
+                conn.close()
+
+            failure = CommandFailed(
+                ["git", "rebase", "origin/main"],
+                1,
+                "",
+                "CONFLICT",
+                str(repo),
+            )
+            out = io.StringIO()
+            with patch("mergetrain.cli.run_command", side_effect=failure), redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "retry",
+                        str(original.id),
+                        "--rebase",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+            conn = connect(config.state.db)
+            try:
+                current = get_job(conn, original.id)
+                job_count = conn.execute(
+                    "SELECT COUNT(*) FROM deploy_queue"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "command_failed")
+            self.assertEqual(current.status, "blocked")
+            self.assertEqual(job_count, 1)
 
     def test_too_new_config_fails_deploy_path_but_permits_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as td:

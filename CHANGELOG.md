@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `mergetrain retry <job-id>` (#166) to atomically replace a fixed
+  blocked/failed outcome with a fresh SHA-pinned job while preserving task,
+  note, worktree, and auto eligibility. Optional `--rebase` fetches and rebases
+  before any queue mutation, so conflicts never dismiss recovery evidence.
+
 ## 0.8.0 - 2026-07-23
 
 - Reframe the documentation around the integration requirement behind parallel
