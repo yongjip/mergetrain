@@ -874,16 +874,39 @@ class GitRunner:
         finally:
             self._cleanup_worktree(worktree, log=log, keep_worktree=False)
 
+    def _assert_tree_unchanged_by_gates(self, worktree: Path, deploy_sha: str) -> None:
+        """Fail closed if a gate moved HEAD or dirtied the tree after the deploy
+        sha was recorded. Gates are verification, not mutation — the exact sha
+        that passed gates must be the sha that is pushed and recorded (#1)."""
+        head = git_rev_parse(worktree, "HEAD")
+        clean = git_worktree_clean(worktree)
+        if head != deploy_sha or not clean:
+            detail = "left the worktree dirty" if not clean else f"moved HEAD to {head[:12]}"
+            raise MergeBlocked(
+                f"a gate {detail} after gating began; gates must not change the "
+                f"integration tree — blocking so a commit differing from the "
+                f"tested {deploy_sha[:12]} tree is never shipped"
+            )
+
     def push_verified_head(
-        self, *, worktree: Path, log: IO[str] | None = None, pulse: Pulse | None = None
+        self,
+        *,
+        worktree: Path,
+        deploy_sha: str = "",
+        log: IO[str] | None = None,
+        pulse: Pulse | None = None,
     ) -> None:
         if not self.config.git.push_refs:
             raise MergetrainError(
                 "git.push_refs must not be empty for "
                 f"{self.config.terminology.action} mode"
             )
+        # Push the exact recorded sha, not HEAD: if anything moved HEAD after the
+        # deploy sha was captured, the recorded and pinned sha is still what ships
+        # (guarantee #1). Falls back to HEAD only when no sha is threaded.
+        target = deploy_sha or "HEAD"
         push_args = ["git", "push", "--atomic", self.config.git.remote]
-        push_args.extend(f"HEAD:{ref}" for ref in self.config.git.push_refs)
+        push_args.extend(f"{target}:{ref}" for ref in self.config.git.push_refs)
         run_command(
             push_args,
             cwd=worktree,
@@ -925,7 +948,9 @@ class GitRunner:
                 log=log,
                 check=False,
             )
-        self.push_verified_head(worktree=worktree, log=log, pulse=pulse)
+        self.push_verified_head(
+            worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse
+        )
 
     def _clear_pending_refs(
         self, job_ids: list[int], *, log: IO[str] | None = None
@@ -1131,6 +1156,7 @@ class GitRunner:
                     pulse=normal_pulse,
                     on_gate=gate_progress,
                 )
+                self._assert_tree_unchanged_by_gates(worktree, deploy_sha)
                 self._event(
                     conn,
                     lease_token=lease_token,
@@ -1913,6 +1939,7 @@ class GitRunner:
                             pulse=normal_pulse,
                             on_gate=gate_progress,
                         )
+                    self._assert_tree_unchanged_by_gates(worktree, deploy_sha)
                     self._event(
                         conn,
                         lease_token=lease_token,

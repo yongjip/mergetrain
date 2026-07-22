@@ -331,8 +331,8 @@ class CrashRecoveryTests(unittest.TestCase):
     def _crash_after_push(self, runner: GitRunner):
         real_push = runner.push_verified_head
 
-        def push_then_crash(*, worktree, log=None, pulse=None):
-            real_push(worktree=worktree, log=log, pulse=pulse)  # the push lands
+        def push_then_crash(*, worktree, deploy_sha="", log=None, pulse=None):
+            real_push(worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse)
             raise _Crash()
 
         return patch.object(runner, "push_verified_head", side_effect=push_then_crash)
@@ -392,8 +392,8 @@ class CrashRecoveryTests(unittest.TestCase):
                 runner = GitRunner(config)
                 real_push = runner.push_verified_head
 
-                def land_then_drop(*, worktree, log=None, pulse=None):
-                    real_push(worktree=worktree, log=log, pulse=pulse)  # remote accepts + advances
+                def land_then_drop(*, worktree, deploy_sha="", log=None, pulse=None):
+                    real_push(worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse)
                     raise CommandFailed(
                         ["git", "push"], 1,
                         stderr="fatal: the remote end hung up unexpectedly",

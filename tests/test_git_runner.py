@@ -329,6 +329,30 @@ class GitRunnerTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(result.status, "blocked")
+
+    def test_a_gate_that_mutates_the_worktree_blocks_the_deploy(self) -> None:
+        # Guarantee #1: gates are verification, not mutation. A gate that dirties
+        # (or commits to) the integration worktree after the deploy sha is
+        # recorded blocks the deploy — a tree differing from the tested sha is
+        # never shipped, and the push is never reached.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root, gate_command="echo x > gate-dirty.txt")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+                pending = git(
+                    repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/"
+                )
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "blocked")
+            self.assertIn("tree", result.note.lower())
+            self.assertEqual(pending, "")  # never reached the push / marker
+            with self.assertRaises(AssertionError):
+                git(root / "remote.git", "show", "main:a.txt")
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
 
