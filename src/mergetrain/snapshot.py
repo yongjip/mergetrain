@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,7 @@ from .store import (
     list_jobs,
     list_jobs_fifo,
     list_run_events,
+    owner_liveness,
     utc_now,
     validated_train_summaries,
 )
@@ -95,6 +97,23 @@ def next_action(
     if payload.get("gc", {}).get("worktree_candidates"):
         return "gc_available"
     return "enqueue_clean_branch"
+
+
+def refresh_dashboard_snapshot(
+    payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
+) -> dict[str, Any]:
+    """Refresh clock/process-derived fields without reopening the queue DB."""
+
+    refreshed = deepcopy(payload)
+    lock = refreshed.get("lock")
+    if isinstance(lock, dict) and lock.get("owner"):
+        pid_suffix = str(lock["owner"]).rsplit(":", 1)[-1]
+        lock["liveness"] = owner_liveness(f"local:{pid_suffix}")
+    refreshed["generated_at"] = utc_now()
+    refreshed["next_action"] = next_action(
+        refreshed, config_version=config_version
+    )
+    return refreshed
 
 
 def _public_job(job: Job) -> dict[str, Any]:

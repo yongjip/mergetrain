@@ -873,6 +873,95 @@ terminology:
                 "interrupted",
             )
 
+    def test_events_follow_reuses_one_read_only_connection(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="queued", branch="feature/queued")
+            finally:
+                conn.close()
+            advanced = False
+
+            def advance(_interval: float) -> None:
+                nonlocal advanced
+                if advanced:
+                    return
+                advanced = True
+                writer = connect(db)
+                try:
+                    mark_job(writer, job.id, status="validated", note="done")
+                finally:
+                    writer.close()
+
+            out = io.StringIO()
+            with patch("mergetrain.cli.connect", wraps=connect) as observer_connect, patch(
+                "mergetrain.cli.time.sleep", side_effect=advance
+            ), redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "events",
+                        "--job",
+                        str(job.id),
+                        "--follow",
+                        "--jsonl",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(observer_connect.call_count, 1)
+            self.assertTrue(observer_connect.call_args.kwargs["read_only"])
+
+    def test_logs_follow_reuses_one_read_only_connection(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            logs = repo / ".mergetrain" / "logs"
+            logs.mkdir(parents=True)
+            log_path = logs / "job.log"
+            log_path.write_text("running\n", encoding="utf-8")
+            conn = connect(db)
+            owner = f"owner:{os.getpid()}"
+            try:
+                queued = enqueue_job(conn, task="run", branch="feature/run")
+                job = claim_next_job(conn, owner=owner)
+                assert job is not None
+                mark_job(
+                    conn,
+                    queued.id,
+                    status="in_progress",
+                    log_path=str(log_path),
+                    expected_claim_token=job.claim_token,
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with patch("mergetrain.cli.connect", wraps=connect) as observer_connect, patch(
+                "mergetrain.cli.time.sleep",
+                side_effect=[None, KeyboardInterrupt],
+            ), redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "logs",
+                        str(queued.id),
+                        "--follow",
+                    ]
+                )
+
+            self.assertEqual(code, 130)
+            self.assertEqual(observer_connect.call_count, 1)
+            self.assertTrue(observer_connect.call_args.kwargs["read_only"])
+
     def test_logs_tail_reads_only_configured_log_directory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

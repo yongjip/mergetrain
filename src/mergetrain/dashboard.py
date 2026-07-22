@@ -18,8 +18,8 @@ from urllib.parse import unquote, urlsplit
 from .config import MergetrainConfig
 from .contract import CONTRACT_VERSION
 from .errors import redact_secrets
-from .hub import HubSnapshotCache, build_hub_snapshot_safe
-from .snapshot import build_dashboard_snapshot
+from .hub import HubSnapshotCache, _db_fingerprint, build_hub_snapshot_safe
+from .snapshot import build_dashboard_snapshot, refresh_dashboard_snapshot
 
 STATIC_ROOT = Path(__file__).with_name("dashboard_dist")
 SECURITY_HEADERS = {
@@ -36,6 +36,37 @@ SSE_POLL_SECONDS = 1.0
 SSE_HEARTBEAT_SECONDS = 15.0
 SSE_MAX_DURATION_SECONDS = 60.0
 MAX_SSE_CLIENTS = 16
+
+
+class DashboardSnapshotCache:
+    """Share one unchanged queue snapshot across every dashboard client."""
+
+    def __init__(self, config: MergetrainConfig, *, preview: bool = False) -> None:
+        self._config = config
+        self._preview = preview
+        self._lock = threading.Lock()
+        self._db_fp: tuple[object, ...] | None = None
+        self._snapshot: dict | None = None
+
+    def __call__(self) -> dict:
+        db_fp = _db_fingerprint(self._config.state.db)
+        with self._lock:
+            if self._snapshot is not None and self._db_fp == db_fp:
+                return refresh_dashboard_snapshot(
+                    self._snapshot,
+                    config_version=self._config.config_version,
+                )
+            snapshot = build_dashboard_snapshot(
+                self._config,
+                preview=self._preview,
+                read_only=True,
+            )
+            self._db_fp = db_fp
+            self._snapshot = snapshot
+            return refresh_dashboard_snapshot(
+                snapshot,
+                config_version=self._config.config_version,
+            )
 
 
 class DashboardHTTPServer(ThreadingHTTPServer):
@@ -350,8 +381,9 @@ def create_server(
     port: int = 8765,
     preview: bool = False,
 ) -> DashboardHTTPServer:
+    cache = DashboardSnapshotCache(config, preview=preview)
     return _create_from_snapshot_fn(
-        lambda: build_dashboard_snapshot(config, preview=preview, read_only=True),
+        cache,
         host=host,
         port=port,
         preview=preview,
