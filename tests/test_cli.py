@@ -242,6 +242,31 @@ class CliTests(unittest.TestCase):
             # The two mandated reads (status/doctor) are now symmetric.
             self.assertIn("next_action", payload)
 
+    def test_status_rejects_non_positive_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            for limit in ("0", "-5"):
+                with self.subTest(limit=limit):
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        code = main(
+                            [
+                                "--repo",
+                                str(repo),
+                                "status",
+                                "--limit",
+                                limit,
+                                "--json",
+                            ]
+                        )
+                    payload = json.loads(out.getvalue())
+                    self.assertEqual(code, 1)
+                    self.assertEqual(payload["error"]["code"], "queue_error")
+                    self.assertIn(
+                        "--limit must be 1 or greater", payload["error"]["message"]
+                    )
+
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -403,6 +428,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(normalized[:2], ["--repo", "/tmp/example"])
         self.assertIn("doctor", normalized)
 
+    def test_global_options_after_terminator_remain_command_data(self) -> None:
+        argv = ["run-batch", "--validate-only", "--", "--repo", "/tmp/other"]
+        self.assertEqual(normalize_global_options(argv), argv)
+        value_argv = ["enqueue", "--task=--repo=/tmp/not-global", "feature/a"]
+        self.assertEqual(normalize_global_options(value_argv), value_argv)
+
+        with_global = [
+            "doctor",
+            "--repo",
+            "/tmp/actual",
+            "--",
+            "--config=/tmp/passthrough",
+        ]
+        self.assertEqual(
+            normalize_global_options(with_global),
+            [
+                "--repo",
+                "/tmp/actual",
+                "doctor",
+                "--",
+                "--config=/tmp/passthrough",
+            ],
+        )
+
     def test_agent_contract_json(self) -> None:
         out = io.StringIO()
         with redirect_stdout(out):
@@ -539,6 +588,22 @@ terminology:
             self.assertEqual(code, 0)
             self.assertTrue((repo / ".mergetrain.yaml").exists())
             self.assertTrue((repo / "AGENTS.mergetrain.md").exists())
+
+    def test_init_write_preflights_all_conflicts_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            existing = repo / "AGENTS.mergetrain.md"
+            existing.write_text("keep me\n", encoding="utf-8")
+
+            with patch("sys.stderr", io.StringIO()):
+                code = main(
+                    ["--repo", str(repo), "init", "--project", "demo", "--write"]
+                )
+
+            self.assertEqual(code, 1)
+            self.assertFalse((repo / ".mergetrain.yaml").exists())
+            self.assertFalse((repo / "CLAUDE.mergetrain.md").exists())
+            self.assertEqual(existing.read_text(encoding="utf-8"), "keep me\n")
 
     def test_status_json_exposes_validated_train_identity(self) -> None:
         with tempfile.TemporaryDirectory() as td:

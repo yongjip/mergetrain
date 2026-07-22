@@ -50,7 +50,7 @@ from mergetrain.store import (
 # during recovery (the test process itself is alive, so it cannot be the owner).
 DEAD_OWNER = "ghost:999999"
 
-from test_git_runner import git, make_demo_repo, py_path, rmtree
+from test_git_runner import SHELL_PYTHON, git, make_demo_repo, py_path, rmtree
 
 
 class _Crash(BaseException):
@@ -770,7 +770,7 @@ class VerifyRerunTests(unittest.TestCase):
             root = Path(td)
             marker = root / "verify-rerun.txt"
             command = (
-                f'{sys.executable} -c "from pathlib import Path; '
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
                 f"Path('{py_path(marker)}').write_text("
                 "Path('a.txt').read_text())\""
             )
@@ -801,7 +801,7 @@ class VerifyRerunTests(unittest.TestCase):
             root = Path(td)
             marker = root / "verify-failed.txt"
             command = (
-                f'{sys.executable} -c "from pathlib import Path; '
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
                 f"Path('{py_path(marker)}').write_text('ran'); "
                 "raise SystemExit(1)\""
             )

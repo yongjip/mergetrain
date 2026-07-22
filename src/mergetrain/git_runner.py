@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import os
+import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -67,6 +69,37 @@ def _dashboard_command(command: Sequence[str] | str) -> str:
 
     rendered = redact_secrets(_render_command(command))
     return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
+
+
+def _posix_shell() -> str:
+    """Return the POSIX shell used by gate and verify commands.
+
+    Git for Windows ships ``sh.exe`` even though Windows has no ``/bin/sh``.
+    Never fall back to ``cmd.exe``: command expansion and the documented gate
+    contract both use POSIX shell syntax.
+    """
+
+    if Path("/bin/sh").exists():
+        return "/bin/sh"
+    shell = shutil.which("sh")
+    if shell:
+        return shell
+    git = shutil.which("git")
+    if git:
+        git_root = Path(git).parent.parent
+        for candidate in (
+            git_root / "bin" / "sh.exe",
+            git_root / "usr" / "bin" / "sh.exe",
+        ):
+            if candidate.exists():
+                return str(candidate)
+    raise MergetrainError(
+        "A POSIX sh executable is required to run gate and verify commands"
+    )
+
+
+def _shell_command(command: str) -> list[str]:
+    return [_posix_shell(), "-c", command]
 
 
 def _stop_process(process: subprocess.Popen[str]) -> bool:
@@ -272,19 +305,18 @@ def run_shell(
         timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
     if pulse is not None or timeout_seconds is not None:
         return _run_managed(
-            command,
+            _shell_command(command),
             cwd=cwd,
             env=env,
             log=log,
             check=check,
-            shell=True,
+            shell=False,
             pulse=pulse,
             pulse_interval_seconds=pulse_interval_seconds,
             timeout_seconds=timeout_seconds,
         )
     completed = subprocess.run(
-        command, cwd=str(cwd), env=env, shell=True,
-        executable="/bin/sh" if Path("/bin/sh").exists() else None,
+        _shell_command(command), cwd=str(cwd), env=env, shell=False,
         text=True, encoding="utf-8", errors="replace",
         stdin=subprocess.DEVNULL, capture_output=True,
     )
@@ -326,29 +358,32 @@ def git_worktree_clean(path: str | Path) -> bool:
     return git_output(["status", "--porcelain"], cwd=path) == ""
 
 
-# Remote responses that mean "you are not allowed to update this ref" rather
-# than "your code/merge is wrong" — protected branches, required PRs, denied
-# non-fast-forward-by-policy, forge rulesets.
-_PUSH_REJECTION_MARKERS = (
-    "protected branch",
-    "pull request",
-    "GH006",
-    "GH013",
-    "denied to",
-    "not permitted",
-    "not allowed to",
-    "refusing to allow",
-    "pre-receive hook declined",
-    "required status check",
-    "ruleset",
-    "permission to",
+# Git prints one of these structured status records only after the remote has
+# definitively refused a ref update. Match the record itself instead of scanning
+# arbitrary hook/advice prose, which may mention words such as "pull request"
+# even when the transport outcome is unknown.
+_REF_REJECTION = re.compile(
+    r"^\s*!\s+\[(?:remote\s+)?rejected\]\s+.+\s+\(.+\)\s*$",
+    re.IGNORECASE,
+)
+_FORGE_POLICY_REJECTION = re.compile(
+    r"^\s*remote:\s+(?:error:\s+)?GH(?:006|013)\b",
+    re.IGNORECASE,
+)
+_PERMISSION_REJECTION = re.compile(
+    r"^\s*(?:remote:\s+)?(?:error:\s+|fatal:\s+)?permission to .+ denied",
+    re.IGNORECASE,
 )
 
 
 def is_push_rejection(stderr: str) -> bool:
-    """True when a failed push was refused for a permission/policy reason."""
-    low = (stderr or "").lower()
-    return any(marker.lower() in low for marker in _PUSH_REJECTION_MARKERS)
+    """True when stderr proves the remote refused the attempted ref update."""
+    return any(
+        _REF_REJECTION.match(line)
+        or _FORGE_POLICY_REJECTION.match(line)
+        or _PERMISSION_REJECTION.match(line)
+        for line in (stderr or "").splitlines()
+    )
 
 
 def git_dirty_paths(path: str | Path, *, limit: int = 5) -> list[str]:
@@ -406,15 +441,53 @@ def delete_pending_ref(
 
 
 def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) -> str:
+    expanded = command
+
+    def replace_path(placeholder: str, value: str) -> None:
+        nonlocal expanded
+        rendered: list[str] = []
+        quote: str | None = None
+        escaped = False
+        index = 0
+        while index < len(expanded):
+            if not escaped and expanded.startswith(placeholder, index):
+                if quote == "'":
+                    replacement = value.replace("'", "'\"'\"'")
+                elif quote == '"':
+                    replacement = (
+                        value.replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("$", "\\$")
+                        .replace("`", "\\`")
+                    )
+                else:
+                    replacement = shlex.quote(value)
+                rendered.append(replacement)
+                index += len(placeholder)
+                continue
+
+            char = expanded[index]
+            rendered.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char in {"'", '"'}:
+                if quote is None:
+                    quote = char
+                elif quote == char:
+                    quote = None
+            index += 1
+        expanded = "".join(rendered)
+
     replacements = {
         "${integration_ref}": config.git.integration_ref,
         "${project}": config.project.name,
-        "${repo}": str(config.repo),
-        "${worktree}": str(worktree),
     }
-    expanded = command
     for key, value in replacements.items():
         expanded = expanded.replace(key, value)
+    replace_path("${repo}", str(config.repo))
+    replace_path("${worktree}", str(worktree))
     return expanded
 
 
@@ -1115,9 +1188,9 @@ class GitRunner:
                     log=log,
                 )
                 raise PushRejected(
-                    "remote rejected the push (protected branch, required "
-                    "pull request, or ref permission) — a repo-config issue, "
-                    f"not a code failure: {exc.stderr.strip() or exc}"
+                    "remote definitively rejected the push (policy, permission, "
+                    "or non-fast-forward); no ref update landed: "
+                    f"{exc.stderr.strip() or exc}"
                 ) from exc
             # The marker is durable but the remote outcome is unknown. Preserve
             # it and park the job(s) for remote-truth reconciliation.

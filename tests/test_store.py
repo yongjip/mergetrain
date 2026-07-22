@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -501,6 +502,26 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(QueueError, "newer than supported"):
             connect(db)
 
+    def test_schema_version_is_rechecked_after_acquiring_migration_lock(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        original_immediate = store_module.immediate
+
+        @contextmanager
+        def newer_binary_wins_before_lock(connection):
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+            connection.commit()
+            with original_immediate(connection):
+                yield
+
+        with patch.object(store_module, "immediate", newer_binary_wins_before_lock):
+            with self.assertRaisesRegex(QueueError, "newer than supported"):
+                store_module.ensure_schema(conn)
+
+        self.assertEqual(
+            conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION + 1
+        )
+
     def test_duplicate_active_branch_is_blocked_until_terminal(self) -> None:
         conn = self.make_conn()
         first = enqueue_job(conn, task="a", branch="feature/a")
@@ -730,6 +751,32 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_lock(conn).token, "replacement-token")
         self.assertEqual(get_job(conn, job.id).status, "in_progress")
 
+    def test_refresh_runner_lock_preserves_omitted_metadata(self) -> None:
+        conn = self.make_conn()
+        owner = f"runner:{os.getpid()}"
+        lock = acquire_runner_lock(
+            conn,
+            owner=owner,
+            worktree_path="/worktrees/live",
+            head_sha="a" * 40,
+        )
+
+        refresh_runner_lock(conn, owner=owner, token=lock.token)
+        preserved = get_lock(conn)
+        self.assertEqual(preserved.worktree_path, "/worktrees/live")
+        self.assertEqual(preserved.head_sha, "a" * 40)
+
+        refresh_runner_lock(
+            conn,
+            owner=owner,
+            token=lock.token,
+            worktree_path="/worktrees/moved",
+            head_sha="b" * 40,
+        )
+        updated = get_lock(conn)
+        self.assertEqual(updated.worktree_path, "/worktrees/moved")
+        self.assertEqual(updated.head_sha, "b" * 40)
+
     def test_auto_only_batch_claim_skips_manual_jobs(self) -> None:
         conn = self.make_conn()
         manual = enqueue_job(conn, task="manual", branch="manual")
@@ -852,6 +899,26 @@ class ConcurrencyAndTransitionTests(unittest.TestCase):
         # an empty claim token is rejected immediately
         with self.assertRaises(LostLease):
             mark_job(conn, job.id, status="validated", expected_claim_token="")
+
+    def test_mark_job_reports_lost_lease_when_canceled_claim_was_replaced(self) -> None:
+        conn = connect(self._db())
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="agent/a")
+        claimed = claim_all_queued(conn, owner=f"runnerA:{os.getpid()}")[0]
+        cancel_job(conn, job.id, note="stop")
+        conn.execute(
+            "UPDATE deploy_queue SET claim_token = ? WHERE id = ?",
+            ("replacement-token", job.id),
+        )
+        conn.commit()
+
+        with self.assertRaises(LostLease):
+            mark_job(
+                conn,
+                job.id,
+                status="failed",
+                expected_claim_token=claimed.claim_token,
+            )
 
     def test_mark_job_has_no_transition_graph_documents_current_behavior(self) -> None:
         # DOCUMENTS CURRENT BEHAVIOR (not a desired invariant): mark_job enforces
