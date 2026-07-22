@@ -7,6 +7,11 @@
   note, worktree, and auto eligibility. Optional `--rebase` fetches and rebases
   before any queue mutation, so conflicts never dismiss recovery evidence.
 
+## 0.8.1 - 2026-07-23
+
+- Make README images and repository links use absolute GitHub URLs so the
+  project description renders correctly on PyPI as well as GitHub.
+
 ## 0.8.0 - 2026-07-23
 
 - Reframe the documentation around the integration requirement behind parallel

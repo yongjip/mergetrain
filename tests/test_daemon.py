@@ -10,7 +10,15 @@ from unittest.mock import patch
 from mergetrain.daemon import _grade_batch, daemon_loop, daemon_tick
 from mergetrain.errors import QueueError
 from mergetrain.models import Job
-from mergetrain.store import claim_all_queued, connect, enqueue_job, get_job, list_jobs
+from mergetrain.store import (
+    claim_all_queued,
+    connect,
+    default_owner,
+    enqueue_job,
+    get_job,
+    list_jobs,
+    release_runner_lock,
+)
 
 
 class GradeBatchTests(unittest.TestCase):
@@ -34,6 +42,40 @@ class GradeBatchTests(unittest.TestCase):
 
 
 class DaemonTests(unittest.TestCase):
+    def test_tick_reports_live_marker_owner_as_active_not_reconcile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            owner = default_owner()
+            conn = connect(db)
+            enqueue_job(
+                conn, task="active", branch="active", auto_deploy=True
+            )
+            claimed = claim_all_queued(conn, owner=owner, auto_only=True)
+            token = claimed[0].claim_token
+            conn.execute(
+                "UPDATE deploy_queue SET pending_deploy_sha='active-sha' WHERE id=?",
+                (claimed[0].id,),
+            )
+            conn.commit()
+            conn.close()
+
+            messages: list[str] = []
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail("active job was reclaimed"),
+                owner=owner,
+                say=messages.append,
+            )
+
+            self.assertEqual(outcome, "idle")
+            self.assertTrue(any("runner is active" in item for item in messages))
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, claimed[0].id).status, "in_progress")
+                release_runner_lock(conn, owner=owner, token=token)
+            finally:
+                conn.close()
+
     def test_daemon_once_processes_only_auto_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"

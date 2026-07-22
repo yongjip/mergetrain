@@ -54,7 +54,6 @@ from .observability import (
     stream_terminal,
 )
 from .recovery import force_unlock, reconcile, recover, sweep_pending_refs
-from .runtime import runtime_provenance
 from .snapshot import next_action as _doctor_next_action
 from .store import (
     cancel_job,
@@ -256,6 +255,8 @@ def cmd_agent_contract(args: argparse.Namespace) -> int:
 
 
 def cmd_version(args: argparse.Namespace) -> int:
+    from .runtime import runtime_provenance
+
     runtime = runtime_provenance()
     if args.json:
         dump_json({"ok": True, "version": __version__, "runtime": runtime})
@@ -734,6 +735,8 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    from .runtime import runtime_provenance
+
     config = config_from_args(args)
     db_existed_before = config.state.db.exists()
     conn = connect(config.state.db)

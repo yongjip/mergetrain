@@ -32,7 +32,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class Liveness:
@@ -326,6 +326,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ("deploy_queue", "pending_deploy_remote", "TEXT NOT NULL DEFAULT ''"),
                 ("deploy_queue", "pending_deploy_refs", "TEXT NOT NULL DEFAULT ''"),
             ),
+            9: (),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:
@@ -344,6 +345,23 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     SET verify_status = 'failed'
                     WHERE status = 'deployed' AND note LIKE 'post-push verify warning:%'
                     """
+                )
+            if next_version == 9:
+                # Queue reads overwhelmingly filter by status or by one branch.
+                # Include id so FIFO/status history queries retain their natural
+                # order without a second sort; auto claims get their own covering
+                # prefix because they sit on the write-lock hot path.
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_status_id_idx "
+                    "ON deploy_queue(status, id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_status_auto_id_idx "
+                    "ON deploy_queue(status, auto_deploy, id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_branch_status_id_idx "
+                    "ON deploy_queue(branch, status, id)"
                 )
             conn.execute(f"PRAGMA user_version = {next_version}")
 
@@ -625,40 +643,39 @@ def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued", auto_onl
 
 
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
-    result = dict.fromkeys(ALL_STATUSES, 0)
-    rows = conn.execute("SELECT status, COUNT(*) AS n FROM deploy_queue GROUP BY status").fetchall()
-    for row in rows:
-        result[str(row["status"])] = int(row["n"])
-    result["auto_queued"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 1"
-        ).fetchone()["n"]
+    row = conn.execute(
+        """
+        SELECT
+          SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+          SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) AS validated,
+          SUM(CASE WHEN status = 'needs_reconcile' THEN 1 ELSE 0 END) AS needs_reconcile,
+          SUM(CASE WHEN status = 'deployed' THEN 1 ELSE 0 END) AS deployed,
+          SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) AS canceled,
+          SUM(CASE WHEN status = 'queued' AND auto_deploy = 1 THEN 1 ELSE 0 END)
+            AS auto_queued,
+          SUM(CASE WHEN status = 'queued' AND auto_deploy = 0 THEN 1 ELSE 0 END)
+            AS manual_queued,
+          SUM(CASE WHEN status = 'in_progress' AND pending_deploy_sha != ''
+              THEN 1 ELSE 0 END) AS in_progress_with_marker,
+          SUM(CASE WHEN status = 'blocked' AND pending_deploy_sha != ''
+              THEN 1 ELSE 0 END) AS blocked_with_marker,
+          SUM(CASE WHEN status = 'deployed' AND verify_status = 'unknown'
+              THEN 1 ELSE 0 END) AS deployed_verify_unknown
+        FROM deploy_queue
+        """
+    ).fetchone()
+    keys = (
+        *ALL_STATUSES,
+        "auto_queued",
+        "manual_queued",
+        "in_progress_with_marker",
+        "blocked_with_marker",
+        "deployed_verify_unknown",
     )
-    result["manual_queued"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 0"
-        ).fetchone()["n"]
-    )
-    # Marker/verify-derived signals for doctor next_action (0.3.0 Phase 2, DB-only).
-    result["in_progress_with_marker"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue "
-            "WHERE status = 'in_progress' AND pending_deploy_sha != ''"
-        ).fetchone()["n"]
-    )
-    result["blocked_with_marker"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue "
-            "WHERE status = 'blocked' AND pending_deploy_sha != ''"
-        ).fetchone()["n"]
-    )
-    result["deployed_verify_unknown"] = int(
-        conn.execute(
-            "SELECT COUNT(*) AS n FROM deploy_queue "
-            "WHERE status = 'deployed' AND verify_status = 'unknown'"
-        ).fetchone()["n"]
-    )
-    return result
+    return {key: int(row[key] or 0) for key in keys}
 
 
 def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:
@@ -666,8 +683,22 @@ def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:
     marker-bearing orphans. A deploy targets the same push refs, so every deploy
     entrypoint (``run-batch``, ``run-next``, and the daemon) must refuse while
     this is non-zero (0.3.0 Phase 2, decision Q4)."""
-    data = counts(conn)
-    return data.get("needs_reconcile", 0) + data.get("in_progress_with_marker", 0)
+    active = active_runner_lock(conn)
+    active_token = active.token if active is not None else ""
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS n
+        FROM deploy_queue
+        WHERE status = 'needs_reconcile'
+           OR (
+                status = 'in_progress'
+                AND pending_deploy_sha != ''
+                AND (? = '' OR claim_token != ?)
+           )
+        """,
+        (active_token, active_token),
+    ).fetchone()
+    return int(row["n"])
 
 
 def has_queued_auto(conn: sqlite3.Connection) -> bool:
@@ -682,6 +713,29 @@ def get_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> Runne
     if row is None:
         return None
     return RunnerLock.from_row(row, liveness=owner_liveness(str(row["owner"])))
+
+
+def active_runner_lock(
+    conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME
+) -> RunnerLock | None:
+    """Return the lock that still fences work as an active runner.
+
+    A live local process remains authoritative even if its wall-clock lease is
+    stale while it owns in-progress work. An owner whose liveness cannot be
+    proved remains authoritative only until its heartbeat-derived expiry. This
+    mirrors the lock-acquisition policy and prevents a healthy marker-bearing
+    push from being misreported as crash evidence.
+    """
+
+    lock = get_lock(conn, name=name)
+    if lock is None or not lock.token:
+        return None
+    expired = _parse_utc(lock.expires_at) <= datetime.now(timezone.utc)
+    if lock.liveness == Liveness.ALIVE:
+        return lock
+    if lock.liveness == Liveness.UNKNOWN and not expired:
+        return lock
+    return None
 
 
 def _delete_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> None:
@@ -771,7 +825,13 @@ def _requeue_orphans(conn: sqlite3.Connection) -> None:
         """
         UPDATE deploy_queue
         SET status = 'queued', started_at = '', claim_token = '', cancel_requested_at = '',
-            note = 're-queued by mergetrain (previous runner gone)'
+            note = 're-queued by mergetrain (previous runner gone)',
+            deploy_sha = '', push_status = 'not_run', verify_status = 'not_run',
+            train_id = '', train_size = 0, validated_at = '',
+            validation_base_sha = '', validation_sha = '', validated_head_sha = '',
+            validation_tree_sha = '', validation_gate_policy_sha = '',
+            validation_environment_sha = '', validation_train_sha = '',
+            reused_validation_sha = ''
         WHERE status = 'in_progress'
         """
     )
@@ -1587,6 +1647,25 @@ def mark_job(
                     "(raced by a concurrent transition)"
                 )
             raise LostLease(f"job {job_id} is no longer owned by this runner")
+        if status == "queued":
+            # Queued means a fresh attempt. Validation identity and outcome
+            # fields belong to the previous attempt and must not leak into a
+            # later batch, where a stale train_id can collateral-block new work.
+            conn.execute(
+                """
+                UPDATE deploy_queue
+                SET started_at = '', deploy_sha = '',
+                    push_status = 'not_run', verify_status = 'not_run',
+                    train_id = '', train_size = 0, validated_at = '',
+                    validation_base_sha = '', validation_sha = '',
+                    validated_head_sha = '', validation_tree_sha = '',
+                    validation_gate_policy_sha = '',
+                    validation_environment_sha = '', validation_train_sha = '',
+                    reused_validation_sha = ''
+                WHERE id = ?
+                """,
+                (job_id,),
+            )
     return get_job(conn, job_id)
 
 

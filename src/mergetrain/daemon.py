@@ -10,6 +10,7 @@ from typing import Any
 from .errors import QueueError
 from .models import Job
 from .store import (
+    active_runner_lock,
     claim_all_queued,
     connect,
     default_owner,
@@ -92,6 +93,7 @@ def daemon_tick(
         probe_failed = exc
     if probe_failed is None:
         try:
+            active_lock = active_runner_lock(probe)
             pending = deploy_reconcile_pending(probe)
             if pending:
                 # A crash left a possibly-landed push unresolved. The daemon
@@ -109,6 +111,12 @@ def daemon_tick(
             # so the writable path recovers it instead of reporting idle forever
             # (#84, defect 1).
             has_orphans = has_in_progress(probe)
+            if has_orphans and active_lock is not None:
+                say(
+                    "mergetrain daemon tick: runner is active; "
+                    "leaving its in-progress train untouched"
+                )
+                return "idle"
         finally:
             probe.close()
         if not has_work and not has_orphans:
