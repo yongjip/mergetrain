@@ -6,15 +6,47 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+_SECRET_VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)'''
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|CREDENTIAL)[A-Z0-9_]*)=([^\s]+)"
+    rf"\b([A-Z_][A-Z0-9_]*)=({_SECRET_VALUE})", re.IGNORECASE
 )
 _SENSITIVE_OPTION = re.compile(
-    r"(?i)(--(?:token|secret|password|passwd|api[-_]?key|credential)(?:=|\s+))([^\s]+)"
+    rf"(--[A-Z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API[-_]?KEY|CREDENTIAL|PAT)"
+    rf"(?:=|\s+))({_SECRET_VALUE})",
+    re.IGNORECASE,
 )
-_URL_PASSWORD = re.compile(
-    r"(?i)\b([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@"
+_URL_USERINFO = re.compile(
+    r"\b([a-z][a-z0-9+.-]*://)([^/@\s]+)@", re.IGNORECASE
 )
+
+_SENSITIVE_KEY_MARKERS = (
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "API_KEY",
+    "CREDENTIAL",
+)
+_SENSITIVE_KEYS = {"DB_PASS", "PGPASS", "GITHUB_PAT"}
+
+
+def _redact_assignment(match: re.Match[str]) -> str:
+    key = match.group(1)
+    normalized = key.upper()
+    sensitive = (
+        normalized in _SENSITIVE_KEYS
+        or normalized.endswith(("_PASS", "_PAT"))
+        or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
+    )
+    return f"{key}=[redacted]" if sensitive else match.group(0)
+
+
+def _redact_url_userinfo(match: re.Match[str]) -> str:
+    scheme, userinfo = match.group(1), match.group(2)
+    if ":" in userinfo:
+        username = userinfo.split(":", 1)[0]
+        return f"{scheme}{username}:[redacted]@"
+    return f"{scheme}[redacted]@"
 
 
 def redact_secrets(text: str) -> str:
@@ -26,8 +58,8 @@ def redact_secrets(text: str) -> str:
     credential passed inline to a gate is never echoed in cleartext. Idempotent.
     """
 
-    text = _URL_PASSWORD.sub(r"\1\2:[redacted]@", text)
-    text = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", text)
+    text = _URL_USERINFO.sub(_redact_url_userinfo, text)
+    text = _SENSITIVE_ASSIGNMENT.sub(_redact_assignment, text)
     text = _SENSITIVE_OPTION.sub(r"\1[redacted]", text)
     return text
 
