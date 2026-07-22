@@ -1482,7 +1482,13 @@ def mark_job(
                 "SELECT status, claim_token, cancel_requested_at FROM deploy_queue WHERE id = ?",
                 (job_id,),
             ).fetchone()
-            if row is not None and str(row["cancel_requested_at"] or ""):
+            if (
+                row is not None
+                and expected_claim_token is not None
+                and str(row["status"]) == "in_progress"
+                and str(row["claim_token"]) == expected_claim_token
+                and str(row["cancel_requested_at"] or "")
+            ):
                 raise CancellationRequested(f"cancellation requested for job {job_id}")
             if expected_status and expected_claim_token is None:
                 raise QueueError(
