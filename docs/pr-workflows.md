@@ -1,5 +1,31 @@
 # PR-first workflows and mergetrain
 
+> **Parallel agents need a serial integration spine.** Let agents code in
+> parallel. Let one train prove and ship the result.
+
+## The missing integration layer
+
+Parallel coding is only half of a parallel agent workflow. Separate worktrees
+let several agents edit, test, and commit at the same time, but the repository's
+integration branch is still one ordered history. When those agents finish
+together, somebody or something must choose the landing order, assemble the
+combined result, test that exact result, and update the remote without racing.
+
+Without that layer, the parallelism collapses at the finish line: the operator
+rebases branches one by one, watches repeated CI runs, resolves changing merge
+bases, and decides which green branch may land next. A merge-train layer is
+therefore a practical requirement for end-to-end parallel agent delivery.
+mergetrain is one local-first implementation of that layer: worktrees supply
+the parallel lanes, while one lease-fenced runner supplies the serial
+integration spine.
+
+It is a necessary coordination layer, not a complete development process by
+itself. Good task boundaries, meaningful gates, and an explicit review policy
+still matter. Repositories that require human approval can keep PRs as the
+review boundary and use a train before or behind that boundary.
+
+## Different units, different jobs
+
 mergetrain does not make pull requests obsolete. They solve different primary
 problems:
 
@@ -118,4 +144,5 @@ Prefer mergetrain when **several trusted local agent branches are execution
 units and integration throughput is the bottleneck**. Prefer PR-first when
 **each branch is a review, governance, or distributed-collaboration unit**.
 Use both when agent throughput is valuable but one final human approval boundary
-must remain.
+must remain. The concise model is: **agents code in parallel; one train proves
+and ships the integrated result**.

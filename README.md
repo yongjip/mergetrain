@@ -5,7 +5,9 @@
 [![Python](https://img.shields.io/pypi/pyversions/mergetrain)](https://pypi.org/project/mergetrain/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-**A local-first merge-and-push queue for coding-agent worktrees.**
+**Parallel agents need a serial integration spine.**
+
+Let agents code in parallel. Let one train prove and ship the result.
 
 <p align="center">
   <img src="./docs/images/mergetrain-explainer.gif"
@@ -13,10 +15,14 @@
        width="720">
 </p>
 
-mergetrain keeps its queue, coordination, merge assembly, and gate execution on
-your machine. Coding agents commit in separate worktrees; one local runner
-serializes their branches, validates the exact train, and pushes only after
-explicit approval. No hosted merge-queue service or CI provider is required.
+mergetrain is a local-first integration runtime for coding-agent worktrees.
+Worktrees give each agent an independent lane, but the repository still has one
+ordered history: without a coordinated landing boundary, parallel coding turns
+back into manual rebases, merge races, and repeated test runs. mergetrain keeps
+that missing integration spine on your machine. Coding agents commit and
+enqueue; one local runner serializes their branches, validates the exact train,
+and pushes only after explicit approval. No hosted merge-queue service or CI
+provider is required.
 
 ![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](./docs/images/hub-overview.png)
 
@@ -96,6 +102,11 @@ And if your team is PR-first on a hosted forge with remote CI, use the
 forge's native queue (see [alternatives](#alternatives--and-whats-different-here)).
 
 ### PR-first or mergetrain?
+
+A fully parallel coding-agent workflow needs two things: **parallel execution
+lanes** and a **serialized integration spine**. Worktrees provide the lanes;
+mergetrain provides the spine. That integration layer is what preserves the
+parallelism after several agents finish at nearly the same time.
 
 A pull request is primarily a **human review unit**. A mergetrain job is an
 **execution and integration unit** for a committed agent branch. Neither model

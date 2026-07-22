@@ -3,7 +3,8 @@
 mergetrain earns its keep when several coding-agent sessions work the same
 repo in parallel worktrees and you want their branches to land safely without
 hand-coordinating the order, the rebases, and the combined test run. If that's
-your situation, this page takes about five minutes; the
+your situation, worktrees are the parallel lanes and mergetrain is their serial
+integration spine. This page takes about five minutes; the
 [README](../README.md#the-problem) explains what goes wrong without a queue.
 If you are deciding between one PR per agent branch and a local train, read the
 [PR-first comparison](pr-workflows.md) before adopting either workflow.
