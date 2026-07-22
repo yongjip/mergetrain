@@ -150,7 +150,7 @@ class CliTests(unittest.TestCase):
             "source_dirty": None,
         }
         out = io.StringIO()
-        with patch("mergetrain.cli.runtime_provenance", return_value=runtime), redirect_stdout(out):
+        with patch("mergetrain.runtime.runtime_provenance", return_value=runtime), redirect_stdout(out):
             code = main(["version", "--json"])
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
@@ -180,7 +180,7 @@ class CliTests(unittest.TestCase):
                 stderr=subprocess.DEVNULL,
             )
             out = io.StringIO()
-            with patch("mergetrain.cli.runtime_provenance", return_value=runtime), redirect_stdout(out):
+        with patch("mergetrain.runtime.runtime_provenance", return_value=runtime), redirect_stdout(out):
                 code = main(["--repo", str(repo), "doctor", "--json"])
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)

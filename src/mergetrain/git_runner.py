@@ -102,6 +102,31 @@ def _shell_command(command: str) -> list[str]:
     return [_posix_shell(), "-c", command]
 
 
+def _stop_windows_process_tree(process: subprocess.Popen[str]) -> None:
+    """Terminate a Windows child and every descendant it spawned.
+
+    ``Popen.terminate`` only stops the direct shell process. Gates commonly
+    launch test servers, build daemons, or watchers, and those grandchildren
+    retain worktree handles and inherited output pipes unless the whole tree is
+    stopped. ``taskkill`` is part of Windows and gives us tree semantics without
+    adding a runtime dependency. Fall back to the direct process when it is
+    unavailable or cannot resolve the pid.
+    """
+
+    try:
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        completed = None
+    if (completed is None or completed.returncode != 0) and process.poll() is None:
+        process.terminate()
+
+
 def _stop_process(process: subprocess.Popen[str]) -> bool:
     if process.poll() is not None:
         return False
@@ -110,7 +135,7 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
         if os.name == "posix":
             os.killpg(process.pid, signal.SIGTERM)
         else:  # pragma: no cover - Windows compatibility
-            process.terminate()
+            _stop_windows_process_tree(process)
         stopped = True
         process.wait(timeout=5)
     except ProcessLookupError:
@@ -120,7 +145,9 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
             if os.name == "posix":
                 os.killpg(process.pid, signal.SIGKILL)
             else:  # pragma: no cover - Windows compatibility
-                process.kill()
+                _stop_windows_process_tree(process)
+                if process.poll() is None:
+                    process.kill()
             stopped = True
             process.wait()
     return stopped
@@ -154,6 +181,11 @@ def _run_managed(
         stderr=subprocess.PIPE,
         bufsize=1,
         start_new_session=os.name == "posix",
+        creationflags=(
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            if os.name == "nt"
+            else 0
+        ),
     )
     stdout_tail: deque[str] = deque(maxlen=2000)
     stderr_tail: deque[str] = deque(maxlen=2000)

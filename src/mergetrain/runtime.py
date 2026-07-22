@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import json
 import subprocess
-from importlib import metadata
 from pathlib import Path, PurePath
 from typing import Any
 from urllib.parse import urlsplit
-from urllib.request import url2pathname
 
 
-def _direct_url(distribution: metadata.Distribution) -> dict[str, Any]:
+def _direct_url(distribution: Any) -> dict[str, Any]:
     try:
         value = distribution.read_text("direct_url.json")
     except (AttributeError, OSError):
@@ -26,6 +24,8 @@ def _direct_url(distribution: metadata.Distribution) -> dict[str, Any]:
 
 
 def _file_url_path(value: object) -> Path | None:
+    from urllib.request import url2pathname
+
     if not isinstance(value, str):
         return None
     parsed = urlsplit(value)
@@ -48,7 +48,7 @@ def _is_within(path: Path, parent: Path) -> bool:
     return True
 
 
-def _installed_package_path(distribution: metadata.Distribution) -> Path | None:
+def _installed_package_path(distribution: Any) -> Path | None:
     try:
         files = distribution.files or ()
     except (AttributeError, OSError):
@@ -64,7 +64,7 @@ def _installed_package_path(distribution: metadata.Distribution) -> Path | None:
     return None
 
 
-def _matches_distribution(package_path: Path, distribution: metadata.Distribution) -> bool:
+def _matches_distribution(package_path: Path, distribution: Any) -> bool:
     installed_path = _installed_package_path(distribution)
     if installed_path is not None:
         return installed_path == package_path
@@ -121,6 +121,8 @@ def runtime_provenance(*, package_path: Path | None = None) -> dict[str, Any]:
     the imported package, so an unrelated distribution on ``sys.path`` is not
     mistaken for the running code.
     """
+
+    from importlib import metadata
 
     imported_path = (package_path or Path(__file__).parent).resolve()
     payload: dict[str, Any] = {
