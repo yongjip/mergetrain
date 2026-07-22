@@ -1157,7 +1157,7 @@ class GitRunner:
         """Resolve and verify the exact task commit that may be merged."""
 
         try:
-            current_sha = git_rev_parse(self.repo, job.branch)
+            current_sha = git_rev_parse(self.repo, f"refs/heads/{job.branch}")
         except CommandFailed as exc:
             raise MergeBlocked(f"task branch cannot be resolved: {job.branch}") from exc
         expected_ref = job.validated_head_sha if deploying_validated else job.head_sha

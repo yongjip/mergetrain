@@ -604,6 +604,25 @@ class GitRunnerTests(unittest.TestCase):
             running_gate = next(event for event in events if event.message == "Running gate 2/2: marker")
             self.assertEqual(running_gate.detail, config.gates[0].run)
 
+    def test_same_named_tag_cannot_shadow_uncaptured_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            # The stale tag points at main while refs/heads/feature/a carries
+            # the task. Enqueue deliberately omits head_sha, matching the
+            # default CLI path without --capture-sha.
+            git(repo, "tag", "feature/a", "refs/heads/main")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "deployed")
+            self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+
     def test_validated_batch_deploys_after_integration_ref_moves(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
