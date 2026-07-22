@@ -69,22 +69,28 @@ def _dashboard_command(command: Sequence[str] | str) -> str:
     return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
 
 
-def _stop_process(process: subprocess.Popen[str]) -> None:
+def _stop_process(process: subprocess.Popen[str]) -> bool:
     if process.poll() is not None:
-        return
+        return False
+    stopped = False
     try:
         if os.name == "posix":
             os.killpg(process.pid, signal.SIGTERM)
         else:  # pragma: no cover - Windows compatibility
             process.terminate()
+        stopped = True
         process.wait(timeout=5)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
+    except ProcessLookupError:
+        process.wait()
+    except subprocess.TimeoutExpired:
         if process.poll() is None:
             if os.name == "posix":
                 os.killpg(process.pid, signal.SIGKILL)
             else:  # pragma: no cover - Windows compatibility
                 process.kill()
+            stopped = True
             process.wait()
+    return stopped
 
 
 def _run_managed(
@@ -108,6 +114,8 @@ def _run_managed(
         shell=shell,
         executable="/bin/sh" if shell and Path("/bin/sh").exists() else None,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -138,13 +146,18 @@ def _run_managed(
 
     started = time.monotonic()
     next_pulse = started + max(0.1, pulse_interval_seconds)
+    timed_out = False
     try:
         while process.poll() is None:
             now = time.monotonic()
             if timeout_seconds is not None and now - started >= timeout_seconds:
-                _stop_process(process)
-                stderr_tail.append(f"command timed out after {timeout_seconds:g} seconds\n")
-                break
+                if _stop_process(process):
+                    timed_out = True
+                    stderr_tail.append(
+                        f"command timed out after {timeout_seconds:g} seconds\n"
+                    )
+                    break
+                continue
             if pulse is not None and now >= next_pulse:
                 pulse()
                 next_pulse = now + max(0.1, pulse_interval_seconds)
@@ -172,7 +185,7 @@ def _run_managed(
     stdout = "".join(stdout_tail)
     stderr = "".join(stderr_tail)
     returncode = process.returncode if process.returncode is not None else 124
-    if timeout_seconds is not None and time.monotonic() - started >= timeout_seconds:
+    if timed_out:
         returncode = 124
     completed = subprocess.CompletedProcess(command, returncode, stdout, stderr)
     if check and completed.returncode != 0:
@@ -226,7 +239,8 @@ def run_command(
         )
     completed = subprocess.run(
         list(command), cwd=str(cwd), env=env, text=True,
-        stdin=subprocess.DEVNULL, capture_output=True,
+        encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+        capture_output=True,
     )
     if log:
         if completed.stdout:
@@ -253,6 +267,9 @@ def run_shell(
     if log:
         log.write(f"\n$ /bin/sh -c {redact_secrets(command)!r}\n")
         log.flush()
+    env = _git_safe_env(env)
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
     if pulse is not None or timeout_seconds is not None:
         return _run_managed(
             command,
@@ -268,7 +285,8 @@ def run_shell(
     completed = subprocess.run(
         command, cwd=str(cwd), env=env, shell=True,
         executable="/bin/sh" if Path("/bin/sh").exists() else None,
-        text=True, capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+        stdin=subprocess.DEVNULL, capture_output=True,
     )
     if log:
         if completed.stdout:
