@@ -320,7 +320,9 @@ def stream_terminal(
         return None
     if any(job.status == "queued" for job in jobs):
         return None
-    if any(job.status in {"failed", "blocked"} for job in jobs):
+    if any(job.status == "needs_reconcile" for job in jobs):
+        reason, exit_code = "needs_reconcile", 1
+    elif any(job.status in {"failed", "blocked"} for job in jobs):
         reason, exit_code = "failure", 1
     elif any(job.status == "canceled" for job in jobs):
         reason, exit_code = "canceled", 1
