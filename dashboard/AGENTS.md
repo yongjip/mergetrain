@@ -8,8 +8,21 @@ When implementing from a selected generated mock, treat that image as the source
 
 ## Selected direction
 
-- Use the approved hybrid: Live Track hierarchy (direction 3) with Signal Board clarity (direction 1).
+- Make the real dashboard itself the demo; do not add a separate marketing,
+  explainer, or before/after surface.
+- Use the selected Live Lanes direction only as a readability reference. Model
+  the work as one current train containing all selected jobs, not as independent
+  branch pipelines.
+- Use exactly one shared phase rail. Show conflict attribution and the surviving
+  validated train as grouped outcomes beneath that rail so the relationship is
+  unambiguous.
+- Demo mode may seed realistic data and replay presentation states, but it must
+  use the same product UI and information architecture as normal operation.
 - Keep the interface read-only, single-repository, desktop-first, and local-only for v0.1.
+- Keep logs and secondary runner detail collapsed by default so the current
+  train, conflict pair, safe train, and next action remain the first read.
 - Show actual runner phases, heartbeat freshness, blocked reason, activity, and the next safe action.
-- Use a warm off-white canvas, dark ink, blue active state, green success, amber attention, red failure, thin borders, and restrained radii.
+- Prefer the dark operational canvas for the demo, with blue active state,
+  green success, amber attention, red failure, thin borders, and restrained
+  radii. Preserve the existing light theme as an optional user preference.
 - Avoid literal train illustrations and action controls; the track is an information model, not decoration.

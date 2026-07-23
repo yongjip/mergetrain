@@ -1,62 +1,93 @@
-# Dashboard Design QA
+# Current Train Dashboard Design QA
 
 ## Evidence
 
-- Source visual truth: `/Users/yongjip/.codex/generated_images/019f6ab0-17e0-7e43-a4f9-4f080fd7505e/exec-b523bd1e-b6b9-4b57-9a89-ee9d5b8e7968.png`
-- User feedback source: `/var/folders/q_/dsp0jv093b56dl2zvd9dzjs00000gn/T/codex-clipboard-f7d7e0b8-6f1c-4b1c-ac07-6277e25d8c59.png`
-- Browser-rendered implementation: `/private/tmp/mergetrain-dashboard-clarity-viewport.png`
-- Full-view comparison: `/private/tmp/mergetrain-dashboard-clarity-comparison.png`
-- Focused Activity comparison: `/private/tmp/mergetrain-dashboard-activity-comparison.png`
-- Responsive capture: `/private/tmp/mergetrain-dashboard-clarity-responsive.png`
-- URL: `http://127.0.0.1:8765/`
-- Viewports: `1440 × 1024` desktop and `820 × 1180` responsive.
-- State: PREVIEW DATA, three assembled jobs, gate 3/4 (`e2e`) running, `diff-check` and `unit` complete, `package` waiting, active runner, one blocked historical job, connected SSE stream.
+- Source visual truth: `dashboard/design/dashboard-demo-ui-target.png`
+- Browser-rendered implementation: `/private/tmp/mergetrain-dashboard-demo-ui-implementation-v2.png`
+- Full-view comparison: `/private/tmp/mergetrain-dashboard-demo-ui-comparison.png`
+- Focused current-train comparison: `/private/tmp/mergetrain-dashboard-demo-ui-focused-comparison.png`
+- Responsive capture: `/private/tmp/mergetrain-dashboard-demo-ui-responsive-v2.png`
+- Local preview: `http://127.0.0.1:4173/`
+- Desktop viewport: `1512 × 1055` CSS px at device pixel ratio 1.
+- Responsive viewport: `820 × 1180` CSS px at device pixel ratio 1.
+- Source pixels: `1505 × 1045`.
+- Implementation pixels: `1512 × 1055`.
+- Comparison normalization: the source was proportionally scaled and padded to
+  `1512 × 1055`; the implementation remained at its native browser capture.
+- State: dark theme, preview data, four-job semantic-conflict result, details
+  collapsed, replay idle at the final validated state.
 
 ## Findings
 
 - No actionable P0, P1, or P2 issue remains.
-- [P3] The added current-check panel makes the desktop page taller than the original visual target. This is accepted because the requested operational meaning, exact command, gate sequence, and scope now appear before the job cards without weakening the existing hierarchy.
-- [P3] At 820 px, the long Activity list naturally extends below the fold. It remains readable and has no horizontal overflow; a future density preference could offer a compact timeline without removing the default explanations.
+- [P3] The implementation is intentionally denser than the generated target.
+  The denser rows preserve the existing operational dashboard language and keep
+  the full conflict/survivor result above the fold.
+- [P3] The generated target uses placeholder task and SHA values. The
+  implementation uses the real demo repository tasks, branches, SHAs, train ID,
+  and timestamps.
 
 ## Required Fidelity Surfaces
 
-- Fonts and typography: bundled Inter Variable and JetBrains Mono Variable remain consistent with the source. The new hierarchy uses a 24 px current-check title, 14 px explanations, and 10–12 px phase/state metadata. Commands truncate safely rather than stretching the layout.
-- Spacing and layout rhythm: the original header, train rail, job track, activity timeline, and right status rail remain in the same order and proportions. The current-check panel uses the existing 7 px radius, line weight, blue state token, and compact grid rhythm rather than introducing a different component language.
-- Colors and visual tokens: blue running, green complete, amber preview/next action, red blocked, gray started/waiting, navy text, warm-white background, and low-contrast separators preserve the source semantics. `STARTED` is deliberately neutral so a historical start event cannot look currently active.
-- Image quality and asset fidelity: there is no photographic or illustrative imagery. All visible icons remain from the bundled Phosphor family; there are no emoji, handcrafted SVGs, CSS illustrations, or placeholder assets.
-- Copy and content: `CONNECTED` now names the browser data channel, `Runner ACTIVE/IDLE` names process ownership, PREVIEW DATA explicitly says that synthetic commands are not executing, and every Activity row states its phase, effective state, explanation, and command/detail where available.
-- Accessibility and behavior: semantic landmarks and heading levels are intact; current gates use a named region and ordered list; preview data uses a status region; reduced motion remains supported. The dashboard has no controls or mutation actions, so there are no keyboard-only control paths to test.
+- Fonts and typography: bundled Inter Variable and JetBrains Mono Variable match
+  the source's sans/mono split. Headings, task names, labels, branches, SHAs,
+  train identity, and timestamps use the intended hierarchy without clipping.
+- Spacing and layout rhythm: the implementation preserves the compact header,
+  one dominant current-train card, five-step rail, grouped four-row result, and
+  narrow inspector. Thin borders and 6–10 px radii remain consistent with the
+  existing dashboard.
+- Colors and visual tokens: near-black canvas, cool-gray borders, blue replay
+  state, red conflict group, green survivor train, and amber demo-data note
+  match the source. There are no decorative gradients or glow effects.
+- Image quality and asset fidelity: this screen contains no photography or
+  custom illustration. All UI symbols come from the existing Phosphor icon
+  dependency; no emoji, handcrafted SVG, div art, or placeholder assets were
+  introduced.
+- Copy and content: the implementation makes the central relationship more
+  explicit than the source: `One train · 4 jobs`, `Conflict pair #1 + #2`, and
+  `Safe train #3 + #4`. The inspector separately states what happened and the
+  two safe next actions.
+- Accessibility and behavior: the train is a named region, the phase rail is an
+  ordered list, the job result uses table/row/column semantics, inspector
+  content is a complementary landmark, and collapsed details use native
+  `details`/`summary`.
 
 ## Browser and Functional Checks
 
-- Primary behavior: initial snapshot, SSE-connected status, separate runner state, current gate summary, four-gate sequence, gate command, scope, elapsed time, Activity explanations, historical `STARTED` resolution, blocked history, and next-safe-action guidance.
-- Desktop: `window.innerWidth = 1440`, `clientWidth = scrollWidth = 1425`; no horizontal overflow.
-- Responsive: `window.innerWidth = 820`, `clientWidth = scrollWidth = 805`; no horizontal overflow.
-- Console: 0 warnings and 0 errors after the final desktop reload.
-- Read-only server behavior and preview labeling are covered by automated HTTP tests.
-- Focused comparison was required because the phase/state chips, explanatory copy, and distinction between `RUNNING`, `COMPLETE`, and historical `STARTED` are too small to judge from the full-view comparison alone.
+- Snapshot and SSE connection loaded from the real disposable demo repository.
+- `Play demo` replayed all five presentation states and returned to the final
+  conflict-isolated/validated state.
+- `Logs and runner details` expanded and exposed runner/heartbeat/event content.
+- Desktop viewport: `clientWidth = scrollWidth = 1512`; no horizontal overflow.
+- Responsive viewport: `clientWidth = scrollWidth = 820`; no page overflow.
+- Console: zero warnings and zero errors.
+- Automated checks: dashboard tests passed; production build passed; full Python
+  suite passed (`310 tests`, `1 skipped`).
 
 ## Comparison History
 
-1. The user feedback image exposed a P1 semantic ambiguity: `LIVE` described the SSE connection but looked like runner execution, and synthetic QA data looked operational. The header now says `CONNECTED`; Runner separately says `ACTIVE` or `IDLE`; `--preview` adds both a PREVIEW badge and a plain-language banner stating that no shown command is executing.
-2. The same image exposed a P1 gate identity mismatch: the phase badge showed four gates while Activity said `2/3`. The snapshot now derives one shared gate total, structured names, indexes, states, and current gate from runner events. The final evidence consistently shows `Gate 3 of 4 · e2e` and the ordered `diff-check → unit → e2e → package` sequence.
-3. The first clarity implementation still showed an old `Assembling validated train` start event as `RUNNING` after a later assembly success. This was a P1 truthfulness defect. Activity now resolves historical active events against later terminal events and labels them `STARTED`; only the unresolved latest gate remains `RUNNING`.
-4. The initial Activity rows had a P2 comprehension gap: messages and raw details did not explain purpose or distinguish commands from context. Each row now has phase/state metadata, purpose copy, and a command treatment only for gates; non-command context is labeled `DETAIL`.
-5. Final full-view, focused Activity, and responsive comparisons found no remaining actionable P0/P1/P2 issue.
+1. The first browser capture showed a P1 semantic contradiction: a red status
+   badge said `2 jobs validated`. The single badge was replaced with two
+   explicit summaries: red `2 need joint fix` and green `2 validated`.
+2. The revised desktop, focused table, and responsive comparisons found no
+   remaining P0/P1/P2 mismatch. The implementation keeps the selected visual
+   hierarchy while applying the user's correction that this must be the real
+   product UI rather than an explainer diagram.
 
 ## Implementation Checklist
 
-- [x] Separate browser connectivity from runner execution.
-- [x] Mark synthetic data unambiguously.
-- [x] Show the exact current gate, position, purpose, command, scope, and elapsed time.
-- [x] Show the complete ordered gate set and per-gate state.
-- [x] Explain every visible Activity milestone.
-- [x] Resolve historical starts so they do not look currently active.
-- [x] Preserve the local read-only contract and responsive layout.
-- [x] Verify zero browser console errors and zero horizontal overflow.
+- [x] One current train contains all four jobs.
+- [x] Exactly one shared phase rail is visible.
+- [x] The semantic-conflict pair is grouped and attributed both ways.
+- [x] The compatible pair is shown as one validated safe train.
+- [x] The inspector explains the outcome and separates deploy/recovery actions.
+- [x] Logs and secondary operational history are collapsed by default.
+- [x] Demo replay changes presentation state without creating a second UI.
+- [x] Desktop, responsive, interactions, console, build, and tests pass.
 
 ## Follow-up Polish
 
-- Consider an optional compact Activity density after real-world use confirms whether operators prefer five detailed rows or more terse history.
+- Consider a user-selectable compact/comfortable row-density preference only
+  after the demo is tried on a projector or recorded at 1080p.
 
 final result: passed

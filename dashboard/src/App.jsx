@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  ArrowRight,
   Broadcast,
   CalendarBlank,
+  CaretDown,
   CheckCircle,
   Circle,
   Clock,
@@ -13,6 +15,7 @@ import {
   Info,
   ListChecks,
   Moon,
+  Play,
   Pulse,
   ShieldCheck,
   SpinnerGap,
@@ -180,7 +183,17 @@ function StatusIcon({ state, size = 22 }) {
   return <Circle size={size} weight="regular" />;
 }
 
-function Header({ snapshot, connection, now, hub, repoName, theme, onToggleTheme }) {
+function Header({
+  snapshot,
+  connection,
+  now,
+  hub,
+  repoName,
+  theme,
+  onToggleTheme,
+  demoState,
+  onPlayDemo,
+}) {
   const generated = relative(snapshot.generated_at, now);
   const connectionLabel = connection === "live" ? "CONNECTED" : connection === "offline" ? "DISCONNECTED" : "POLLING";
   const preview = !hub && snapshot.project?.preview;
@@ -198,8 +211,20 @@ function Header({ snapshot, connection, now, hub, repoName, theme, onToggleTheme
         </>
       )}
       <span className="local-badge">LOCAL</span>
-      {preview && <span className="preview-badge">PREVIEW</span>}
+      {preview && <span className="preview-badge">DEMO DATA</span>}
       <div className="topbar-spacer" />
+      {preview && (
+        <button
+          className={`demo-play ${demoState?.playing ? "playing" : ""}`}
+          type="button"
+          onClick={onPlayDemo}
+          aria-label={demoState?.playing ? `Playing demo step ${demoState.step + 1} of 5` : "Play demo"}
+          disabled={demoState?.playing}
+        >
+          {demoState?.playing ? <SpinnerGap size={17} className="spin" /> : <Play size={17} weight="fill" />}
+          <span>{demoState?.playing ? `Playing ${demoState.step + 1} / 5` : "Play demo"}</span>
+        </button>
+      )}
       <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
       <button
         className="theme-toggle"
@@ -619,28 +644,374 @@ function Loading() {
   return <main className="loading"><SpinnerGap size={36} className="spin" /><strong>Reading local train state…</strong></main>;
 }
 
-function SingleRepoBody({ snapshot, now }) {
+const WORKSPACE_PHASES = [
+  ["queue", "Queue"],
+  ["checks", "Branch checks"],
+  ["gate", "Combined gate"],
+  ["isolate", "Isolate"],
+  ["ready", "Ready"],
+];
+
+function splitJobIds(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function jobLabel(job) {
+  if (job.task) return job.task;
+  return String(job.branch || "pending job")
+    .split("/")
+    .at(-1)
+    .replaceAll("-", " ");
+}
+
+function currentTrainModel(snapshot) {
+  const jobMap = new Map();
+  [...(snapshot.jobs || []), ...(snapshot.train.jobs || [])].forEach((job) => {
+    jobMap.set(String(job.id), job);
+  });
+
+  const validatedTrain = (snapshot.validated_trains || []).find((train) => train.deploy_eligible)
+    || snapshot.validated_trains?.[0]
+    || null;
+  (validatedTrain?.branches || []).forEach((branch) => {
+    const key = String(branch.job_id);
+    if (!jobMap.has(key)) {
+      jobMap.set(key, {
+        id: branch.job_id,
+        branch: branch.branch,
+        validated_head_sha: branch.validated_head_sha,
+        status: "validated",
+      });
+    }
+  });
+
+  const uniqueJobs = [...jobMap.values()];
+  const conflictCandidates = uniqueJobs.filter((job) => (
+    splitJobIds(job.conflict_with).length > 0
+    && ["blocked", "failed", "needs_reconcile"].includes(job.status)
+  ));
+  const conflictCandidateIds = new Set(conflictCandidates.map((job) => String(job.id)));
+  const conflictJobs = conflictCandidates
+    .filter((job) => splitJobIds(job.conflict_with).some((id) => conflictCandidateIds.has(id)))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+
+  const validatedIds = new Set([
+    ...(validatedTrain?.job_ids || []),
+    ...(validatedTrain?.branches || []).map((branch) => branch.job_id),
+  ].map(String));
+  const safeJobs = [...validatedIds]
+    .map((id) => jobMap.get(id))
+    .filter(Boolean)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+
+  const fallbackJobs = [...(snapshot.train.jobs || [])].sort((a, b) => Number(a.id) - Number(b.id));
+  const currentJobs = conflictJobs.length || safeJobs.length
+    ? [...conflictJobs, ...safeJobs]
+    : fallbackJobs;
+
+  return {
+    conflictJobs,
+    safeJobs,
+    currentJobs,
+    validatedTrain,
+  };
+}
+
+function workspacePhaseState(index, step, hasConflict) {
+  if (index === 0) return step === 0 ? "active" : "done";
+  if (index === 1) return step < 1 ? "waiting" : step === 1 ? "active" : "done";
+  if (index === 2) {
+    if (step < 2) return "waiting";
+    return hasConflict ? "error" : step === 2 ? "active" : "done";
+  }
+  if (index === 3) return step < 3 ? "waiting" : step === 3 ? "active" : "done";
+  return step < 4 ? "waiting" : "done";
+}
+
+function WorkspacePhaseRail({ step, hasConflict }) {
+  return (
+    <ol className="workspace-phase-rail" aria-label="Current train phases">
+      {WORKSPACE_PHASES.map(([key, label], index) => {
+        const state = workspacePhaseState(index, step, hasConflict);
+        return (
+          <li className={state} key={key}>
+            <span>{label}</span>
+            <i><StatusIcon state={state} size={23} /></i>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function TrainJobRow({ job, kind, step }) {
+  const checksPassed = step >= 1;
+  const gateResolved = step >= 2;
+  const isolated = step >= 3;
+  const ready = step >= 4;
+  const partnerIds = splitJobIds(job.conflict_with);
+  const conflict = kind === "conflict";
+
+  return (
+    <div className="train-job-row" role="row">
+      <div className="job-cell identity-cell" role="cell">
+        <strong>#{job.id}</strong>
+        <div><span>{jobLabel(job)}</span><code>{shortSha(job.head_sha || job.validated_head_sha)}</code></div>
+      </div>
+      <div className="job-cell branch-cell" role="cell"><code>{job.branch || "branch pending"}</code></div>
+      <div className={`job-cell result-cell ${checksPassed ? "done" : "waiting"}`} role="cell">
+        <StatusIcon state={checksPassed ? "done" : "waiting"} size={17} />
+        <span>{checksPassed ? "Passed" : "Waiting"}</span>
+      </div>
+      <div className={`job-cell result-cell ${gateResolved ? (conflict ? "error" : "done") : "waiting"}`} role="cell">
+        <StatusIcon state={gateResolved ? (conflict ? "error" : "done") : "waiting"} size={17} />
+        <span>
+          {gateResolved
+            ? conflict
+              ? `Conflict with #${partnerIds.join(", #")}`
+              : "Passed"
+            : "Waiting"}
+        </span>
+      </div>
+      <div className={`job-cell outcome-cell ${conflict ? "error" : "done"}`} role="cell">
+        {conflict ? (
+          <span>{isolated ? "Joint fix" : "Pending"}</span>
+        ) : (
+          <>
+            <span>{ready ? "Validated" : isolated ? "Safe" : "Pending"}</span>
+            {ready && <><ArrowRight size={15} /><code className="main-chip">main</code></>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TrainJobGroup({ kind, jobs, step }) {
+  if (!jobs.length) return null;
+  const conflict = kind === "conflict";
+  const resolved = step >= (conflict ? 2 : 3);
+  return (
+    <section className={`train-job-group ${kind} ${resolved ? "resolved" : "pending"}`}>
+      <header>
+        <div>
+          {conflict
+            ? <XCircle size={19} weight="fill" />
+            : <ShieldCheck size={19} weight="fill" />}
+          <strong>{conflict ? "Conflict pair" : "Safe train"}</strong>
+          <span>{jobs.map((job) => `#${job.id}`).join(" + ")}</span>
+        </div>
+        <span>{resolved ? (conflict ? "Joint fix required" : "Validated together") : "Checking together"}</span>
+      </header>
+      <div role="rowgroup">
+        {jobs.map((job) => <TrainJobRow job={job} kind={kind} step={step} key={job.id} />)}
+      </div>
+    </section>
+  );
+}
+
+function CurrentTrainWorkspace({ snapshot, demoStep }) {
+  const { conflictJobs, safeJobs, currentJobs, validatedTrain } = currentTrainModel(snapshot);
+  const hasConflict = conflictJobs.length > 0;
+  const step = demoStep ?? 4;
+  const status = step === 0
+    ? "4 jobs queued"
+    : step === 1
+      ? "Branch checks passed"
+      : step === 2
+        ? hasConflict ? "Combined gate failed" : "Combined gate passed"
+        : step === 3
+          ? hasConflict ? "Conflict isolated" : "Train assembled"
+          : safeJobs.length
+            ? `${safeJobs.length} jobs validated`
+            : "Ready";
+  const neutralJobs = !hasConflict && !safeJobs.length ? currentJobs : [];
+
+  return (
+    <section className="current-train-card" aria-labelledby="current-train-title">
+      <header className="current-train-heading">
+        <div>
+          <span className="workspace-eyebrow">Current train</span>
+          <h1 id="current-train-title">One train · {currentJobs.length} job{currentJobs.length === 1 ? "" : "s"}</h1>
+        </div>
+        <div className="workspace-status-list">
+          {hasConflict && step >= 2 && (
+            <span className="workspace-status error">
+              <StatusIcon state="error" size={18} />
+              {conflictJobs.length} need joint fix
+            </span>
+          )}
+          {safeJobs.length > 0 && step >= 4 && (
+            <span className="workspace-status done">
+              <StatusIcon state="done" size={18} />
+              {safeJobs.length} validated
+            </span>
+          )}
+          {!(hasConflict && step >= 2) && !(safeJobs.length > 0 && step >= 4) && (
+            <span className="workspace-status active">
+              <StatusIcon state="active" size={18} />
+              {status}
+            </span>
+          )}
+        </div>
+      </header>
+
+      <WorkspacePhaseRail step={step} hasConflict={hasConflict} />
+
+      <div className="train-table" role="table" aria-label="Jobs and grouped train outcomes">
+        <div className="train-table-head" role="row">
+          <span role="columnheader">Job</span>
+          <span role="columnheader">Branch</span>
+          <span role="columnheader">Branch check</span>
+          <span role="columnheader">Combined gate</span>
+          <span role="columnheader">Outcome</span>
+        </div>
+        <TrainJobGroup kind="conflict" jobs={conflictJobs} step={step} />
+        <TrainJobGroup kind="safe" jobs={safeJobs} step={step} />
+        {!!neutralJobs.length && (
+          <section className="train-job-group current resolved">
+            <header><div><Broadcast size={19} /><strong>Selected jobs</strong></div><span>{snapshot.progress.message}</span></header>
+            <div role="rowgroup">
+              {neutralJobs.map((job) => <TrainJobRow job={job} kind="safe" step={step} key={job.id} />)}
+            </div>
+          </section>
+        )}
+      </div>
+
+      <footer className="train-meta">
+        <span>Train ID</span>
+        <code>{validatedTrain?.train_id || snapshot.train.jobs?.[0]?.train_id || "assigned after validation"}</code>
+        <span className="train-meta-spacer" />
+        <span>Updated</span>
+        <time>{relative(snapshot.generated_at, new Date())}</time>
+      </footer>
+    </section>
+  );
+}
+
+function WhatHappened({ snapshot, demoStep }) {
+  const { conflictJobs, safeJobs } = currentTrainModel(snapshot);
+  const step = demoStep ?? 4;
+  const conflictNames = conflictJobs.map((job) => `#${job.id}`).join(" and ");
+  const safeNames = safeJobs.map((job) => `#${job.id}`).join(" and ");
+  const facts = [
+    step === 0
+      ? `${conflictJobs.length + safeJobs.length} committed jobs entered one train.`
+      : "Every job passed its branch check on its own.",
+    step < 2
+      ? "The combined gate checks how the jobs behave together."
+      : conflictJobs.length
+        ? `The combined gate found a semantic conflict between ${conflictNames}.`
+        : "The combined gate passed for the complete train.",
+    step < 3
+      ? "Isolation starts only if the combined result fails."
+      : safeJobs.length
+        ? `${safeNames} were rechecked together as one safe train.`
+        : "No compatible survivor train is ready yet.",
+  ];
+
+  return (
+    <section className="inspector-section what-happened">
+      <div className="inspector-heading"><h2>What happened</h2>{conflictJobs.length ? <XCircle size={20} weight="fill" /> : <CheckCircle size={20} weight="fill" />}</div>
+      <ol>
+        {facts.map((fact, index) => <li key={fact}><span>{index + 1}</span><p>{fact}</p></li>)}
+      </ol>
+    </section>
+  );
+}
+
+function NextSafeActions({ snapshot, demoStep }) {
+  const { conflictJobs, safeJobs } = currentTrainModel(snapshot);
+  const ready = (demoStep ?? 4) >= 4;
+  return (
+    <section className="inspector-section next-safe-actions">
+      <h2>Next safe action</h2>
+      {!!safeJobs.length && (
+        <div className={`safe-action ready ${ready ? "" : "muted"}`}>
+          <CheckCircle size={19} weight="fill" />
+          <div>
+            <strong>{safeJobs.map((job) => `#${job.id}`).join(" + ")} are validated together</strong>
+            <p>{ready ? "Deploy this exact train when approved." : "Isolation and validation are still running."}</p>
+          </div>
+        </div>
+      )}
+      {!!conflictJobs.length && (
+        <div className="safe-action repair">
+          <XCircle size={19} weight="fill" />
+          <div>
+            <strong>Fix {conflictJobs.map((job) => `#${job.id}`).join(" + ")} together</strong>
+            <p>Commit the joint fix, then enqueue both branches again.</p>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CollapsedDetails({ snapshot, now }) {
+  const events = (snapshot.events || []).slice(-4).reverse();
+  const lock = snapshot.lock;
+  return (
+    <details className="inspector-section inspector-details">
+      <summary><span>Logs and runner details</span><small>Collapsed</small><CaretDown size={17} /></summary>
+      <div className="runner-compact">
+        <span>Runner</span><strong>{lock?.liveness === "alive" ? "Active" : "Idle"}</strong>
+        <span>Heartbeat</span><code>{lock ? relative(lock.heartbeat_at, now) : "—"}</code>
+      </div>
+      <div className="compact-event-list">
+        {events.map((event) => (
+          <div key={event.id}>
+            <StatusIcon state={event.state === "success" ? "done" : event.state} size={16} />
+            <span>{event.message}</span>
+            <time>{clockTime(event.created_at)}</time>
+          </div>
+        ))}
+        {!events.length && <p>No runner events yet.</p>}
+      </div>
+    </details>
+  );
+}
+
+function TrainInspector({ snapshot, now, demoStep }) {
+  return (
+    <aside className="train-inspector" aria-label="Current train explanation and next actions">
+      <WhatHappened snapshot={snapshot} demoStep={demoStep} />
+      <NextSafeActions snapshot={snapshot} demoStep={demoStep} />
+      <CollapsedDetails snapshot={snapshot} now={now} />
+      {snapshot.project.preview && (
+        <section className="inspector-section demo-note">
+          <strong>Demo data</strong>
+          <p>Synthetic runner data for UI review. Replay changes presentation only.</p>
+        </section>
+      )}
+    </aside>
+  );
+}
+
+function SingleRepoBody({ snapshot, now, demoStep }) {
   const recentJobs = snapshot.jobs || [];
   const words = terminology(snapshot);
   return (
-    <div className="dashboard-grid">
-      <main className="main-column">
-        <RemediationBanner snapshot={snapshot} />
-        <Hero snapshot={snapshot} now={now} />
-        <CountsStrip counts={snapshot.counts} />
-        <PhaseRail snapshot={snapshot} />
-        <CurrentWork snapshot={snapshot} now={now} />
-        <ReadyToDeploy snapshot={snapshot} />
-        <JobCards snapshot={snapshot} />
-        <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={words} />
+    <main className="workspace-shell">
+      <div className="train-workspace-grid">
+        <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} />
+        <TrainInspector snapshot={snapshot} now={now} demoStep={demoStep} />
+      </div>
+      <details className="secondary-drawer">
+        <summary><span>Full activity and history</span><small>Operational detail</small><CaretDown size={18} /></summary>
+        <div className="secondary-grid">
+          <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={words} />
+          <div>
+            <RunnerPanel snapshot={snapshot} now={now} />
+            <AttentionPanel jobs={recentJobs} />
+          </div>
+        </div>
         <DeploymentHistory jobs={recentJobs} words={words} />
-      </main>
-      <aside className="side-rail">
-        <RunnerPanel snapshot={snapshot} now={now} />
-        <AttentionPanel jobs={recentJobs} />
-        <NextAction snapshot={snapshot} />
-      </aside>
-    </div>
+      </details>
+    </main>
   );
 }
 
@@ -844,6 +1215,8 @@ export function App() {
   const [now, setNow] = useState(new Date());
   const [selectedRepo, setSelectedRepo] = useState(readRepoHash);
   const [theme, setTheme] = useState(initialTheme);
+  const [demoStep, setDemoStep] = useState(4);
+  const [demoPlaying, setDemoPlaying] = useState(false);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNow(new Date()), 1000);
@@ -863,6 +1236,16 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (!demoPlaying) return undefined;
+    if (demoStep >= 4) {
+      const stop = window.setTimeout(() => setDemoPlaying(false), 900);
+      return () => window.clearTimeout(stop);
+    }
+    const advance = window.setTimeout(() => setDemoStep((value) => value + 1), 1050);
+    return () => window.clearTimeout(advance);
+  }, [demoPlaying, demoStep]);
+
+  useEffect(() => {
     if (!snapshot) return;
     if (snapshot.hub) {
       const attention = snapshot.repos.filter((entry) => {
@@ -880,6 +1263,10 @@ export function App() {
   const selectRepo = (path) => {
     window.location.hash = path === null ? "" : `repo=${encodeURIComponent(path)}`;
     setSelectedRepo(path);
+  };
+  const playDemo = () => {
+    setDemoStep(0);
+    setDemoPlaying(true);
   };
 
   if (!snapshot) return <Loading />;
@@ -922,9 +1309,14 @@ export function App() {
         now={now}
         theme={theme}
         onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
+        demoState={{ playing: demoPlaying, step: demoStep }}
+        onPlayDemo={playDemo}
       />
-      {snapshot.project.preview && <PreviewBanner />}
-      <SingleRepoBody snapshot={snapshot} now={now} />
+      <SingleRepoBody
+        snapshot={snapshot}
+        now={now}
+        demoStep={snapshot.project.preview ? demoStep : null}
+      />
       <footer className="page-footer"><WifiHigh size={18} /><span>Read-only local view</span><i>·</i><span>All actions are performed by mergetrain.</span></footer>
     </div>
   );
