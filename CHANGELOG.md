@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `mergetrain demo`, a network-free nine-step walkthrough that creates a
+  disposable repo and local bare remote, enqueues four real agent worktrees,
+  exposes a two-branch semantic conflict through `conflict_with`, and deploys
+  only the validated survivor train. The sandbox isolates user Git config,
+  cleans up on success, and is preserved with recovery hints on failure (#171).
+
 - Add read-only `mergetrain history` and `mergetrain stats` commands (#168).
   Durable jobs are grouped into complete trains for status, queue wait,
   duration, land-rate, median/p95 latency, and retained per-gate timing. Queue

@@ -152,6 +152,9 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 ## Quickstart
 
 ```bash
+# See the whole workflow in a disposable local sandbox (~1 minute)
+uvx mergetrain demo
+
 # Install the public alpha (zero runtime dependencies)
 uv tool install mergetrain     # or: pipx install mergetrain
 brew install yongjip/tap/mergetrain   # macOS, no Python needed
@@ -184,6 +187,12 @@ changes human CLI, dashboard, wrapper, and generated-agent wording only;
 SQLite/JSON keep the stable `deployed` status and `deploy_sha` field.
 
 For an unreleased source checkout, use `python -m pip install -e .` instead.
+
+`mergetrain demo` creates a throwaway repository and local bare remote, then
+drives four real agent branches through enqueue → combined validation → semantic
+conflict attribution → exact-train deploy. It uses no network and isolates Git
+configuration from your account. Add `--keep` to inspect the final queue or
+open `mergetrain dashboard --preview`; add `--pause` for a narrated presentation.
 
 The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
 runner phases, heartbeat freshness, job order, blocked reasons, recent activity,

@@ -24,6 +24,7 @@ Command summary:
 mergetrain init [--project NAME] [--write] [--force]
 mergetrain agent-contract [--json]
 mergetrain version [--json]
+mergetrain demo [--dir PATH] [--keep] [--pause]
 mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain retry JOB_ID [--rebase] [--json]
 mergetrain status [--json] [--limit N]
@@ -86,6 +87,40 @@ paths are not classified by naming convention. A VCS install can report the
 commit recorded by PEP 610 even when the installed wheel has no Git checkout.
 Unavailable metadata is returned as `null` or `unknown`, never as a command
 failure.
+
+## `demo`
+
+Run a local-only walkthrough of the complete train lifecycle:
+
+```sh
+uvx mergetrain demo
+mergetrain demo --dir /tmp/mt-demo --keep
+mergetrain demo --pause
+```
+
+The command bootstraps a disposable Python project, a local bare Git remote,
+and four clean agent worktrees. Every branch passes alone; two branches form a
+semantic conflict only when combined, so the real runner bisects the four-job
+train, records `conflict_with`, keeps the two compatible jobs as one validated
+train, and atomically deploys exactly that survivor train after an explicit
+`--train-id` step. The walkthrough prints the real CLI commands and JSON output,
+including why its internal `result: partial` validation exits 1 before the final
+`result: success`.
+
+The sandbox never reads or writes the invoking repository or user Git config,
+and its remote is a local path, so the walkthrough uses no network. Git 2.32 or
+newer is required for config isolation.
+
+| Option | Meaning |
+|---|---|
+| `--dir PATH` | Use an absent or empty sandbox directory instead of a generated temporary one. |
+| `--keep` | Preserve a successful sandbox and print status/dashboard follow-up commands. |
+| `--pause` | Wait for Enter between the nine narrated steps. |
+
+Successful demos clean up automatically unless `--keep` is set. Any failed or
+interrupted demo is always preserved and prints `status --json` and
+`dashboard --preview` recovery hints. `MERGETRAIN_DEMO_STEP_DELAY` adds a
+bounded delay between steps for deterministic screen recording.
 
 ## `enqueue`
 

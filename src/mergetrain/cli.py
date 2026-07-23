@@ -276,6 +276,14 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    # Keep the sizeable walkthrough implementation off ordinary CLI import
+    # paths; `mergetrain --help` and agent commands remain fast and dependency-free.
+    from .demo import run_demo
+
+    return run_demo(directory=args.directory, keep=args.keep, pause=args.pause)
+
+
 def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
     try:
         return git_rev_parse(path, ref)
@@ -1697,6 +1705,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_version = subparsers.add_parser("version", help="Show version and installed package provenance")
     p_version.add_argument("--json", action="store_true")
     p_version.set_defaults(func=cmd_version)
+
+    p_demo = subparsers.add_parser(
+        "demo", help="Run a local-only semantic-conflict walkthrough"
+    )
+    p_demo.add_argument(
+        "--dir",
+        dest="directory",
+        help="Empty or absent sandbox directory (default: a temporary directory)",
+    )
+    p_demo.add_argument("--keep", action="store_true", help="Keep the sandbox after success")
+    p_demo.add_argument("--pause", action="store_true", help="Wait for Enter between steps")
+    p_demo.set_defaults(func=cmd_demo)
 
     p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the integration queue")
     p_enqueue.add_argument("--task", required=True)
