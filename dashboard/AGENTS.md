@@ -18,9 +18,17 @@ When implementing from a selected generated mock, treat that image as the source
   unambiguous.
 - Demo mode may seed realistic data and replay presentation states, but it must
   use the same product UI and information architecture as normal operation.
+- Make the primary demo the ordinary FIFO policy: enqueue several committed
+  merge requests, merge them into the candidate train in order, skip a later
+  request that hits a real Git conflict, continue with the remaining requests,
+  then validate the surviving train for one atomic update to `main`.
+- Keep semantic-conflict bisection as an advanced scenario, not the default
+  product explanation. Never label a semantic incompatibility as a generic Git
+  merge conflict.
 - Keep the interface read-only, single-repository, desktop-first, and local-only for v0.1.
 - Keep logs and secondary runner detail collapsed by default so the current
-  train, conflict pair, safe train, and next action remain the first read.
+  train, blocked request, surviving validated train, and next action remain the
+  first read.
 - Show actual runner phases, heartbeat freshness, blocked reason, activity, and the next safe action.
 - Prefer the dark operational canvas for the demo, with blue active state,
   green success, amber attention, red failure, thin borders, and restrained

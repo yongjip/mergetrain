@@ -56,7 +56,7 @@ class DemoAssetTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("git"), "git is required")
 class DemoTests(unittest.TestCase):
-    def test_full_demo_isolated_conflict_and_deploys_only_survivors(self) -> None:
+    def test_full_demo_skips_fifo_git_conflict_and_deploys_survivors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             invoking_repo = root / "invoking"
@@ -97,9 +97,9 @@ class DemoTests(unittest.TestCase):
             )
             self.assertIn("result: partial", out.getvalue())
             self.assertIn("result: success", out.getvalue())
-            self.assertIn("Train gate failed; bisecting 4 jobs", out.getvalue())
-            self.assertIn('"conflict_with": "2"', out.getvalue())
-            self.assertIn("conflict_with: #1 ↔ #2", out.getvalue())
+            self.assertIn("FIFO result: #1 merged; #2 hit a Git conflict", out.getvalue())
+            self.assertIn('"conflict_with": ""', out.getvalue())
+            self.assertIn("three compatible requests were validated together", out.getvalue())
             self.assertIn("Sandbox kept at:", out.getvalue())
 
             repo = sandbox / "repo"
@@ -110,11 +110,14 @@ class DemoTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            left = jobs["agent/faster-timeout"]
-            right = jobs["agent/health-check"]
-            self.assertEqual(left.status, "canceled")
-            self.assertEqual(right.status, "canceled")
-            for branch in ("agent/add-retries", "agent/request-logging"):
+            conflicted = jobs["agent/longer-timeout"]
+            self.assertEqual(conflicted.status, "canceled")
+            self.assertEqual(conflicted.conflict_with, "")
+            for branch in (
+                "agent/faster-timeout",
+                "agent/add-retries",
+                "agent/request-logging",
+            ):
                 self.assertEqual(jobs[branch].status, "deployed")
                 self.assertEqual(jobs[branch].push_status, "succeeded")
                 self.assertEqual(jobs[branch].verify_status, "succeeded")
@@ -135,7 +138,11 @@ class DemoTests(unittest.TestCase):
             agent_subjects = {subject for subject in subjects if subject.startswith("agent/")}
             self.assertEqual(
                 agent_subjects,
-                {"agent/add-retries", "agent/request-logging"},
+                {
+                    "agent/faster-timeout",
+                    "agent/add-retries",
+                    "agent/request-logging",
+                },
             )
             remote_config = subprocess.run(
                 ["git", f"--git-dir={remote}", "show", "main:app/config.py"],
@@ -143,7 +150,7 @@ class DemoTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             ).stdout
-            self.assertEqual(remote_config, "DEFAULT_TIMEOUT = 30\n")
+            self.assertEqual(remote_config, "DEFAULT_TIMEOUT = 10\n")
             for path in ("app/retries.py", "app/request_logging.py"):
                 subprocess.run(
                     ["git", f"--git-dir={remote}", "cat-file", "-e", f"main:{path}"],

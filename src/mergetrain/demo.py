@@ -402,17 +402,17 @@ deploy:
                 },
             ),
             (
-                "agent/health-check",
-                "add a timeout-aware health check",
+                "agent/longer-timeout",
+                "raise the timeout for slow jobs",
                 {
-                    "app/health.py": "TIMEOUT_BUDGET = 30\n",
-                    "tests/test_health.py": (
+                    "app/config.py": "DEFAULT_TIMEOUT = 60\n",
+                    "tests/test_config.py": (
                         "import unittest\n\n"
                         "from app.config import DEFAULT_TIMEOUT\n"
-                        "from app.health import TIMEOUT_BUDGET\n\n\n"
-                        "class HealthTests(unittest.TestCase):\n"
-                        "    def test_budget_matches_config(self):\n"
-                        "        self.assertEqual(TIMEOUT_BUDGET, DEFAULT_TIMEOUT)\n"
+                        "\n\n"
+                        "class ConfigTests(unittest.TestCase):\n"
+                        "    def test_default_timeout(self):\n"
+                        "        self.assertEqual(DEFAULT_TIMEOUT, 60)\n"
                     ),
                 },
             ),
@@ -523,50 +523,63 @@ deploy:
 
         self._step(
             "Validate the combined train",
-            "Every branch is green alone, but the first two disagree semantically when combined.",
+            "The runner merges requests in FIFO order. A later Git conflict is "
+            "skipped without discarding requests that already merged cleanly.",
         )
         self._cli("run-batch", "--validate-only", expected={1})
         validation = self._cli_json("status", "--json", "--limit", "10")
         jobs = self._jobs_by_branch(validation)
-        left = jobs.get("agent/faster-timeout", {})
-        right = jobs.get("agent/health-check", {})
-        if left.get("status") != "blocked" or right.get("status") != "blocked":
-            raise DemoFailure("semantic conflict pair was not blocked")
-        if str(left.get("conflict_with")) != str(job_ids["agent/health-check"]):
-            raise DemoFailure("faster-timeout conflict attribution is missing")
-        if str(right.get("conflict_with")) != str(job_ids["agent/faster-timeout"]):
-            raise DemoFailure("health-check conflict attribution is missing")
-        survivors = [jobs.get("agent/add-retries", {}), jobs.get("agent/request-logging", {})]
+        conflicted = jobs.get("agent/longer-timeout", {})
+        if conflicted.get("status") != "blocked":
+            raise DemoFailure("the second FIFO request was not blocked on its Git conflict")
+        if str(conflicted.get("conflict_with") or ""):
+            raise DemoFailure("a Git merge conflict must not be labeled as a semantic pair")
+        if "conflict" not in str(conflicted.get("note", "")).lower():
+            raise DemoFailure("the blocked request is missing its Git conflict reason")
+        survivor_branches = (
+            "agent/faster-timeout",
+            "agent/add-retries",
+            "agent/request-logging",
+        )
+        survivors = [jobs.get(branch, {}) for branch in survivor_branches]
         if any(job.get("status") != "validated" for job in survivors):
-            raise DemoFailure("compatible survivor branches were not validated")
+            raise DemoFailure("the compatible FIFO survivors were not validated")
         train_ids = {str(job.get("train_id", "")) for job in survivors}
         if len(train_ids) != 1 or not next(iter(train_ids)):
             raise DemoFailure("validated survivors do not share one train identity")
         train_id = next(iter(train_ids))
-        print("Train gate failed; bisecting 4 jobs")
         print(
-            "conflict_with: "
-            f"#{job_ids['agent/faster-timeout']} ↔ #{job_ids['agent/health-check']}"
+            "FIFO result: "
+            f"#{job_ids['agent/faster-timeout']} merged; "
+            f"#{job_ids['agent/longer-timeout']} hit a Git conflict and was skipped; "
+            f"#{job_ids['agent/add-retries']} and "
+            f"#{job_ids['agent/request-logging']} continued."
         )
-        print("result: partial — exit 1 means inspect the graded result; two safe jobs survived.")
+        print(
+            "result: partial — exit 1 means inspect the graded result; "
+            "three compatible requests were validated together."
+        )
 
         self._step(
-            "Inspect the attributed conflict",
-            "The blocked job names its partner and keeps the recovery guidance in structured JSON.",
+            "Inspect the blocked request",
+            "The second request keeps its concrete Git conflict reason and recovery "
+            "guidance in structured JSON.",
         )
         inspect_args = (
             "inspect",
-            str(job_ids["agent/faster-timeout"]),
+            str(job_ids["agent/longer-timeout"]),
             "--event-limit",
             "3",
             "--json",
         )
         inspected = self._cli_json(*inspect_args)
-        if str(inspected.get("job", {}).get("conflict_with")) != str(
-            job_ids["agent/health-check"]
-        ):
-            raise DemoFailure("inspect did not preserve conflict_with")
         inspected_job = inspected.get("job", {})
+        if inspected_job.get("status") != "blocked":
+            raise DemoFailure("inspect did not preserve the blocked status")
+        if str(inspected_job.get("conflict_with") or ""):
+            raise DemoFailure("inspect mislabeled the Git conflict as a semantic pair")
+        if "conflict" not in str(inspected_job.get("note", "")).lower():
+            raise DemoFailure("inspect did not preserve the Git conflict reason")
         inspected_outcome = inspected.get("outcome", {})
         self._show_cli_json(
             inspect_args,
@@ -587,15 +600,15 @@ deploy:
         )
 
         self._step(
-            "Dismiss the broken pair",
-            "Blocked jobs never self-clear. Dismissal reveals the already "
-            "validated survivor train.",
+            "Dismiss the blocked request",
+            "Blocked requests never self-clear. Dismissal keeps the already "
+            "validated three-request train ready for explicit approval.",
         )
         self._cli(
             "dismiss",
             "--all",
             "--note",
-            "demo: semantic conflict acknowledged",
+            "demo: Git conflict acknowledged; rebase and enqueue a fresh commit",
         )
         self._cli("doctor")
         after_dismiss = self._cli_json("doctor", "--json")
@@ -616,14 +629,15 @@ deploy:
         deployed_jobs = self._jobs_by_branch(deployed)
         if any(
             deployed_jobs.get(branch, {}).get("status") != "deployed"
-            for branch in ("agent/add-retries", "agent/request-logging")
+            for branch in survivor_branches
         ):
             raise DemoFailure("validated survivor train did not deploy successfully")
         print("result: success — the atomic local-remote push and verify hook both completed.")
 
         self._step(
             "Prove what landed",
-            "Final state and the bare remote show exactly the two compatible agent changes.",
+            "Final state and the bare remote show exactly the three compatible "
+            "requests, in FIFO order, on main.",
         )
         self._cli("status", "--limit", "10")
         final_status = self._cli_json("status", "--json", "--limit", "10")
@@ -689,7 +703,7 @@ def run_demo(
             print(f"  {hint}", file=sys.stderr)
         return 1
 
-    print("\nDemo complete: semantic conflict isolated; survivor train deployed atomically.")
+    print("\nDemo complete: FIFO Git conflict skipped; survivor train deployed atomically.")
     if keep:
         print(f"Sandbox kept at: {sandbox.root}")
         for hint in walkthrough.hints():

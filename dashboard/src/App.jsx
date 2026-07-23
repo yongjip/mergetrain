@@ -218,11 +218,11 @@ function Header({
           className={`demo-play ${demoState?.playing ? "playing" : ""}`}
           type="button"
           onClick={onPlayDemo}
-          aria-label={demoState?.playing ? `Playing demo step ${demoState.step + 1} of 5` : "Play demo"}
+          aria-label={demoState?.playing ? `Playing demo step ${demoState.step + 1} of 7` : "Play demo"}
           disabled={demoState?.playing}
         >
           {demoState?.playing ? <SpinnerGap size={17} className="spin" /> : <Play size={17} weight="fill" />}
-          <span>{demoState?.playing ? `Playing ${demoState.step + 1} / 5` : "Play demo"}</span>
+          <span>{demoState?.playing ? `Playing ${demoState.step + 1} / 7` : "Play demo"}</span>
         </button>
       )}
       <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
@@ -280,7 +280,7 @@ function PreviewBanner() {
     <div className="preview-banner" role="status">
       <Info size={18} weight="fill" />
       <strong>Preview data</strong>
-      <span>Synthetic runner events for UI review. No gate command shown here is actually executing.</span>
+      <span>Local walkthrough state for UI review. Replay changes presentation only.</span>
     </div>
   );
 }
@@ -646,9 +646,8 @@ function Loading() {
 
 const WORKSPACE_PHASES = [
   ["queue", "Queue"],
-  ["checks", "Branch checks"],
-  ["gate", "Combined gate"],
-  ["isolate", "Isolate"],
+  ["merge", "Merge in order"],
+  ["gate", "Gates"],
   ["ready", "Ready"],
 ];
 
@@ -688,16 +687,6 @@ function currentTrainModel(snapshot) {
     }
   });
 
-  const uniqueJobs = [...jobMap.values()];
-  const conflictCandidates = uniqueJobs.filter((job) => (
-    splitJobIds(job.conflict_with).length > 0
-    && ["blocked", "failed", "needs_reconcile"].includes(job.status)
-  ));
-  const conflictCandidateIds = new Set(conflictCandidates.map((job) => String(job.id)));
-  const conflictJobs = conflictCandidates
-    .filter((job) => splitJobIds(job.conflict_with).some((id) => conflictCandidateIds.has(id)))
-    .sort((a, b) => Number(a.id) - Number(b.id));
-
   const validatedIds = new Set([
     ...(validatedTrain?.job_ids || []),
     ...(validatedTrain?.branches || []).map((branch) => branch.job_id),
@@ -707,35 +696,47 @@ function currentTrainModel(snapshot) {
     .filter(Boolean)
     .sort((a, b) => Number(a.id) - Number(b.id));
 
+  const blockedJobs = [...jobMap.values()]
+    .filter((job) => ["blocked", "failed", "needs_reconcile"].includes(job.status))
+    .sort((a, b) => Number(a.id) - Number(b.id));
   const fallbackJobs = [...(snapshot.train.jobs || [])].sort((a, b) => Number(a.id) - Number(b.id));
-  const currentJobs = conflictJobs.length || safeJobs.length
-    ? [...conflictJobs, ...safeJobs]
+  const currentJobs = blockedJobs.length || safeJobs.length
+    ? [...new Map([...blockedJobs, ...safeJobs].map((job) => [String(job.id), job])).values()]
+      .sort((a, b) => Number(a.id) - Number(b.id))
     : fallbackJobs;
 
   return {
-    conflictJobs,
+    blockedJobs,
     safeJobs,
     currentJobs,
     validatedTrain,
   };
 }
 
-function workspacePhaseState(index, step, hasConflict) {
-  if (index === 0) return step === 0 ? "active" : "done";
-  if (index === 1) return step < 1 ? "waiting" : step === 1 ? "active" : "done";
-  if (index === 2) {
-    if (step < 2) return "waiting";
-    return hasConflict ? "error" : step === 2 ? "active" : "done";
-  }
-  if (index === 3) return step < 3 ? "waiting" : step === 3 ? "active" : "done";
-  return step < 4 ? "waiting" : "done";
+function isGitConflict(job) {
+  return splitJobIds(job.conflict_with).length === 0
+    && String(job.note || "").toLowerCase().includes("conflict");
 }
 
-function WorkspacePhaseRail({ step, hasConflict }) {
+function blockedReason(job) {
+  if (isGitConflict(job)) return "Git conflict";
+  if (splitJobIds(job.conflict_with).length) return "Semantic conflict";
+  if (job.status === "needs_reconcile") return "Needs reconcile";
+  return "Blocked";
+}
+
+function workspacePhaseState(index, step) {
+  if (index === 0) return step === 0 ? "active" : "done";
+  if (index === 1) return step < 1 ? "waiting" : step <= 4 ? "active" : "done";
+  if (index === 2) return step < 5 ? "waiting" : step === 5 ? "active" : "done";
+  return step < 6 ? "waiting" : "done";
+}
+
+function WorkspacePhaseRail({ step }) {
   return (
     <ol className="workspace-phase-rail" aria-label="Current train phases">
       {WORKSPACE_PHASES.map(([key, label], index) => {
-        const state = workspacePhaseState(index, step, hasConflict);
+        const state = workspacePhaseState(index, step);
         return (
           <li className={state} key={key}>
             <span>{label}</span>
@@ -747,110 +748,137 @@ function WorkspacePhaseRail({ step, hasConflict }) {
   );
 }
 
-function TrainJobRow({ job, kind, step }) {
-  const checksPassed = step >= 1;
-  const gateResolved = step >= 2;
-  const isolated = step >= 3;
-  const ready = step >= 4;
-  const partnerIds = splitJobIds(job.conflict_with);
-  const conflict = kind === "conflict";
+function TrainJobRow({ job, blocked, order, step }) {
+  const mergeReached = step >= order;
+  const gateRunning = step === 5;
+  const gatePassed = step >= 6;
+  const mergeState = !mergeReached ? "waiting" : blocked ? "error" : "done";
+  const gateState = blocked && mergeReached
+    ? "waiting"
+    : gatePassed
+      ? "done"
+      : gateRunning
+        ? "active"
+        : "waiting";
+  const outcomeState = blocked && mergeReached
+    ? "error"
+    : gatePassed
+      ? "done"
+      : "waiting";
 
   return (
-    <div className="train-job-row" role="row">
+    <div className={`train-job-row ${blocked && mergeReached ? "blocked" : ""}`} role="row">
+      <div className="job-cell order-cell" role="cell">
+        <span>{order}</span>
+      </div>
       <div className="job-cell identity-cell" role="cell">
         <strong>#{job.id}</strong>
-        <div><span>{jobLabel(job)}</span><code>{shortSha(job.head_sha || job.validated_head_sha)}</code></div>
+        <div>
+          <span>{jobLabel(job)}</span>
+          <code>{job.branch || "branch pending"} · {shortSha(job.head_sha || job.validated_head_sha)}</code>
+        </div>
       </div>
-      <div className="job-cell branch-cell" role="cell"><code>{job.branch || "branch pending"}</code></div>
-      <div className={`job-cell result-cell ${checksPassed ? "done" : "waiting"}`} role="cell">
-        <StatusIcon state={checksPassed ? "done" : "waiting"} size={17} />
-        <span>{checksPassed ? "Passed" : "Waiting"}</span>
+      <div className={`job-cell result-cell ${mergeState}`} role="cell">
+        <StatusIcon state={mergeState} size={17} />
+        <span>{!mergeReached ? "Waiting" : blocked ? blockedReason(job) : "Merged"}</span>
       </div>
-      <div className={`job-cell result-cell ${gateResolved ? (conflict ? "error" : "done") : "waiting"}`} role="cell">
-        <StatusIcon state={gateResolved ? (conflict ? "error" : "done") : "waiting"} size={17} />
+      <div className={`job-cell result-cell ${gateState}`} role="cell">
+        <StatusIcon state={gateState} size={17} />
         <span>
-          {gateResolved
-            ? conflict
-              ? `Conflict with #${partnerIds.join(", #")}`
-              : "Passed"
-            : "Waiting"}
+          {blocked && mergeReached
+            ? "Skipped"
+            : gatePassed
+              ? "Passed"
+              : gateRunning
+                ? "Running"
+                : "Waiting"}
         </span>
       </div>
-      <div className={`job-cell outcome-cell ${conflict ? "error" : "done"}`} role="cell">
-        {conflict ? (
-          <span>{isolated ? "Joint fix" : "Pending"}</span>
-        ) : (
-          <>
-            <span>{ready ? "Validated" : isolated ? "Safe" : "Pending"}</span>
-            {ready && <><ArrowRight size={15} /><code className="main-chip">main</code></>}
-          </>
-        )}
+      <div className={`job-cell outcome-cell ${outcomeState}`} role="cell">
+        <span>
+          {blocked && mergeReached
+            ? "Rebase"
+            : gatePassed
+              ? "Train member"
+              : mergeReached
+                ? "Candidate"
+                : "Queued"}
+        </span>
       </div>
     </div>
   );
 }
 
-function TrainJobGroup({ kind, jobs, step }) {
+function FifoJobList({ jobs, blockedIds, step }) {
   if (!jobs.length) return null;
-  const conflict = kind === "conflict";
-  const resolved = step >= (conflict ? 2 : 3);
+  const blockedCount = jobs.filter((job) => blockedIds.has(String(job.id))).length;
   return (
-    <section className={`train-job-group ${kind} ${resolved ? "resolved" : "pending"}`}>
+    <section className={`train-job-group fifo ${step >= 6 ? "resolved" : "pending"}`}>
       <header>
         <div>
-          {conflict
-            ? <XCircle size={19} weight="fill" />
-            : <ShieldCheck size={19} weight="fill" />}
-          <strong>{conflict ? "Conflict pair" : "Safe train"}</strong>
-          <span>{jobs.map((job) => `#${job.id}`).join(" + ")}</span>
+          <ListChecks size={19} weight="fill" />
+          <strong>FIFO merge order</strong>
+          <span>{jobs.map((job) => `#${job.id}`).join(" → ")}</span>
         </div>
-        <span>{resolved ? (conflict ? "Joint fix required" : "Validated together") : "Checking together"}</span>
+        <span>
+          {step >= 6
+            ? `${blockedCount} skipped · ${jobs.length - blockedCount} continue`
+            : step >= 1
+              ? "Merging one by one"
+              : "Oldest request first"}
+        </span>
       </header>
       <div role="rowgroup">
-        {jobs.map((job) => <TrainJobRow job={job} kind={kind} step={step} key={job.id} />)}
+        {jobs.map((job, index) => (
+          <TrainJobRow
+            job={job}
+            blocked={blockedIds.has(String(job.id))}
+            order={index + 1}
+            step={step}
+            key={job.id}
+          />
+        ))}
       </div>
     </section>
   );
 }
 
 function CurrentTrainWorkspace({ snapshot, demoStep }) {
-  const { conflictJobs, safeJobs, currentJobs, validatedTrain } = currentTrainModel(snapshot);
-  const hasConflict = conflictJobs.length > 0;
-  const step = demoStep ?? 4;
+  const { blockedJobs, safeJobs, currentJobs, validatedTrain } = currentTrainModel(snapshot);
+  const step = demoStep ?? 6;
+  const blockedIds = new Set(blockedJobs.map((job) => String(job.id)));
+  const safeNames = safeJobs.map((job) => `#${job.id}`).join(" + ");
   const status = step === 0
-    ? "4 jobs queued"
-    : step === 1
-      ? "Branch checks passed"
-      : step === 2
-        ? hasConflict ? "Combined gate failed" : "Combined gate passed"
-        : step === 3
-          ? hasConflict ? "Conflict isolated" : "Train assembled"
-          : safeJobs.length
-            ? `${safeJobs.length} jobs validated`
-            : "Ready";
-  const neutralJobs = !hasConflict && !safeJobs.length ? currentJobs : [];
+    ? `${currentJobs.length} requests queued`
+    : step <= 4
+      ? `Merging request ${Math.min(step, currentJobs.length)} of ${currentJobs.length}`
+      : step === 5
+        ? "Running gates"
+        : safeJobs.length
+          ? `${safeJobs.length} requests validated`
+          : "Ready";
 
   return (
     <section className="current-train-card" aria-labelledby="current-train-title">
       <header className="current-train-heading">
         <div>
           <span className="workspace-eyebrow">Current train</span>
-          <h1 id="current-train-title">One train · {currentJobs.length} job{currentJobs.length === 1 ? "" : "s"}</h1>
+          <h1 id="current-train-title">FIFO train · {currentJobs.length} request{currentJobs.length === 1 ? "" : "s"}</h1>
         </div>
         <div className="workspace-status-list">
-          {hasConflict && step >= 2 && (
+          {blockedJobs.length > 0 && step >= 2 && (
             <span className="workspace-status error">
               <StatusIcon state="error" size={18} />
-              {conflictJobs.length} need joint fix
+              {blockedJobs.length} blocked
             </span>
           )}
-          {safeJobs.length > 0 && step >= 4 && (
+          {safeJobs.length > 0 && step >= 6 && (
             <span className="workspace-status done">
               <StatusIcon state="done" size={18} />
               {safeJobs.length} validated
             </span>
           )}
-          {!(hasConflict && step >= 2) && !(safeJobs.length > 0 && step >= 4) && (
+          {!(blockedJobs.length > 0 && step >= 2) && !(safeJobs.length > 0 && step >= 6) && (
             <span className="workspace-status active">
               <StatusIcon state="active" size={18} />
               {status}
@@ -859,27 +887,30 @@ function CurrentTrainWorkspace({ snapshot, demoStep }) {
         </div>
       </header>
 
-      <WorkspacePhaseRail step={step} hasConflict={hasConflict} />
+      <WorkspacePhaseRail step={step} />
 
-      <div className="train-table" role="table" aria-label="Jobs and grouped train outcomes">
+      <div className="train-table" role="table" aria-label="FIFO merge requests and train outcomes">
         <div className="train-table-head" role="row">
-          <span role="columnheader">Job</span>
-          <span role="columnheader">Branch</span>
-          <span role="columnheader">Branch check</span>
-          <span role="columnheader">Combined gate</span>
+          <span role="columnheader">Order</span>
+          <span role="columnheader">Merge request</span>
+          <span role="columnheader">FIFO merge</span>
+          <span role="columnheader">Gate</span>
           <span role="columnheader">Outcome</span>
         </div>
-        <TrainJobGroup kind="conflict" jobs={conflictJobs} step={step} />
-        <TrainJobGroup kind="safe" jobs={safeJobs} step={step} />
-        {!!neutralJobs.length && (
-          <section className="train-job-group current resolved">
-            <header><div><Broadcast size={19} /><strong>Selected jobs</strong></div><span>{snapshot.progress.message}</span></header>
-            <div role="rowgroup">
-              {neutralJobs.map((job) => <TrainJobRow job={job} kind="safe" step={step} key={job.id} />)}
-            </div>
-          </section>
-        )}
+        <FifoJobList jobs={currentJobs} blockedIds={blockedIds} step={step} />
       </div>
+
+      {!!safeJobs.length && (
+        <div className={`validated-train-summary ${step >= 6 ? "ready" : ""}`}>
+          <CheckCircle size={21} weight="fill" />
+          <div>
+            <span>Validated train</span>
+            <strong>{safeNames}</strong>
+          </div>
+          <ArrowRight size={18} />
+          <code>main after approval</code>
+        </div>
+      )}
 
       <footer className="train-meta">
         <span>Train ID</span>
@@ -893,29 +924,39 @@ function CurrentTrainWorkspace({ snapshot, demoStep }) {
 }
 
 function WhatHappened({ snapshot, demoStep }) {
-  const { conflictJobs, safeJobs } = currentTrainModel(snapshot);
-  const step = demoStep ?? 4;
-  const conflictNames = conflictJobs.map((job) => `#${job.id}`).join(" and ");
-  const safeNames = safeJobs.map((job) => `#${job.id}`).join(" and ");
+  const { blockedJobs, safeJobs, currentJobs } = currentTrainModel(snapshot);
+  const step = demoStep ?? 6;
+  const first = currentJobs[0];
+  const blocked = blockedJobs[0];
+  const later = currentJobs.filter((job) => (
+    first
+    && blocked
+    && Number(job.id) > Number(blocked.id)
+    && !blockedJobs.some((item) => String(item.id) === String(job.id))
+  ));
+  const firstName = first ? `#${first.id}` : "The first request";
+  const blockedName = blocked ? `#${blocked.id}` : "The next request";
+  const laterNames = later.map((job) => `#${job.id}`).join(" and ");
+  const safeNames = safeJobs.map((job) => `#${job.id}`).join(" + ");
   const facts = [
     step === 0
-      ? `${conflictJobs.length + safeJobs.length} committed jobs entered one train.`
-      : "Every job passed its branch check on its own.",
+      ? `${currentJobs.length} committed merge requests entered in FIFO order.`
+      : `${firstName} merged first because it was oldest in the queue.`,
     step < 2
-      ? "The combined gate checks how the jobs behave together."
-      : conflictJobs.length
-        ? `The combined gate found a semantic conflict between ${conflictNames}.`
-        : "The combined gate passed for the complete train.",
-    step < 3
-      ? "Isolation starts only if the combined result fails."
-      : safeJobs.length
-        ? `${safeNames} were rechecked together as one safe train.`
-        : "No compatible survivor train is ready yet.",
+      ? `${blockedName} is next. Each request merges onto the candidate built so far.`
+      : blocked
+        ? `${blockedName} hit a ${blockedReason(blocked).toLowerCase()} and was skipped.`
+        : "Every request merged cleanly in queue order.",
+    step < 4
+      ? "Later requests keep their place and continue after a skipped conflict."
+      : step < 6
+        ? `${laterNames || "Later requests"} continued; gates now check the surviving train together.`
+        : `${safeNames} passed gates together and can update main atomically.`,
   ];
 
   return (
     <section className="inspector-section what-happened">
-      <div className="inspector-heading"><h2>What happened</h2>{conflictJobs.length ? <XCircle size={20} weight="fill" /> : <CheckCircle size={20} weight="fill" />}</div>
+      <div className="inspector-heading"><h2>What happened</h2>{blockedJobs.length ? <XCircle size={20} weight="fill" /> : <CheckCircle size={20} weight="fill" />}</div>
       <ol>
         {facts.map((fact, index) => <li key={fact}><span>{index + 1}</span><p>{fact}</p></li>)}
       </ol>
@@ -924,8 +965,8 @@ function WhatHappened({ snapshot, demoStep }) {
 }
 
 function NextSafeActions({ snapshot, demoStep }) {
-  const { conflictJobs, safeJobs } = currentTrainModel(snapshot);
-  const ready = (demoStep ?? 4) >= 4;
+  const { blockedJobs, safeJobs } = currentTrainModel(snapshot);
+  const ready = (demoStep ?? 6) >= 6;
   return (
     <section className="inspector-section next-safe-actions">
       <h2>Next safe action</h2>
@@ -933,17 +974,17 @@ function NextSafeActions({ snapshot, demoStep }) {
         <div className={`safe-action ready ${ready ? "" : "muted"}`}>
           <CheckCircle size={19} weight="fill" />
           <div>
-            <strong>{safeJobs.map((job) => `#${job.id}`).join(" + ")} are validated together</strong>
-            <p>{ready ? "Deploy this exact train when approved." : "Isolation and validation are still running."}</p>
+            <strong>Deploy {safeJobs.map((job) => `#${job.id}`).join(" + ")} together</strong>
+            <p>{ready ? "One approved atomic update to main." : "Wait for the combined gates to finish."}</p>
           </div>
         </div>
       )}
-      {!!conflictJobs.length && (
+      {!!blockedJobs.length && (
         <div className="safe-action repair">
           <XCircle size={19} weight="fill" />
           <div>
-            <strong>Fix {conflictJobs.map((job) => `#${job.id}`).join(" + ")} together</strong>
-            <p>Commit the joint fix, then enqueue both branches again.</p>
+            <strong>Rebase {blockedJobs.map((job) => `#${job.id}`).join(" + ")} on latest main</strong>
+            <p>Commit the fix, then enqueue a fresh request.</p>
           </div>
         </div>
       )}
@@ -984,7 +1025,7 @@ function TrainInspector({ snapshot, now, demoStep }) {
       {snapshot.project.preview && (
         <section className="inspector-section demo-note">
           <strong>Demo data</strong>
-          <p>Synthetic runner data for UI review. Replay changes presentation only.</p>
+          <p>Real local walkthrough data. Replay changes presentation only.</p>
         </section>
       )}
     </aside>
@@ -1215,7 +1256,7 @@ export function App() {
   const [now, setNow] = useState(new Date());
   const [selectedRepo, setSelectedRepo] = useState(readRepoHash);
   const [theme, setTheme] = useState(initialTheme);
-  const [demoStep, setDemoStep] = useState(4);
+  const [demoStep, setDemoStep] = useState(6);
   const [demoPlaying, setDemoPlaying] = useState(false);
 
   useEffect(() => {
@@ -1237,7 +1278,7 @@ export function App() {
 
   useEffect(() => {
     if (!demoPlaying) return undefined;
-    if (demoStep >= 4) {
+    if (demoStep >= 6) {
       const stop = window.setTimeout(() => setDemoPlaying(false), 900);
       return () => window.clearTimeout(stop);
     }

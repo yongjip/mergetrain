@@ -195,10 +195,12 @@ SQLite/JSON keep the stable `deployed` status and `deploy_sha` field.
 For an unreleased source checkout, use `python -m pip install -e .` instead.
 
 `mergetrain demo` creates a throwaway repository and local bare remote, then
-drives four real agent branches through enqueue → combined validation → semantic
-conflict attribution → exact-train deploy. It uses no network and isolates Git
-configuration from your account. Add `--keep` to inspect the final queue or
-open `mergetrain dashboard --preview`; add `--pause` for a narrated presentation.
+drives four real agent branches through FIFO enqueue → ordered merge → one
+skipped Git conflict → combined validation of the three survivors → exact-train
+deploy. It uses no network and isolates Git configuration from your account.
+Add `--keep` to inspect the final queue or open `mergetrain dashboard --preview`;
+add `--pause` for a narrated presentation. Semantic-conflict bisection remains
+available as an advanced runner behavior, but is not the default walkthrough.
 
 The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
 runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
