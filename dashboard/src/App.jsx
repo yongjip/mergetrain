@@ -31,6 +31,7 @@ import {
   REMEDIAL_ACTIONS,
   actionCopy,
   newestFirstFifoRows,
+  queuedAfterCurrentBatch,
   reconnectDelay,
 } from "./dashboardLogic.js";
 
@@ -671,11 +672,25 @@ function jobLabel(job) {
     .replaceAll("-", " ");
 }
 
+function sameBatch(job, selectedJobs) {
+  const selectedIds = new Set(selectedJobs.map((item) => String(item.id)));
+  if (selectedIds.has(String(job.id))) return true;
+  const claimTokens = new Set(selectedJobs.map((item) => item.claim_token).filter(Boolean));
+  const trainIds = new Set(selectedJobs.map((item) => item.train_id).filter(Boolean));
+  const startedTimes = new Set(selectedJobs.map((item) => item.started_at).filter(Boolean));
+  return (job.claim_token && claimTokens.has(job.claim_token))
+    || (job.train_id && trainIds.has(job.train_id))
+    || (job.started_at && startedTimes.has(job.started_at));
+}
+
 function currentTrainModel(snapshot) {
   const jobMap = new Map();
   [...(snapshot.jobs || []), ...(snapshot.train.jobs || [])].forEach((job) => {
     jobMap.set(String(job.id), job);
   });
+  const selection = snapshot.train.selection;
+  const selectedJobs = [...(snapshot.train.jobs || [])]
+    .sort((a, b) => Number(a.id) - Number(b.id));
 
   const validatedTrain = (snapshot.validated_trains || []).find((train) => train.deploy_eligible)
     || snapshot.validated_trains?.[0]
@@ -696,24 +711,38 @@ function currentTrainModel(snapshot) {
     ...(validatedTrain?.job_ids || []),
     ...(validatedTrain?.branches || []).map((branch) => branch.job_id),
   ].map(String));
-  const safeJobs = [...validatedIds]
+  const readyJobs = [...validatedIds]
     .map((id) => jobMap.get(id))
     .filter(Boolean)
     .sort((a, b) => Number(a.id) - Number(b.id));
 
-  const blockedJobs = [...jobMap.values()]
+  const attentionJobs = [...jobMap.values()]
     .filter((job) => ["blocked", "failed", "needs_reconcile"].includes(job.status))
     .sort((a, b) => Number(a.id) - Number(b.id));
-  const fallbackJobs = [...(snapshot.train.jobs || [])].sort((a, b) => Number(a.id) - Number(b.id));
-  const currentJobs = blockedJobs.length || safeJobs.length
-    ? [...new Map([...blockedJobs, ...safeJobs].map((job) => [String(job.id), job])).values()]
-      .sort((a, b) => Number(a.id) - Number(b.id))
-    : fallbackJobs;
+  const batchAttentionJobs = selectedJobs.length
+    ? attentionJobs.filter((job) => sameBatch(job, selectedJobs))
+    : attentionJobs;
+  const blockedJobs = ["running", "validated"].includes(selection)
+    ? batchAttentionJobs
+    : selection === "idle"
+      ? attentionJobs
+      : [];
+  const safeJobs = selection === "validated"
+    ? selectedJobs.filter((job) => job.status === "validated")
+    : [];
+  const currentJobs = [...new Map(
+    [...selectedJobs, ...blockedJobs].map((job) => [String(job.id), job]),
+  ).values()].sort((a, b) => Number(a.id) - Number(b.id));
+  const nextBatchJobs = queuedAfterCurrentBatch(snapshot, currentJobs);
 
   return {
+    attentionJobs,
     blockedJobs,
     safeJobs,
+    readyJobs,
     currentJobs,
+    nextBatchJobs,
+    selection,
     validatedTrain,
   };
 }
@@ -739,7 +768,7 @@ function workspacePhaseState(index, step) {
 
 function WorkspacePhaseRail({ step }) {
   return (
-    <ol className="workspace-phase-rail" aria-label="Current train phases">
+    <ol className="workspace-phase-rail" aria-label="Current batch phases">
       {WORKSPACE_PHASES.map(([key, label], index) => {
         const state = workspacePhaseState(index, step);
         return (
@@ -851,11 +880,12 @@ function FifoJobList({ jobs, blockedIds, step }) {
   );
 }
 
-function CurrentTrainWorkspace({ snapshot, demoStep }) {
-  const { blockedJobs, safeJobs, currentJobs, validatedTrain } = currentTrainModel(snapshot);
+function CurrentTrainWorkspace({ snapshot, demoStep, model = currentTrainModel(snapshot) }) {
+  const { blockedJobs, safeJobs, currentJobs, validatedTrain, selection } = model;
   const step = demoStep ?? 6;
   const blockedIds = new Set(blockedJobs.map((job) => String(job.id)));
   const safeNames = safeJobs.map((job) => `#${job.id}`).join(" + ");
+  const batchLocked = ["running", "validated"].includes(selection);
   const status = step === 0
     ? `${currentJobs.length} requests queued`
     : step <= 4
@@ -870,8 +900,11 @@ function CurrentTrainWorkspace({ snapshot, demoStep }) {
     <section className="current-train-card" aria-labelledby="current-train-title">
       <header className="current-train-heading">
         <div>
-          <span className="workspace-eyebrow">Current train</span>
-          <h1 id="current-train-title">FIFO train · {currentJobs.length} request{currentJobs.length === 1 ? "" : "s"}</h1>
+          <span className="workspace-eyebrow">Merge train</span>
+          <h1 id="current-train-title">Current batch · {currentJobs.length} request{currentJobs.length === 1 ? "" : "s"}</h1>
+          <span className={`batch-boundary ${batchLocked ? "locked" : ""}`}>
+            {batchLocked ? "Batch locked when the runner started" : "Batch forms when the runner starts"}
+          </span>
         </div>
         <div className="workspace-status-list">
           {blockedJobs.length > 0 && step >= 2 && (
@@ -897,7 +930,7 @@ function CurrentTrainWorkspace({ snapshot, demoStep }) {
 
       <WorkspacePhaseRail step={step} />
 
-      <div className="train-table" role="table" aria-label="FIFO merge requests and train outcomes">
+      <div className="train-table" role="table" aria-label="Current batch FIFO requests and outcomes">
         <div className="train-table-head" role="row">
           <span role="columnheader">Order</span>
           <span role="columnheader">Merge request</span>
@@ -931,12 +964,44 @@ function CurrentTrainWorkspace({ snapshot, demoStep }) {
   );
 }
 
-function contextualInspectorState(snapshot, demoStep) {
-  const { blockedJobs, safeJobs, validatedTrain } = currentTrainModel(snapshot);
+function NextBatchPanel({ jobs }) {
+  if (!jobs.length) return null;
+  const rows = newestFirstFifoRows(jobs);
+  const fifoNames = [...rows].reverse().map(({ job }) => `#${job.id}`).join(" → ");
+  return (
+    <section className="next-batch-card" aria-labelledby="next-batch-title">
+      <header>
+        <div>
+          <span className="workspace-eyebrow">Arrived after batch lock</span>
+          <h2 id="next-batch-title">Next batch · {jobs.length} waiting</h2>
+          <p>These requests stay queued until the current batch finishes.</p>
+        </div>
+        <span className="next-batch-status"><HourglassHigh size={17} />Not in current batch</span>
+      </header>
+      <div className="next-batch-list">
+        {rows.slice(0, 4).map(({ job }) => (
+          <article key={job.id}>
+            <strong>#{job.id}</strong>
+            <div>
+              <span>{jobLabel(job)}</span>
+              <code>{job.branch || "branch pending"}</code>
+            </div>
+            <small>Waiting</small>
+          </article>
+        ))}
+        {rows.length > 4 && <span className="next-batch-more">+{rows.length - 4} more queued</span>}
+      </div>
+      <footer><ListChecks size={16} />FIFO order <code>{fifoNames}</code></footer>
+    </section>
+  );
+}
+
+function contextualInspectorState(snapshot, demoStep, model = currentTrainModel(snapshot)) {
+  const { attentionJobs, readyJobs, validatedTrain } = model;
   const step = demoStep ?? 6;
   return {
-    blockedJobs: step >= 2 ? blockedJobs : [],
-    readyJobs: step >= 6 ? safeJobs : [],
+    blockedJobs: step >= 2 ? attentionJobs : [],
+    readyJobs: step >= 6 ? readyJobs : [],
     validatedTrain: step >= 6 ? validatedTrain : null,
   };
 }
@@ -961,7 +1026,7 @@ function NeedsAttentionPanel({ jobs }) {
           <article className="context-job" key={job.id}>
             <div className="context-job-title">
               <strong>#{job.id} · {jobLabel(job)}</strong>
-              <span>{blockedReason(job)}</span>
+              <span><XCircle size={14} weight="fill" />{blockedReason(job)}</span>
             </div>
             <code>{job.branch || "branch pending"}</code>
             {!!files.length && (
@@ -1021,14 +1086,16 @@ function TrainInspector({ snapshot, inspector }) {
 function SingleRepoBody({ snapshot, now, demoStep }) {
   const recentJobs = snapshot.jobs || [];
   const words = terminology(snapshot);
-  const inspector = contextualInspectorState(snapshot, demoStep);
+  const model = currentTrainModel(snapshot);
+  const inspector = contextualInspectorState(snapshot, demoStep, model);
   const showInspector = inspector.blockedJobs.length > 0 || inspector.readyJobs.length > 0;
   return (
     <main className="workspace-shell">
       <div className={`train-workspace-grid ${showInspector ? "with-inspector" : ""}`}>
-        <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} />
+        <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} model={model} />
         {showInspector && <TrainInspector snapshot={snapshot} inspector={inspector} />}
       </div>
+      <NextBatchPanel jobs={model.nextBatchJobs} />
       <details className="secondary-drawer">
         <summary><span>Full activity and history</span><small>Operational detail</small><CaretDown size={18} /></summary>
         <div className="secondary-grid">
@@ -1068,6 +1135,7 @@ function RepoCard({ entry, onSelect, now }) {
   const [state, label] = repoCardState(entry);
   const name = entry.name || entry.path;
   const snapshot = entry.ok && !entry.empty ? entry.snapshot : null;
+  const batch = snapshot ? currentTrainModel(snapshot) : null;
   const chips = snapshot
     ? REPO_CARD_COUNTS.filter(([key]) => snapshot.counts?.[key]).map(([key, text]) => (
         <span className={`count-chip ${key}`} key={key}>{snapshot.counts[key]} {text}</span>
@@ -1101,6 +1169,19 @@ function RepoCard({ entry, onSelect, now }) {
         {!entry.ok && <WarningCircle size={17} weight="fill" />}
         <span>{summary}</span>
       </p>
+      {batch && batch.currentJobs.length > 0 && (
+        <div className="repo-batch-summary">
+          <span>
+            <small>{batch.selection === "validated" ? "Validated batch" : "Current batch"}</small>
+            <strong>{batch.currentJobs.length}</strong>
+          </span>
+          <ArrowRight size={15} />
+          <span className={batch.nextBatchJobs.length ? "has-next" : ""}>
+            <small>Next batch</small>
+            <strong>{batch.nextBatchJobs.length}</strong>
+          </span>
+        </div>
+      )}
       {snapshot && (
         <footer className="repo-card-foot">
           <span><GitBranch size={15} />{snapshot.project.integration_ref}</span>

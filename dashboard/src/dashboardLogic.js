@@ -43,3 +43,12 @@ export function newestFirstFifoRows(jobs = []) {
     .map((job, index) => ({ job, order: index + 1 }))
     .reverse();
 }
+
+export function queuedAfterCurrentBatch(snapshot = {}, currentJobs = []) {
+  const selection = snapshot.train?.selection;
+  if (!["running", "validated"].includes(selection)) return [];
+  const currentIds = new Set(currentJobs.map((job) => String(job.id)));
+  return (snapshot.jobs || [])
+    .filter((job) => job.status === "queued" && !currentIds.has(String(job.id)))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+}

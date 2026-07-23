@@ -33,6 +33,11 @@ When implementing from a selected generated mock, treat that image as the source
   contextual inspector only for blocked work that needs repair or a validated
   train that needs explicit approval. Keep logs, heartbeat, and history in the
   lower operational-detail drawer.
+- Name the runner-claimed cohort `Current batch`. Its membership freezes when
+  the runner starts. Requests enqueued afterward must remain visibly separate
+  as `Next batch`; never imply that they joined the running or validated train.
+- In Hub, keep per-project state scannable and include current/next batch counts
+  on each project card when a batch exists.
 - Keep the interface read-only, single-repository, desktop-first, and local-only for v0.1.
 - Keep logs and secondary runner detail collapsed by default so the current
   train, blocked request, surviving validated train, and next action remain the

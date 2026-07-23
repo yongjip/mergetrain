@@ -687,6 +687,38 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .repo-card.error .repo-summary { color: var(--red); }
 .repo-summary svg { flex: none; margin-top: 1px; }
 
+.repo-batch-summary {
+  min-height: 44px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+.repo-batch-summary > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.repo-batch-summary small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-batch-summary strong {
+  color: var(--ink);
+  font: 720 13px "JetBrains Mono Variable", monospace;
+}
+.repo-batch-summary svg { color: var(--muted); }
+.repo-batch-summary .has-next strong { color: var(--blue); }
+
 .repo-card-foot {
   margin-top: auto;
   padding-top: 11px;
@@ -844,6 +876,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 
 .current-train-card {
   min-width: 0;
+  min-height: 742px;
   padding: 20px 18px 16px;
 }
 
@@ -869,6 +902,14 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   line-height: 1.08;
   letter-spacing: -0.04em;
 }
+.batch-boundary {
+  display: inline-flex;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.batch-boundary.locked { color: var(--blue); }
 .workspace-status-list {
   display: flex;
   align-items: center;
@@ -972,7 +1013,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .train-job-group:last-child { margin-bottom: 0; }
 .train-job-group > header {
-  min-height: 39px;
+  min-height: 47px;
   padding: 8px 12px;
   display: flex;
   align-items: center;
@@ -1005,7 +1046,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .train-job-group.fifo.resolved > header strong { color: var(--green); }
 
 .train-job-row {
-  min-height: 64px;
+  min-height: 72px;
   align-items: stretch;
   border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--surface) 78%, transparent);
@@ -1158,6 +1199,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .inspector-section:last-child { border-bottom: 0; }
 .context-panel {
+  flex: 1 1 0;
   display: grid;
   gap: 14px;
 }
@@ -1191,10 +1233,8 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   background: var(--red-soft);
 }
 .context-job-title {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  gap: 7px;
 }
 .context-job-title strong {
   color: var(--ink);
@@ -1202,7 +1242,9 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   line-height: 1.35;
 }
 .context-job-title span {
-  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--red);
   font: 680 10px "JetBrains Mono Variable", monospace;
 }
@@ -1275,6 +1317,111 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   white-space: nowrap;
 }
 
+.next-batch-card {
+  margin-top: 18px;
+  padding: 17px 18px 14px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 2px 12px var(--shadow);
+}
+.next-batch-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.next-batch-card h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  letter-spacing: -0.025em;
+}
+.next-batch-card header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.next-batch-status {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line));
+  border-radius: 6px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+.next-batch-list {
+  margin-top: 13px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.next-batch-list article {
+  min-width: 0;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 35px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+.next-batch-list article > strong {
+  color: var(--blue);
+  font: 720 13px "JetBrains Mono Variable", monospace;
+}
+.next-batch-list article > div { min-width: 0; }
+.next-batch-list article span,
+.next-batch-list article code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.next-batch-list article span {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+.next-batch-list article code {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.next-batch-list article small {
+  color: var(--blue);
+  font: 680 9px "JetBrains Mono Variable", monospace;
+  text-transform: uppercase;
+}
+.next-batch-more {
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.next-batch-card > footer {
+  margin-top: 11px;
+  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 10px;
+}
+.next-batch-card > footer code {
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .secondary-drawer > summary {
   min-height: 54px;
   padding: 14px 20px;
@@ -1331,6 +1478,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 @media (max-width: 980px) {
   .workspace-shell { padding-inline: 20px; }
   .train-workspace-grid.with-inspector { grid-template-columns: 1fr; }
+  .current-train-card { min-height: 0; }
   .train-inspector { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .train-inspector .inspector-section { border-right: 1px solid var(--line); }
   .train-inspector .inspector-section:nth-child(even) { border-right: 0; }
@@ -1354,5 +1502,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   .validated-train-summary > code { display: none; }
   .train-inspector { display: block; }
   .train-inspector .inspector-section { border-right: 0; }
+  .next-batch-card > header { flex-direction: column; }
+  .next-batch-list { grid-template-columns: 1fr; }
   .secondary-grid { padding-inline: 14px; }
 }

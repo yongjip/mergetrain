@@ -6,6 +6,7 @@ import {
   SSE_RECONNECT_GRACE_MS,
   actionCopy,
   newestFirstFifoRows,
+  queuedAfterCurrentBatch,
   reconnectDelay,
 } from "../src/dashboardLogic.js";
 
@@ -49,4 +50,25 @@ test("FIFO rows display newest first without changing processing order", () => {
   ]);
   assert.deepEqual(rows.map(({ job }) => job.id), [4, 3, 2, 1]);
   assert.deepEqual(rows.map(({ order }) => order), [4, 3, 2, 1]);
+});
+
+test("requests arriving after a batch starts wait for the next batch", () => {
+  const jobs = [
+    { id: 1, status: "in_progress" },
+    { id: 2, status: "in_progress" },
+    { id: 3, status: "queued" },
+    { id: 4, status: "queued" },
+  ];
+  const running = queuedAfterCurrentBatch(
+    { train: { selection: "running" }, jobs },
+    jobs.slice(0, 2),
+  );
+  assert.deepEqual(running.map((job) => job.id), [3, 4]);
+  assert.deepEqual(
+    queuedAfterCurrentBatch(
+      { train: { selection: "queued" }, jobs },
+      jobs,
+    ),
+    [],
+  );
 });
