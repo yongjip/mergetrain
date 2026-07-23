@@ -5,9 +5,12 @@ import {
   NEXT_ACTION_COPY,
   SSE_RECONNECT_GRACE_MS,
   actionCopy,
+  jobActivityAt,
+  latestRepoJob,
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
+  repoStateForEntry,
   workspaceStepForSnapshot,
 } from "../src/dashboardLogic.js";
 
@@ -83,4 +86,32 @@ test("live runner progress never renders as validated before gates finish", () =
     train: { selection: "validated", jobs: [{ id: 34 }] },
     progress: { phase: "ready" },
   }), 6);
+});
+
+test("hub distinguishes approval, queued, and idle repositories", () => {
+  assert.deepEqual(repoStateForEntry({
+    ok: true,
+    snapshot: {
+      counts: { validated: 1 },
+      validated_trains: [{ deploy_eligible: true }],
+    },
+  }), ["approval", "APPROVAL"]);
+  assert.deepEqual(repoStateForEntry({
+    ok: true,
+    snapshot: { counts: { queued: 2 }, validated_trains: [] },
+  }), ["queued", "QUEUED"]);
+  assert.deepEqual(repoStateForEntry({
+    ok: true,
+    snapshot: { counts: {}, validated_trains: [] },
+  }), ["idle", "IDLE"]);
+});
+
+test("hub selects the most recently active job for repository context", () => {
+  const latest = latestRepoJob([
+    { id: 49, finished_at: "2026-07-23T14:45:32Z" },
+    { id: 50, finished_at: "2026-07-23T15:42:09Z" },
+    { id: 51, requested_at: "2026-07-23T15:00:00Z" },
+  ]);
+  assert.equal(latest.id, 50);
+  assert.equal(jobActivityAt(latest), "2026-07-23T15:42:09Z");
 });

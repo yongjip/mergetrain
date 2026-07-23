@@ -59,3 +59,10 @@ When implementing from a selected generated mock, treat that image as the source
   the user asks for it.
 - Derive the live workspace step from the runner snapshot. Never default a real
   running batch to the final or validated step.
+- Hub repository cards must answer four questions without drill-down: what
+  state the repository is in, which current or latest request that state refers
+  to, when workflow activity last changed, and where details can be opened.
+- In Hub, label a deploy-eligible validated train as amber `APPROVAL`, never
+  green `READY`. Keep the completed validation chip green.
+- Let small repository sets fill the Hub grid with `auto-fit`; do not leave an
+  empty phantom column beside sparse cards.

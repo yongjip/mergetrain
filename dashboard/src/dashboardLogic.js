@@ -68,3 +68,37 @@ export function workspaceStepForSnapshot(snapshot = {}) {
   }
   return 0;
 }
+
+export function repoStateForEntry(entry = {}) {
+  if (!entry.ok) return ["error", "ERROR"];
+  if (entry.empty) return ["waiting", "NO QUEUE"];
+
+  const snapshot = entry.snapshot || {};
+  const counts = snapshot.counts || {};
+  if (counts.needs_reconcile || counts.blocked || counts.failed || counts.deployed_verify_unknown) {
+    return ["warning", "ATTENTION"];
+  }
+  if (snapshot.lock?.liveness === "alive" || counts.in_progress) return ["active", "RUNNING"];
+  if ((snapshot.validated_trains || []).some((train) => train.deploy_eligible)) {
+    return ["approval", "APPROVAL"];
+  }
+  if (counts.queued) return ["queued", "QUEUED"];
+  return ["idle", "IDLE"];
+}
+
+export function jobActivityAt(job = {}) {
+  if (!job) return "";
+  return job.finished_at
+    || job.validated_at
+    || job.started_at
+    || job.requested_at
+    || "";
+}
+
+export function latestRepoJob(jobs = []) {
+  return [...jobs].sort((a, b) => {
+    const timeDelta = Date.parse(jobActivityAt(b)) - Date.parse(jobActivityAt(a));
+    if (Number.isFinite(timeDelta) && timeDelta !== 0) return timeDelta;
+    return Number(b.id || 0) - Number(a.id || 0);
+  })[0] || null;
+}

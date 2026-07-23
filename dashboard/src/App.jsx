@@ -30,9 +30,12 @@ import {
 import {
   REMEDIAL_ACTIONS,
   actionCopy,
+  jobActivityAt,
+  latestRepoJob,
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
+  repoStateForEntry,
   workspaceStepForSnapshot,
 } from "./dashboardLogic.js";
 
@@ -1126,19 +1129,116 @@ const REPO_CARD_COUNTS = [
   ["validated", "validated"],
 ];
 
-function repoCardState(entry) {
-  if (!entry.ok) return ["error", "ERROR"];
-  if (entry.empty) return ["waiting", "NO QUEUE"];
-  const snapshot = entry.snapshot;
-  const c = snapshot.counts || {};
-  if (c.needs_reconcile || c.blocked || c.failed || c.deployed_verify_unknown) return ["warning", "ATTENTION"];
-  if (snapshot.lock?.liveness === "alive" || c.in_progress) return ["active", "RUNNING"];
-  if ((snapshot.validated_trains || []).some((train) => train.deploy_eligible)) return ["done", "READY"];
-  return ["idle", "IDLE"];
+function repoOperationalState(entry, snapshot, state, words) {
+  if (!entry.ok) {
+    return {
+      title: "Configuration error",
+      detail: entry.error,
+      icon: <WarningCircle size={20} weight="fill" />,
+    };
+  }
+  if (entry.empty) {
+    return {
+      title: "Queue not initialized",
+      detail: "Enqueue the first committed task branch in this repository.",
+      icon: <Circle size={20} />,
+    };
+  }
+  if (state === "approval") {
+    return {
+      title: "Awaiting deploy approval",
+      detail: "Tests passed · not on main yet",
+      icon: <Clock size={20} weight="fill" />,
+    };
+  }
+  if (state === "active") {
+    const gate = snapshot.progress?.current_gate;
+    return {
+      title: snapshot.progress?.phase === "gating" ? "Running tests" : "Batch in progress",
+      detail: gate
+        ? `Gate ${gate.index}/${gate.total} · ${gate.name}`
+        : snapshot.progress?.message || "The runner is processing the current batch.",
+      icon: <SpinnerGap size={20} className="spin" />,
+    };
+  }
+  if (state === "warning") {
+    return {
+      title: "Needs attention",
+      detail: actionCopy(snapshot.next_action, words)[0],
+      icon: <WarningCircle size={20} weight="fill" />,
+    };
+  }
+  if (state === "queued") {
+    const count = snapshot.counts?.queued || 0;
+    return {
+      title: "Queued for validation",
+      detail: `${count} request${count === 1 ? "" : "s"} waiting to start`,
+      icon: <HourglassHigh size={20} weight="fill" />,
+    };
+  }
+  return {
+    title: "Queue clear",
+    detail: "No requests waiting",
+    icon: <CheckCircle size={20} weight="fill" />,
+  };
+}
+
+function RepoWorkPreview({ job, label, now }) {
+  if (!job) {
+    return (
+      <div className="repo-work-preview empty">
+        <span>No queue activity recorded yet</span>
+      </div>
+    );
+  }
+  return (
+    <div className="repo-work-preview">
+      <header>
+        <small>{label}</small>
+        <time>{relative(jobActivityAt(job), now)}</time>
+      </header>
+      <div>
+        <strong>#{job.id}</strong>
+        <span>{jobLabel(job)}</span>
+      </div>
+      <footer>
+        <code>{job.branch || "branch unavailable"}</code>
+        <code>{shortSha(job.deploy_sha || job.validation_sha || job.head_sha)}</code>
+      </footer>
+    </div>
+  );
+}
+
+function RepoFacts({ snapshot, batch, featuredJob, now }) {
+  const activity = relative(jobActivityAt(featuredJob), now);
+  const attention = (snapshot.counts?.blocked || 0)
+    + (snapshot.counts?.failed || 0)
+    + (snapshot.counts?.needs_reconcile || 0);
+  const facts = batch?.currentJobs.length
+    ? [
+        ["Current batch", batch.currentJobs.length],
+        ["Next batch", batch.nextBatchJobs.length],
+        ["Last activity", activity],
+      ]
+    : [
+        ["Queued", snapshot.counts?.queued || 0],
+        ["Needs attention", attention],
+        ["Last activity", activity],
+      ];
+  return (
+    <dl className="repo-facts">
+      {facts.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function RepoCard({ entry, onSelect, now }) {
-  const [state, label] = repoCardState(entry);
+  const [state, label] = repoStateForEntry(entry);
   const name = entry.name || entry.path;
   const snapshot = entry.ok && !entry.empty ? entry.snapshot : null;
   const batch = snapshot ? currentTrainModel(snapshot) : null;
@@ -1151,11 +1251,15 @@ function RepoCard({ entry, onSelect, now }) {
     chips.push(<span className="count-chip daemon-off" key="daemon-off">manual deploy</span>);
   }
   const words = snapshot ? terminology(snapshot) : DEFAULT_TERMINOLOGY;
-  const summary = !entry.ok
-    ? entry.error
-    : entry.empty
-      ? "No queue database yet — enqueue the first job in this repo."
-      : actionCopy(snapshot.next_action, words)[0];
+  const status = repoOperationalState(entry, snapshot, state, words);
+  const currentJob = batch?.currentJobs.length ? latestRepoJob(batch.currentJobs) : null;
+  const latestDeployed = snapshot
+    ? latestRepoJob(snapshot.jobs?.filter((job) => job.status === "deployed"))
+    : null;
+  const featuredJob = currentJob || latestDeployed || latestRepoJob(snapshot?.jobs);
+  const featuredLabel = currentJob
+    ? batch.selection === "validated" ? "Validated train" : "Current batch"
+    : latestDeployed ? "Latest deployment" : "Latest activity";
   const clickable = Boolean(snapshot);
   return (
     <article
@@ -1171,27 +1275,24 @@ function RepoCard({ entry, onSelect, now }) {
       </div>
       <code className="repo-path">{entry.path}</code>
       {!!chips.length && <div className="repo-chips">{chips}</div>}
-      <p className="repo-summary">
-        {!entry.ok && <WarningCircle size={17} weight="fill" />}
-        <span>{summary}</span>
-      </p>
-      {batch && batch.currentJobs.length > 0 && (
-        <div className="repo-batch-summary">
-          <span>
-            <small>{batch.selection === "validated" ? "Validated batch" : "Current batch"}</small>
-            <strong>{batch.currentJobs.length}</strong>
-          </span>
-          <ArrowRight size={15} />
-          <span className={batch.nextBatchJobs.length ? "has-next" : ""}>
-            <small>Next batch</small>
-            <strong>{batch.nextBatchJobs.length}</strong>
-          </span>
+      <div className={`repo-operational-state ${state}`}>
+        {status.icon}
+        <div>
+          <strong>{status.title}</strong>
+          <span>{status.detail}</span>
         </div>
+      </div>
+      {snapshot && (
+        <>
+          <RepoWorkPreview job={featuredJob} label={featuredLabel} now={now} />
+          <RepoFacts snapshot={snapshot} batch={batch} featuredJob={featuredJob} now={now} />
+        </>
       )}
       {snapshot && (
         <footer className="repo-card-foot">
           <span><GitBranch size={15} />{snapshot.project.integration_ref}</span>
-          <span><Heartbeat size={15} />{snapshot.lock ? relative(snapshot.lock.heartbeat_at, now) : "idle"}</span>
+          <span><Heartbeat size={15} />Runner {snapshot.lock ? relative(snapshot.lock.heartbeat_at, now) : "idle"}</span>
+          <span className="repo-open">Open details<ArrowRight size={14} /></span>
         </footer>
       )}
     </article>
@@ -1208,7 +1309,15 @@ function RegistryErrorBanner({ message }) {
   );
 }
 
-const REPO_SEVERITY = { error: 0, warning: 1, active: 2, done: 3, waiting: 4, idle: 5 };
+const REPO_SEVERITY = {
+  error: 0,
+  warning: 1,
+  approval: 2,
+  active: 3,
+  queued: 4,
+  waiting: 5,
+  idle: 6,
+};
 
 function HubOverview({ snapshot, onSelect, now }) {
   if (!snapshot.repos.length) {
@@ -1221,21 +1330,28 @@ function HubOverview({ snapshot, onSelect, now }) {
     );
   }
   const repos = [...snapshot.repos].sort((a, b) => {
-    const [aState] = repoCardState(a);
-    const [bState] = repoCardState(b);
+    const [aState] = repoStateForEntry(a);
+    const [bState] = repoStateForEntry(b);
     return REPO_SEVERITY[aState] - REPO_SEVERITY[bState] || (a.name || a.path).localeCompare(b.name || b.path);
   });
   const rollup = repos.reduce((result, entry) => {
-    const [state] = repoCardState(entry);
+    const [state] = repoStateForEntry(entry);
     if (["error", "warning"].includes(state)) result.attention += 1;
     else if (state === "active") result.running += 1;
-    else result.quiet += 1;
+    else if (state === "approval") result.approval += 1;
+    else if (state === "queued") result.queued += 1;
+    else result.clear += 1;
     return result;
-  }, { attention: 0, running: 0, quiet: 0 });
+  }, { attention: 0, running: 0, approval: 0, queued: 0, clear: 0 });
   return (
     <main>
       <section className="hub-rollup" aria-label="Hub status summary">
-        <strong>{rollup.attention} need attention</strong><span>{rollup.running} running</span><span>{rollup.quiet} ready or idle</span>
+        <strong>{repos.length} repositories</strong>
+        <span className="approval">{rollup.approval} awaiting approval</span>
+        <span className="running">{rollup.running} running</span>
+        <span className="attention">{rollup.attention} need attention</span>
+        <span className="clear">{rollup.clear} queue clear</span>
+        {!!rollup.queued && <span className="queued">{rollup.queued} queued</span>}
       </section>
       <section className="hub-grid" aria-label="Registered repos">
         {repos.map((entry) => (
@@ -1365,7 +1481,7 @@ export function App() {
     if (!snapshot) return;
     if (snapshot.hub) {
       const attention = snapshot.repos.filter((entry) => {
-        const [state] = repoCardState(entry);
+        const [state] = repoStateForEntry(entry);
         return ["error", "warning"].includes(state);
       }).length;
       document.title = `${attention ? `(${attention}) ` : ""}mergetrain · hub`;
