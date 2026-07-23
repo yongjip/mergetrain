@@ -621,17 +621,17 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 
 .hub-grid {
-  padding: 30px 36px 40px;
+  padding: 22px 36px 34px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 20px;
+  gap: 16px;
 }
 
 .repo-card {
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  padding: 19px 18px 15px;
+  gap: 8px;
+  padding: 14px 15px 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--paper);
@@ -653,27 +653,42 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .repo-card.done { border-color: #91cea4; }
 
 .repo-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.repo-card-head strong { font-size: 18px; letter-spacing: -0.02em; }
+.repo-card-head strong { font-size: 17px; letter-spacing: -0.02em; }
+
+.repo-card-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
 
 .repo-path {
+  min-width: 0;
+  flex: 1 1 220px;
   overflow: hidden;
-  padding: 5px 7px;
+  padding: 4px 7px;
   border-radius: 5px;
   background: #f1f2f4;
   color: #2b364b;
-  font-size: 12px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.repo-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.repo-chips {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
 .count-chip {
-  padding: 3px 8px;
+  padding: 2px 7px;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
   background: #f3f5f7;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 640;
 }
 .count-chip.queued { color: #69758a; }
@@ -684,11 +699,11 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .count-chip.validated { border-color: #91cea4; color: var(--green); background: #effaf2; }
 
 .repo-operational-state {
-  min-height: 58px;
-  padding: 11px 12px;
+  min-height: 46px;
+  padding: 8px 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface-subtle);
@@ -701,13 +716,13 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .repo-operational-state strong {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.25;
 }
 .repo-operational-state span {
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -720,9 +735,9 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .repo-operational-state.idle { color: var(--green); }
 
 .repo-work-preview {
-  padding: 11px 12px;
+  padding: 8px 10px;
   display: grid;
-  gap: 7px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface-subtle);
@@ -737,30 +752,30 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .repo-work-preview small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 720;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .repo-work-preview time {
   color: var(--muted);
-  font: 600 10px "JetBrains Mono Variable", monospace;
+  font: 600 9px "JetBrains Mono Variable", monospace;
 }
 .repo-work-preview > div {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
-  gap: 9px;
+  gap: 7px;
 }
 .repo-work-preview > div strong {
   color: var(--blue);
-  font: 720 13px "JetBrains Mono Variable", monospace;
+  font: 720 12px "JetBrains Mono Variable", monospace;
 }
 .repo-work-preview > div span {
   overflow: hidden;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -769,13 +784,13 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .repo-work-preview footer code:first-child { flex: 1; }
 .repo-work-preview.empty {
-  min-height: 72px;
+  min-height: 54px;
   place-items: center;
   color: var(--muted);
   font-size: 11px;
@@ -791,15 +806,15 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .repo-facts > div {
   min-width: 0;
-  padding: 9px 10px;
+  padding: 6px 8px;
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 .repo-facts > div + div { border-left: 1px solid var(--line); }
 .repo-facts dt {
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -808,22 +823,22 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   margin: 0;
   overflow: hidden;
   color: var(--ink);
-  font: 720 11px "JetBrains Mono Variable", monospace;
+  font: 720 10px "JetBrains Mono Variable", monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .repo-card-foot {
   margin-top: auto;
-  padding-top: 11px;
+  padding-top: 7px;
   border-top: 1px solid #edf0f4;
   display: flex;
   justify-content: space-between;
   align-items: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
-.repo-card-foot span { display: flex; align-items: center; gap: 6px; }
+.repo-card-foot span { display: flex; align-items: center; gap: 4px; }
 .repo-card-foot .repo-open {
   margin-left: auto;
   color: var(--blue);

@@ -1273,8 +1273,10 @@ function RepoCard({ entry, onSelect, now }) {
         <strong>{name}</strong>
         <span className={`state-pill ${state}`}>{label}</span>
       </div>
-      <code className="repo-path">{entry.path}</code>
-      {!!chips.length && <div className="repo-chips">{chips}</div>}
+      <div className="repo-card-meta">
+        <code className="repo-path">{entry.path}</code>
+        {!!chips.length && <div className="repo-chips">{chips}</div>}
+      </div>
       <div className={`repo-operational-state ${state}`}>
         {status.icon}
         <div>

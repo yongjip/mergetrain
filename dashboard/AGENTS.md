@@ -66,3 +66,8 @@ When implementing from a selected generated mock, treat that image as the source
   green `READY`. Keep the completed validation chip green.
 - Let small repository sets fill the Hub grid with `auto-fit`; do not leave an
   empty phantom column beside sparse cards.
+- Keep Hub repository cards compact in proportion to their information. Do not
+  add vertical height merely because more operational detail is present.
+- Preserve all four repository-card answers while compressing metadata: keep
+  the path and policy chips on one row when space allows, use roughly 8px
+  vertical gaps, and let cards end at their natural content height.
