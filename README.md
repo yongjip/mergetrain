@@ -151,6 +151,12 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 
 ## Quickstart
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/demo.gif"
+       alt="A terminal recording of mergetrain creating four agent branches, attributing a semantic conflict between two of them, and atomically deploying the compatible survivor train."
+       width="900">
+</p>
+
 ```bash
 # See the whole workflow in a disposable local sandbox (~1 minute)
 uvx mergetrain demo

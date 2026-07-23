@@ -281,7 +281,12 @@ def cmd_demo(args: argparse.Namespace) -> int:
     # paths; `mergetrain --help` and agent commands remain fast and dependency-free.
     from .demo import run_demo
 
-    return run_demo(directory=args.directory, keep=args.keep, pause=args.pause)
+    return run_demo(
+        directory=args.directory,
+        keep=args.keep,
+        pause=args.pause,
+        brief=args.brief,
+    )
 
 
 def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
@@ -1716,6 +1721,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_demo.add_argument("--keep", action="store_true", help="Keep the sandbox after success")
     p_demo.add_argument("--pause", action="store_true", help="Wait for Enter between steps")
+    p_demo.add_argument(
+        "--brief",
+        action="store_true",
+        help="Show only milestone results (useful for recordings and presentations)",
+    )
     p_demo.set_defaults(func=cmd_demo)
 
     p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the integration queue")

@@ -1,0 +1,48 @@
+name: Demo GIF
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - ".github/workflows/demo-gif.yml"
+      - "docs/demo.tape"
+      - "pyproject.toml"
+      - "src/mergetrain/**"
+      - "tests/test_demo.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/demo-gif.yml"
+      - "docs/demo.tape"
+      - "pyproject.toml"
+      - "src/mergetrain/**"
+      - "tests/test_demo.py"
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install mergetrain
+        run: python -m pip install -e .
+      - name: Render demo
+        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1.0
+        with:
+          path: docs/demo.tape
+          version: v0.11.0
+      - name: Upload rendered GIF
+        uses: actions/upload-artifact@v7
+        with:
+          name: mergetrain-demo-gif
+          path: docs/images/demo.gif
+          if-no-files-found: error
+          retention-days: 14

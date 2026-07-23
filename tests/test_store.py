@@ -20,8 +20,8 @@ from mergetrain.errors import (
 from mergetrain.store import (
     SCHEMA_VERSION,
     Liveness,
-    active_runner_lock,
     acquire_runner_lock,
+    active_runner_lock,
     cancel_job,
     claim_all_queued,
     claim_deploy_batch,

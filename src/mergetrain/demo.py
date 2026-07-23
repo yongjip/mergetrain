@@ -17,9 +17,10 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 class DemoFailure(RuntimeError):
@@ -32,7 +33,7 @@ class DemoSandbox:
     marker_token: str
 
     @classmethod
-    def create(cls, requested: str | None) -> "DemoSandbox":
+    def create(cls, requested: str | None) -> DemoSandbox:
         if requested:
             requested_path = Path(requested).expanduser()
             if requested_path.is_symlink():
@@ -97,10 +98,18 @@ class CommandResult:
 class DemoWalkthrough:
     TOTAL_STEPS = 9
 
-    def __init__(self, sandbox: DemoSandbox, *, pause: bool, delay: float):
+    def __init__(
+        self,
+        sandbox: DemoSandbox,
+        *,
+        pause: bool,
+        delay: float,
+        brief: bool = False,
+    ):
         self.sandbox = sandbox
         self.pause = pause
         self.delay = delay
+        self.brief = brief
         self.repo = sandbox.root / "repo"
         self.remote = sandbox.root / "remote.git"
         self.agent_root = sandbox.root / "agents"
@@ -131,6 +140,8 @@ class DemoWalkthrough:
         if self._step_number:
             if self.pause:
                 input("\nPress Enter for the next step...")
+                if self.brief:
+                    print("\033[2J\033[H", end="", flush=True)
             elif self.delay:
                 time.sleep(self.delay)
         self._step_number += 1
@@ -149,7 +160,8 @@ class DemoWalkthrough:
         expected = expected or {0}
         shown = list(display if display is not None else argv)
         if show:
-            print(f"$ {shlex.join(shown)}", flush=True)
+            command = self._display_command(shown)
+            print(f"$ {command}", flush=True)
         completed = subprocess.run(
             argv,
             cwd=cwd,
@@ -160,7 +172,9 @@ class DemoWalkthrough:
             check=False,
         )
         if show and completed.stdout:
-            print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
+            output = self._brief_output(completed.stdout) if self.brief else completed.stdout
+            if output:
+                print(output, end="" if output.endswith("\n") else "\n")
         if show and completed.stderr:
             print(
                 completed.stderr,
@@ -174,6 +188,46 @@ class DemoWalkthrough:
                 f"command exited {completed.returncode}, expected {sorted(expected)}: {command}"
             )
         return result
+
+    def _display_command(self, shown: list[str]) -> str:
+        if not self.brief:
+            return shlex.join(shown)
+        if shown[:2] == ["mergetrain", "--repo"]:
+            shown = [shown[0], *shown[3:]]
+        if shown[:2] == ["mergetrain", "enqueue"] and "--branch" in shown:
+            branch = shown[shown.index("--branch") + 1]
+            return f"mergetrain enqueue --branch {shlex.quote(branch)} …"
+        if shown[:3] == ["mergetrain", "run-batch", "--deploy"]:
+            return "mergetrain run-batch --deploy --train-id <validated-train>"
+        if shown[:2] == ["git", "--git-dir"]:
+            return "git log --oneline main"
+        return shlex.join(shown).replace(str(self.sandbox.root), "$DEMO")
+
+    @staticmethod
+    def _brief_output(output: str) -> str:
+        prefixes = (
+            "#",
+            "dismissed job ",
+            "health:",
+            "lock:",
+            "next action:",
+            "queued job ",
+            "result:",
+        )
+        lines: list[str] = []
+        for line in output.splitlines():
+            if line.startswith("#"):
+                matched = re.match(r"^(#\d+) ([^:]+): ([^ ]+)", line)
+                lines.append(
+                    f"{matched.group(1)} {matched.group(2)}: {matched.group(3)}"
+                    if matched
+                    else line
+                )
+            elif line.startswith(prefixes):
+                lines.append(line)
+            elif re.match(r"^[0-9a-f]{7,40} ", line):
+                lines.append(re.sub(r"'[0-9a-f]{40}'", "'<agent-commit>'", line))
+        return "\n".join(lines) + ("\n" if lines else "")
 
     def _git(self, *args: str, cwd: Path | None = None, show: bool = False) -> CommandResult:
         return self._run(
@@ -191,6 +245,34 @@ class DemoWalkthrough:
     def _cli_json(self, *args: str) -> dict[str, Any]:
         argv = [sys.executable, "-m", "mergetrain", "--repo", str(self.repo), *args]
         return self._run(argv, cwd=self.repo, show=False).json()
+
+    def _show_cli_json(self, args: tuple[str, ...], payload: dict[str, Any]) -> None:
+        shown = (
+            ["mergetrain", *args]
+            if self.brief
+            else ["mergetrain", "--repo", str(self.repo), *args]
+        )
+        command = self._display_command(shown)
+        print(f"$ {command}", flush=True)
+        if self.brief and "git" in payload:
+            git_state = payload["git"]
+            print(
+                "ready: "
+                f"health={str(payload.get('health')).lower()} "
+                f"clean={str(git_state.get('worktree_clean')).lower()} "
+                f"next={payload.get('next_action')}"
+            )
+            return
+        if self.brief and "job" in payload:
+            job = payload["job"]
+            print(
+                f"job: #{job.get('id')} {job.get('status')} · "
+                f"{job.get('branch')}"
+            )
+            print(f"conflict_with: #{job.get('conflict_with')}")
+            print(f"outcome: {payload.get('outcome', {}).get('category')}")
+            return
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
     def _require_git(self) -> None:
         if shutil.which("git") is None:
@@ -388,16 +470,29 @@ deploy:
         self._cli("init", "--project", "demo", "--write")
         self._commit_seed()
         branches = self._make_agent_branches()
-        print(f"Sandbox: {self.sandbox.root}")
+        print(f"Sandbox: {'$DEMO' if self.brief else self.sandbox.root}")
         print("Created four clean agent worktrees; no network or user Git config was used.")
 
         self._step(
             "Check readiness",
             "doctor returns a machine-readable next action before any branch is enqueued.",
         )
-        doctor = self._cli("doctor", "--json").json()
+        doctor = self._cli_json("doctor", "--json")
         if doctor.get("next_action") != "enqueue_clean_branch":
             raise DemoFailure("doctor did not report enqueue_clean_branch")
+        git_state = doctor.get("git", {})
+        self._show_cli_json(
+            ("doctor", "--json"),
+            {
+                "health": doctor.get("health"),
+                "git": {
+                    "integration_ref": git_state.get("integration_ref"),
+                    "worktree_clean": git_state.get("worktree_clean"),
+                },
+                "lock": doctor.get("lock"),
+                "next_action": doctor.get("next_action"),
+            },
+        )
 
         self._step(
             "Enqueue four agent branches",
@@ -449,27 +544,47 @@ deploy:
             raise DemoFailure("validated survivors do not share one train identity")
         train_id = next(iter(train_ids))
         print("Train gate failed; bisecting 4 jobs")
-        print("result: partial — exit 1 means inspect the graded result; two safe jobs survived.")
         print(
             "conflict_with: "
             f"#{job_ids['agent/faster-timeout']} ↔ #{job_ids['agent/health-check']}"
         )
+        print("result: partial — exit 1 means inspect the graded result; two safe jobs survived.")
 
         self._step(
             "Inspect the attributed conflict",
             "The blocked job names its partner and keeps the recovery guidance in structured JSON.",
         )
-        inspected = self._cli(
+        inspect_args = (
             "inspect",
             str(job_ids["agent/faster-timeout"]),
             "--event-limit",
             "3",
             "--json",
-        ).json()
+        )
+        inspected = self._cli_json(*inspect_args)
         if str(inspected.get("job", {}).get("conflict_with")) != str(
             job_ids["agent/health-check"]
         ):
             raise DemoFailure("inspect did not preserve conflict_with")
+        inspected_job = inspected.get("job", {})
+        inspected_outcome = inspected.get("outcome", {})
+        self._show_cli_json(
+            inspect_args,
+            {
+                "job": {
+                    "branch": inspected_job.get("branch"),
+                    "conflict_with": inspected_job.get("conflict_with"),
+                    "id": inspected_job.get("id"),
+                    "note": inspected_job.get("note"),
+                    "status": inspected_job.get("status"),
+                },
+                "ok": inspected.get("ok"),
+                "outcome": {
+                    "category": inspected_outcome.get("category"),
+                    "message": inspected_outcome.get("message"),
+                },
+            },
+        )
 
         self._step(
             "Dismiss the broken pair",
@@ -543,7 +658,13 @@ def _step_delay() -> float:
     return delay
 
 
-def run_demo(*, directory: str | None = None, keep: bool = False, pause: bool = False) -> int:
+def run_demo(
+    *,
+    directory: str | None = None,
+    keep: bool = False,
+    pause: bool = False,
+    brief: bool = False,
+) -> int:
     """Run the walkthrough, preserving its sandbox on every failure."""
 
     try:
@@ -553,7 +674,7 @@ def run_demo(*, directory: str | None = None, keep: bool = False, pause: bool = 
         print(f"mergetrain demo: {exc}", file=sys.stderr)
         return 1
 
-    walkthrough = DemoWalkthrough(sandbox, pause=pause, delay=delay)
+    walkthrough = DemoWalkthrough(sandbox, pause=pause, delay=delay, brief=brief)
     try:
         walkthrough.run()
     except KeyboardInterrupt:
@@ -580,6 +701,7 @@ def run_demo(*, directory: str | None = None, keep: bool = False, pause: bool = 
         print(f"Demo succeeded, but cleanup was refused: {exc}", file=sys.stderr)
         print(f"Sandbox kept at: {sandbox.root}", file=sys.stderr)
         return 1
-    print(f"Sandbox removed: {sandbox.root}")
-    print("Run with --keep to inspect the queue or open the read-only dashboard afterward.")
+    print(f"Sandbox removed: {'$DEMO' if brief else sandbox.root}")
+    if not brief:
+        print("Run with --keep to inspect the queue or open the read-only dashboard afterward.")
     return 0

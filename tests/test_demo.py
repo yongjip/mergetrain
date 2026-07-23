@@ -16,6 +16,44 @@ from mergetrain.demo import DemoFailure, DemoWalkthrough
 from mergetrain.store import connect, list_jobs
 
 
+class DemoAssetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo = Path(__file__).resolve().parents[1]
+
+    def test_tape_records_the_conflict_and_success_outcomes(self) -> None:
+        tape = (self.repo / "docs" / "demo.tape").read_text(encoding="utf-8")
+        self.assertIn("Output docs/images/demo.gif", tape)
+        self.assertIn("Require mergetrain", tape)
+        self.assertIn(
+            'Type "mergetrain demo --brief --pause --dir /tmp/mt-vhs-171"',
+            tape,
+        )
+        self.assertIn("Wait+Screen@5s /result: partial/", tape)
+        self.assertIn("Wait+Screen@5s /result: success/", tape)
+        self.assertIn("Wait+Screen@120s /Demo complete:/", tape)
+
+    def test_workflow_pins_the_recorder_and_uploads_the_result(self) -> None:
+        workflow = (
+            self.repo / ".github" / "workflows" / "demo-gif.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn(
+            "charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3",
+            workflow,
+        )
+        self.assertIn("version: v0.11.0", workflow)
+        self.assertIn("path: docs/demo.tape", workflow)
+        self.assertIn("uses: actions/upload-artifact@v7", workflow)
+
+    def test_readme_embeds_the_generated_gif(self) -> None:
+        readme = (self.repo / "README.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "https://raw.githubusercontent.com/yongjip/mergetrain/main/"
+            "docs/images/demo.gif",
+            readme,
+        )
+
+
 @unittest.skipUnless(shutil.which("git"), "git is required")
 class DemoTests(unittest.TestCase):
     def test_full_demo_isolated_conflict_and_deploys_only_survivors(self) -> None:
@@ -120,6 +158,32 @@ class DemoTests(unittest.TestCase):
                 code = main(["demo", "--dir", str(sandbox)])
             self.assertEqual(code, 0)
             self.assertFalse(sandbox.exists())
+
+    def test_brief_mode_keeps_milestones_and_omits_bulk_json(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            sandbox = Path(td) / "brief"
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                patch.dict(
+                    os.environ,
+                    {"MERGETRAIN_DEMO_STEP_DELAY": "0"},
+                    clear=False,
+                ),
+                redirect_stdout(out),
+                redirect_stderr(err),
+            ):
+                code = main(["demo", "--brief", "--dir", str(sandbox)])
+            self.assertEqual(code, 0, err.getvalue())
+            rendered = out.getvalue()
+            self.assertIn("ready: health=true clean=true", rendered)
+            self.assertIn("result: partial", rendered)
+            self.assertIn("conflict_with: #1 ↔ #2", rendered)
+            self.assertIn("outcome: merge_conflict", rendered)
+            self.assertIn("result: success", rendered)
+            self.assertIn("Demo complete:", rendered)
+            self.assertIn("Sandbox removed: $DEMO", rendered)
+            self.assertNotIn(str(sandbox), rendered)
+            self.assertNotIn('"config": {', rendered)
 
     def test_failure_keeps_sandbox_and_prints_recovery_hints(self) -> None:
         with tempfile.TemporaryDirectory() as td:
