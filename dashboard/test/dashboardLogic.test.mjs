@@ -8,6 +8,7 @@ import {
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
+  workspaceStepForSnapshot,
 } from "../src/dashboardLogic.js";
 
 const SERVER_NEXT_ACTIONS = [
@@ -71,4 +72,15 @@ test("requests arriving after a batch starts wait for the next batch", () => {
     ),
     [],
   );
+});
+
+test("live runner progress never renders as validated before gates finish", () => {
+  assert.equal(workspaceStepForSnapshot({
+    train: { selection: "running", jobs: [{ id: 50 }] },
+    progress: { phase: "gating", completed_job_ids: [50] },
+  }), 5);
+  assert.equal(workspaceStepForSnapshot({
+    train: { selection: "validated", jobs: [{ id: 34 }] },
+    progress: { phase: "ready" },
+  }), 6);
 });

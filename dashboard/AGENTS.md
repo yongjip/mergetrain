@@ -50,3 +50,12 @@ When implementing from a selected generated mock, treat that image as the source
   green success, amber attention, red failure, thin borders, and restrained
   radii. Preserve the existing light theme as an optional user preference.
 - Avoid literal train illustrations and action controls; the track is an information model, not decoration.
+- Use one dominant lifecycle state at a time: `Running`, `Awaiting deploy
+  approval`, or `Deployed`.
+- A validated train must say `Tests passed · Not on main yet` and use amber for
+  its pending approval. Reserve green for completed merge and test outcomes.
+- Keep the status workspace at its natural content height. Do not reserve a
+  permanent sidebar or fixed vertical space; collapse operational detail until
+  the user asks for it.
+- Derive the live workspace step from the runner snapshot. Never default a real
+  running batch to the final or validated step.

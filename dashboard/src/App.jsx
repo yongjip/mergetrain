@@ -33,6 +33,7 @@ import {
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
+  workspaceStepForSnapshot,
 } from "./dashboardLogic.js";
 
 const PHASES = [
@@ -651,10 +652,10 @@ function Loading() {
 }
 
 const WORKSPACE_PHASES = [
-  ["queue", "Queue"],
-  ["merge", "Merge in order"],
-  ["gate", "Gates"],
-  ["ready", "Ready"],
+  ["queue", "Queued"],
+  ["merge", "Merged"],
+  ["gate", "Tests passed"],
+  ["ready", "Approval"],
 ];
 
 function splitJobIds(value) {
@@ -763,18 +764,22 @@ function workspacePhaseState(index, step) {
   if (index === 0) return step === 0 ? "active" : "done";
   if (index === 1) return step < 1 ? "waiting" : step <= 4 ? "active" : "done";
   if (index === 2) return step < 5 ? "waiting" : step === 5 ? "active" : "done";
-  return step < 6 ? "waiting" : "done";
+  return step < 6 ? "waiting" : "active";
 }
 
-function WorkspacePhaseRail({ step }) {
+function WorkspacePhaseRail({ step, approval }) {
   return (
-    <ol className="workspace-phase-rail" aria-label="Current batch phases">
+    <ol className={`workspace-phase-rail ${approval ? "approval" : ""}`} aria-label="Batch lifecycle">
       {WORKSPACE_PHASES.map(([key, label], index) => {
         const state = workspacePhaseState(index, step);
         return (
           <li className={state} key={key}>
             <span>{label}</span>
-            <i><StatusIcon state={state} size={23} /></i>
+            <i>
+              {approval && key === "ready" && state === "active"
+                ? <Clock size={23} weight="fill" />
+                : <StatusIcon state={state} size={23} />}
+            </i>
           </li>
         );
       })}
@@ -794,10 +799,10 @@ function TrainJobRow({ job, blocked, order, turn, step }) {
       : gateRunning
         ? "active"
         : "waiting";
-  const outcomeState = blocked && mergeReached
+  const approvalState = blocked && mergeReached
     ? "error"
     : gatePassed
-      ? "done"
+      ? "approval"
       : "waiting";
 
   return (
@@ -809,8 +814,11 @@ function TrainJobRow({ job, blocked, order, turn, step }) {
         <strong>#{job.id}</strong>
         <div>
           <span>{jobLabel(job)}</span>
-          <code>{job.branch || "branch pending"} · {shortSha(job.head_sha || job.validated_head_sha)}</code>
+          <code>{shortSha(job.head_sha || job.validated_head_sha)}</code>
         </div>
+      </div>
+      <div className="job-cell branch-cell" role="cell">
+        <code>{job.branch || "branch pending"}</code>
       </div>
       <div className={`job-cell result-cell ${mergeState}`} role="cell">
         <StatusIcon state={mergeState} size={17} />
@@ -822,18 +830,21 @@ function TrainJobRow({ job, blocked, order, turn, step }) {
           {blocked && mergeReached
             ? "Skipped"
             : gatePassed
-              ? "Passed"
+              ? "Tests passed"
               : gateRunning
-                ? "Running"
+                ? "Tests running"
                 : "Waiting"}
         </span>
       </div>
-      <div className={`job-cell outcome-cell ${outcomeState}`} role="cell">
+      <div className={`job-cell outcome-cell ${approvalState}`} role="cell">
+        {approvalState === "approval"
+          ? <Clock size={17} weight="fill" />
+          : <StatusIcon state={approvalState} size={17} />}
         <span>
           {blocked && mergeReached
             ? "Rebase"
             : gatePassed
-              ? "Train member"
+              ? "Awaiting approval"
               : mergeReached
                 ? "Candidate"
                 : "Queued"}
@@ -853,12 +864,12 @@ function FifoJobList({ jobs, blockedIds, step }) {
       <header>
         <div>
           <ListChecks size={19} weight="fill" />
-          <strong>FIFO merge order</strong>
+          <strong>{step >= 6 ? "Exact train" : "FIFO merge order"}</strong>
           <span>{fifoJobs.map((job) => `#${job.id}`).join(" → ")}</span>
         </div>
         <span>
           {step >= 6
-            ? `Newest first · ${blockedCount} skipped`
+            ? `FIFO order · ${blockedCount} skipped`
             : step >= 1
               ? "Newest first · merging one by one"
               : "Newest first · FIFO runs oldest first"}
@@ -880,78 +891,101 @@ function FifoJobList({ jobs, blockedIds, step }) {
   );
 }
 
-function CurrentTrainWorkspace({ snapshot, demoStep, model = currentTrainModel(snapshot) }) {
-  const { blockedJobs, safeJobs, currentJobs, validatedTrain, selection } = model;
-  const step = demoStep ?? 6;
-  const blockedIds = new Set(blockedJobs.map((job) => String(job.id)));
-  const safeNames = safeJobs.map((job) => `#${job.id}`).join(" + ");
-  const batchLocked = ["running", "validated"].includes(selection);
-  const status = step === 0
-    ? `${currentJobs.length} requests queued`
-    : step <= 4
-      ? `Merging request ${Math.min(step, currentJobs.length)} of ${currentJobs.length}`
-      : step === 5
-        ? "Running gates"
-        : safeJobs.length
-          ? `${safeJobs.length} requests validated`
-          : "Ready";
+function BatchStatusBanner({ snapshot, model, now }) {
+  const { currentJobs, selection } = model;
+  const count = currentJobs.length;
+  const words = terminology(snapshot);
+  const target = snapshot.project.integration_ref;
+  const progress = snapshot.progress || {};
+  const currentGate = progress.current_gate
+    || progress.gates?.find((gate) => gate.state === "active")
+    || null;
+
+  let tone = "idle";
+  let title = "No active batch";
+  let detail = "Queue is clear";
+  let runner = "Runner idle";
+  let runnerDetail = "Waiting for the next request";
+  let nextAction = "Enqueue a committed task branch";
+  let icon = <Circle size={25} />;
+
+  if (selection === "validated") {
+    tone = "approval";
+    title = "Awaiting deploy approval";
+    detail = "Tests passed · Not on main yet";
+    runnerDetail = `Last activity ${relative(progress.updated_at || snapshot.generated_at, now)}`;
+    nextAction = `Approve ${words.noun} to ${target}`;
+    icon = <Clock size={25} weight="fill" />;
+  } else if (selection === "running") {
+    tone = "running";
+    title = progress.phase === "gating" ? "Running tests" : "Running batch";
+    detail = currentGate
+      ? `Gate ${currentGate.index}/${currentGate.total} · ${currentGate.name}`
+      : progress.message || "The runner is processing this batch";
+    runner = "Runner active";
+    runnerDetail = snapshot.lock
+      ? `Heartbeat ${relative(snapshot.lock.heartbeat_at, now)}`
+      : "Work is in progress";
+    nextAction = "Wait for the current phase to finish";
+    icon = <SpinnerGap size={25} className="spin" />;
+  } else if (selection === "queued") {
+    tone = "queued";
+    title = "Queued for validation";
+    detail = "Not started yet";
+    runnerDetail = `${count} request${count === 1 ? "" : "s"} waiting`;
+    nextAction = "Start the runner when ready";
+    icon = <HourglassHigh size={25} weight="fill" />;
+  }
 
   return (
-    <section className="current-train-card" aria-labelledby="current-train-title">
-      <header className="current-train-heading">
+    <section className={`batch-status-banner ${tone}`} aria-labelledby="batch-status-title">
+      <div className="batch-status-primary">
+        <span className="batch-status-icon">{icon}</span>
         <div>
-          <span className="workspace-eyebrow">Merge train</span>
-          <h1 id="current-train-title">Current batch · {currentJobs.length} request{currentJobs.length === 1 ? "" : "s"}</h1>
-          <span className={`batch-boundary ${batchLocked ? "locked" : ""}`}>
-            {batchLocked ? "Batch locked when the runner started" : "Batch forms when the runner starts"}
-          </span>
+          <h1 id="batch-status-title">{title}</h1>
+          <p>{detail}</p>
         </div>
-        <div className="workspace-status-list">
-          {blockedJobs.length > 0 && step >= 2 && (
-            <span className="workspace-status error">
-              <StatusIcon state="error" size={18} />
-              {blockedJobs.length} blocked
-            </span>
-          )}
-          {safeJobs.length > 0 && step >= 6 && (
-            <span className="workspace-status done">
-              <StatusIcon state="done" size={18} />
-              {safeJobs.length} validated
-            </span>
-          )}
-          {!(blockedJobs.length > 0 && step >= 2) && !(safeJobs.length > 0 && step >= 6) && (
-            <span className="workspace-status active">
-              <StatusIcon state="active" size={18} />
-              {status}
-            </span>
-          )}
+      </div>
+      <dl className="batch-status-facts">
+        <div>
+          <dt>Batch</dt>
+          <dd>{count} request{count === 1 ? "" : "s"}</dd>
+          <small>in this train</small>
         </div>
-      </header>
+        <div>
+          <dt>Runner</dt>
+          <dd>{runner}</dd>
+          <small>{runnerDetail}</small>
+        </div>
+      </dl>
+      <div className="batch-next-action">
+        <span>Next action</span>
+        <strong>{nextAction}</strong>
+      </div>
+    </section>
+  );
+}
 
-      <WorkspacePhaseRail step={step} />
+function CurrentTrainWorkspace({ snapshot, demoStep, model = currentTrainModel(snapshot) }) {
+  const { blockedJobs, currentJobs, validatedTrain, selection } = model;
+  const step = demoStep ?? workspaceStepForSnapshot(snapshot);
+  const blockedIds = new Set(blockedJobs.map((job) => String(job.id)));
+
+  return (
+    <section className="current-train-card" aria-label="Current batch details">
+      <WorkspacePhaseRail step={step} approval={selection === "validated"} />
 
       <div className="train-table" role="table" aria-label="Current batch FIFO requests and outcomes">
         <div className="train-table-head" role="row">
           <span role="columnheader">Order</span>
           <span role="columnheader">Merge request</span>
-          <span role="columnheader">FIFO merge</span>
-          <span role="columnheader">Gate</span>
-          <span role="columnheader">Outcome</span>
+          <span role="columnheader">Branch</span>
+          <span role="columnheader">Merged</span>
+          <span role="columnheader">Tests</span>
+          <span role="columnheader">Approval</span>
         </div>
         <FifoJobList jobs={currentJobs} blockedIds={blockedIds} step={step} />
       </div>
-
-      {!!safeJobs.length && (
-        <div className={`validated-train-summary ${step >= 6 ? "ready" : ""}`}>
-          <CheckCircle size={21} weight="fill" />
-          <div>
-            <span>Validated train</span>
-            <strong>{safeNames}</strong>
-          </div>
-          <ArrowRight size={18} />
-          <code>main after approval</code>
-        </div>
-      )}
 
       <footer className="train-meta">
         <span>Train ID</span>
@@ -997,12 +1031,10 @@ function NextBatchPanel({ jobs }) {
 }
 
 function contextualInspectorState(snapshot, demoStep, model = currentTrainModel(snapshot)) {
-  const { attentionJobs, readyJobs, validatedTrain } = model;
-  const step = demoStep ?? 6;
+  const { attentionJobs } = model;
+  const step = demoStep ?? workspaceStepForSnapshot(snapshot);
   return {
     blockedJobs: step >= 2 ? attentionJobs : [],
-    readyJobs: step >= 6 ? readyJobs : [],
-    validatedTrain: step >= 6 ? validatedTrain : null,
   };
 }
 
@@ -1042,42 +1074,12 @@ function NeedsAttentionPanel({ jobs }) {
   );
 }
 
-function ReadyToDeployPanel({ snapshot, jobs, validatedTrain }) {
-  const words = terminology(snapshot);
-  return (
-    <section className="inspector-section context-panel ready-panel">
-      <div className="context-panel-heading">
-        <span className="context-eyebrow"><CheckCircle size={17} weight="fill" />Ready to {words.action}</span>
-        <strong>{jobs.length} validated</strong>
-      </div>
-      <div className="ready-train-members">
-        <span>Exact train</span>
-        <strong>{jobs.map((job) => `#${job.id}`).join(" + ")}</strong>
-      </div>
-      <dl className="context-meta">
-        <dt>Target</dt>
-        <dd><code>{snapshot.project.integration_ref}</code></dd>
-        <dt>Train ID</dt>
-        <dd><code>{validatedTrain?.train_id || "assigned after validation"}</code></dd>
-      </dl>
-      <p>Validated together. Explicit approval is required before one atomic update.</p>
-    </section>
-  );
-}
-
-function TrainInspector({ snapshot, inspector }) {
-  if (!inspector.blockedJobs.length && !inspector.readyJobs.length) return null;
+function TrainInspector({ inspector }) {
+  if (!inspector.blockedJobs.length) return null;
   return (
     <aside className="train-inspector" aria-label="Items that need operator judgment">
       {!!inspector.blockedJobs.length && (
         <NeedsAttentionPanel jobs={inspector.blockedJobs} />
-      )}
-      {!!inspector.readyJobs.length && (
-        <ReadyToDeployPanel
-          snapshot={snapshot}
-          jobs={inspector.readyJobs}
-          validatedTrain={inspector.validatedTrain}
-        />
       )}
     </aside>
   );
@@ -1088,13 +1090,17 @@ function SingleRepoBody({ snapshot, now, demoStep }) {
   const words = terminology(snapshot);
   const model = currentTrainModel(snapshot);
   const inspector = contextualInspectorState(snapshot, demoStep, model);
-  const showInspector = inspector.blockedJobs.length > 0 || inspector.readyJobs.length > 0;
+  const showInspector = inspector.blockedJobs.length > 0;
+  const step = demoStep ?? workspaceStepForSnapshot(snapshot);
   return (
     <main className="workspace-shell">
-      <div className={`train-workspace-grid ${showInspector ? "with-inspector" : ""}`}>
-        <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} model={model} />
-        {showInspector && <TrainInspector snapshot={snapshot} inspector={inspector} />}
-      </div>
+      <BatchStatusBanner snapshot={snapshot} model={model} now={now} />
+      {!!model.currentJobs.length && (
+        <div className={`train-workspace-grid ${showInspector ? "with-inspector" : ""}`}>
+          <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} model={model} />
+          {showInspector && <TrainInspector inspector={inspector} />}
+        </div>
+      )}
       <NextBatchPanel jobs={model.nextBatchJobs} />
       <details className="secondary-drawer">
         <summary><span>Full activity and history</span><small>Operational detail</small><CaretDown size={18} /></summary>

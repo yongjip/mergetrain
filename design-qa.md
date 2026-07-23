@@ -1,99 +1,90 @@
-# Current / Next Batch Dashboard Design QA
+# Compact Batch Status Design QA
 
 ## Evidence
 
-- Source visual truth:
-  `dashboard/design/dashboard-contextual-inspector-target.png`
-- Scoped user override:
-  - Rename the runner-claimed cohort to `Current batch`.
-  - Freeze that cohort when the runner starts.
-  - Show requests queued afterward in a separate `Next batch`.
-  - Show current/next batch counts on Hub project cards.
+- Selected visual source:
+  `dashboard/design/status-clarity-option-1.png`
 - Browser-rendered implementation:
-  `dashboard/design/dashboard-current-next-batch-final.jpg`
-- Full-page implementation:
-  `dashboard/design/dashboard-current-next-batch-full-final.jpg`
-- Same-frame source/implementation comparison:
-  `dashboard/design/dashboard-batch-comparison-final.png`
-- Hub overview:
-  `dashboard/design/hub-multi-project-final.jpg`
-- Local previews:
-  - Single-repo demo: `http://127.0.0.1:4173/`
-  - Multi-repo Hub: `http://127.0.0.1:4175/`
-- Source pixels: `1505 × 1045`.
-- Implementation pixels: `1505 × 1045`.
-- CSS viewport: `1505 × 1045`; density `1`.
-- State: dark theme, batch `#1–#4` fixed and validated with `#2`
-  blocked, request `#5` queued afterward for the next batch.
+  `dashboard/design/status-clarity-implementation-v2.jpg`
+- Same-frame full comparison:
+  `dashboard/design/status-clarity-comparison-v2.jpg`
+- Focused status, lifecycle, and request comparison:
+  `dashboard/design/status-clarity-focused-v2.jpg`
+- Local preview:
+  `http://127.0.0.1:4175/#repo=~%2FProjects%2Fmergetrain`
+- Source pixels: `1487 × 1058`.
+- Implementation pixels: `1487 × 1058`.
+- CSS viewport: `1487 × 1058`; density `1`.
+- State: dark theme, exact train `#34`, tests passed, runner idle, and explicit
+  deployment approval still required before updating `origin/main`.
 
 ## Full-view comparison
 
-- The current-batch card and contextual inspector retain the target's desktop
-  grid, proportions, dark operational palette, borders, radii, phase rail,
-  FIFO table, conflict treatment, and validated-train treatment.
-- The intentional copy change from `FIFO train` to `Current batch` explains
-  the fixed boundary without changing the hierarchy.
-- `Next batch · 1 waiting` sits below the fixed batch as a separate blue
-  waiting-state region. It does not visually or semantically join the green
-  validated train.
-- Hub uses the same tokens and adds a compact `Validated batch 4 → Next batch
-  1` strip to the project card.
+- The implementation keeps the source's single dominant amber state banner,
+  four-stage lifecycle, one dense request row, metadata line, and collapsed
+  operational detail.
+- The status area now answers the state in one read: `Awaiting deploy approval`,
+  `Tests passed · Not on main yet`, and `Approve deployment to origin/main`.
+- The permanent right inspector and fixed-height workspace are removed. The
+  implementation is intentionally more compact than the source to satisfy the
+  user's request to eliminate empty space.
+- Existing product navigation, connection status, theme control, and local-only
+  footer remain because they are real application context rather than mock
+  content.
 
 ## Focused region comparison
 
-- Current batch boundary: the eyebrow, title, and boundary sentence establish
-  when membership freezes.
-- Next batch: request `#5` has its task, branch, waiting state, and FIFO order
-  visible without competing with the blocked/ready inspector.
-- Contextual inspector: the Git-conflict label is a separate status row, so the
-  request title no longer wraps against it.
-- Hub: the demo project opens to the full single-project view and `← All repos`
-  returns to the overview.
+- Status banner: amber is restricted to the unresolved approval and next
+  action. Batch size and runner state are secondary facts separated by rules.
+- Lifecycle: queued, merged, and tests passed are green completed states;
+  approval is an amber clock state and is not presented as running or done.
+- Request row: order, request, branch, merge result, test result, and approval
+  are visible in one scan. `Exact train #34` and FIFO order remain explicit.
+- Metadata and history: the train ID remains visible while activity and runner
+  internals are collapsed into a single compact drawer.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: Inter Variable and JetBrains Mono Variable remain the
-  implementation fonts. Headings, status text, task names, and machine
-  identifiers preserve the target hierarchy and truncation behavior.
-- Spacing and layout rhythm: the current card is `742px` minimum height at the
-  desktop target; 72px request rows and flexible inspector panels align the two
-  primary columns. The next batch begins on the following visual band.
-- Colors and tokens: existing blue/green/red semantic tokens are reused;
-  no new palette or decorative treatment was introduced.
-- Image and icon fidelity: the UI has no raster content assets. Existing
-  Phosphor icons and the product's current brand mark remain unchanged.
-- Copy and content: batch terminology matches the queue policy. Requests added
-  after the locked cohort explicitly say `Not in current batch`.
+- Fonts and typography: the product's Inter Variable and JetBrains Mono
+  Variable fonts preserve the source hierarchy for human-readable status and
+  machine identifiers.
+- Spacing and layout rhythm: natural content height replaces the previous tall
+  container. The banner, lifecycle, table, metadata, and drawer form one dense
+  vertical sequence without reserved empty regions.
+- Colors and tokens: amber marks pending approval, green marks completed merge
+  and test outcomes, and the existing dark operational palette remains.
+- Image and icon fidelity: no raster assets are used in the application.
+  Existing Phosphor clock, check, repository, and disclosure icons match the
+  source's restrained operational iconography.
+- Copy and content: the selected source wording is preserved for the dominant
+  state and the real target ref is shown in the next action.
 
 ## Interaction and runtime checks
 
-- Demo snapshot loaded over SSE with current batch `#1–#4` and queued `#5`.
-- Hub rendered three project cards, including isolated configuration/schema
-  errors and the healthy demo project.
-- Hub project drill-down and return-to-overview both worked.
-- Browser console errors: none on the demo or Hub.
-- The narrow layout was observed with stacked inspector/next-batch regions and
-  the existing internally scrollable request table. No separate mobile visual
-  target was supplied, so mobile was not used for pixel-fidelity grading.
+- `Full activity and history` opened to reveal Activity, Runner, attention
+  history, and deployment history; it closed back to the compact state.
+- `← All repos` returned to the two-repository Hub, and the mergetrain card
+  reopened this repository view.
+- The Hub continued to show both mergetrain and teratorn at a glance.
+- Browser console errors: none.
+- Live snapshot progress is derived from the real runner phase. A running gate
+  no longer defaults to the final validated step.
 
 ## Comparison history
 
-- Initial implementation made the main batch card too vertically dense and
-  left unused space below the inspector content.
-- Fix: increased desktop card/row rhythm and allowed both contextual panels to
-  share the full inspector height.
+- V1 used terminology-derived `deployment` in the dominant heading.
+  Fix: aligned the heading to the selected source's `Awaiting deploy approval`.
+- V1 risked making the final marker read like generic activity.
+  Fix: the approval marker and request outcome now use static clock treatment,
+  while only an actual running batch uses a spinner.
 - Post-fix evidence:
-  `dashboard/design/dashboard-batch-comparison-final.png`.
-- The conflict status initially shared a line with the job title.
-- Fix: moved it to its own icon/status row.
-- Post-fix evidence:
-  `dashboard/design/dashboard-current-next-batch-final.jpg`.
+  `dashboard/design/status-clarity-comparison-v2.jpg`.
 
 ## Findings
 
 - No actionable P0, P1, or P2 differences remain for the selected desktop
-  target plus the approved batch-boundary override.
-- P3: a dedicated mobile mock would allow a stricter small-screen typography
-  comparison.
+  target and the user's compactness override.
+- P3: the implementation keeps the richer existing product header, which is
+  useful real-application context and sits outside the changed status workflow.
 
 final result: passed

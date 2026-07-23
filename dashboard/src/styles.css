@@ -857,16 +857,16 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 
 .train-workspace-grid {
+  margin-top: 22px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 20px;
-  align-items: stretch;
+  align-items: start;
 }
 .train-workspace-grid.with-inspector {
   grid-template-columns: minmax(0, 1fr) 330px;
 }
 
-.current-train-card,
 .train-inspector {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -876,17 +876,122 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 
 .current-train-card {
   min-width: 0;
-  min-height: 742px;
-  padding: 20px 18px 16px;
+  padding: 0;
 }
 
-.current-train-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 0 4px 18px;
+.batch-status-banner {
+  min-height: 128px;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: minmax(310px, 1.35fr) minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  align-items: center;
+  gap: 24px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: 0 2px 12px var(--shadow);
 }
+.batch-status-banner.approval {
+  border-color: color-mix(in srgb, var(--amber) 72%, var(--line));
+  background: color-mix(in srgb, var(--amber-soft) 66%, var(--surface));
+}
+.batch-status-banner.running {
+  border-color: color-mix(in srgb, var(--blue) 68%, var(--line));
+  background: color-mix(in srgb, var(--blue-soft) 62%, var(--surface));
+}
+.batch-status-banner.queued {
+  border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
+}
+.batch-status-primary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.batch-status-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+}
+.batch-status-banner.approval .batch-status-icon,
+.batch-status-banner.approval h1 { color: var(--amber); }
+.batch-status-banner.running .batch-status-icon,
+.batch-status-banner.running h1 { color: var(--blue); }
+.batch-status-banner.queued .batch-status-icon,
+.batch-status-banner.queued h1 { color: var(--blue); }
+.batch-status-primary h1 {
+  margin: 0;
+  font-size: clamp(22px, 2vw, 29px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+.batch-status-primary p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 570;
+}
+.batch-status-facts {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-left: 1px solid color-mix(in srgb, currentColor 14%, var(--line));
+  border-right: 1px solid color-mix(in srgb, currentColor 14%, var(--line));
+}
+.batch-status-facts > div {
+  min-width: 0;
+  padding: 2px 18px;
+}
+.batch-status-facts > div + div { border-left: 1px solid var(--line-soft); }
+.batch-status-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.batch-status-facts dd {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 690;
+}
+.batch-status-facts small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-next-action {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+.batch-next-action span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.batch-next-action strong {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+}
+.batch-status-banner.approval .batch-next-action span { color: var(--amber); }
+
 .workspace-eyebrow {
   display: block;
   margin-bottom: 4px;
@@ -896,47 +1001,10 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.current-train-heading h1 {
-  margin: 0;
-  font-size: clamp(24px, 2.2vw, 32px);
-  line-height: 1.08;
-  letter-spacing: -0.04em;
-}
-.batch-boundary {
-  display: inline-flex;
-  margin-top: 7px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
-}
-.batch-boundary.locked { color: var(--blue); }
-.workspace-status-list {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.workspace-status {
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--blue);
-  background: var(--blue-soft);
-  font-size: 12px;
-  font-weight: 700;
-}
-.workspace-status.error { border-color: color-mix(in srgb, var(--red) 42%, var(--line)); color: var(--red); background: var(--red-soft); }
-.workspace-status.done { border-color: color-mix(in srgb, var(--green) 42%, var(--line)); color: var(--green); background: var(--green-soft); }
 
 .workspace-phase-rail {
-  margin: 0 0 18px;
-  padding: 9px 14px 16px;
+  margin: 0 0 20px;
+  padding: 10px 46px 16px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   list-style: none;
@@ -961,6 +1029,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .workspace-phase-rail li:last-child::after { display: none; }
 .workspace-phase-rail li.done::after { background: var(--green); }
 .workspace-phase-rail li.error::after { background: var(--red); }
+.workspace-phase-rail.approval li:nth-child(3)::after { background: var(--amber); }
 .workspace-phase-rail li span {
   display: block;
   min-height: 35px;
@@ -981,6 +1050,8 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .workspace-phase-rail li.done i { color: var(--green); }
 .workspace-phase-rail li.active i { color: var(--blue); }
+.workspace-phase-rail.approval li.active i,
+.workspace-phase-rail.approval li.active span { color: var(--amber); }
 .workspace-phase-rail li.error i { color: var(--red); }
 
 .train-table { min-width: 0; }
@@ -989,10 +1060,11 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   display: grid;
   grid-template-columns:
     58px
-    minmax(235px, 1.8fr)
-    minmax(125px, 0.9fr)
-    minmax(105px, 0.76fr)
-    minmax(115px, 0.82fr);
+    minmax(250px, 1.7fr)
+    minmax(185px, 1.15fr)
+    minmax(110px, 0.72fr)
+    minmax(125px, 0.82fr)
+    minmax(145px, 0.95fr);
 }
 .train-table-head {
   padding: 0 12px 8px;
@@ -1115,6 +1187,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .outcome-cell { flex-wrap: wrap; font-weight: 680; }
 .outcome-cell.error { color: var(--red); }
 .outcome-cell.done { color: var(--green); }
+.outcome-cell.approval { color: var(--amber); }
 .train-job-group.pending .outcome-cell { color: var(--muted); }
 .main-chip {
   padding: 2px 5px;
@@ -1464,19 +1537,33 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 @media (max-width: 1220px) {
   .topbar .divider { display: none; }
   .train-workspace-grid.with-inspector { grid-template-columns: minmax(0, 1fr) 300px; }
+  .batch-status-banner {
+    grid-template-columns: minmax(280px, 1.2fr) minmax(250px, 0.9fr) minmax(260px, 1fr);
+    gap: 18px;
+  }
   .train-table-head,
   .train-job-row {
     grid-template-columns:
       52px
-      minmax(205px, 1.6fr)
-      minmax(112px, 0.86fr)
-      minmax(92px, 0.7fr)
-      minmax(105px, 0.78fr);
+      minmax(210px, 1.5fr)
+      minmax(155px, 1fr)
+      minmax(95px, 0.7fr)
+      minmax(105px, 0.78fr)
+      minmax(125px, 0.88fr);
   }
 }
 
 @media (max-width: 980px) {
   .workspace-shell { padding-inline: 20px; }
+  .batch-status-banner {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  }
+  .batch-status-facts {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    border: 0;
+  }
+  .batch-next-action { grid-column: 2; grid-row: 1; }
   .train-workspace-grid.with-inspector { grid-template-columns: 1fr; }
   .current-train-card { min-height: 0; }
   .train-inspector { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
@@ -1487,14 +1574,29 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 
 @media (max-width: 760px) {
   .workspace-shell { padding: 18px 14px 0; }
-  .current-train-card { padding-inline: 12px; }
-  .current-train-heading { flex-direction: column; }
-  .workspace-status { align-self: flex-start; }
+  .batch-status-banner {
+    padding: 17px;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .batch-status-primary,
+  .batch-status-facts,
+  .batch-next-action {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .batch-status-facts {
+    padding-block: 12px;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .batch-status-facts > div:first-child { padding-left: 0; }
+  .batch-status-facts > div:last-child { padding-right: 0; }
   .workspace-phase-rail { padding-inline: 2px; }
   .workspace-phase-rail li span { min-height: 43px; font-size: 10px; }
   .train-table { overflow-x: auto; }
   .train-table-head,
-  .train-job-row { min-width: 690px; }
+  .train-job-row { min-width: 900px; }
   .validated-train-summary {
     grid-template-columns: 22px minmax(0, 1fr);
   }

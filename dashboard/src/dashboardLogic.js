@@ -52,3 +52,19 @@ export function queuedAfterCurrentBatch(snapshot = {}, currentJobs = []) {
     .filter((job) => job.status === "queued" && !currentIds.has(String(job.id)))
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
+
+export function workspaceStepForSnapshot(snapshot = {}) {
+  const selection = snapshot.train?.selection;
+  if (selection === "validated") return 6;
+  if (selection !== "running") return 0;
+
+  const phase = snapshot.progress?.phase;
+  if (["gating"].includes(phase)) return 5;
+  if (["ready", "pushing", "verifying", "complete"].includes(phase)) return 6;
+  if (phase === "assembling") {
+    const mergedCount = snapshot.progress?.completed_job_ids?.length || 0;
+    const trainSize = snapshot.train?.jobs?.length || 1;
+    return Math.max(1, Math.min(trainSize, mergedCount + 1));
+  }
+  return 0;
+}
