@@ -27,7 +27,12 @@ import {
   WifiHigh,
   XCircle,
 } from "@phosphor-icons/react";
-import { REMEDIAL_ACTIONS, actionCopy, reconnectDelay } from "./dashboardLogic.js";
+import {
+  REMEDIAL_ACTIONS,
+  actionCopy,
+  newestFirstFifoRows,
+  reconnectDelay,
+} from "./dashboardLogic.js";
 
 const PHASES = [
   ["queue", "Queue"],
@@ -748,8 +753,8 @@ function WorkspacePhaseRail({ step }) {
   );
 }
 
-function TrainJobRow({ job, blocked, order, step }) {
-  const mergeReached = step >= order;
+function TrainJobRow({ job, blocked, order, turn, step }) {
+  const mergeReached = step >= turn;
   const gateRunning = step === 5;
   const gatePassed = step >= 6;
   const mergeState = !mergeReached ? "waiting" : blocked ? "error" : "done";
@@ -811,6 +816,8 @@ function TrainJobRow({ job, blocked, order, step }) {
 
 function FifoJobList({ jobs, blockedIds, step }) {
   if (!jobs.length) return null;
+  const newestFirstRows = newestFirstFifoRows(jobs);
+  const fifoJobs = [...newestFirstRows].reverse().map(({ job }) => job);
   const blockedCount = jobs.filter((job) => blockedIds.has(String(job.id))).length;
   return (
     <section className={`train-job-group fifo ${step >= 6 ? "resolved" : "pending"}`}>
@@ -818,22 +825,23 @@ function FifoJobList({ jobs, blockedIds, step }) {
         <div>
           <ListChecks size={19} weight="fill" />
           <strong>FIFO merge order</strong>
-          <span>{jobs.map((job) => `#${job.id}`).join(" → ")}</span>
+          <span>{fifoJobs.map((job) => `#${job.id}`).join(" → ")}</span>
         </div>
         <span>
           {step >= 6
-            ? `${blockedCount} skipped · ${jobs.length - blockedCount} continue`
+            ? `Newest first · ${blockedCount} skipped`
             : step >= 1
-              ? "Merging one by one"
-              : "Oldest request first"}
+              ? "Newest first · merging one by one"
+              : "Newest first · FIFO runs oldest first"}
         </span>
       </header>
       <div role="rowgroup">
-        {jobs.map((job, index) => (
+        {newestFirstRows.map(({ job, order }) => (
           <TrainJobRow
             job={job}
             blocked={blockedIds.has(String(job.id))}
-            order={index + 1}
+            order={order}
+            turn={order}
             step={step}
             key={job.id}
           />

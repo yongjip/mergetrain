@@ -5,6 +5,7 @@ import {
   NEXT_ACTION_COPY,
   SSE_RECONNECT_GRACE_MS,
   actionCopy,
+  newestFirstFifoRows,
   reconnectDelay,
 } from "../src/dashboardLogic.js";
 
@@ -37,4 +38,15 @@ test("planned SSE reconnect remains live for the grace window", () => {
   assert.equal(reconnectDelay(1000, 1000), SSE_RECONNECT_GRACE_MS);
   assert.equal(reconnectDelay(1000, 7000), 1000);
   assert.equal(reconnectDelay(1000, 8000), 0);
+});
+
+test("FIFO rows display newest first without changing processing order", () => {
+  const rows = newestFirstFifoRows([
+    { id: 3 },
+    { id: 1 },
+    { id: 4 },
+    { id: 2 },
+  ]);
+  assert.deepEqual(rows.map(({ job }) => job.id), [4, 3, 2, 1]);
+  assert.deepEqual(rows.map(({ order }) => order), [4, 3, 2, 1]);
 });

@@ -4,6 +4,8 @@
 
 - Selected visual target:
   `dashboard/design/dashboard-fifo-requests-target.png`
+- Scoped user override: render the request rows in descending/newest-first
+  order so merged work falls toward the bottom.
 - Previous browser implementation capture:
   `/private/tmp/mergetrain-dashboard-demo-ui-final.png`
 - Stale browser capture after the server restart:
@@ -19,6 +21,8 @@
 - The shared rail is `Queue → Merge in order → Gates → Ready`.
 - The request table keeps queue order visible and shows the result at each
   stage: merge, gate, and outcome.
+- Rows display newest/highest-number first, while the header and replay retain
+  the real oldest-first FIFO sequence.
 - Request #2 is the only red row. It says `Git conflict → Skipped → Rebase`.
 - Requests #1, #3, and #4 remain green train members.
 - A separate validated-train summary says
@@ -35,7 +39,8 @@
 - `run-batch --validate-only` produced the expected real state:
   `#2 blocked`, `#1/#3/#4 validated`.
 - The replay now has seven presentation states: queued, four ordered merge
-  attempts, gates, and ready.
+  attempts, gates, and ready. Display order is independent from replay order,
+  so reversing the rows does not change which request is processed next.
 - Dashboard unit tests passed.
 - Production dashboard build passed.
 - Full Python suite passed: `310 tests`, `1 skipped`.
@@ -55,4 +60,4 @@
 - Final desktop/responsive pixel comparison, replay interaction, overflow, and
   console checks remain pending until the in-app browser tab is refreshed.
 
-final result: pending browser refresh
+final result: blocked

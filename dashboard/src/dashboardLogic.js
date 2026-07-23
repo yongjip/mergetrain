@@ -36,3 +36,10 @@ export function reconnectDelay(lastLiveAt, now = Date.now()) {
   if (!lastLiveAt) return 0;
   return Math.max(0, SSE_RECONNECT_GRACE_MS - (now - lastLiveAt));
 }
+
+export function newestFirstFifoRows(jobs = []) {
+  return [...jobs]
+    .sort((a, b) => Number(a.id) - Number(b.id))
+    .map((job, index) => ({ job, order: index + 1 }))
+    .reverse();
+}

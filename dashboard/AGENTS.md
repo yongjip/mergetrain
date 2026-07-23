@@ -25,6 +25,9 @@ When implementing from a selected generated mock, treat that image as the source
 - Keep semantic-conflict bisection as an advanced scenario, not the default
   product explanation. Never label a semantic incompatibility as a generic Git
   merge conflict.
+- Display the current request rows newest/highest-number first so active and
+  pending work stays above completed work. Preserve the real oldest-first FIFO
+  sequence in the group header, order badges, and replay timing.
 - Keep the interface read-only, single-repository, desktop-first, and local-only for v0.1.
 - Keep logs and secondary runner detail collapsed by default so the current
   train, blocked request, surviving validated train, and next action remain the
