@@ -3,9 +3,12 @@
 ## Evidence
 
 - Selected visual target:
-  `dashboard/design/dashboard-fifo-requests-target.png`
+  `dashboard/design/dashboard-contextual-inspector-target.png`
 - Scoped user override: render the request rows in descending/newest-first
   order so merged work falls toward the bottom.
+- Scoped user override: remove the always-on explanatory sidebar. Use the full
+  workspace during normal running states and show a contextual inspector only
+  for blocked repair or validated-train approval.
 - Previous browser implementation capture:
   `/private/tmp/mergetrain-dashboard-demo-ui-final.png`
 - Stale browser capture after the server restart:
@@ -27,8 +30,12 @@
 - Requests #1, #3, and #4 remain green train members.
 - A separate validated-train summary says
   `#1 + #3 + #4 → main after approval`.
-- The inspector explains that #1 merged first, #2 was skipped, and #3/#4
-  continued. It separates the atomic deploy action from the #2 rebase action.
+- The contextual inspector no longer repeats the table. A blocked panel shows
+  the branch, conflict type, conflicting files when available, and recovery
+  steps. A ready panel shows the exact train, target ref, train ID, and approval
+  requirement.
+- During queue and normal running states with no blocked or validated work, the
+  inspector is absent and the current-train card uses the full workspace.
 - Semantic-conflict bisection remains an advanced runner behavior and is no
   longer the default walkthrough.
 
@@ -51,6 +58,9 @@
 - The selected target preserves the existing dashboard's Inter/JetBrains Mono
   typography, Phosphor icon language, dark operational palette, borders,
   density, radii, collapsed detail panels, and desktop composition.
+- The revised target removes the explanatory/demo sidebar and shows only the
+  blocked-job repair context and exact validated train awaiting approval. It is
+  a generated visual target, not an implementation capture.
 - The existing in-app browser tab retained the old JavaScript asset after the
   preview server restart. The browser safety policy rejected an automated
   localhost reload, so the new build could not yet be captured from that tab.

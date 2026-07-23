@@ -931,110 +931,88 @@ function CurrentTrainWorkspace({ snapshot, demoStep }) {
   );
 }
 
-function WhatHappened({ snapshot, demoStep }) {
-  const { blockedJobs, safeJobs, currentJobs } = currentTrainModel(snapshot);
+function contextualInspectorState(snapshot, demoStep) {
+  const { blockedJobs, safeJobs, validatedTrain } = currentTrainModel(snapshot);
   const step = demoStep ?? 6;
-  const first = currentJobs[0];
-  const blocked = blockedJobs[0];
-  const later = currentJobs.filter((job) => (
-    first
-    && blocked
-    && Number(job.id) > Number(blocked.id)
-    && !blockedJobs.some((item) => String(item.id) === String(job.id))
-  ));
-  const firstName = first ? `#${first.id}` : "The first request";
-  const blockedName = blocked ? `#${blocked.id}` : "The next request";
-  const laterNames = later.map((job) => `#${job.id}`).join(" and ");
-  const safeNames = safeJobs.map((job) => `#${job.id}`).join(" + ");
-  const facts = [
-    step === 0
-      ? `${currentJobs.length} committed merge requests entered in FIFO order.`
-      : `${firstName} merged first because it was oldest in the queue.`,
-    step < 2
-      ? `${blockedName} is next. Each request merges onto the candidate built so far.`
-      : blocked
-        ? `${blockedName} hit a ${blockedReason(blocked).toLowerCase()} and was skipped.`
-        : "Every request merged cleanly in queue order.",
-    step < 4
-      ? "Later requests keep their place and continue after a skipped conflict."
-      : step < 6
-        ? `${laterNames || "Later requests"} continued; gates now check the surviving train together.`
-        : `${safeNames} passed gates together and can update main atomically.`,
-  ];
+  return {
+    blockedJobs: step >= 2 ? blockedJobs : [],
+    readyJobs: step >= 6 ? safeJobs : [],
+    validatedTrain: step >= 6 ? validatedTrain : null,
+  };
+}
 
+function conflictFiles(job) {
+  return [...String(job.note || "").matchAll(/Merge conflict in ([^\n]+)/gi)]
+    .map((match) => match[1].trim())
+    .filter((path, index, paths) => path && paths.indexOf(path) === index)
+    .slice(0, 3);
+}
+
+function NeedsAttentionPanel({ jobs }) {
   return (
-    <section className="inspector-section what-happened">
-      <div className="inspector-heading"><h2>What happened</h2>{blockedJobs.length ? <XCircle size={20} weight="fill" /> : <CheckCircle size={20} weight="fill" />}</div>
-      <ol>
-        {facts.map((fact, index) => <li key={fact}><span>{index + 1}</span><p>{fact}</p></li>)}
-      </ol>
+    <section className="inspector-section context-panel attention-panel">
+      <div className="context-panel-heading">
+        <span className="context-eyebrow"><XCircle size={17} weight="fill" />Needs attention</span>
+        <strong>{jobs.length} blocked</strong>
+      </div>
+      {jobs.map((job) => {
+        const files = conflictFiles(job);
+        return (
+          <article className="context-job" key={job.id}>
+            <div className="context-job-title">
+              <strong>#{job.id} · {jobLabel(job)}</strong>
+              <span>{blockedReason(job)}</span>
+            </div>
+            <code>{job.branch || "branch pending"}</code>
+            {!!files.length && (
+              <div className="conflict-files" aria-label={`Conflicting files for job ${job.id}`}>
+                {files.map((file) => <code key={file}>{file}</code>)}
+              </div>
+            )}
+            <p>Rebase on latest main, resolve the conflict, commit, then enqueue a fresh request.</p>
+          </article>
+        );
+      })}
     </section>
   );
 }
 
-function NextSafeActions({ snapshot, demoStep }) {
-  const { blockedJobs, safeJobs } = currentTrainModel(snapshot);
-  const ready = (demoStep ?? 6) >= 6;
+function ReadyToDeployPanel({ snapshot, jobs, validatedTrain }) {
+  const words = terminology(snapshot);
   return (
-    <section className="inspector-section next-safe-actions">
-      <h2>Next safe action</h2>
-      {!!safeJobs.length && (
-        <div className={`safe-action ready ${ready ? "" : "muted"}`}>
-          <CheckCircle size={19} weight="fill" />
-          <div>
-            <strong>Deploy {safeJobs.map((job) => `#${job.id}`).join(" + ")} together</strong>
-            <p>{ready ? "One approved atomic update to main." : "Wait for the combined gates to finish."}</p>
-          </div>
-        </div>
-      )}
-      {!!blockedJobs.length && (
-        <div className="safe-action repair">
-          <XCircle size={19} weight="fill" />
-          <div>
-            <strong>Rebase {blockedJobs.map((job) => `#${job.id}`).join(" + ")} on latest main</strong>
-            <p>Commit the fix, then enqueue a fresh request.</p>
-          </div>
-        </div>
-      )}
+    <section className="inspector-section context-panel ready-panel">
+      <div className="context-panel-heading">
+        <span className="context-eyebrow"><CheckCircle size={17} weight="fill" />Ready to {words.action}</span>
+        <strong>{jobs.length} validated</strong>
+      </div>
+      <div className="ready-train-members">
+        <span>Exact train</span>
+        <strong>{jobs.map((job) => `#${job.id}`).join(" + ")}</strong>
+      </div>
+      <dl className="context-meta">
+        <dt>Target</dt>
+        <dd><code>{snapshot.project.integration_ref}</code></dd>
+        <dt>Train ID</dt>
+        <dd><code>{validatedTrain?.train_id || "assigned after validation"}</code></dd>
+      </dl>
+      <p>Validated together. Explicit approval is required before one atomic update.</p>
     </section>
   );
 }
 
-function CollapsedDetails({ snapshot, now }) {
-  const events = (snapshot.events || []).slice(-4).reverse();
-  const lock = snapshot.lock;
+function TrainInspector({ snapshot, inspector }) {
+  if (!inspector.blockedJobs.length && !inspector.readyJobs.length) return null;
   return (
-    <details className="inspector-section inspector-details">
-      <summary><span>Logs and runner details</span><small>Collapsed</small><CaretDown size={17} /></summary>
-      <div className="runner-compact">
-        <span>Runner</span><strong>{lock?.liveness === "alive" ? "Active" : "Idle"}</strong>
-        <span>Heartbeat</span><code>{lock ? relative(lock.heartbeat_at, now) : "—"}</code>
-      </div>
-      <div className="compact-event-list">
-        {events.map((event) => (
-          <div key={event.id}>
-            <StatusIcon state={event.state === "success" ? "done" : event.state} size={16} />
-            <span>{event.message}</span>
-            <time>{clockTime(event.created_at)}</time>
-          </div>
-        ))}
-        {!events.length && <p>No runner events yet.</p>}
-      </div>
-    </details>
-  );
-}
-
-function TrainInspector({ snapshot, now, demoStep }) {
-  return (
-    <aside className="train-inspector" aria-label="Current train explanation and next actions">
-      <WhatHappened snapshot={snapshot} demoStep={demoStep} />
-      <NextSafeActions snapshot={snapshot} demoStep={demoStep} />
-      <CollapsedDetails snapshot={snapshot} now={now} />
-      {snapshot.project.preview && (
-        <section className="inspector-section demo-note">
-          <strong>Demo data</strong>
-          <p>Real local walkthrough data. Replay changes presentation only.</p>
-        </section>
+    <aside className="train-inspector" aria-label="Items that need operator judgment">
+      {!!inspector.blockedJobs.length && (
+        <NeedsAttentionPanel jobs={inspector.blockedJobs} />
+      )}
+      {!!inspector.readyJobs.length && (
+        <ReadyToDeployPanel
+          snapshot={snapshot}
+          jobs={inspector.readyJobs}
+          validatedTrain={inspector.validatedTrain}
+        />
       )}
     </aside>
   );
@@ -1043,11 +1021,13 @@ function TrainInspector({ snapshot, now, demoStep }) {
 function SingleRepoBody({ snapshot, now, demoStep }) {
   const recentJobs = snapshot.jobs || [];
   const words = terminology(snapshot);
+  const inspector = contextualInspectorState(snapshot, demoStep);
+  const showInspector = inspector.blockedJobs.length > 0 || inspector.readyJobs.length > 0;
   return (
     <main className="workspace-shell">
-      <div className="train-workspace-grid">
+      <div className={`train-workspace-grid ${showInspector ? "with-inspector" : ""}`}>
         <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} />
-        <TrainInspector snapshot={snapshot} now={now} demoStep={demoStep} />
+        {showInspector && <TrainInspector snapshot={snapshot} inspector={inspector} />}
       </div>
       <details className="secondary-drawer">
         <summary><span>Full activity and history</span><small>Operational detail</small><CaretDown size={18} /></summary>

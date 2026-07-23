@@ -28,6 +28,11 @@ When implementing from a selected generated mock, treat that image as the source
 - Display the current request rows newest/highest-number first so active and
   pending work stays above completed work. Preserve the real oldest-first FIFO
   sequence in the group header, order badges, and replay timing.
+- Do not reserve permanent width for explanatory sidebar copy. Let the current
+  train use the full workspace during normal queue and running states; show a
+  contextual inspector only for blocked work that needs repair or a validated
+  train that needs explicit approval. Keep logs, heartbeat, and history in the
+  lower operational-detail drawer.
 - Keep the interface read-only, single-repository, desktop-first, and local-only for v0.1.
 - Keep logs and secondary runner detail collapsed by default so the current
   train, blocked request, surviving validated train, and next action remain the
