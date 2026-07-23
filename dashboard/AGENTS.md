@@ -71,3 +71,11 @@ When implementing from a selected generated mock, treat that image as the source
 - Preserve all four repository-card answers while compressing metadata: keep
   the path and policy chips on one row when space allows, use roughly 8px
   vertical gaps, and let cards end at their natural content height.
+- Use a unified compact repository table for Hub rather than separate project
+  cards. Sort action-required repositories first and align current work, queue,
+  recent outcomes, runner, and state into comparable columns.
+- Keep Hub search and status filtering in the rollup band. Repository rows are
+  the primary drill-down target; expose `Open details` without adding a second
+  action surface.
+- Recent-outcome marks must reflect real job states. Treat canceled jobs as
+  neutral history, never as successful or failed work.
