@@ -36,6 +36,24 @@ PHASES = (
 
 GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
 
+NEXT_ACTION_VALUES = frozenset(
+    {
+        "upgrade_mergetrain",
+        "unlock_wedged_runner",
+        "wait_for_runner",
+        "reconcile_pending_deploy",
+        "reconcile_conflict_manual",
+        "fix_blocked_job",
+        "verify_reconciled_deploy",
+        "deploy_validated_train_when_approved",
+        "cancel_and_reenqueue_legacy_validated_jobs",
+        "run_daemon_or_run_batch_deploy_when_approved",
+        "run_batch_validate",
+        "gc_available",
+        "enqueue_clean_branch",
+    }
+)
+
 
 def _lock_expired(lock: dict[str, Any] | None) -> bool:
     if not lock:

@@ -17,7 +17,7 @@ from mergetrain.dashboard import (
     _create_from_snapshot_fn,
     create_server,
 )
-from mergetrain.snapshot import build_dashboard_snapshot
+from mergetrain.snapshot import NEXT_ACTION_VALUES, build_dashboard_snapshot
 from mergetrain.store import (
     claim_all_queued,
     connect,
@@ -31,6 +31,17 @@ from mergetrain.store import (
 class DashboardTests(unittest.TestCase):
     def make_config(self, root: Path):
         return load_config(repo=root, db_override=root / "queue.sqlite")
+
+    def test_frontend_maps_every_server_next_action(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard"
+            / "src"
+            / "dashboardLogic.js"
+        ).read_text(encoding="utf-8")
+        for value in NEXT_ACTION_VALUES:
+            with self.subTest(value=value):
+                self.assertIn(f"{value}:", source)
 
     def test_single_repo_cache_rebuilds_only_when_queue_changes(self) -> None:
         with tempfile.TemporaryDirectory() as td:

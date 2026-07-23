@@ -5,22 +5,26 @@ import {
   CheckCircle,
   Circle,
   Clock,
+  Copy,
   FileCode,
   GitBranch,
   Heartbeat,
   HourglassHigh,
   Info,
   ListChecks,
+  Moon,
   Pulse,
   ShieldCheck,
   SpinnerGap,
   StackSimple,
+  Sun,
   TerminalWindow,
   Timer,
   WarningCircle,
   WifiHigh,
   XCircle,
 } from "@phosphor-icons/react";
+import { REMEDIAL_ACTIONS, actionCopy, reconnectDelay } from "./dashboardLogic.js";
 
 const PHASES = [
   ["queue", "Queue"],
@@ -42,20 +46,6 @@ const DEFAULT_TERMINOLOGY = {
 
 function terminology(snapshot) {
   return snapshot.project.terminology || DEFAULT_TERMINOLOGY;
-}
-
-function actionCopy(value, words) {
-  const actions = {
-    wait_for_runner: ["Wait for the current phase to finish.", "The runner will continue automatically."],
-    fix_blocked_job: ["Fix the blocked branch and enqueue again.", "Commit a clean result in the owning branch first."],
-    deploy_validated_train_when_approved: [`Approve the exact validated train to ${words.action}.`, `Git ${words.noun} remains an explicit CLI action.`],
-    cancel_and_reenqueue_legacy_validated_jobs: ["Re-enqueue the legacy validated jobs.", `A fresh train identity is required before ${words.noun}.`],
-    run_daemon_or_run_batch_deploy_when_approved: [`Start the approved ${words.action} runner.`, "Only auto-approved jobs are eligible for the daemon."],
-    run_batch_validate: ["Start a validation run when ready.", "Nothing will be pushed in validate-only mode."],
-    gc_available: ["Clean up completed worktrees.", "Review the dry run before applying cleanup."],
-    enqueue_clean_branch: ["Enqueue a committed task branch.", "The queue is ready for the next clean job."],
-  };
-  return actions[value] || actions.enqueue_clean_branch;
 }
 
 const STATE_LABELS = {
@@ -190,7 +180,7 @@ function StatusIcon({ state, size = 22 }) {
   return <Circle size={size} weight="regular" />;
 }
 
-function Header({ snapshot, connection, now, hub, repoName }) {
+function Header({ snapshot, connection, now, hub, repoName, theme, onToggleTheme }) {
   const generated = relative(snapshot.generated_at, now);
   const connectionLabel = connection === "live" ? "CONNECTED" : connection === "offline" ? "DISCONNECTED" : "POLLING";
   const preview = !hub && snapshot.project?.preview;
@@ -211,9 +201,52 @@ function Header({ snapshot, connection, now, hub, repoName }) {
       {preview && <span className="preview-badge">PREVIEW</span>}
       <div className="topbar-spacer" />
       <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
+      <button
+        className="theme-toggle"
+        type="button"
+        onClick={onToggleTheme}
+        aria-label={`Use ${theme === "dark" ? "light" : "dark"} theme`}
+        title={`Use ${theme === "dark" ? "light" : "dark"} theme`}
+      >
+        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
       <div className="context divider"><Clock size={19} /><span>{clockTime(now)}</span></div>
       <div className="context divider"><CalendarBlank size={19} /><span>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(now)}</span></div>
     </header>
+  );
+}
+
+const COUNT_ITEMS = [
+  ["queued", "Queued"],
+  ["in_progress", "Running"],
+  ["blocked", "Blocked"],
+  ["validated", "Validated"],
+  ["deployed", "Deployed"],
+];
+
+function CountsStrip({ counts = {} }) {
+  return (
+    <section className="counts-strip" aria-label="Queue counts">
+      {COUNT_ITEMS.map(([key, label]) => (
+        <div className={`count-stat ${key}`} key={key}>
+          <strong>{counts[key] || 0}</strong>
+          <span>{label}</span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function RemediationBanner({ snapshot }) {
+  if (!REMEDIAL_ACTIONS.has(snapshot.next_action)) return null;
+  const [title, detail] = actionCopy(snapshot.next_action, terminology(snapshot));
+  const severe = ["unlock_wedged_runner", "reconcile_pending_deploy", "reconcile_conflict_manual"].includes(snapshot.next_action);
+  return (
+    <section className={`remediation-banner ${severe ? "error" : "warning"}`} role="alert">
+      <WarningCircle size={24} weight="fill" />
+      <div><strong>{title}</strong><p>{detail}</p></div>
+      <code>{snapshot.next_action}</code>
+    </section>
   );
 }
 
@@ -360,6 +393,114 @@ function JobCards({ snapshot }) {
   );
 }
 
+function CopyCommand({ value, label }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="copy-command">
+      <div><small>{label}</small><code>{value}</code></div>
+      <button type="button" onClick={copy} aria-label={`Copy ${label}`}><Copy size={17} />{copied ? "Copied" : "Copy"}</button>
+    </div>
+  );
+}
+
+function ReadyToDeploy({ snapshot }) {
+  const trains = snapshot.validated_trains || [];
+  if (!trains.length) return null;
+  const words = terminology(snapshot);
+  return (
+    <section className="ready-panel" aria-labelledby="ready-panel-title">
+      <div className="ready-heading">
+        <div><span className="eyebrow"><ShieldCheck size={18} />Approval surface</span><h2 id="ready-panel-title">Ready to {words.action}</h2></div>
+        <span className="read-only-badge">READ-ONLY</span>
+      </div>
+      {trains.map((train) => {
+        const command = `mergetrain run-batch --deploy --train-id ${train.train_id}`;
+        const guarded = `scripts/mt-deploy.sh --confirm --train-id ${train.train_id}`;
+        return (
+          <article className={`ready-train ${train.deploy_eligible ? "eligible" : "incomplete"}`} key={train.train_id || `legacy-${(train.job_ids || []).join("-")}`}>
+            <div className="train-identity">
+              <div><small>Train ID</small><code>{train.train_id || "missing legacy identity"}</code></div>
+              <div className="identity-badges">
+                <span className={`state-pill ${train.deploy_eligible ? "done" : "warning"}`}>{train.deploy_eligible ? "DEPLOY ELIGIBLE" : "IDENTITY INCOMPLETE"}</span>
+                <span className={`state-pill ${train.reuse_identity_complete ? "done" : "waiting"}`}>{train.reuse_identity_complete ? "REUSE IDENTITY COMPLETE" : "GATES MUST RERUN"}</span>
+              </div>
+            </div>
+            <div className="train-members">
+              {(train.branches || []).map((branch) => (
+                <div key={branch.job_id}>
+                  <strong>#{branch.job_id}</strong>
+                  <code>{branch.branch}</code>
+                  <span>{shortSha(branch.validated_head_sha)}</span>
+                </div>
+              ))}
+            </div>
+            {train.deploy_eligible && (
+              <div className="train-commands">
+                <CopyCommand value={guarded} label="Guarded confirmation" />
+                <CopyCommand value={command} label="Direct CLI" />
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+
+function DeploymentHistory({ jobs, words }) {
+  const trains = [];
+  const bySha = new Map();
+  jobs.filter((job) => job.status === "deployed").forEach((job) => {
+    const key = job.deploy_sha || `job-${job.id}`;
+    let train = bySha.get(key);
+    if (!train) {
+      train = { key, sha: job.deploy_sha, jobs: [], finished_at: job.finished_at, started_at: job.started_at };
+      bySha.set(key, train);
+      trains.push(train);
+    }
+    train.jobs.push(job);
+  });
+  if (!trains.length) return null;
+  return (
+    <section className="deployment-history" aria-labelledby="deployment-history-title">
+      <div className="activity-heading"><h2 id="deployment-history-title">Recent {words.noun} history</h2><span>Newest trains · local queue record</span></div>
+      <div className="history-list">
+        {trains.slice(0, 5).map((train) => {
+          const started = parseTime(train.started_at);
+          const finished = parseTime(train.finished_at);
+          const elapsed = started && finished ? duration((finished - started) / 1000) : "—";
+          const verifyStates = [...new Set(train.jobs.map((job) => job.verify_status || "not_run"))];
+          const warning = verifyStates.some((state) => ["failed", "unknown"].includes(state));
+          return (
+            <article className="history-row" key={train.key}>
+              <div className={`history-status ${warning ? "warning" : "success"}`}><StatusIcon state={warning ? "warning" : "done"} size={22} /></div>
+              <div className="history-copy">
+                <strong>{train.jobs.length}-job train</strong>
+                <div>{train.jobs.map((job) => <code key={job.id}>#{job.id} {job.branch}</code>)}</div>
+              </div>
+              <dl>
+                <div><dt>Deploy</dt><dd><code>{shortSha(train.sha)}</code></dd></div>
+                <div><dt>Verify</dt><dd>{verifyStates.join(", ")}</dd></div>
+                <div><dt>Duration</dt><dd>{elapsed}</dd></div>
+                <div><dt>Finished</dt><dd>{dateTime(train.finished_at)}</dd></div>
+              </dl>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Activity({ events, jobCount, words }) {
   const hasTrainAssembly = events.some((event) => event.phase === "assembling" && event.job_id === null);
   const visible = events
@@ -423,24 +564,35 @@ function RunnerPanel({ snapshot, now }) {
 }
 
 function AttentionPanel({ jobs }) {
-  const job = jobs.find((item) => (
+  const problemJobs = jobs.filter((item) => (
     item.status === "blocked"
     || item.status === "failed"
+    || item.status === "needs_reconcile"
     || (item.status === "deployed" && item.verify_status === "failed")
   ));
-  const verifyWarning = job?.status === "deployed" && job.verify_status === "failed";
   return (
     <section className="rail-section blocked-section">
       <h2>Attention <small>(history)</small></h2>
-      {job ? (
-        <div className="blocked-item">
-          <div className={`blocked-title ${verifyWarning ? "warning" : "error"}`}>
-            {verifyWarning
-              ? <WarningCircle size={24} weight="fill" />
-              : <XCircle size={24} weight="fill" />}
-            <strong>#{job.id}</strong><span>{job.task}</span>
-          </div>
-          <div className="blocked-detail"><small>Reason</small><p>{job.note || "No reason recorded"}</p><small>Occurred</small><code>{dateTime(job.finished_at || job.requested_at)}</code></div>
+      {problemJobs.length ? (
+        <div className="blocked-list">
+          {problemJobs.map((job) => {
+            const verifyWarning = job.status === "deployed" && job.verify_status === "failed";
+            return (
+              <article className="blocked-item" key={job.id}>
+                <div className={`blocked-title ${verifyWarning ? "warning" : "error"}`}>
+                  {verifyWarning
+                    ? <WarningCircle size={24} weight="fill" />
+                    : <XCircle size={24} weight="fill" />}
+                  <strong>#{job.id}</strong><span>{job.task}</span>
+                </div>
+                <div className="blocked-detail">
+                  <small>Reason</small><p>{job.note || "No reason recorded"}</p>
+                  {job.conflict_with && <div className="conflict-badge"><GitBranch size={14} />conflicts with <code>{job.conflict_with}</code></div>}
+                  <small>Occurred</small><code>{dateTime(job.finished_at || job.requested_at)}</code>
+                </div>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <div className="clear-history"><CheckCircle size={24} weight="fill" /><span>No jobs need attention in recent history.</span></div>
@@ -469,14 +621,19 @@ function Loading() {
 
 function SingleRepoBody({ snapshot, now }) {
   const recentJobs = snapshot.jobs || [];
+  const words = terminology(snapshot);
   return (
     <div className="dashboard-grid">
       <main className="main-column">
+        <RemediationBanner snapshot={snapshot} />
         <Hero snapshot={snapshot} now={now} />
+        <CountsStrip counts={snapshot.counts} />
         <PhaseRail snapshot={snapshot} />
         <CurrentWork snapshot={snapshot} now={now} />
+        <ReadyToDeploy snapshot={snapshot} />
         <JobCards snapshot={snapshot} />
-        <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={terminology(snapshot)} />
+        <Activity events={snapshot.events} jobCount={snapshot.train.jobs.length} words={words} />
+        <DeploymentHistory jobs={recentJobs} words={words} />
       </main>
       <aside className="side-rail">
         <RunnerPanel snapshot={snapshot} now={now} />
@@ -507,7 +664,7 @@ function repoCardState(entry) {
   return ["idle", "IDLE"];
 }
 
-function RepoCard({ entry, onSelect }) {
+function RepoCard({ entry, onSelect, now }) {
   const [state, label] = repoCardState(entry);
   const name = entry.name || entry.path;
   const snapshot = entry.ok && !entry.empty ? entry.snapshot : null;
@@ -547,7 +704,7 @@ function RepoCard({ entry, onSelect }) {
       {snapshot && (
         <footer className="repo-card-foot">
           <span><GitBranch size={15} />{snapshot.project.integration_ref}</span>
-          <span>{snapshot.counts?.deployed || 0} {words.completed}</span>
+          <span><Heartbeat size={15} />{snapshot.lock ? relative(snapshot.lock.heartbeat_at, now) : "idle"}</span>
         </footer>
       )}
     </article>
@@ -564,7 +721,9 @@ function RegistryErrorBanner({ message }) {
   );
 }
 
-function HubOverview({ snapshot, onSelect }) {
+const REPO_SEVERITY = { error: 0, warning: 1, active: 2, done: 3, waiting: 4, idle: 5 };
+
+function HubOverview({ snapshot, onSelect, now }) {
   if (!snapshot.repos.length) {
     return (
       <main className="hub-empty">
@@ -574,11 +733,28 @@ function HubOverview({ snapshot, onSelect }) {
       </main>
     );
   }
+  const repos = [...snapshot.repos].sort((a, b) => {
+    const [aState] = repoCardState(a);
+    const [bState] = repoCardState(b);
+    return REPO_SEVERITY[aState] - REPO_SEVERITY[bState] || (a.name || a.path).localeCompare(b.name || b.path);
+  });
+  const rollup = repos.reduce((result, entry) => {
+    const [state] = repoCardState(entry);
+    if (["error", "warning"].includes(state)) result.attention += 1;
+    else if (state === "active") result.running += 1;
+    else result.quiet += 1;
+    return result;
+  }, { attention: 0, running: 0, quiet: 0 });
   return (
-    <main className="hub-grid" aria-label="Registered repos">
-      {snapshot.repos.map((entry) => (
-        <RepoCard entry={entry} key={entry.path} onSelect={onSelect} />
-      ))}
+    <main>
+      <section className="hub-rollup" aria-label="Hub status summary">
+        <strong>{rollup.attention} need attention</strong><span>{rollup.running} running</span><span>{rollup.quiet} ready or idle</span>
+      </section>
+      <section className="hub-grid" aria-label="Registered repos">
+        {repos.map((entry) => (
+          <RepoCard entry={entry} key={entry.path} onSelect={onSelect} now={now} />
+        ))}
+      </section>
     </main>
   );
 }
@@ -600,6 +776,8 @@ function useSnapshotFeed() {
   useEffect(() => {
     let active = true;
     let polling = null;
+    let staleTimer = null;
+    let lastLiveAt = 0;
     const update = (payload) => {
       if (active && payload?.ok) setSnapshot(payload);
     };
@@ -611,35 +789,61 @@ function useSnapshotFeed() {
         if (active) setConnection("offline");
       }
     };
-    fetchSnapshot();
-    const source = new EventSource("/api/events");
-    source.addEventListener("snapshot", (event) => {
-      update(JSON.parse(event.data));
-      setConnection("live");
-      if (polling) {
-        window.clearInterval(polling);
-        polling = null;
-      }
-    });
-    source.onerror = () => {
+    const stopPolling = () => {
+      if (polling) window.clearInterval(polling);
+      polling = null;
+    };
+    const markLive = () => {
+      lastLiveAt = Date.now();
+      if (staleTimer) window.clearTimeout(staleTimer);
+      staleTimer = null;
+      stopPolling();
+      if (active) setConnection("live");
+    };
+    const startPolling = () => {
       if (!active) return;
       setConnection("polling");
       if (!polling) polling = window.setInterval(fetchSnapshot, 2000);
     };
+    fetchSnapshot();
+    const source = new EventSource("/api/events");
+    source.onopen = markLive;
+    source.addEventListener("snapshot", (event) => {
+      update(JSON.parse(event.data));
+      markLive();
+    });
+    source.onerror = () => {
+      if (!active) return;
+      const delay = reconnectDelay(lastLiveAt);
+      if (delay > 0) {
+        if (staleTimer) window.clearTimeout(staleTimer);
+        staleTimer = window.setTimeout(startPolling, delay);
+        return;
+      }
+      startPolling();
+    };
     return () => {
       active = false;
       source.close();
-      if (polling) window.clearInterval(polling);
+      stopPolling();
+      if (staleTimer) window.clearTimeout(staleTimer);
     };
   }, []);
 
   return [snapshot, connection];
 }
 
+function initialTheme() {
+  const stored = window.localStorage.getItem("mergetrain-theme");
+  if (["light", "dark"].includes(stored)) return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export function App() {
   const [snapshot, connection] = useSnapshotFeed();
   const [now, setNow] = useState(new Date());
   const [selectedRepo, setSelectedRepo] = useState(readRepoHash);
+  const [theme, setTheme] = useState(initialTheme);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNow(new Date()), 1000);
@@ -651,6 +855,27 @@ export function App() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("mergetrain-theme", theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#0d1117" : "#fbfaf7");
+  }, [theme]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    if (snapshot.hub) {
+      const attention = snapshot.repos.filter((entry) => {
+        const [state] = repoCardState(entry);
+        return ["error", "warning"].includes(state);
+      }).length;
+      document.title = `${attention ? `(${attention}) ` : ""}mergetrain · hub`;
+      return;
+    }
+    const failures = (snapshot.counts?.blocked || 0) + (snapshot.counts?.failed || 0) + (snapshot.counts?.needs_reconcile || 0);
+    const state = failures ? "attention" : snapshot.train.selection === "running" ? "running" : snapshot.train.selection === "validated" ? "ready" : "idle";
+    document.title = `${failures ? `(${failures}) ` : ""}mergetrain · ${state}`;
+  }, [snapshot]);
 
   const selectRepo = (path) => {
     window.location.hash = path === null ? "" : `repo=${encodeURIComponent(path)}`;
@@ -672,6 +897,8 @@ export function App() {
           now={now}
           hub
           repoName={drillable ? drillable.name || drillable.path : null}
+          theme={theme}
+          onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
         />
         {snapshot.registry_error && <RegistryErrorBanner message={snapshot.registry_error} />}
         {drillable ? (
@@ -680,7 +907,7 @@ export function App() {
             <SingleRepoBody snapshot={drillable.snapshot} now={now} />
           </>
         ) : (
-          <HubOverview snapshot={snapshot} onSelect={selectRepo} />
+          <HubOverview snapshot={snapshot} onSelect={selectRepo} now={now} />
         )}
         <footer className="page-footer"><WifiHigh size={18} /><span>Read-only local view</span><i>·</i><span>All actions are performed by mergetrain.</span></footer>
       </div>
@@ -689,7 +916,13 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Header snapshot={snapshot} connection={connection} now={now} />
+      <Header
+        snapshot={snapshot}
+        connection={connection}
+        now={now}
+        theme={theme}
+        onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
+      />
       {snapshot.project.preview && <PreviewBanner />}
       <SingleRepoBody snapshot={snapshot} now={now} />
       <footer className="page-footer"><WifiHigh size={18} /><span>Read-only local view</span><i>·</i><span>All actions are performed by mergetrain.</span></footer>
