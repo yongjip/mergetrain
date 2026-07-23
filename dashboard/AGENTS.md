@@ -38,6 +38,9 @@ When implementing from a selected generated mock, treat that image as the source
   as `Next batch`; never imply that they joined the running or validated train.
 - In Hub, keep per-project state scannable and include current/next batch counts
   on each project card when a batch exists.
+- Describe repos excluded from Hub daemon execution as `manual deploy`, not
+  `daemon off`: Hub monitoring remains active while unattended `--auto`
+  execution is disabled.
 - Keep the interface read-only, single-repository, desktop-first, and local-only for v0.1.
 - Keep logs and secondary runner detail collapsed by default so the current
   train, blocked request, surviving validated train, and next action remain the

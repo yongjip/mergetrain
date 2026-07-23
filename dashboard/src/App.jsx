@@ -1142,7 +1142,7 @@ function RepoCard({ entry, onSelect, now }) {
       ))
     : [];
   if (entry.daemon === false) {
-    chips.push(<span className="count-chip daemon-off" key="daemon-off">daemon off</span>);
+    chips.push(<span className="count-chip daemon-off" key="daemon-off">manual deploy</span>);
   }
   const words = snapshot ? terminology(snapshot) : DEFAULT_TERMINOLOGY;
   const summary = !entry.ok
