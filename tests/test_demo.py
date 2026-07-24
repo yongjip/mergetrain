@@ -184,7 +184,7 @@ class DemoTests(unittest.TestCase):
             rendered = out.getvalue()
             self.assertIn("ready: health=true clean=true", rendered)
             self.assertIn("result: partial", rendered)
-            self.assertIn("conflict_with: #1 ↔ #2", rendered)
+            self.assertIn("blocked_reason: Git conflict with current train", rendered)
             self.assertIn("outcome: merge_conflict", rendered)
             self.assertIn("result: success", rendered)
             self.assertIn("Demo complete:", rendered)

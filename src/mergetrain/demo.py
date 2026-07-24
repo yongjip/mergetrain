@@ -265,12 +265,16 @@ class DemoWalkthrough:
             return
         if self.brief and "job" in payload:
             job = payload["job"]
+            outcome = payload.get("outcome", {})
             print(
                 f"job: #{job.get('id')} {job.get('status')} · "
                 f"{job.get('branch')}"
             )
-            print(f"conflict_with: #{job.get('conflict_with')}")
-            print(f"outcome: {payload.get('outcome', {}).get('category')}")
+            if job.get("conflict_with"):
+                print(f"conflict_with: #{job.get('conflict_with')}")
+            elif outcome.get("category") == "merge_conflict":
+                print("blocked_reason: Git conflict with current train")
+            print(f"outcome: {outcome.get('category')}")
             return
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
