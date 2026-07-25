@@ -659,10 +659,10 @@ deploy:
             f"set; #{job_ids['agent/add-retries']} and "
             f"#{job_ids['agent/request-logging']} rejoined."
         )
-        print(
-            "result: partial — exit 1 means inspect the graded result; "
-            "two compatible requests were validated together."
-        )
+        # Two short lines rather than one long one: the recording is 1200px at
+        # font size 18, so a single sentence wraps mid-word in the README GIF.
+        print("result: partial — exit 1 means read the result, not that nothing ran.")
+        print("two compatible requests were validated together.")
 
         self._step(
             "Inspect the blocked request",
