@@ -58,6 +58,23 @@ class _PushVerifyState:
     warning: str = ""
 
 
+def _post_push_verify_status(state: _PushVerifyState) -> str:
+    """What to record for verification when the push landed but the run errored.
+
+    Never invent a failure: a repo configured with no verify hooks has nothing
+    that could fail, and a verification that already completed must not be
+    relabeled by a later error. Anything genuinely indeterminate becomes
+    ``unknown``, which is the value ``reconcile`` and ``mergetrain verify``
+    already exist to discharge -- and which makes doctor say
+    ``verify_reconciled_deploy`` instead of pointing at a hook that does not
+    exist.
+    """
+
+    if state.verify_status in {"not_configured", "succeeded", "failed"}:
+        return state.verify_status
+    return "unknown"
+
+
 def _render_command(command: Sequence[str] | str) -> str:
     if isinstance(command, str):
         return command
@@ -630,7 +647,11 @@ class GitRunner:
         }
         if result.status == "deployed":
             completed = self.config.terminology.completed
-            if result.verify_status == "failed":
+            # 'unknown' needs the same attention as 'failed': the refs landed but
+            # verification was never established, so a completion event that reads
+            # plain success would hide the one thing the operator has to discharge
+            # (mergetrain verify).
+            if result.verify_status in {"failed", "unknown"}:
                 event_map["deployed"] = (
                     "complete",
                     "warning",
@@ -1386,7 +1407,7 @@ class GitRunner:
             if deploy_state.push_status == "succeeded":
                 status = "deployed"
                 note = f"post-push completion warning: {note}"
-                post_push_verify_status = "failed"
+                post_push_verify_status = _post_push_verify_status(deploy_state)
             else:
                 post_push_verify_status = deploy_state.verify_status
             result = self._finish_job(
@@ -1964,7 +1985,7 @@ class GitRunner:
             if deploy_state.push_status == "succeeded":
                 status = "deployed"
                 note = f"post-push completion warning: {note}"
-                post_push_verify_status = "failed"
+                post_push_verify_status = _post_push_verify_status(deploy_state)
             else:
                 post_push_verify_status = deploy_state.verify_status
             deployed_ids: list[int] = []

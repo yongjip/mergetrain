@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Stop inventing a verification failure when the run errored after a landed push.
+  The post-push boundary set `verify_status: failed` unconditionally, so a repo
+  configured with no verify hooks — whose state was `not_configured` — reported a
+  failed verification, sending an operator after a hook that does not exist. And
+  when hooks *are* configured but their runner crashed, nothing had determined a
+  failure either. Both now record what is true: configured-and-decided outcomes
+  are preserved, anything indeterminate becomes `unknown` — the value `doctor`
+  turns into `next_action: verify_reconciled_deploy`, so `mergetrain verify`
+  discharges it instead of the operator hunting a phantom failure. The completion
+  event treats `unknown` with the same `warning` severity `failed` had, so the run
+  is not reported as a plain success.
+
 - Add a local fault-injection matrix (`tests/test_fault_*.py`) covering the
   failures that decide whether the queue tells the truth about what shipped: a
   real `git push --atomic` SIGKILLed with the refs applied and without, a push
