@@ -44,3 +44,30 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # v1.14.1
+
+  bump-tap:
+    # The Homebrew tap bumps itself from PyPI on a daily cron, which GitHub
+    # disables after 60 days without repository activity — exactly what a quiet
+    # tap looks like. Poking its workflow_dispatch here makes a release's bump
+    # immediate and keeps the schedule alive. Optional by design: without the
+    # HOMEBREW_TAP_DISPATCH_TOKEN secret this step is skipped, and the cron
+    # remains the only path. See docs/release.md.
+    needs: publish
+    if: vars.HOMEBREW_TAP_REPOSITORY != ''
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Dispatch the tap bump
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+          TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_DISPATCH_TOKEN is not set; leaving the bump to the tap's cron"
+            exit 0
+          fi
+          # PyPI's CDN can still be serving the previous "latest" right after a
+          # publish, and the tap reads that endpoint, so give it a moment.
+          sleep 60
+          gh workflow run bump.yml --repo "${TAP_REPOSITORY}"
+          echo "requested a formula bump in ${TAP_REPOSITORY}"
