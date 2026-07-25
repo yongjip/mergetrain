@@ -59,28 +59,6 @@ class _PushVerifyState:
     warning: str = ""
 
 
-def _contention_status(state: _PushVerifyState) -> str:
-    """Where a job belongs when a queue write was contended mid-run.
-
-    Keyed on how far the deploy got, because that decides what is knowable:
-
-    * ``succeeded`` -- the refs are on the remote. ``finish_after_error`` already
-      overrides this to ``deployed`` with a warning, so the value here is moot;
-      it is spelled out so a reader does not have to prove that by inspection.
-    * ``pending`` -- the durable marker was written and the push outcome is
-      unknown, the same position an ambiguous push leaves: ``needs_reconcile``,
-      so the remote decides.
-    * anything else -- nothing was pushed. Back to ``queued``: the work is intact
-      and the next run picks it up without an operator.
-    """
-
-    if state.push_status == "succeeded":
-        return "deployed"
-    if state.push_status == "pending":
-        return "needs_reconcile"
-    return "queued"
-
-
 def _post_push_verify_status(state: _PushVerifyState) -> str:
     """What to record for verification when the push landed but the run errored.
 
@@ -928,6 +906,11 @@ class GitRunner:
                     current_environment_sha = self._environment_fingerprint(
                         worktree=worktree, log=log, pulse=pulse
                     )
+                except QueueBusy:
+                    # Queue contention says nothing about the toolchain. Absorbed
+                    # here it would report a fingerprint mismatch and silently
+                    # re-run gates that were legitimately reusable.
+                    raise
                 except (CommandFailed, MergetrainError):
                     reasons.append(
                         "required environment fingerprint could not be reproduced"
@@ -1602,21 +1585,30 @@ class GitRunner:
             except AmbiguousPush as exc:
                 return finish_after_error(status="needs_reconcile", note=str(exc))
             except QueueBusy as exc:
-                # Contention is not the branch's fault and nothing is broken, so
-                # it must never finalize `failed`. Park where the remote state
-                # says to, and if the parking write is contended too, let it
-                # propagate: the row stays in_progress with its claim, which is
-                # exactly what a crash looks like and what orphan recovery
-                # already resolves. Better a recoverable orphan than a lie.
-                parked = finish_after_error(
-                    status=_contention_status(deploy_state), note=str(exc)
-                )
-                if parked.status == "queued":
-                    # Nothing ran to completion and nothing shipped, so there is
-                    # no outcome to grade. Re-raise so the caller reports the
-                    # retryable failure envelope instead of a graded run.
+                # This frame pushed and saw the refs land, so it can finalize
+                # honestly -- that is the pre-existing landed-push guard, not a
+                # new decision. Anything less certain writes NOTHING.
+                #
+                # Every status write here goes through the same contended
+                # database, and the ones that succeed destroy durable evidence:
+                # mark_job clears the pending-deploy marker on a requeue. An
+                # in-memory push_status is also not safe to grade from -- it can
+                # belong to a different frame (process_batch catching a nested
+                # process_one) or be optimistic (set before the marker write it
+                # describes), which parks landed pushes as `queued` and
+                # markerless rows as `needs_reconcile`.
+                #
+                # Leaving the row as the last successful write left it makes
+                # contention indistinguishable from a crash at the same instant.
+                # That is what store.recover_orphans exists for -- "a batch that
+                # raised after its lease was already released" -- and its
+                # marker-aware split decides queued vs needs_reconcile from
+                # DURABLE evidence rather than from what this frame believes. If
+                # the finalize below is contended too, it raises and lands on
+                # that same path.
+                if deploy_state.push_status != "succeeded":
                     raise
-                return parked
+                return finish_after_error(status="deployed", note=str(exc))
             except CommandFailed as exc:
                 return finish_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
@@ -2440,13 +2432,13 @@ class GitRunner:
             except AmbiguousPush as exc:
                 return finish_active_after_error(status="needs_reconcile", note=str(exc))
             except QueueBusy as exc:
-                # See process_one: contention parks, it never blames the branch.
-                parked = finish_active_after_error(
-                    status=_contention_status(deploy_state), note=str(exc)
-                )
-                if all(item.status == "queued" for item in parked):
+                # See process_one. This frame's own push is the only thing it may
+                # grade from: an isolated job's contention arrives here through
+                # _process_isolated_jobs, where this state describes the batch and
+                # not the job that actually pushed.
+                if deploy_state.push_status != "succeeded":
                     raise
-                return parked
+                return finish_active_after_error(status="deployed", note=str(exc))
             except CommandFailed as exc:
                 return finish_active_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:

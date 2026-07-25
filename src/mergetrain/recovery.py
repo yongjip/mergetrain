@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .config import MergetrainConfig
-from .errors import CancellationRequested, QueueError, RemoteUnreachable
+from .errors import CancellationRequested, QueueBusy, QueueError, RemoteUnreachable
 from .git_runner import (
     PENDING_REF_PREFIX,
     apply_gc,
@@ -258,6 +258,11 @@ def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDeci
                 conn, job.id, status="blocked",
                 note=f"reconcile conflict: {decision.reason}", expected_status="needs_reconcile",
             )
+    except QueueBusy:
+        # Contention is not "someone else won the race": nothing was written, so
+        # reporting this decision as applied would be a false success. Surface it
+        # as the retryable failure it is and let the caller run reconcile again.
+        raise
     except (QueueError, CancellationRequested):
         # The job was transitioned by a concurrent op after our read — do not
         # overwrite the newer state (a landed cancel must survive reconcile).

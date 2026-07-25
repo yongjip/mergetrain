@@ -9,12 +9,13 @@
   `failed`, the status that means *fix the branch and enqueue a fresh commit*.
   Nothing had crashed, no ref had moved, and the branch was fine. `immediate()`
   now translates contention into a typed, retryable `QueueBusy`
-  (`error.code: queue_busy`), and both runner ladders park on it by how far the
-  deploy got: back to `queued` when nothing was pushed, `needs_reconcile` when
-  the durable marker was written and the outcome is unknown, and the existing
-  `deployed` + warning when the refs already landed. If the parking write is
-  contended too it is left alone, so the row stays a recoverable orphan rather
-  than carrying a wrong terminal status.
+  (`error.code: queue_busy`), and the runner writes **nothing** on it unless its
+  own push is known to have landed — leaving the row exactly as the last durable
+  write left it, which is indistinguishable from a crash at the same instant and
+  is what `recover_orphans`' marker-aware split already resolves from durable
+  evidence. Contention also no longer reads as a toolchain-fingerprint failure in
+  the validated-gate reuse check, and `reconcile --apply` no longer reports an
+  unwritten decision as `applied: true`.
 
 - Stop inventing a verification failure when the run errored after a landed push.
   The post-push boundary set `verify_status: failed` unconditionally, so a repo

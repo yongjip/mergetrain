@@ -72,6 +72,7 @@ from mergetrain.store import (
     connect,
     enqueue_job,
     get_job,
+    record_pending_push,
     release_runner_lock,
 )
 
@@ -235,11 +236,9 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
     def test_prepush_writer_contention_leaves_the_remote_untouched(self) -> None:
         """Always-run half of the pre-push case: the fault lands, the remote does not.
 
-        This test owns the sentinel for the whole pre-push injection. Its sibling
-        below is @expectedFailure, which swallows every exception it sees, so the
-        sibling cannot detect that the fault injection stopped working — verified
-        by mutation: neuter _WriteLockHolder and the sibling still reports
-        'expected failure' while this test goes red on the note assertion.
+        This test owns the sentinel for the whole pre-push injection, so if the
+        injection ever stops working its sibling cannot silently pass on a plain
+        successful deploy.
         """
 
         with tempfile.TemporaryDirectory() as td:
@@ -248,17 +247,11 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
             final = outcome.job
 
             # SENTINEL: the contended write really raised, and the resulting
-            # sqlite3.OperationalError really reached process_batch's error
-            # boundary. Without this the pre-push pair could silently degrade
-            # into a plain successful deploy that asserts nothing.
-            self.assertIn(
-                LOCK_ERROR_TEXT,
-                final.note,
-                f"the injected write-lock contention never reached the error "
-                f"boundary (note={final.note!r}, status={final.status!r}); the "
-                "fault injection is broken, so the sibling expectedFailure case "
-                "is no longer testing anything",
-            )
+            # error really reached the runner. It has to be asserted on the
+            # RAISED error rather than on the job's note, because writing a note
+            # is exactly what the fix stops doing -- see the sibling below.
+            self.assertIsInstance(outcome.raised, QueueBusy)
+            self.assertIn(LOCK_ERROR_TEXT, str(outcome.raised))
 
             # Nothing was pushed: the contention hit before the write-ahead
             # marker, so the remote must be byte-for-byte where it started.
@@ -429,6 +422,129 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                 f"verify_status={final.verify_status!r} on a repo that configures "
                 "no verify hooks; a verification that never ran cannot have failed",
             )
+
+
+class ContentionNeverDestroysEvidenceTests(unittest.TestCase):
+    """The regressions an adversarial review found in the first version of this fix.
+
+    v1 parked the job on contention, choosing the status from the in-memory
+    ``_PushVerifyState``. Both halves of that were wrong, and both were caught
+    with real reproductions:
+
+    * The state can belong to a **different frame**. ``_process_isolated_jobs``
+      runs ``process_one`` inside ``process_batch``'s own try, so a nested job's
+      contention was graded against the batch's ``push_status`` -- ``not_run``
+      even when the nested job's refs had just landed -- and requeued it. The
+      requeue then ran ``mark_job``, which CLEARS ``pending_deploy_sha`` and the
+      deploy sha, so reconcile had nothing left to find and a retry re-ran the
+      verify hooks for an already-shipped commit.
+    * The state can be **optimistic**. ``push_status`` is set to ``pending``
+      before the marker write it describes, so contention on that very write
+      parked ``needs_reconcile`` with no marker -- a row that hard-blocks every
+      deploy entrypoint while ``reconcile --apply`` reports an unresolvable pin
+      that never existed.
+
+    The fix writes nothing unless this frame's own push is known to have landed,
+    so these assert on durable evidence surviving, not on a chosen status.
+    """
+
+    def test_contention_never_clears_a_durable_marker(self) -> None:
+        # If a marker was written, contention must leave it: it is the only
+        # record that lets reconcile ask the remote what happened.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                claimed = claim_deploy_batch(conn, owner=f"runner:{os.getpid()}")
+                # Stand in for "the marker write succeeded, a later write did
+                # not": record_pending_push is the only writer of the marker.
+                record_pending_push(
+                    conn,
+                    job_ids=[claimed[0].id],
+                    deploy_sha="a" * 40,
+                    claim_token=claimed[0].claim_token,
+                    remote="origin",
+                    push_refs=["main"],
+                )
+                before = get_job(conn, job.id)
+                self.assertEqual(before.pending_deploy_sha, "a" * 40)
+
+                holder = _WriteLockHolder(config.state.db)
+                real_mark_job = git_runner_module.mark_job
+
+                def wrapper(conn_arg, job_id, **kwargs):
+                    holder.start_holding()
+                    try:
+                        return real_mark_job(conn_arg, job_id, **kwargs)
+                    finally:
+                        holder.stop_holding()
+
+                with patch("mergetrain.git_runner.mark_job", wrapper):
+                    with self.assertRaises(QueueBusy):
+                        GitRunner(config).process_batch(
+                            conn, claimed, deploy=True, owner=f"runner:{os.getpid()}"
+                        )
+                holder.assert_clean()
+                after = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            # The evidence survives, and nothing terminal was written.
+            self.assertEqual(after.pending_deploy_sha, "a" * 40)
+            self.assertNotEqual(after.status, "failed")
+            self.assertNotIn(after.status, ("deployed", "canceled"))
+
+    def test_a_markerless_row_is_never_parked_needs_reconcile(self) -> None:
+        # needs_reconcile with no marker hard-blocks every deploy entrypoint and
+        # makes reconcile report an unresolvable pin that never existed. Only
+        # recover_orphans may make that call, and only from durable state.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outcome = self._run_marker_write_contended(root)
+            self.assertIsInstance(outcome[1], QueueBusy)
+            final = outcome[0]
+            self.assertNotEqual(
+                (final.status, final.pending_deploy_sha),
+                ("needs_reconcile", ""),
+                "parked needs_reconcile with no durable marker",
+            )
+            self.assertNotEqual(final.status, "failed")
+
+    def _run_marker_write_contended(self, root: Path):
+        """Contend the write-ahead marker itself (record_pending_push)."""
+
+        repo, _marker = make_demo_repo(root)
+        config = load_config(repo=repo)
+        conn = connect(config.state.db)
+        conn.execute(f"PRAGMA busy_timeout = {CONTENDED_BUSY_TIMEOUT_MS}")
+        raised: Exception | None = None
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            claimed = claim_deploy_batch(conn, owner=f"runner:{os.getpid()}")
+            holder = _WriteLockHolder(config.state.db)
+            real_record = git_runner_module.record_pending_push
+
+            def wrapper(*args, **kwargs):
+                holder.start_holding()
+                try:
+                    return real_record(*args, **kwargs)
+                finally:
+                    holder.stop_holding()
+
+            with patch("mergetrain.git_runner.record_pending_push", wrapper):
+                try:
+                    GitRunner(config).process_batch(
+                        conn, claimed, deploy=True, owner=f"runner:{os.getpid()}"
+                    )
+                except QueueBusy as exc:
+                    raised = exc
+            holder.assert_clean()
+            return get_job(conn, job.id), raised
+        finally:
+            conn.close()
 
 
 class ContentionContractTests(unittest.TestCase):
