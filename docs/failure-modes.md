@@ -114,10 +114,16 @@ Two consequences worth knowing:
   if the row carries a marker, run `reconcile`.
 - A row left `in_progress` with no runner lock is a stranded claim.
   `doctor` reports `next_action: recover_stranded_claim`; `mergetrain recover`
-  clears it. Until then the next deploy run requeues it automatically, which
-  also clears its validated-train identity — so a train that was approved by
-  `train_id` must be retried with that same `--train-id`, which fails closed
-  rather than silently shipping a different set.
+  clears it.
+
+  Recovering it **dissolves any validated-train identity it carried**, on
+  purpose: a requeued row asserting a validation it no longer holds would
+  collateral-block unrelated auto deploys. The consequence is that a bare
+  `run-batch --deploy` afterwards gates and ships whatever is queued *now* as a
+  new train — which may not be the set that was approved. Two things guard that:
+  the requeue writes the dissolution into the job's `note`, naming the train and
+  saying to validate and re-approve; and retrying with the original
+  `--train-id` fails closed rather than silently shipping a different set.
 
 ## Stale lock
 

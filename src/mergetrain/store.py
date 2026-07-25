@@ -910,11 +910,25 @@ def _requeue_orphans(conn: sqlite3.Connection) -> None:
         WHERE status = 'in_progress' AND pending_deploy_sha != ''
         """
     )
+    # Clearing the validated-train identity is deliberate (#160): a requeued row
+    # asserting a validation it no longer holds collateral-blocks unrelated auto
+    # deploys. But dissolving an APPROVED train silently is its own hazard -- the
+    # operator who retries a failed deploy gets whatever is queued now, gated
+    # together as a new train, which may not be the set they confirmed. The note
+    # is the one field that survives, so say it there. SQLite evaluates every SET
+    # expression against the pre-update row, so the CASE below still sees the
+    # train_id the later clause clears.
     conn.execute(
         """
         UPDATE deploy_queue
         SET status = 'queued', started_at = '', claim_token = '', cancel_requested_at = '',
-            note = 're-queued by mergetrain (previous runner gone)',
+            note = CASE
+                WHEN train_id != '' THEN
+                    're-queued by mergetrain (previous runner gone); validated train '
+                    || train_id
+                    || ' was dissolved - validate and re-approve before deploying'
+                ELSE 're-queued by mergetrain (previous runner gone)'
+            END,
             deploy_sha = '', push_status = 'not_run', verify_status = 'not_run',
             train_id = '', train_size = 0, validated_at = '',
             validation_base_sha = '', validation_sha = '', validated_head_sha = '',
