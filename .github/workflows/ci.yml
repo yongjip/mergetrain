@@ -50,6 +50,43 @@ jobs:
       - name: Mypy
         run: mypy
 
+  dashboard:
+    # The wheel ships the built dashboard from src/mergetrain/dashboard_dist, so
+    # that directory is a build artifact kept in the repository. Nothing used to
+    # verify it: dashboard/test never ran here, and a dist rebuilt from stale
+    # source (or not rebuilt at all) would ship silently. `npm ci` plus the
+    # pinned Node in dashboard/.nvmrc make the build reproducible, so a drifted
+    # dist shows up as a dirty tree.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: dashboard/.nvmrc
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Assert the packaged dashboard matches its source
+        working-directory: .
+        run: |
+          drift="$(git status --porcelain -- src/mergetrain/dashboard_dist)"
+          if [ -n "$drift" ]; then
+            echo "::error::src/mergetrain/dashboard_dist does not match dashboard/src."
+            echo "Run 'npm run build' in dashboard/ and commit the result."
+            printf '%s\n' "$drift"
+            git diff --stat -- src/mergetrain/dashboard_dist
+            exit 1
+          fi
+          echo "packaged dashboard is current"
+
   no-yaml:
     # The package ships zero runtime deps, so the built-in YAML fallback parser
     # is the DEFAULT install path. Every other leg installs .[dev] (which pins
