@@ -26,13 +26,11 @@ Two injection points, differing only in *when* the lock is held:
   the same ``OperationalError`` into an honest ``deployed`` + warning instead of
   claiming the code never shipped.
 
-One of the four tests is an ``@unittest.expectedFailure`` record of an open defect.
-That marker absorbs *every* exception in the test it decorates, so an
-expected-failing test can never be trusted to police its own fault injection: if
-the injection silently stopped working, the test would still report green. So
-each injection point also has an **always-run** test that owns the sentinel —
-``note`` must name the lock error — plus the safety invariants that do hold
-today. Break the injection and those go red. Keep new assertions on the side of
+Both defects this module recorded are now fixed, so nothing here is
+``@unittest.expectedFailure`` any more. The structure that caught them stays:
+each injection point has a test that owns the **sentinel** — ``note`` must name
+the lock error — so if the injection silently stopped working the pair goes red
+instead of reporting a vacuous green. Keep new assertions on the side of
 the always-run test wherever the product is already honest.
 
 The contention is injected deterministically — a holder thread takes the write
@@ -43,12 +41,15 @@ added is one ``busy_timeout`` per run.
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import sqlite3
 import sys
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import NamedTuple
 from unittest.mock import patch
@@ -60,9 +61,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_git_runner import git, make_demo_repo
 
+import mergetrain.cli as cli_module
 import mergetrain.git_runner as git_runner_module
+from mergetrain.cli import main
 from mergetrain.config import load_config
-from mergetrain.errors import LockHeld, LostLease
+from mergetrain.errors import LockHeld, LostLease, QueueBusy
 from mergetrain.git_runner import GitRunner
 from mergetrain.store import (
     claim_deploy_batch,
@@ -203,7 +206,7 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                     GitRunner(config).process_batch(
                         conn, claimed, deploy=True, owner=owner
                     )
-                except (LockHeld, LostLease) as exc:
+                except (LockHeld, LostLease, QueueBusy) as exc:
                     # Acceptable: a classified, retryable QueueError. The CLI
                     # maps these to error.code lock_held / lost_lease and the
                     # job stays claimable instead of being blamed.
@@ -284,30 +287,23 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                 "",
             )
 
-    # OPEN DEFECT (expectedFailure): pure pre-push writer contention is written
-    # as terminal 'failed'. src/mergetrain/git_runner.py:2386 — process_batch's
-    # `except Exception` boundary catches the sqlite3.OperationalError raised by
-    # the opening _mark_job(status='in_progress') (git_runner.py:1998) and calls
-    # finish_active_after_error(status='failed', note='unexpected error: database
-    # is locked'). sqlite3.OperationalError is not a MergetrainError, so it never
-    # reaches the `except MergetrainError` -> 'blocked' clause, and there is no
-    # clause that recognises lock contention as retryable at all. process_one has
-    # the identical boundary at git_runner.py:1564-1565.
+    # WAS AN OPEN DEFECT, fixed: pure pre-push writer contention used to be
+    # written as terminal 'failed'. sqlite3.OperationalError is not a
+    # MergetrainError, so it fell past every classified clause to
+    # process_batch's defensive `except Exception` and was retired with
+    # note='unexpected error: database is locked'. 'failed' is the queue's "the
+    # branch is at fault, rebase and re-enqueue" signal (see PushRejected's
+    # docstring, which parks 'blocked' precisely to avoid this confusion), so an
+    # agent was sent to rewrite innocent code over a second process holding the
+    # write lock past busy_timeout.
     #
-    # Why it matters: 'failed' is the queue's "the branch is at fault, rebase and
-    # re-enqueue" signal (see PushRejected's docstring in errors.py, which parks
-    # 'blocked' precisely to avoid this confusion). Here nothing crashed, no ref
-    # was touched, and the branch is fine — a second process just held the write
-    # lock for longer than busy_timeout. The job is retired terminally (store.py
-    # :1601 stamps finished_at and the claim token is cleared) and an agent is
-    # sent to rewrite innocent code.
-    #
-    # Do not "fix" this by weakening the assertion. The fix belongs in src/:
-    # classify sqlite3.OperationalError('database is locked') as a retryable
-    # QueueError (LockHeld) before the defensive boundary sees it. When that
-    # lands, this test starts passing, unittest reports an unexpected success
-    # (which fails the run), and the marker should be deleted — not re-added.
-    @unittest.expectedFailure
+    # store.immediate() now translates contention into QueueBusy, a retryable
+    # QueueError, and both runner ladders park on it instead of blaming the
+    # branch: 'deployed' when the refs already landed, 'needs_reconcile' when the
+    # durable marker was written and the outcome is unknown, otherwise back to
+    # 'queued'. Contention on the opening mark_job -- before the runner's own
+    # ladder exists -- surfaces the retryable error to the caller with the row
+    # untouched, which is what this case exercises.
     def test_prepush_writer_contention_is_not_the_branch_fault(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -432,6 +428,81 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                 ("not_configured", "unknown"),
                 f"verify_status={final.verify_status!r} on a repo that configures "
                 "no verify hooks; a verification that never ran cannot have failed",
+            )
+
+
+class ContentionContractTests(unittest.TestCase):
+    """What an agent driving the CLI sees when the queue database is contended.
+
+    The fingerprint gate nulls every value, so the error.code string and the
+    retryable flag an agent branches on live outside it. Pin them here, because
+    this is the whole point of the fix: "retry me" must be distinguishable from
+    "your branch is broken".
+    """
+
+    def test_cli_reports_contention_as_a_retryable_queue_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            remote_before = git(root / "remote.git", "rev-parse", "main")
+            conn = connect(config.state.db)
+            try:
+                enqueue_job(conn, task="a", branch="feature/a")
+            finally:
+                conn.close()
+
+            holder = _WriteLockHolder(config.state.db)
+            real_mark_job = git_runner_module.mark_job
+            contended = {"done": False}
+
+            def wrapper(conn_arg, job_id, **kwargs):
+                if not contended["done"]:
+                    contended["done"] = True
+                    holder.start_holding()
+                    try:
+                        return real_mark_job(conn_arg, job_id, **kwargs)
+                    finally:
+                        holder.stop_holding()
+                return real_mark_job(conn_arg, job_id, **kwargs)
+
+            real_connect = cli_module.connect
+
+            def fast_connect(*args, **kwargs):
+                # Only shortens the wait; the defect is how the resulting error is
+                # classified, not how long SQLite blocks first.
+                opened = real_connect(*args, **kwargs)
+                opened.execute(f"PRAGMA busy_timeout = {CONTENDED_BUSY_TIMEOUT_MS}")
+                return opened
+
+            out = io.StringIO()
+            with (
+                patch("mergetrain.git_runner.mark_job", wrapper),
+                patch.object(cli_module, "connect", fast_connect),
+                redirect_stdout(out),
+            ):
+                code = main(["--repo", str(repo), "run-batch", "--deploy", "--json"])
+            holder.assert_clean()
+
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 1)
+            self.assertFalse(payload["ok"])
+            # queue_busy, not queue_error, and never a graded 'failed' run: the
+            # code says "the database was busy", retryable says "call again".
+            self.assertEqual(payload["error"]["code"], "queue_busy")
+            self.assertTrue(payload["error"]["retryable"])
+            self.assertIn("busy", payload["error"]["message"])
+
+            # And the branch is not blamed: nothing shipped, nothing is terminal.
+            conn = connect(config.state.db)
+            try:
+                final = get_job(conn, 1)
+            finally:
+                conn.close()
+            self.assertNotEqual(final.status, "failed")
+            self.assertEqual(final.push_status, "not_run")
+            self.assertEqual(
+                git(root / "remote.git", "rev-parse", "main"), remote_before
             )
 
 

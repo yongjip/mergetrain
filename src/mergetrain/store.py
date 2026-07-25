@@ -18,6 +18,7 @@ from .errors import (
     DuplicateActiveBranch,
     LockHeld,
     LostLease,
+    QueueBusy,
     QueueError,
 )
 from .models import (
@@ -59,16 +60,46 @@ def _plus_minutes(minutes: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _busy(exc: sqlite3.OperationalError) -> bool:
+    text = str(exc).lower()
+    return "database is locked" in text or "database is busy" in text
+
+
 @contextmanager
 def immediate(conn: sqlite3.Connection) -> Iterator[None]:
-    conn.execute("BEGIN IMMEDIATE")
+    """Open the one write transaction every queue mutation goes through.
+
+    Contention is translated here rather than at each call site: a raw
+    ``sqlite3.OperationalError`` is not a ``MergetrainError``, so it used to
+    reach the runner's defensive boundary and finalize the job ``failed`` -- the
+    status that means the branch is at fault. ``QueueBusy`` is retryable and
+    typed, so every caller can tell "the database was busy" from "this work is
+    broken".
+    """
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as exc:
+        if _busy(exc):
+            raise QueueBusy(
+                f"queue database is busy; another process held the write lock: {exc}"
+            ) from exc
+        raise
     try:
         yield
     except Exception:
         conn.rollback()
         raise
     else:
-        conn.commit()
+        try:
+            conn.commit()
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            if _busy(exc):
+                raise QueueBusy(
+                    f"queue database is busy; the commit could not complete: {exc}"
+                ) from exc
+            raise
 
 
 def _self_ignore(state_dir: Path, *, db_name: str, dedicated: bool) -> None:

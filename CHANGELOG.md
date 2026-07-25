@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Stop reporting queue-database contention as the branch's fault (#191). SQLite
+  allows one writer, so a process holding the write lock past `busy_timeout`
+  made a queue write raise `sqlite3.OperationalError` — not a `MergetrainError`,
+  so it fell to the runner's defensive boundary and retired the job terminal
+  `failed`, the status that means *fix the branch and enqueue a fresh commit*.
+  Nothing had crashed, no ref had moved, and the branch was fine. `immediate()`
+  now translates contention into a typed, retryable `QueueBusy`
+  (`error.code: queue_busy`), and both runner ladders park on it by how far the
+  deploy got: back to `queued` when nothing was pushed, `needs_reconcile` when
+  the durable marker was written and the outcome is unknown, and the existing
+  `deployed` + warning when the refs already landed. If the parking write is
+  contended too it is left alone, so the row stays a recoverable orphan rather
+  than carrying a wrong terminal status.
+
 - Stop inventing a verification failure when the run errored after a landed push.
   The post-push boundary set `verify_status: failed` unconditionally, so a repo
   configured with no verify hooks — whose state was `not_configured` — reported a

@@ -2097,7 +2097,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         error_payload = _error_payload(
             code,
             str(exc),
-            retryable=type(exc).__name__ in {"LockHeld", "LostLease"},
+            retryable=type(exc).__name__ in {"LockHeld", "LostLease", "QueueBusy"},
         )
         if getattr(args, "json", False):
             dump_json(error_payload)

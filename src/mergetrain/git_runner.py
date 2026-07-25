@@ -27,6 +27,7 @@ from .errors import (
     MergeBlocked,
     MergetrainError,
     PushRejected,
+    QueueBusy,
     redact_secrets,
 )
 from .models import Job
@@ -56,6 +57,28 @@ class _PushVerifyState:
     push_status: str = "not_run"
     verify_status: str = "not_run"
     warning: str = ""
+
+
+def _contention_status(state: _PushVerifyState) -> str:
+    """Where a job belongs when a queue write was contended mid-run.
+
+    Keyed on how far the deploy got, because that decides what is knowable:
+
+    * ``succeeded`` -- the refs are on the remote. ``finish_after_error`` already
+      overrides this to ``deployed`` with a warning, so the value here is moot;
+      it is spelled out so a reader does not have to prove that by inspection.
+    * ``pending`` -- the durable marker was written and the push outcome is
+      unknown, the same position an ambiguous push leaves: ``needs_reconcile``,
+      so the remote decides.
+    * anything else -- nothing was pushed. Back to ``queued``: the work is intact
+      and the next run picks it up without an operator.
+    """
+
+    if state.push_status == "succeeded":
+        return "deployed"
+    if state.push_status == "pending":
+        return "needs_reconcile"
+    return "queued"
 
 
 def _post_push_verify_status(state: _PushVerifyState) -> str:
@@ -1578,6 +1601,22 @@ class GitRunner:
                 return finish_after_error(status="blocked", note=str(exc))
             except AmbiguousPush as exc:
                 return finish_after_error(status="needs_reconcile", note=str(exc))
+            except QueueBusy as exc:
+                # Contention is not the branch's fault and nothing is broken, so
+                # it must never finalize `failed`. Park where the remote state
+                # says to, and if the parking write is contended too, let it
+                # propagate: the row stays in_progress with its claim, which is
+                # exactly what a crash looks like and what orphan recovery
+                # already resolves. Better a recoverable orphan than a lie.
+                parked = finish_after_error(
+                    status=_contention_status(deploy_state), note=str(exc)
+                )
+                if parked.status == "queued":
+                    # Nothing ran to completion and nothing shipped, so there is
+                    # no outcome to grade. Re-raise so the caller reports the
+                    # retryable failure envelope instead of a graded run.
+                    raise
+                return parked
             except CommandFailed as exc:
                 return finish_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
@@ -2400,6 +2439,14 @@ class GitRunner:
                 return cancel_active_jobs()
             except AmbiguousPush as exc:
                 return finish_active_after_error(status="needs_reconcile", note=str(exc))
+            except QueueBusy as exc:
+                # See process_one: contention parks, it never blames the branch.
+                parked = finish_active_after_error(
+                    status=_contention_status(deploy_state), note=str(exc)
+                )
+                if all(item.status == "queued" for item in parked):
+                    raise
+                return parked
             except CommandFailed as exc:
                 return finish_active_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:

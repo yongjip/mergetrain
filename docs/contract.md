@@ -73,6 +73,7 @@ listed here as an unexpected failure and fall back to `message`.
 | `queue_error` | no | a queue or lock precondition failed (nothing to run, bad job id, terminal job) |
 | `duplicate_active_branch` | no | that branch already has a non-terminal job queued |
 | `lock_held` | **yes** | another runner owns the queue lock; retry after it finishes |
+| `queue_busy` | **yes** | the queue database refused a writer because another process held it past `busy_timeout`. Nothing was pushed and no work is lost — the job stays claimable (or parks `needs_reconcile` if the push outcome was already unknown). Retry |
 | `lost_lease` | **yes** | this runner no longer owns the lease it was given; re-read state and retry |
 | `merge_blocked` | no | the branch cannot be merged into the integration train |
 | `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |
@@ -90,8 +91,8 @@ intervention. Everything else needs a decision — read `message` and, when
 present, `next_action`.
 
 `retryable` comes from two rules, which is worth knowing because they can
-disagree for the same class: the generic handler marks `LockHeld` and
-`LostLease` retryable, while the recovery commands (`reconcile`, `recover`,
+disagree for the same class: the generic handler marks `LockHeld`, `LostLease`
+and `QueueBusy` retryable, while the recovery commands (`reconcile`, `recover`,
 `unlock`) mark their exit-code 3 and 7 failures retryable — which is why
 `lock_held` and `remote_unreachable` are retryable there. A consumer should read
 the flag rather than infer it from the code.

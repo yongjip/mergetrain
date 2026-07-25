@@ -86,6 +86,17 @@ class LockHeld(QueueError):
     """Raised when another runner owns the queue lock."""
 
 
+class QueueBusy(QueueError):
+    """Raised when a queue write could not start because SQLite is contended.
+
+    Distinct from ``LockHeld``, which is mergetrain's own runner lock: this is
+    the database refusing a writer because another process held it past
+    ``busy_timeout``. Nothing is wrong with the branch, nothing was pushed, and
+    the same call is expected to succeed later -- so it must never be reported
+    as ``failed``, which tells an agent to rebase and enqueue a fresh commit.
+    """
+
+
 class LostLease(QueueError):
     """Raised when a runner no longer owns the lease it was given."""
 

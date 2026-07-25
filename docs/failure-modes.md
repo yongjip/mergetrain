@@ -81,6 +81,28 @@ being rewritten as a pre-push failure. Run JSON returns `result=warning` and
 `ok=true`, human output names both outcomes, the final completion event remains
 a warning, and the dashboard keeps the job in its Attention history.
 
+## Queue database contention
+
+SQLite allows one writer at a time. If another process holds the write lock past
+`busy_timeout` (5s), a queue write raises `error.code: queue_busy`,
+`retryable: true` — never `failed`. `failed` means *the branch is at fault, fix it
+and enqueue a fresh commit*, and contention says nothing about the branch: no ref
+moved and no work was lost.
+
+Where the job lands depends only on how far the deploy got, because that is what
+is knowable:
+
+| When contention hit | Job | Why |
+|---|---|---|
+| before the push | back to `queued`, claim released | nothing was touched; the next run picks it up with no operator |
+| after the durable marker, push outcome unknown | `needs_reconcile` | same position an ambiguous push leaves — the remote decides |
+| after the refs landed | `deployed` with a warning in the note | the code shipped; saying otherwise would be the one lie this tool forbids |
+
+If the parking write is contended too, nothing is written and the row stays
+`in_progress` with its claim — indistinguishable from a crash, which
+[orphan recovery](#orphan-in_progress) already resolves. A recoverable orphan is
+better than a wrong terminal status.
+
 ## Stale lock
 
 The runner lock records an owner, unique token, and lease expiry. Claimed jobs
