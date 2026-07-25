@@ -38,12 +38,16 @@ class DemoAssetTests(unittest.TestCase):
             self.repo / ".github" / "workflows" / "demo-gif.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read", workflow)
-        self.assertIn(
-            "charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3",
-            workflow,
-        )
-        self.assertIn("version: v0.11.0", workflow)
-        self.assertIn("path: docs/demo.tape", workflow)
+        # The recorder's dependencies are installed by pinned version and
+        # verified by checksum, so a moved release cannot change the render.
+        self.assertIn('VHS_VERSION: "0.11.0"', workflow)
+        self.assertIn('TTYD_VERSION: "1.7.7"', workflow)
+        for variable in ("VHS_SHA256", "TTYD_SHA256"):
+            self.assertRegex(workflow, rf'{variable}: "[0-9a-f]{{64}}"')
+        self.assertIn("sha256sum --check --strict", workflow)
+        # The tape names JetBrains Mono; a fallback face would be silent.
+        self.assertIn("fonts-jetbrains-mono", workflow)
+        self.assertIn("vhs docs/demo.tape", workflow)
         self.assertIn("uses: actions/upload-artifact@v7", workflow)
 
     def test_readme_embeds_the_generated_gif(self) -> None:
