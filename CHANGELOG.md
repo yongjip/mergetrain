@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Settle key names on the payloads that ship for the first time in this release,
+  while they are still free to change: `retry` returns `dismissed_job` (singular,
+  an object) so it no longer collides with `dismiss`'s `dismissed` array;
+  `history` gate rows report `duration_seconds` like every other finished
+  duration, instead of `elapsed_seconds`, which elsewhere means a still-climbing
+  counter; `stats` reports flat `median_duration_seconds` and
+  `p95_duration_seconds` rather than nesting them under a `duration_seconds`
+  object that is a float in `history`; per-gate `states` becomes `state_counts`
+  like every other counter map; and `trains.completed` becomes
+  `trains.finished`, because it counts deployed + blocked + failed while
+  `completed` is configured human vocabulary for the success end state alone —
+  and it is `land_rate`'s denominator, so reading it as "shipped" inverted the
+  metric.
+
 - Stop reporting a possibly-landed push as `failed`. A non-rejection push
   failure parks the job `needs_reconcile` precisely because the remote may have
   accepted the atomic update, but `push_status` was overwritten with `failed`

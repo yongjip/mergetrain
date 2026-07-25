@@ -160,7 +160,9 @@ mergetrain retry 12 --rebase
 
 The replacement inherits the original task, note, worktree, branch, and `--auto`
 eligibility, and always captures fresh integration/base and branch/head SHAs.
-Dismissal and insertion are one SQLite transaction. With `--rebase`, Git fetch
+Dismissal and insertion are one SQLite transaction. `--json` returns the new
+`job` plus the `dismissed_job` it replaced — singular and an object, unlike
+`dismiss`, whose `dismissed` is an array. With `--rebase`, Git fetch
 and rebase run first; any fetch error or rebase conflict leaves the old queue row
 untouched. The worktree must be clean and checked out on the job's branch.
 
@@ -236,9 +238,10 @@ mergetrain history --since 2026-07-01T00:00:00Z
 ```
 
 Jobs sharing a non-empty `train_id` remain one complete item even at the limit;
-legacy/single jobs use `job:<id>`. Each item includes status, queue wait,
-duration, structured outcome, member jobs, and retained gate runs. `--since`
-accepts ISO-8601 timestamps and is inclusive.
+legacy/single jobs use `job:<id>`. Each item includes status, queue wait
+(`queue_seconds`), `duration_seconds`, structured outcome, member jobs, and
+retained gate runs — each gate row carrying its own `duration_seconds`.
+`--since` accepts ISO-8601 timestamps and is inclusive.
 
 ## `stats`
 
@@ -248,8 +251,13 @@ Aggregate the same read-only history:
 mergetrain stats --since 2026-07-01T00:00:00Z --json
 ```
 
-The payload reports landed/blocked/failed trains, land rate, median and p95
-train duration, average queue wait, and per-gate run states and timing. Queue
+The payload reports `trains{total,landed,blocked,failed,finished,land_rate}`,
+`median_duration_seconds` and `p95_duration_seconds`, `average_queue_seconds`,
+and per-gate `state_counts` with `median_seconds`/`p95_seconds`. `finished`
+counts deployed + blocked + failed — every train that reached an end state,
+excluding canceled and still-open ones — and is the denominator of `land_rate`;
+it is deliberately not called `completed`, which is configured human vocabulary
+for the success end state alone. Queue
 rows are not automatically pruned, so their history is unbounded. Gate timing
 is explicitly marked as covering the latest 5,000 retained runner events; it
 never pretends an older truncated event tail is complete.

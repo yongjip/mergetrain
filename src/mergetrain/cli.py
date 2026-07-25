@@ -446,7 +446,7 @@ def cmd_retry(args: argparse.Namespace) -> int:
         conn.close()
     payload = {
         "ok": True,
-        "dismissed": dismissed.to_dict(),
+        "dismissed_job": dismissed.to_dict(),
         "job": replacement.to_dict(),
         "next_action": next_action,
     }

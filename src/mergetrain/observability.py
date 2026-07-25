@@ -102,7 +102,7 @@ def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
                         "state": "failed",
                         "started_at": prior.created_at,
                         "finished_at": event.created_at,
-                        "elapsed_seconds": elapsed_seconds(
+                        "duration_seconds": elapsed_seconds(
                             prior.created_at, event.created_at
                         ),
                     }
@@ -119,7 +119,7 @@ def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
                 "state": "reused" if event.state == "reused" else event.state,
                 "started_at": started.created_at if started else "",
                 "finished_at": event.created_at,
-                "elapsed_seconds": (
+                "duration_seconds": (
                     elapsed_seconds(started.created_at, event.created_at)
                     if started
                     else None
@@ -141,7 +141,7 @@ def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
                 "state": "failed" if failed else "incomplete",
                 "started_at": started.created_at,
                 "finished_at": terminal.created_at if failed and terminal else "",
-                "elapsed_seconds": (
+                "duration_seconds": (
                     elapsed_seconds(started.created_at, terminal.created_at)
                     if failed and terminal
                     else None
@@ -272,7 +272,7 @@ def stats_payload(
     landed = sum(item["status"] == "deployed" for item in items)
     blocked = sum(item["status"] == "blocked" for item in items)
     failed = sum(item["status"] == "failed" for item in items)
-    completed = landed + blocked + failed
+    finished = landed + blocked + failed
     durations = [
         float(item["duration_seconds"])
         for item in items
@@ -291,16 +291,16 @@ def stats_payload(
     for name in sorted(gate_groups):
         runs = gate_groups[name]
         elapsed = [
-            float(run["elapsed_seconds"])
+            float(run["duration_seconds"])
             for run in runs
-            if run["elapsed_seconds"] is not None
+            if run["duration_seconds"] is not None
         ]
         states = Counter(str(run["state"]) for run in runs)
         per_gate.append(
             {
                 "name": name,
                 "runs": len(runs),
-                "states": dict(sorted(states.items())),
+                "state_counts": dict(sorted(states.items())),
                 "median_seconds": round(median(elapsed), 3) if elapsed else None,
                 "p95_seconds": _percentile(elapsed, 0.95),
             }
@@ -313,14 +313,19 @@ def stats_payload(
             "landed": landed,
             "blocked": blocked,
             "failed": failed,
-            "completed": completed,
-            "land_rate": round(landed / completed, 4) if completed else None,
+            # `finished`, not `completed`: `completed` is configured human
+            # vocabulary for the SUCCESS end state (terminology.completed), while
+            # this counts deployed + blocked + failed. It is land_rate's
+            # denominator, so reading it as "shipped" inverts the metric.
+            "finished": finished,
+            "land_rate": round(landed / finished, 4) if finished else None,
         },
         "jobs": {"total": len(jobs)},
-        "duration_seconds": {
-            "median": round(median(durations), 3) if durations else None,
-            "p95": _percentile(durations, 0.95),
-        },
+        # Flat and unit-suffixed like every neighbour (average_queue_seconds,
+        # gates[].median_seconds); history's duration_seconds is a float, and the
+        # same name must not be an object here.
+        "median_duration_seconds": round(median(durations), 3) if durations else None,
+        "p95_duration_seconds": _percentile(durations, 0.95),
         "average_queue_seconds": round(mean(queue_times), 3) if queue_times else None,
         "gates": per_gate,
         "coverage": {

@@ -379,7 +379,7 @@
           "finished_at": null,
           "gates": {
             "[]": {
-              "elapsed_seconds": null,
+              "duration_seconds": null,
               "finished_at": null,
               "index": null,
               "name": null,
@@ -723,7 +723,7 @@
     },
     "retry": {
       "contract_version": null,
-      "dismissed": {
+      "dismissed_job": {
         "auto_deploy": null,
         "base_sha": null,
         "branch": null,
@@ -875,17 +875,13 @@
         "gate_events": null,
         "queue_history": null
       },
-      "duration_seconds": {
-        "median": null,
-        "p95": null
-      },
       "gates": {
         "[]": {
           "median_seconds": null,
           "name": null,
           "p95_seconds": null,
           "runs": null,
-          "states": {
+          "state_counts": {
             "success": null
           }
         }
@@ -893,12 +889,14 @@
       "jobs": {
         "total": null
       },
+      "median_duration_seconds": null,
       "ok": null,
+      "p95_duration_seconds": null,
       "since": null,
       "trains": {
         "blocked": null,
-        "completed": null,
         "failed": null,
+        "finished": null,
         "land_rate": null,
         "landed": null,
         "total": null
