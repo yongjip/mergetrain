@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Name a stranded claim in `next_action`. A job left `in_progress` while no
+  runner holds the lock — a crashed runner, or a run that raised after releasing
+  its lease — read as an idle queue: `doctor` said `enqueue_clean_branch`, the
+  read agents are told to trust. The new `recover_stranded_claim` points at
+  `mergetrain recover`, which matters because the next deploy otherwise requeues
+  the row automatically and clears its validated-train identity, so a train
+  approved by `train_id` can become a different set (retrying with that
+  `--train-id` fails closed instead). Additive: a new `next_action` value.
+
+- Stop reporting queue-database contention as the branch's fault (#191). SQLite
+  allows one writer, so a process holding the write lock past `busy_timeout`
+  made a queue write raise `sqlite3.OperationalError` — not a `MergetrainError`,
+  so it fell to the runner's defensive boundary and retired the job terminal
+  `failed`, the status that means *fix the branch and enqueue a fresh commit*.
+  Nothing had crashed, no ref had moved, and the branch was fine. `immediate()`
+  now translates contention into a typed, retryable `QueueBusy`
+  (`error.code: queue_busy`), and the runner writes **nothing** on it unless its
+  own push is known to have landed — leaving the row exactly as the last durable
+  write left it, which is indistinguishable from a crash at the same instant and
+  is what `recover_orphans`' marker-aware split already resolves from durable
+  evidence. Contention also no longer reads as a toolchain-fingerprint failure in
+  the validated-gate reuse check, and `reconcile --apply` no longer reports an
+  unwritten decision as `applied: true`.
+
 - Stop inventing a verification failure when the run errored after a landed push.
   The post-push boundary set `verify_status: failed` unconditionally, so a repo
   configured with no verify hooks — whose state was `not_configured` — reported a

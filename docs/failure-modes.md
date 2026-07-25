@@ -81,6 +81,44 @@ being rewritten as a pre-push failure. Run JSON returns `result=warning` and
 `ok=true`, human output names both outcomes, the final completion event remains
 a warning, and the dashboard keeps the job in its Attention history.
 
+## Queue database contention
+
+SQLite allows one writer at a time. If another process holds the write lock past
+`busy_timeout` (5s), a queue write raises `error.code: queue_busy`,
+`retryable: true` — never `failed`. `failed` means *the branch is at fault, fix it
+and enqueue a fresh commit*, and contention says nothing about the branch.
+
+The runner then writes **nothing**, with one exception: if it pushed and saw the
+refs land, it still finalizes `deployed` (with the contention recorded as a
+warning), because that is the one thing it knows for certain.
+
+Everything else is left exactly as the last durable write left it, which is
+indistinguishable from a crash at the same instant — deliberately, because that
+is a state the recovery machinery already understands. What the row looks like
+depends only on how far the deploy got before the contention:
+
+| Contention hit | Row is left | `recover` / the next claim resolves it to |
+|---|---|---|
+| before the write-ahead marker | `in_progress`, no marker, remote untouched | `queued` |
+| after the marker, push outcome unknown | `in_progress` with its marker and pin ref | `needs_reconcile`, then the remote decides |
+| after the refs landed | finalized `deployed` with a warning | nothing to do |
+
+The split is made by `store.recover_orphans` from **durable evidence** (is there
+a marker?), never from what the failing run believed — an in-memory push status
+can belong to a different frame, or describe a marker write that never committed.
+
+Two consequences worth knowing:
+
+- `queue_busy` does **not** mean "nothing was pushed". It means "a queue write
+  did not happen". The refs may well be on the remote; read `status --json` and,
+  if the row carries a marker, run `reconcile`.
+- A row left `in_progress` with no runner lock is a stranded claim.
+  `doctor` reports `next_action: recover_stranded_claim`; `mergetrain recover`
+  clears it. Until then the next deploy run requeues it automatically, which
+  also clears its validated-train identity — so a train that was approved by
+  `train_id` must be retried with that same `--train-id`, which fails closed
+  rather than silently shipping a different set.
+
 ## Stale lock
 
 The runner lock records an owner, unique token, and lease expiry. Claimed jobs

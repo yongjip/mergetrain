@@ -27,6 +27,7 @@ from .errors import (
     MergeBlocked,
     MergetrainError,
     PushRejected,
+    QueueBusy,
     redact_secrets,
 )
 from .models import Job
@@ -905,6 +906,11 @@ class GitRunner:
                     current_environment_sha = self._environment_fingerprint(
                         worktree=worktree, log=log, pulse=pulse
                     )
+                except QueueBusy:
+                    # Queue contention says nothing about the toolchain. Absorbed
+                    # here it would report a fingerprint mismatch and silently
+                    # re-run gates that were legitimately reusable.
+                    raise
                 except (CommandFailed, MergetrainError):
                     reasons.append(
                         "required environment fingerprint could not be reproduced"
@@ -1578,6 +1584,31 @@ class GitRunner:
                 return finish_after_error(status="blocked", note=str(exc))
             except AmbiguousPush as exc:
                 return finish_after_error(status="needs_reconcile", note=str(exc))
+            except QueueBusy as exc:
+                # This frame pushed and saw the refs land, so it can finalize
+                # honestly -- that is the pre-existing landed-push guard, not a
+                # new decision. Anything less certain writes NOTHING.
+                #
+                # Every status write here goes through the same contended
+                # database, and the ones that succeed destroy durable evidence:
+                # mark_job clears the pending-deploy marker on a requeue. An
+                # in-memory push_status is also not safe to grade from -- it can
+                # belong to a different frame (process_batch catching a nested
+                # process_one) or be optimistic (set before the marker write it
+                # describes), which parks landed pushes as `queued` and
+                # markerless rows as `needs_reconcile`.
+                #
+                # Leaving the row as the last successful write left it makes
+                # contention indistinguishable from a crash at the same instant.
+                # That is what store.recover_orphans exists for -- "a batch that
+                # raised after its lease was already released" -- and its
+                # marker-aware split decides queued vs needs_reconcile from
+                # DURABLE evidence rather than from what this frame believes. If
+                # the finalize below is contended too, it raises and lands on
+                # that same path.
+                if deploy_state.push_status != "succeeded":
+                    raise
+                return finish_after_error(status="deployed", note=str(exc))
             except CommandFailed as exc:
                 return finish_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
@@ -2400,6 +2431,14 @@ class GitRunner:
                 return cancel_active_jobs()
             except AmbiguousPush as exc:
                 return finish_active_after_error(status="needs_reconcile", note=str(exc))
+            except QueueBusy as exc:
+                # See process_one. This frame's own push is the only thing it may
+                # grade from: an isolated job's contention arrives here through
+                # _process_isolated_jobs, where this state describes the batch and
+                # not the job that actually pushed.
+                if deploy_state.push_status != "succeeded":
+                    raise
+                return finish_active_after_error(status="deployed", note=str(exc))
             except CommandFailed as exc:
                 return finish_active_after_error(status="failed", note=str(exc))
             except MergetrainError as exc:
