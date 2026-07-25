@@ -26,7 +26,7 @@ Two injection points, differing only in *when* the lock is held:
   the same ``OperationalError`` into an honest ``deployed`` + warning instead of
   claiming the code never shipped.
 
-Two of the four tests are ``@unittest.expectedFailure`` records of open defects.
+One of the four tests is an ``@unittest.expectedFailure`` record of an open defect.
 That marker absorbs *every* exception in the test it decorates, so an
 expected-failing test can never be trusted to police its own fault injection: if
 the injection silently stopped working, the test would still report green. So
@@ -398,7 +398,7 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                 self.assertEqual(final.push_status, "pending")
                 self.assertTrue(final.pending_deploy_sha)
 
-    # OPEN DEFECT (expectedFailure): the post-push guard overwrites verify_status
+    # WAS AN OPEN DEFECT, fixed: the post-push guard overwrote verify_status
     # with 'failed' unconditionally — src/mergetrain/git_runner.py:1967 (and the
     # identical line in process_one, git_runner.py:1389) set
     # post_push_verify_status = 'failed' without regard for what the push path
@@ -417,8 +417,10 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
     # honest here; 'failed' is not.
     #
     # The overall outcome stays honest (deployed + a visible warning), which is
-    # why the test above passes — this is the narrower lie inside it.
-    @unittest.expectedFailure
+    # why the test above passes — this was the narrower lie inside it, now fixed
+    # by _post_push_verify_status (git_runner.py): not_configured and succeeded
+    # are preserved, and anything indeterminate becomes 'unknown', the value
+    # doctor turns into next_action verify_reconciled_deploy.
     def test_postpush_contention_does_not_invent_a_failed_verification(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
