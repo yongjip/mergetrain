@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Add a local fault-injection matrix (`tests/test_fault_*.py`) covering the
+  failures that decide whether the queue tells the truth about what shipped: a
+  real `git push --atomic` SIGKILLed with the refs applied and without, a push
+  that outlives `command_timeout_seconds`, a remote tip moved on top of a landed
+  deploy, `unlock --force` stealing the lease between a landed push and its
+  terminal write, and SQLite writer contention across both status writes. Every
+  existing test of this family faked the push by patching `push_verified_head`,
+  so git's real exit code, its real stderr, and the rejection classifier's
+  behavior on that stderr were never exercised. `pytest-xdist` is a dev
+  dependency and CI runs `-n auto`: the whole suite, fault cases included, takes
+  ~30s instead of ~160s, which is what makes injecting these on every push
+  affordable.
+
 - Settle key names on the payloads that ship for the first time in this release,
   while they are still free to change: `retry` returns `dismissed_job` (singular,
   an object) so it no longer collides with `dismiss`'s `dismissed` array;

@@ -68,6 +68,33 @@ The suite covers the behaviors that make the queue safe:
 
 When adding behavior, add or extend the matching `tests/test_*.py` module.
 
+### The fault matrix
+
+`tests/test_fault_*.py` inject the failures that decide whether mergetrain tells
+the truth about what shipped, against real git and a real bare remote:
+
+| File | Injects |
+| --- | --- |
+| `test_fault_push_kill.py` | a real `git push --atomic` SIGKILLed mid-flight, once with the refs applied (`post-receive` hook) and once not (`pre-receive`), as one decision table |
+| `test_fault_push_timeout.py` | a push exceeding `command_timeout_seconds`, both hook variants — the likeliest real ambiguous push, and the one that also runs on Windows |
+| `test_fault_reconcile_ancestry.py` | a remote tip that moved *on top of* a landed deploy, plus the absent and diverged shapes |
+| `test_fault_lock_steal.py` | `unlock --force` stealing the lease between a landed push and its `deployed` write |
+| `test_fault_db_contention.py` | a SQLite writer held past `busy_timeout` across the pre-push and post-push status writes |
+
+Two of these tests are `@unittest.expectedFailure`, each with a comment naming an
+open defect and the file:line that causes it. That is deliberate: a recorded
+defect that keeps the suite green is better than a deleted case.
+
+Run the suite in parallel — every case builds its own repo and bare remote, so the
+work is I/O-bound on git and parallelism is nearly free:
+
+```sh
+python -m pytest -q -n auto
+```
+
+That is ~30s wall time versus ~160s serial on a 10-core machine, which is what
+makes fault injection cheap enough to run on every push. CI uses `-n auto`.
+
 ## Dashboard authoring
 
 The published wheel does not need Node at runtime; it serves committed assets
