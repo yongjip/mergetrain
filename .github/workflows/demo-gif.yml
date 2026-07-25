@@ -27,6 +27,13 @@ jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Refresh both checksums from the release's own published list when
+      # bumping a version: vhs ships checksums.txt, ttyd ships SHA256SUMS.
+      VHS_VERSION: "0.11.0"
+      VHS_SHA256: "99cb634587eaae0473c1ea377db80c3a048c27f99fe0a7febb1a1e8cb7ee5009"
+      TTYD_VERSION: "1.7.7"
+      TTYD_SHA256: "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -34,11 +41,40 @@ jobs:
           python-version: "3.12"
       - name: Install mergetrain
         run: python -m pip install -e .
+
+      # charmbracelet/vhs-action installed the recorder's dependencies itself,
+      # but its ffmpeg step stopped resolving a download URL and failed every
+      # run, and the action is unmaintained (last release 2024-05, Node 20).
+      # Install the three dependencies directly instead, each pinned.
+      - name: Install ffmpeg and the tape font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-jetbrains-mono
+          # docs/demo.tape asks for JetBrains Mono by name; without the font in
+          # the cache vhs renders the GIF in a fallback face without saying so.
+          fc-cache -f
+          fc-match "JetBrains Mono"
+      - name: Install ttyd
+        run: |
+          curl -fsSL --retry 3 \
+            "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
+            -o ttyd
+          echo "${TTYD_SHA256}  ttyd" | sha256sum --check --strict
+          sudo install -m 0755 ttyd /usr/local/bin/ttyd
+          ttyd --version
+      - name: Install vhs
+        run: |
+          archive="vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL --retry 3 \
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/${archive}" \
+            -o "$archive"
+          echo "${VHS_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive"
+          sudo install -m 0755 "vhs_${VHS_VERSION}_Linux_x86_64/vhs" /usr/local/bin/vhs
+          vhs --version
+
       - name: Render demo
-        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1.0
-        with:
-          path: docs/demo.tape
-          version: v0.11.0
+        run: vhs docs/demo.tape
       - name: Upload rendered GIF
         uses: actions/upload-artifact@v7
         with:
