@@ -501,6 +501,28 @@ deploy:
         ]
 
     @staticmethod
+    def _describe_jobs(
+        jobs: dict[str, dict[str, Any]], branches: Iterable[str]
+    ) -> str:
+        """Summarize queue rows so a demo failure says what actually happened.
+
+        A walkthrough that fails on a queue outcome is otherwise unactionable:
+        the sandbox is kept, but the reason lives in a gate log the reader has
+        to go find. Statuses and notes name the cause in the failure itself.
+        """
+
+        parts: list[str] = []
+        for branch in branches:
+            job = jobs.get(branch)
+            if not job:
+                parts.append(f"{branch}=missing")
+                continue
+            note = " ".join(str(job.get("note", "")).split())[:120]
+            status = job.get("status", "unknown")
+            parts.append(f"{branch}={status}" + (f" ({note})" if note else ""))
+        return "; ".join(parts)
+
+    @staticmethod
     def _jobs_by_branch(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         jobs = payload.get("jobs")
         if not isinstance(jobs, list):
@@ -579,9 +601,18 @@ deploy:
         self._cli("run-batch", "--validate-only", expected={1})
         validation = self._cli_json("status", "--json", "--limit", "10")
         jobs = self._jobs_by_branch(validation)
+        all_branches = (
+            "agent/faster-timeout",
+            "agent/longer-timeout",
+            "agent/add-retries",
+            "agent/request-logging",
+        )
         conflicted = jobs.get("agent/longer-timeout", {})
         if conflicted.get("status") != "blocked":
-            raise DemoFailure("the second FIFO request was not blocked on its Git conflict")
+            raise DemoFailure(
+                "the second FIFO request was not blocked on its Git conflict: "
+                + self._describe_jobs(jobs, all_branches)
+            )
         if str(conflicted.get("conflict_with") or ""):
             raise DemoFailure("a Git merge conflict must not be labeled as a semantic pair")
         if "conflict" not in str(conflicted.get("note", "")).lower():
@@ -593,7 +624,10 @@ deploy:
         )
         survivors = [jobs.get(branch, {}) for branch in survivor_branches]
         if any(job.get("status") != "validated" for job in survivors):
-            raise DemoFailure("the compatible FIFO survivors were not validated")
+            raise DemoFailure(
+                "the compatible FIFO survivors were not validated: "
+                + self._describe_jobs(jobs, all_branches)
+            )
         train_ids = {str(job.get("train_id", "")) for job in survivors}
         if len(train_ids) != 1 or not next(iter(train_ids)):
             raise DemoFailure("validated survivors do not share one train identity")
@@ -681,7 +715,10 @@ deploy:
             deployed_jobs.get(branch, {}).get("status") != "deployed"
             for branch in survivor_branches
         ):
-            raise DemoFailure("validated survivor train did not deploy successfully")
+            raise DemoFailure(
+                "validated survivor train did not deploy successfully: "
+                + self._describe_jobs(deployed_jobs, survivor_branches)
+            )
         print("result: success — the atomic local-remote push and verify hook both completed.")
 
         self._step(
