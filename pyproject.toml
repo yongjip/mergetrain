@@ -41,6 +41,10 @@ dev = [
   "PyYAML>=6.0",
   "pytest>=7",
   "pytest-cov>=4",
+  # The fault matrix builds a real repo and bare remote per case, so the suite
+  # is I/O-bound on git rather than CPU-bound: -n auto cuts it from ~2.5 min to
+  # ~35s and keeps fault injection cheap enough to run on every push.
+  "pytest-xdist>=3",
   "ruff>=0.6",
   "mypy>=1.11",
 ]
