@@ -10,6 +10,7 @@ export const NEXT_ACTION_COPY = {
   cancel_and_reenqueue_legacy_validated_jobs: ["Re-enqueue the legacy validated jobs.", "A fresh train identity is required before {noun}."],
   run_daemon_or_run_batch_deploy_when_approved: ["Start the approved {action} runner.", "Only auto-approved jobs are eligible for the daemon."],
   run_batch_validate: ["Start a validation run when ready.", "Nothing will be pushed in validate-only mode."],
+  initialize_config: ["Scaffold the repository config.", "Run mergetrain init: queue commands refuse to ship against guessed defaults."],
   gc_available: ["Clean up completed worktrees.", "Review the dry run before applying cleanup."],
   enqueue_clean_branch: ["Enqueue a committed task branch.", "The queue is ready for the next clean job."],
 };

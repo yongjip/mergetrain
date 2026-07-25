@@ -294,6 +294,7 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 - `cancel_and_reenqueue_legacy_validated_jobs` — pre-migration validated jobs lack safe train identity.
 - `run_daemon_or_run_batch_deploy_when_approved` — auto-approved jobs are queued.
 - `run_batch_validate` — manual jobs are queued; validate them.
+- `initialize_config` — the repository has no `.mergetrain.yaml`. Every queue-advancing command (`enqueue`, `run-batch`, `run-next`, the daemons) refuses without one rather than shipping against guessed defaults, so this outranks the queue actions above; recovery and read-only commands still work. Run `mergetrain init --write`.
 - `gc_available` — only cleanup remains.
 - `enqueue_clean_branch` — the queue is empty.
 - `upgrade_mergetrain` — the config declares a `version:` newer than this binary supports; this **overrides** the action above, and `doctor --json` also sets `config_version_supported` to the highest version this binary understands. Upgrade mergetrain before acting.
