@@ -122,6 +122,31 @@ an upload that already succeeded.
    publication in step 4 **is** the approval.
 6. Verify <https://pypi.org/project/mergetrain/> and install from PyPI in a
    fresh environment.
+7. The Homebrew tap picks the release up on its own daily cron. To make that
+   immediate, see the optional dispatch below; otherwise check
+   `brew install yongjip/tap/mergetrain` the next day.
+
+## Optional: bump the Homebrew tap on release
+
+[yongjip/homebrew-tap](https://github.com/yongjip/homebrew-tap) rewrites its own
+formula from PyPI on a daily schedule, deliberately using no cross-repo
+credentials. GitHub disables a scheduled workflow after 60 days without
+repository activity, though, which is exactly what a quiet tap looks like — so a
+release can leave the formula stale twice over: the cron has not fired yet, and
+it may not be armed at all.
+
+The `bump-tap` job in `release.yml` closes both gaps by requesting the tap's
+`workflow_dispatch` after a successful publish. It is **skipped unless both** of
+these exist, so the default path stays credential-free:
+
+| Setting | Kind | Value |
+| --- | --- | --- |
+| `HOMEBREW_TAP_REPOSITORY` | repository **variable** | `yongjip/homebrew-tap` |
+| `HOMEBREW_TAP_DISPATCH_TOKEN` | repository **secret** | fine-grained PAT, that tap only, `Actions: read and write` |
+
+Scope the token to the tap repository alone and nothing else; it needs no access
+to this repository. If it is missing, the job logs that it is leaving the bump to
+the cron and succeeds, so a release never fails over tap plumbing.
 
 ## 0.1.0 highlights
 
