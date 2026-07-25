@@ -1832,7 +1832,7 @@ def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job
     )
 
 
-def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, str]]:
+def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     terminal_placeholders = _status_placeholders(TERMINAL_STATUSES)
     active_placeholders = _status_placeholders(ACTIVE_STATUSES)
     rows = conn.execute(
@@ -1856,4 +1856,10 @@ def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, str]]
         """,
         (*TERMINAL_STATUSES, *TERMINAL_STATUSES, *ACTIVE_STATUSES),
     ).fetchall()
-    return [{"branch": str(row["branch"]), "job_id": str(row["job_id"]), "status": str(row["status"])} for row in rows]
+    # job_id is an int here to match the same key under gc's own
+    # result.swept_pending_refs; a string made a join across one payload
+    # return nothing, and the fingerprint gate cannot see value types.
+    return [
+        {"branch": str(row["branch"]), "job_id": int(row["job_id"]), "status": str(row["status"])}
+        for row in rows
+    ]

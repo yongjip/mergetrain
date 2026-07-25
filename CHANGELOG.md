@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- Stop reporting a possibly-landed push as `failed`. A non-rejection push
+  failure parks the job `needs_reconcile` precisely because the remote may have
+  accepted the atomic update, but `push_status` was overwritten with `failed`
+  first — the one thing this tool promises not to say. It now stays at the
+  `pending` the durable marker already recorded, which is what a crash-orphaned
+  job has always carried; reconcile replaces it with the remote's answer. A
+  definitive rejection still records `failed`.
+
+- Refuse `run-next` with a push mode while a validated train is pending
+  (`error.code: validated_train_pending`). `run-next` claims the next *queued*
+  job, so it pushed a different commit and moved the integration ref out from
+  under the exact train a human had approved, invalidating that validation
+  silently. `docs/cli.md` already directed validated work through
+  `run-batch --deploy`; that is now enforced rather than advisory, and
+  `agent-contract`'s `boundary.deploy_requires` no longer implies the two
+  commands are interchangeable.
+
+- Report a stranded runner as `lease_liveness: "lost"` in event frames, matching
+  what `inspect` already said. A one-shot events reader — how the MCP server
+  reads progress — had no other lease signal, so an abandoned train was
+  indistinguishable from an idle queue.
+
+- Make the fingerprint gate see what it claimed to cover. `keyset()` nulls every
+  value, and an empty list pins nothing inside it, so `gc`'s
+  `branch_candidates[]` element shape was unpinned — which is how one payload
+  shipped `job_id` as a string next to an int `job_id`, and `protected` as the
+  string `"true"` in a contract of real booleans. Both are now correct types,
+  the `gc` capture seeds a candidate, `gc --apply` is a fingerprinted surface,
+  and the JSONL family pins `heartbeat` and both `stream_end` variants instead
+  of only `event` and `stream_start` (26 surfaces). New tests pin the
+  `error.code` table in `docs/contract.md` against the codes the code can emit,
+  and the retryable flag on the recovery path — where `remote_unreachable` is
+  retryable, which that table had wrong.
+
 - Point `next_action` at the actual blocker in an unconfigured repository. An
   agent following the mandated read got `enqueue_clean_branch`, and `enqueue`
   then refused with `config_error` — every queue-advancing command does, on

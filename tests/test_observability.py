@@ -8,6 +8,7 @@ from mergetrain.config import load_config
 from mergetrain.models import Job, RunnerLock
 from mergetrain.observability import (
     _lease_context,
+    event_record,
     history_payload,
     job_outcome,
     normalize_since,
@@ -233,6 +234,49 @@ class HistoryStatsTests(unittest.TestCase):
             empty = stats_payload(config, since="2026-07-23T00:00:00Z")
             self.assertEqual(empty["trains"]["total"], 0)
             self.assertIsNone(empty["trains"]["land_rate"])
+
+    def test_event_frame_reports_a_stranded_runner_as_lost(self) -> None:
+        # A one-shot events reader (how the MCP server reads progress) has no
+        # other lease signal. Collapsing "the runner is gone" into "inactive"
+        # made an abandoned train look like an idle queue; inspect already drew
+        # the distinction, so the two reads disagreed about the same state.
+        from mergetrain.models import RunEvent
+
+        event = RunEvent(
+            id=1,
+            job_id=7,
+            claim_token="stale",
+            phase="gating",
+            state="active",
+            message="Running gate 1/1: tests",
+            created_at="2026-07-25T00:00:05Z",
+        )
+        running = Job(
+            id=7,
+            task="a",
+            branch="agent/a",
+            status="in_progress",
+            claim_token="stale",
+            started_at="2026-07-25T00:00:00Z",
+        )
+        # No lock at all: the runner that claimed this job is gone.
+        self.assertEqual(event_record(event, [running], None)["lease_liveness"], "lost")
+
+        # A lock held by a different token is equally not this job's runner.
+        other = RunnerLock(
+            name="runner", owner="runner:2", token="different", liveness="alive"
+        )
+        self.assertEqual(event_record(event, [running], other)["lease_liveness"], "lost")
+
+        # The live owner still reports its own liveness.
+        mine = RunnerLock(
+            name="runner", owner="runner:1", token="stale", liveness="alive"
+        )
+        self.assertEqual(event_record(event, [running], mine)["lease_liveness"], "alive")
+
+        # And a terminal job with no runner is idle, not lost.
+        done = Job(id=7, task="a", branch="agent/a", status="deployed")
+        self.assertEqual(event_record(event, [done], None)["lease_liveness"], "inactive")
 
     def test_since_normalization_rejects_invalid_timestamp(self) -> None:
         self.assertEqual(

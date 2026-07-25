@@ -159,7 +159,7 @@ def agent_contract_payload(
             "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
         ],
         "boundary": {
-            "deploy_requires": "run-next --deploy or run-batch --deploy",
+            "deploy_requires": "run-batch --deploy for a validated train; run-next --deploy only when none is pending",
             "validate_requires": "run-next --validate-only or run-batch --validate-only",
             "validated_train_deploy": "run-batch --deploy claims one exact validated train",
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
@@ -944,6 +944,42 @@ def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
     return 1
 
 
+def _emit_validated_train_block(
+    args: argparse.Namespace, trains: list[dict[str, Any]], terminology: TerminologyConfig
+) -> int:
+    """Refuse a one-job push while an approved train is still pending.
+
+    ``run-next`` claims the next *queued* job, so it never picks up the
+    ``validated`` members of a pending train — it would push a different commit
+    and move the integration ref out from under the exact train a human
+    approved, invalidating that validation without saying so. docs/cli.md
+    already directs validated work through ``run-batch --deploy``; this makes it
+    true instead of advisory.
+    """
+
+    ids = [str(train.get("train_id")) for train in trains]
+    listed = ", ".join(ids)
+    note = (
+        f"{terminology.action} refused: {len(ids)} validated train(s) pending "
+        f"({listed}). run-next claims a queued job instead, which would move the "
+        f"integration ref and invalidate that validation — "
+        f"'mergetrain run-batch --{terminology.action} --train-id {ids[0]}' "
+        "ships the approved train, or dismiss it first to ship something else"
+    )
+    if args.json:
+        dump_json(
+            _error_payload(
+                "validated_train_pending",
+                note,
+                next_action="deploy_validated_train_when_approved",
+                pending_train_ids=ids,
+            )
+        )
+    else:
+        print(note, file=sys.stderr)
+    return 1
+
+
 def _human_next_action(action: str, terminology: TerminologyConfig) -> str:
     return {
         "deploy_validated_train_when_approved": (
@@ -1042,6 +1078,13 @@ def cmd_run_next(args: argparse.Namespace) -> int:
             pending = deploy_reconcile_pending(conn)
             if pending:
                 return _emit_deploy_reconcile_block(args, pending)
+            eligible = [
+                train
+                for train in validated_train_summaries(conn)
+                if train.get("deploy_eligible")
+            ]
+            if eligible:
+                return _emit_validated_train_block(args, eligible, config.terminology)
         job = claim_next_job(
             conn,
             owner=owner,

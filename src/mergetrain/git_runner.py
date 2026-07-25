@@ -16,7 +16,7 @@ from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 from .config import GateConfig, MergetrainConfig
 from .errors import (
@@ -1192,6 +1192,11 @@ class GitRunner:
             state="active",
             message="Pushing verified HEAD atomically",
         )
+        # Mirror what the durable marker records (store.record_pending_push
+        # writes push_status='pending'), so an in-memory state that outlives an
+        # ambiguous push carries the same truth the DB already holds instead of
+        # overwriting it with not_run.
+        state.push_status = "pending"
         try:
             self._push_with_marker(
                 conn,
@@ -1203,7 +1208,6 @@ class GitRunner:
                 pulse=ownership_pulse,
             )
         except CommandFailed as exc:
-            state.push_status = "failed"
             self._event(
                 conn,
                 lease_token=lease_token,
@@ -1214,6 +1218,8 @@ class GitRunner:
                 detail=f"exit_code={exc.returncode}",
             )
             if is_push_rejection(exc.stderr):
+                # Definitively refused: nothing landed, so `failed` is the truth.
+                state.push_status = "failed"
                 self._clear_rejected_push(
                     conn,
                     job_ids=job_ids,
@@ -1225,8 +1231,11 @@ class GitRunner:
                     "or non-fast-forward); no ref update landed: "
                     f"{exc.stderr.strip() or exc}"
                 ) from exc
-            # The marker is durable but the remote outcome is unknown. Preserve
-            # it and park the job(s) for remote-truth reconciliation.
+            # The marker is durable but the remote outcome is unknown. Leave
+            # push_status at the `pending` the marker write recorded: the job
+            # parks needs_reconcile precisely because the refs may have landed,
+            # and calling that `failed` is the one thing this tool promises not
+            # to do. Reconcile replaces it with the remote's answer.
             raise AmbiguousPush(
                 "atomic push failed after the write-ahead marker was "
                 f"recorded (exit {exc.returncode}); outcome ambiguous — "
@@ -2384,7 +2393,7 @@ class GitRunner:
 
 def find_worktree_gc_candidates(
     config: MergetrainConfig, *, protect: Iterable[str] = ()
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     root = config.state.worktree_root
     prefix = f"{config.project.name}-mergetrain-"
     if not root.exists():
@@ -2399,7 +2408,7 @@ def find_worktree_gc_candidates(
             continue
         if str(path) in protected:
             candidates.append(
-                {"path": str(path), "reason": "active runner worktree, skipped", "protected": "true"}
+                {"path": str(path), "reason": "active runner worktree, skipped", "protected": True}
             )
             continue
         candidates.append({"path": str(path), "reason": "temporary mergetrain worktree"})

@@ -489,7 +489,12 @@ class GitRunnerTests(unittest.TestCase):
             # (Marker preservation with a real claim is covered end-to-end in
             # test_reconcile.test_ambiguous_push_parks_needs_reconcile_*.)
             self.assertEqual(result.status, "needs_reconcile")
-            self.assertEqual(result.push_status, "failed")
+            # And push_status stays `pending`, the value the durable marker
+            # already recorded and the same one a crashed mid-push job carries
+            # (test_reconcile asserts that). Reporting `failed` for refs that may
+            # be on the remote is the single thing this tool promises not to do;
+            # reconcile replaces it with the remote's answer.
+            self.assertEqual(result.push_status, "pending")
             self.assertEqual(result.verify_status, "not_run")
 
     def test_definitive_push_rejection_blocks_not_reconciles(self) -> None:
@@ -519,6 +524,9 @@ class GitRunnerTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(result.status, "blocked")
+            # The other side of the pending/failed split: a definitive rejection
+            # proves nothing landed, so here `failed` is the honest value.
+            self.assertEqual(result.push_status, "failed")
             self.assertEqual(result.pending_deploy_sha, "")
             self.assertEqual(action, "fix_blocked_job")
             pending = git(
