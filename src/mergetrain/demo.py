@@ -27,6 +27,59 @@ class DemoFailure(RuntimeError):
     """A safe, user-facing demo failure."""
 
 
+def _shell_argument(value: str) -> str:
+    """Quote one argument for the shell that will run gates and verify hooks.
+
+    Gate commands are strings executed through the platform shell (``/bin/sh``
+    where it exists, ``cmd.exe`` on Windows), so the generated config has to
+    carry quoting the *target* shell understands. Double quotes work on both,
+    and keep the rendered command free of single quotes so it stays
+    representable as a YAML single-quoted scalar (see ``_yaml_scalar``).
+    """
+
+    if os.name == "nt":
+        # cmd.exe has no escape for a literal double quote, and Windows paths
+        # cannot contain one, so wrapping is both necessary and sufficient.
+        return f'"{value}"'
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
+    return f'"{escaped}"'
+
+
+def _write_repo_file(path: Path, content: str) -> None:
+    """Write demo repository content with LF endings on every platform.
+
+    A text-mode write translates ``\\n`` to ``os.linesep``, so on Windows every
+    seeded and agent-authored file landed as CRLF. The runner's built-in
+    ``git diff --check`` then read each carriage return as trailing whitespace
+    and failed the train before any gate ran.
+    """
+
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def _yaml_scalar(value: str) -> str:
+    """Render a command as a scalar PyYAML and the built-in parser read alike.
+
+    The dependency-free fallback parser strips the outer quotes without undoing
+    YAML escapes, so any scalar that needs escaping would be read differently
+    depending on whether PyYAML happens to be installed. A single-quoted scalar
+    with no embedded single quote is the one form both parsers agree on, so
+    refuse rather than write a config whose meaning depends on the environment.
+    """
+
+    if "'" in value:
+        raise DemoFailure(
+            "the demo cannot generate a gate for a path containing a single "
+            f"quote: {value}"
+        )
+    return f"'{value}'"
+
+
 @dataclass(slots=True)
 class DemoSandbox:
     root: Path
@@ -307,22 +360,25 @@ class DemoWalkthrough:
         self._git("clone", str(self.remote), str(self.repo))
         (self.repo / "app").mkdir()
         (self.repo / "tests").mkdir()
-        (self.repo / "app" / "__init__.py").write_text("", encoding="utf-8")
-        (self.repo / "app" / "config.py").write_text(
-            "DEFAULT_TIMEOUT = 30\n", encoding="utf-8"
-        )
-        (self.repo / "tests" / "test_config.py").write_text(
+        _write_repo_file(self.repo / "app" / "__init__.py", "")
+        _write_repo_file(self.repo / "app" / "config.py", "DEFAULT_TIMEOUT = 30\n")
+        _write_repo_file(
+            self.repo / "tests" / "test_config.py",
             "import unittest\n\n"
             "from app.config import DEFAULT_TIMEOUT\n\n\n"
             "class ConfigTests(unittest.TestCase):\n"
             "    def test_default_timeout(self):\n"
             "        self.assertEqual(DEFAULT_TIMEOUT, 30)\n",
-            encoding="utf-8",
         )
 
     def _write_demo_config(self) -> None:
-        python = shlex.quote(sys.executable)
-        remote = shlex.quote(str(self.remote))
+        gate = _yaml_scalar(
+            f"{_shell_argument(sys.executable)} -m unittest discover -s tests"
+        )
+        verify = _yaml_scalar(
+            f"git --git-dir={_shell_argument(str(self.remote))} "
+            "log -1 --format=%H main"
+        )
         config = f"""version: 1
 
 project:
@@ -352,21 +408,21 @@ agent:
 
 gates:
   - name: tests
-    run: {python} -m unittest discover -s tests
+    run: {gate}
 
 deploy:
   verify:
     - name: bare-remote-main
-      run: git --git-dir={remote} log -1 --format=%H main
+      run: {verify}
   reuse:
     enabled: false
     max_age_minutes: 60
     on_mismatch: rerun
     fingerprints: []
 """
-        (self.repo / ".mergetrain.yaml").write_text(config, encoding="utf-8")
-        (self.repo / ".gitignore").write_text(
-            ".mergetrain/\n__pycache__/\n*.py[cod]\n", encoding="utf-8"
+        _write_repo_file(self.repo / ".mergetrain.yaml", config)
+        _write_repo_file(
+            self.repo / ".gitignore", ".mergetrain/\n__pycache__/\n*.py[cod]\n"
         )
 
     def _commit_seed(self) -> None:
@@ -384,7 +440,7 @@ deploy:
         for relative, content in files.items():
             path = worktree / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            _write_repo_file(path, content)
         self._git("add", ".", cwd=worktree)
         self._git("commit", "-m", branch, cwd=worktree)
         return worktree
@@ -453,6 +509,30 @@ deploy:
             (branch, task, self._make_agent_branch(branch, files))
             for branch, task, files in branches
         ]
+
+    @staticmethod
+    def _describe_jobs(
+        jobs: dict[str, dict[str, Any]], branches: Iterable[str]
+    ) -> str:
+        """Summarize queue rows so a demo failure says what actually happened.
+
+        A walkthrough that fails on a queue outcome is otherwise unactionable:
+        the sandbox is kept, but the reason lives in a gate log the reader has
+        to go find. Statuses and notes name the cause in the failure itself.
+        """
+
+        lines: list[str] = []
+        for branch in branches:
+            job = jobs.get(branch)
+            if not job:
+                lines.append(f"  {branch}=missing")
+                continue
+            lines.append(f"  {branch}={job.get('status', 'unknown')}")
+            # The note carries the failing command and its output tail, which is
+            # the part a reader needs; keep enough of it to name the cause.
+            for line in str(job.get("note", "")).strip().splitlines()[:6]:
+                lines.append(f"    {line[:200]}")
+        return "\n" + "\n".join(lines)
 
     @staticmethod
     def _jobs_by_branch(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -533,9 +613,18 @@ deploy:
         self._cli("run-batch", "--validate-only", expected={1})
         validation = self._cli_json("status", "--json", "--limit", "10")
         jobs = self._jobs_by_branch(validation)
+        all_branches = (
+            "agent/faster-timeout",
+            "agent/longer-timeout",
+            "agent/add-retries",
+            "agent/request-logging",
+        )
         conflicted = jobs.get("agent/longer-timeout", {})
         if conflicted.get("status") != "blocked":
-            raise DemoFailure("the second FIFO request was not blocked on its Git conflict")
+            raise DemoFailure(
+                "the second FIFO request was not blocked on its Git conflict: "
+                + self._describe_jobs(jobs, all_branches)
+            )
         if str(conflicted.get("conflict_with") or ""):
             raise DemoFailure("a Git merge conflict must not be labeled as a semantic pair")
         if "conflict" not in str(conflicted.get("note", "")).lower():
@@ -547,7 +636,10 @@ deploy:
         )
         survivors = [jobs.get(branch, {}) for branch in survivor_branches]
         if any(job.get("status") != "validated" for job in survivors):
-            raise DemoFailure("the compatible FIFO survivors were not validated")
+            raise DemoFailure(
+                "the compatible FIFO survivors were not validated: "
+                + self._describe_jobs(jobs, all_branches)
+            )
         train_ids = {str(job.get("train_id", "")) for job in survivors}
         if len(train_ids) != 1 or not next(iter(train_ids)):
             raise DemoFailure("validated survivors do not share one train identity")
@@ -635,7 +727,10 @@ deploy:
             deployed_jobs.get(branch, {}).get("status") != "deployed"
             for branch in survivor_branches
         ):
-            raise DemoFailure("validated survivor train did not deploy successfully")
+            raise DemoFailure(
+                "validated survivor train did not deploy successfully: "
+                + self._describe_jobs(deployed_jobs, survivor_branches)
+            )
         print("result: success — the atomic local-remote push and verify hook both completed.")
 
         self._step(

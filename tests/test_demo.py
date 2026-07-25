@@ -4,6 +4,7 @@ import io
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -12,7 +13,7 @@ from unittest.mock import patch
 
 from mergetrain.cli import main
 from mergetrain.config import load_config
-from mergetrain.demo import DemoFailure, DemoWalkthrough
+from mergetrain.demo import DemoFailure, DemoSandbox, DemoWalkthrough
 from mergetrain.store import connect, list_jobs
 
 
@@ -224,6 +225,112 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep\n")
             self.assertIn("must not exist or must be empty", err.getvalue())
+
+
+class DemoConfigTests(unittest.TestCase):
+    """The generated config carries paths into two parsers and one shell.
+
+    A quoted path used to be pasted into the YAML template raw, which produced
+    an invalid document for PyYAML (`config_error`, so `doctor` failed at step
+    two) and POSIX-only quoting for the built-in parser. Every path that needs
+    quoting -- any Windows path, and any path with a space on any platform --
+    hit this, so these cases stay covered off the slow full-demo path.
+    """
+
+    def _walkthrough(self, dirname: str, *, make_repo: bool = True) -> DemoWalkthrough:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / dirname
+        root.mkdir(parents=True)
+        sandbox = DemoSandbox(root=root, marker_token="test-token")
+        walkthrough = DemoWalkthrough(sandbox, pause=False, delay=0.0)
+        if make_repo:
+            walkthrough.repo.mkdir(parents=True)
+        return walkthrough
+
+    def test_quoted_interpreter_path_stays_a_single_yaml_scalar(self) -> None:
+        walkthrough = self._walkthrough("space in name")
+        with patch.object(sys, "executable", "/opt/py 3.12/python3"):
+            walkthrough._write_demo_config()
+
+        config = load_config(repo=walkthrough.repo)
+        self.assertEqual(
+            config.gates[0].run,
+            '"/opt/py 3.12/python3" -m unittest discover -s tests',
+        )
+        self.assertIn(f'--git-dir="{walkthrough.remote}"', config.deploy.verify[0].run)
+
+    def test_windows_paths_keep_their_separators(self) -> None:
+        walkthrough = self._walkthrough("brief")
+        executable = r"C:\tools\Python\3.13\python.exe"
+        with (
+            patch.object(sys, "executable", executable),
+            patch.object(os, "name", "nt"),
+        ):
+            walkthrough._write_demo_config()
+
+        config = load_config(repo=walkthrough.repo)
+        self.assertEqual(
+            config.gates[0].run,
+            f'"{executable}" -m unittest discover -s tests',
+        )
+
+    def test_path_with_a_single_quote_is_refused_not_misparsed(self) -> None:
+        walkthrough = self._walkthrough("quote")
+        with patch.object(sys, "executable", "/opt/o'brien/python3"):
+            with self.assertRaises(DemoFailure) as raised:
+                walkthrough._write_demo_config()
+        self.assertIn("single quote", str(raised.exception))
+
+    @unittest.skipUnless(shutil.which("git"), "git is required")
+    def test_seeded_repository_commits_lf_line_endings(self) -> None:
+        # Text-mode writes translate "\n" to os.linesep, so on Windows every
+        # demo file was committed with CRLF and the runner's built-in
+        # `git diff --check` failed the train on the carriage returns. The
+        # committed blob is what the runner reads, so assert on that.
+        walkthrough = self._walkthrough("crlf", make_repo=False)
+        walkthrough._bootstrap()
+        walkthrough._commit_seed()
+        walkthrough._make_agent_branch(
+            "agent/probe", {"app/probe.py": "PROBE = 1\n"}
+        )
+
+        for ref, path in (
+            ("main", "app/config.py"),
+            ("main", "tests/test_config.py"),
+            ("main", ".mergetrain.yaml"),
+            ("agent/probe", "app/probe.py"),
+        ):
+            blob = subprocess.run(
+                ["git", "show", f"{ref}:{path}"],
+                cwd=walkthrough.repo,
+                env=walkthrough.env,
+                check=True,
+                capture_output=True,
+            ).stdout
+            self.assertNotIn(b"\r", blob, f"{ref}:{path} was committed with CRLF")
+
+    @unittest.skipUnless(shutil.which("git"), "git is required")
+    def test_generated_commands_run_through_the_platform_shell(self) -> None:
+        walkthrough = self._walkthrough("space in name", make_repo=False)
+        walkthrough._bootstrap()
+        walkthrough._commit_seed()
+
+        config = load_config(repo=walkthrough.repo)
+        for command in (config.gates[0].run, config.deploy.verify[0].run):
+            completed = subprocess.run(
+                command,
+                shell=True,
+                cwd=walkthrough.repo,
+                env=walkthrough.env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                f"{command}\n{completed.stdout}\n{completed.stderr}",
+            )
 
 
 if __name__ == "__main__":
