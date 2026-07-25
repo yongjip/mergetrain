@@ -606,10 +606,21 @@ class GitRunnerTests(unittest.TestCase):
                     conn.close()
                 self.assertEqual(result.status, "deployed")
                 self.assertEqual(result.push_status, "succeeded")
-                self.assertEqual(result.verify_status, "failed")
+                # 'unknown', not 'failed': the hook never returned a verdict, it
+                # crashed, so nothing determined that verification failed. A hook
+                # that genuinely fails exits non-zero and is recorded 'failed' on
+                # the normal path; this boundary only ever sees unexpected errors.
+                # 'unknown' is also the value doctor turns into next_action
+                # verify_reconciled_deploy, so the operator gets 'run mergetrain
+                # verify' instead of a dead end.
+                self.assertEqual(result.verify_status, "unknown")
                 self.assertIn("post-push completion warning", result.note)
                 self.assertEqual(events[-1].phase, "complete")
+                # Still a warning, not a plain success: 'unknown' has to draw the
+                # same attention 'failed' did, or the completion event hides the
+                # thing the operator must discharge.
                 self.assertEqual(events[-1].state, "warning")
+                self.assertIn("verification needs attention", events[-1].message)
                 self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
                 pending = git(
                     repo,
