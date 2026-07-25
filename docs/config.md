@@ -188,6 +188,13 @@ Gates run before push in the temporary integration worktree. The optional
 `always_rerun_on_deploy` flag matters only when validated-gate reuse is accepted;
 that gate still runs against the exact restored validation commit.
 
+Every `run` string is executed by a **POSIX `sh`, on every platform** — mergetrain
+never falls back to `cmd.exe`. On Windows it uses `sh` from `PATH` or the one Git
+for Windows ships (`sh.exe` under the Git installation), and refuses to run gates
+at all when no POSIX shell can be found, rather than running them under a shell
+with different quoting rules. So one gate command works everywhere: write POSIX
+shell syntax, not `cmd` syntax, and expect POSIX quoting and expansion.
+
 ## `deploy.reuse`
 
 ```yaml
@@ -245,6 +252,13 @@ ${worktree}
 context, so each expands to exactly one path argument even when the path contains
 spaces or shell metacharacters. They may be used unquoted or inside matching
 single or double quotes.
+
+That escaping is POSIX, on every platform, because [the shell always is](#gates) —
+including for Windows paths, whose backslashes survive the expansion. A gate that
+embeds a path inside a *Python* string literal is a separate concern: `python -c
+"...'${worktree}'..."` would read `C:\Users` as an escape sequence, so pass such
+paths as arguments (`python script.py "${worktree}"`) or read them from
+`MERGETRAIN_WORKTREE` instead.
 
 Equivalent environment variables:
 

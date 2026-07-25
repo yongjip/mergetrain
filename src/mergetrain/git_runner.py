@@ -154,25 +154,28 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
 
 
 def _run_managed(
-    command: Sequence[str] | str,
+    command: Sequence[str],
     *,
     cwd: str | Path,
     env: dict[str, str] | None,
     log: IO[str] | None,
     check: bool,
-    shell: bool,
     pulse: Pulse | None,
     pulse_interval_seconds: float,
     timeout_seconds: float | None,
 ) -> subprocess.CompletedProcess[str]:
+    # Always an argv list, never a platform shell. A gate string is turned into
+    # argv by `_shell_command`, which resolves a POSIX sh even on Windows, so
+    # `${repo}`/`${worktree}` escaping has one dialect to target. Reintroducing
+    # `shell=True` here would silently run gates under cmd.exe on Windows and
+    # break that contract, so the option is deliberately absent.
     if pulse is not None:
         pulse()
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
         env=env,
-        shell=shell,
-        executable="/bin/sh" if shell and Path("/bin/sh").exists() else None,
+        shell=False,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -297,7 +300,6 @@ def run_command(
             env=env,
             log=log,
             check=check,
-            shell=False,
             pulse=pulse,
             pulse_interval_seconds=pulse_interval_seconds,
             timeout_seconds=timeout_seconds,
@@ -342,7 +344,6 @@ def run_shell(
             env=env,
             log=log,
             check=check,
-            shell=False,
             pulse=pulse,
             pulse_interval_seconds=pulse_interval_seconds,
             timeout_seconds=timeout_seconds,

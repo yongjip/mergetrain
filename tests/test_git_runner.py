@@ -248,6 +248,36 @@ class GitRunnerTests(unittest.TestCase):
             ["C:/Program Files/Git/bin/sh.exe", "-c", "printf '%s' ok"],
         )
 
+    def test_gate_commands_never_go_through_a_platform_shell(self) -> None:
+        """The single-shell guarantee, pinned where it could regress.
+
+        `${repo}`/`${worktree}` escaping targets POSIX sh on every platform, so
+        it is only correct while gates are spawned as argv. A `shell=True` here
+        would run them under cmd.exe on Windows and quietly invalidate both the
+        escaping and the documented gate contract.
+        """
+
+        with tempfile.TemporaryDirectory() as td:
+            repo, _ = make_demo_repo(Path(td))
+            config = load_config(repo=repo)
+            with patch("mergetrain.git_runner.subprocess.Popen") as popen:
+                popen.return_value.__enter__ = Mock(return_value=popen.return_value)
+                popen.return_value.stdout = io.StringIO("")
+                popen.return_value.stderr = io.StringIO("")
+                popen.return_value.wait.return_value = 0
+                popen.return_value.returncode = 0
+                run_shell(
+                    "printf ok",
+                    cwd=repo,
+                    env=command_env(config=config, worktree=repo),
+                )
+
+        args, kwargs = popen.call_args
+        self.assertIsInstance(args[0], list)
+        self.assertEqual(args[0][1:], ["-c", "printf ok"])
+        self.assertFalse(kwargs["shell"])
+        self.assertNotIn("executable", kwargs)
+
     def test_path_placeholders_are_shell_safe_in_all_quote_contexts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "root $(touch injected)"
