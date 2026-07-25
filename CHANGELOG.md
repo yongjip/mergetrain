@@ -17,8 +17,9 @@
 
 - Add `mergetrain demo`, a network-free nine-step walkthrough that creates a
   disposable repo and local bare remote, enqueues four real agent worktrees,
-  exposes a two-branch semantic conflict through `conflict_with`, and deploys
-  only the validated survivor train. The sandbox isolates user Git config,
+  exposes a two-branch semantic conflict through `conflict_with` — both branches
+  green alone and merging cleanly, red only combined — and deploys only the
+  validated survivor train. The sandbox isolates user Git config,
   cleans up on success, and is preserved with recovery hints on failure (#171).
 
 - Add read-only `mergetrain history` and `mergetrain stats` commands (#168).

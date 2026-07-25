@@ -61,7 +61,7 @@ class DemoAssetTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("git"), "git is required")
 class DemoTests(unittest.TestCase):
-    def test_full_demo_skips_fifo_git_conflict_and_deploys_survivors(self) -> None:
+    def test_full_demo_attributes_the_semantic_pair_and_deploys_survivors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             invoking_repo = root / "invoking"
@@ -102,9 +102,16 @@ class DemoTests(unittest.TestCase):
             )
             self.assertIn("result: partial", out.getvalue())
             self.assertIn("result: success", out.getvalue())
-            self.assertIn("FIFO result: #1 merged; #2 hit a Git conflict", out.getvalue())
-            self.assertIn('"conflict_with": ""', out.getvalue())
-            self.assertIn("three compatible requests were validated together", out.getvalue())
+            # The lesson the demo exists for: both branches pass alone and Git
+            # merges them cleanly, so only the combined train catches them, and
+            # the block names the partner instead of blaming one side.
+            self.assertIn('"conflict_with": "2"', out.getvalue())
+            self.assertIn(
+                "semantic conflict: passes gates alone but fails combined with job 2",
+                out.getvalue(),
+            )
+            self.assertIn("bisect result: #1 \u2194 #2 blocked", out.getvalue())
+            self.assertIn("two compatible requests were validated together", out.getvalue())
             self.assertIn("Sandbox kept at:", out.getvalue())
 
             repo = sandbox / "repo"
@@ -115,11 +122,11 @@ class DemoTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            conflicted = jobs["agent/longer-timeout"]
-            self.assertEqual(conflicted.status, "canceled")
-            self.assertEqual(conflicted.conflict_with, "")
+            left = jobs["agent/faster-timeout"]
+            right = jobs["agent/health-check"]
+            self.assertEqual(left.status, "canceled")
+            self.assertEqual(right.status, "canceled")
             for branch in (
-                "agent/faster-timeout",
                 "agent/add-retries",
                 "agent/request-logging",
             ):
@@ -143,11 +150,7 @@ class DemoTests(unittest.TestCase):
             agent_subjects = {subject for subject in subjects if subject.startswith("agent/")}
             self.assertEqual(
                 agent_subjects,
-                {
-                    "agent/faster-timeout",
-                    "agent/add-retries",
-                    "agent/request-logging",
-                },
+                {"agent/add-retries", "agent/request-logging"},
             )
             remote_config = subprocess.run(
                 ["git", f"--git-dir={remote}", "show", "main:app/config.py"],
@@ -155,7 +158,9 @@ class DemoTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             ).stdout
-            self.assertEqual(remote_config, "DEFAULT_TIMEOUT = 10\n")
+            # faster-timeout was held with its partner, so main keeps the seed
+            # value: a blocked pair never lands half of itself.
+            self.assertEqual(remote_config, "DEFAULT_TIMEOUT = 30\n")
             for path in ("app/retries.py", "app/request_logging.py"):
                 subprocess.run(
                     ["git", f"--git-dir={remote}", "cat-file", "-e", f"main:{path}"],
@@ -189,7 +194,7 @@ class DemoTests(unittest.TestCase):
             rendered = out.getvalue()
             self.assertIn("ready: health=true clean=true", rendered)
             self.assertIn("result: partial", rendered)
-            self.assertIn("blocked_reason: Git conflict with current train", rendered)
+            self.assertIn("conflict_with: #2", rendered)
             self.assertIn("outcome: merge_conflict", rendered)
             self.assertIn("result: success", rendered)
             self.assertIn("Demo complete:", rendered)
