@@ -362,6 +362,34 @@
       "ok": null,
       "since": null
     },
+    "hub_add": {
+      "contract_version": null,
+      "entry": {
+        "added_at": null,
+        "daemon": null,
+        "path": null
+      },
+      "ok": null,
+      "registry": null
+    },
+    "hub_list": {
+      "contract_version": null,
+      "ok": null,
+      "registry": null,
+      "repos": {
+        "[]": {
+          "added_at": null,
+          "daemon": null,
+          "path": null
+        }
+      }
+    },
+    "hub_remove": {
+      "contract_version": null,
+      "ok": null,
+      "registry": null,
+      "removed": null
+    },
     "hub_status": {
       "contract_version": null,
       "generated_at": null,
@@ -519,6 +547,12 @@
           }
         }
       }
+    },
+    "init": {
+      "contract_version": null,
+      "next_step": null,
+      "ok": null,
+      "written": "[]"
     },
     "inspect": {
       "contract_version": null,
@@ -686,6 +720,73 @@
       },
       "next_action": null,
       "ok": null
+    },
+    "run_batch_preview": {
+      "contract_version": null,
+      "jobs": {
+        "[]": {
+          "auto_deploy": null,
+          "base_sha": null,
+          "branch": null,
+          "cancel_requested_at": null,
+          "conflict_with": null,
+          "deploy_sha": null,
+          "finished_at": null,
+          "head_sha": null,
+          "id": null,
+          "log_path": null,
+          "note": null,
+          "pending_deploy_sha": null,
+          "push_status": null,
+          "requested_at": null,
+          "reused_validation_sha": null,
+          "started_at": null,
+          "status": null,
+          "task": null,
+          "train_id": null,
+          "train_size": null,
+          "validated_at": null,
+          "validated_head_sha": null,
+          "validation_base_sha": null,
+          "validation_environment_sha": null,
+          "validation_gate_policy_sha": null,
+          "validation_sha": null,
+          "validation_train_sha": null,
+          "validation_tree_sha": null,
+          "verify_status": null,
+          "worktree_path": null
+        }
+      },
+      "mode": null,
+      "ok": null,
+      "preview": null,
+      "push_plan": {
+        "atomic": null,
+        "refs": {
+          "[]": {
+            "source": null,
+            "spec": null,
+            "target": null
+          }
+        },
+        "remote": null
+      },
+      "reuse": {
+        "action": null,
+        "authorized": null,
+        "eligible": null,
+        "reasons": "[]",
+        "reused_validation_sha": null,
+        "validation_sha": null
+      },
+      "terminology": {
+        "action": null,
+        "completed": null,
+        "git_operation": null,
+        "in_progress": null,
+        "noun": null
+      },
+      "train_id": null
     },
     "run_batch_validate": {
       "contract_version": null,

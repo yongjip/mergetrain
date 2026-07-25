@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Close the contract gate's coverage gaps before the 0.9.0 freeze. `init`,
+  `run-batch --preview`, `hub add`, `hub list`, and `hub remove` emit
+  contract-stamped payloads that no fingerprint covered, so their shapes could
+  have changed without CI objecting; the gate now pins 25 surfaces instead of
+  20. Regenerating the golden was purely additive — no existing surface changed
+  shape, which is the evidence the freeze needs. `docs/contract.md` also
+  enumerates the `error.code` vocabulary it tells consumers to branch on,
+  including `lock_held` and `remote_unreachable`, which appeared in no document.
+
 - Add `mergetrain mcp`, a stdio Model Context Protocol server behind the
   optional `mcp` extra (#172, phase 1). Every tool shells out to the CLI with
   `--json` and returns that payload verbatim, so `contract_version` stays the
