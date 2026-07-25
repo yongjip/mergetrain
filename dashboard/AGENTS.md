@@ -18,13 +18,17 @@ When implementing from a selected generated mock, treat that image as the source
   unambiguous.
 - Demo mode may seed realistic data and replay presentation states, but it must
   use the same product UI and information architecture as normal operation.
-- Make the primary demo the ordinary FIFO policy: enqueue several committed
-  merge requests, merge them into the candidate train in order, skip a later
-  request that hits a real Git conflict, continue with the remaining requests,
-  then validate the surviving train for one atomic update to `main`.
-- Keep semantic-conflict bisection as an advanced scenario, not the default
-  product explanation. Never label a semantic incompatibility as a generic Git
-  merge conflict.
+- Make the **dashboard's** primary illustration the ordinary FIFO policy:
+  enqueue several committed merge requests, merge them into the candidate train
+  in order, skip a later request that hits a real Git conflict, continue with the
+  remaining requests, then validate the surviving train for one atomic update to
+  `main`. That is the common case the board should read well for, and it is a
+  scoping rule for this UI, not for the product's explanation of itself.
+- `mergetrain demo` deliberately shows the other case: two requests that are
+  green alone and merge cleanly, red only combined, bisected to the minimal
+  failing pair. That is what a merge queue catches and per-branch CI cannot, so
+  it stays the CLI walkthrough's headline. The board must render it correctly
+  too — never label a semantic incompatibility as a generic Git merge conflict.
 - Display the current request rows newest/highest-number first so active and
   pending work stays above completed work. Preserve the real oldest-first FIFO
   sequence in the group header, order badges, and replay timing.
