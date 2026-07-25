@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Name a stranded claim in `next_action`. A job left `in_progress` while no
+  runner holds the lock — a crashed runner, or a run that raised after releasing
+  its lease — read as an idle queue: `doctor` said `enqueue_clean_branch`, the
+  read agents are told to trust. The new `recover_stranded_claim` points at
+  `mergetrain recover`, which matters because the next deploy otherwise requeues
+  the row automatically and clears its validated-train identity, so a train
+  approved by `train_id` can become a different set (retrying with that
+  `--train-id` fails closed instead). Additive: a new `next_action` value.
+
 - Stop reporting queue-database contention as the branch's fault (#191). SQLite
   allows one writer, so a process holding the write lock past `busy_timeout`
   made a queue write raise `sqlite3.OperationalError` — not a `MergetrainError`,

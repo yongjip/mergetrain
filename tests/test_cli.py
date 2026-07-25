@@ -360,6 +360,34 @@ class CliTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(queued[0].status, "queued")
 
+    def test_next_action_names_a_stranded_claim(self) -> None:
+        # A row claimed by a runner that no longer holds the lock is what a crash
+        # -- or queue contention that raised after the lease was released --
+        # leaves behind. doctor used to report an idle queue for it, while the
+        # next deploy would requeue it and clear its validated-train identity.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("stranded"), encoding="utf-8"
+            )
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="a", branch="agent/a")
+                mark_job(conn, job.id, status="in_progress", note="claimed")
+            finally:
+                conn.close()
+
+            for command in (["doctor", "--json"], ["status", "--json"]):
+                with self.subTest(command=command[0]):
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        code = main(["--repo", str(repo), "--db", str(db), *command])
+                    payload = json.loads(out.getvalue())
+                    self.assertEqual(code, 0)
+                    self.assertEqual(payload["next_action"], "recover_stranded_claim")
+
     def test_status_rejects_non_positive_limits(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

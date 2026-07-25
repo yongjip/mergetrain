@@ -46,6 +46,7 @@ a separate action.
 - `cancel_and_reenqueue_legacy_validated_jobs`
 - `run_daemon_or_run_batch_deploy_when_approved`
 - `run_batch_validate`
+- `recover_stranded_claim`
 - `initialize_config`
 - `gc_available`
 - `enqueue_clean_branch`

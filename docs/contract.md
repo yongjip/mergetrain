@@ -73,7 +73,7 @@ listed here as an unexpected failure and fall back to `message`.
 | `queue_error` | no | a queue or lock precondition failed (nothing to run, bad job id, terminal job) |
 | `duplicate_active_branch` | no | that branch already has a non-terminal job queued |
 | `lock_held` | **yes** | another runner owns the queue lock; retry after it finishes |
-| `queue_busy` | **yes** | the queue database refused a writer because another process held it past `busy_timeout`. Nothing was pushed and no work is lost — the job stays claimable (or parks `needs_reconcile` if the push outcome was already unknown). Retry |
+| `queue_busy` | **yes** | a queue write did not happen: the database refused the writer because another process held it past `busy_timeout`. It does **not** mean nothing was pushed — the refs may already be on the remote, and the row is left as the last durable write left it for recovery to resolve. Retry, then read `status --json` |
 | `lost_lease` | **yes** | this runner no longer owns the lease it was given; re-read state and retry |
 | `merge_blocked` | no | the branch cannot be merged into the integration train |
 | `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |

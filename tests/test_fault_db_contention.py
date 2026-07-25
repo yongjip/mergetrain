@@ -67,11 +67,14 @@ from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.errors import LockHeld, LostLease, QueueBusy
 from mergetrain.git_runner import GitRunner
+from mergetrain.recovery import reconcile
 from mergetrain.store import (
     claim_deploy_batch,
+    claim_next_job,
     connect,
     enqueue_job,
     get_job,
+    immediate,
     record_pending_push,
     release_runner_lock,
 )
@@ -545,6 +548,180 @@ class ContentionNeverDestroysEvidenceTests(unittest.TestCase):
             return get_job(conn, job.id), raised
         finally:
             conn.close()
+
+
+class _CommitRaises:
+    """A connection whose COMMIT fails. sqlite3.Connection.commit is read-only,
+    and ``immediate()`` only ever calls execute / commit / rollback, so a narrow
+    stand-in is enough to reach its commit branch."""
+
+    def __init__(self, conn, exc: BaseException) -> None:
+        self._conn = conn
+        self._exc = exc
+        self.commits = 0
+        self.rollbacks = 0
+
+    def execute(self, *args, **kwargs):
+        return self._conn.execute(*args, **kwargs)
+
+    def commit(self) -> None:
+        self.commits += 1
+        raise self._exc
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
+        self._conn.rollback()
+
+
+class ContentionTranslationTests(unittest.TestCase):
+    """Unit coverage for the pieces the end-to-end cases cannot reach.
+
+    An adversarial review found each of these deletable with a green suite,
+    which for a translation layer means it was not tested at all: the whole
+    point is that a raw sqlite3.OperationalError must never escape into code
+    that treats it as an unexpected crash.
+    """
+
+    def _db(self) -> Path:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        return Path(td.name) / "queue.sqlite"
+
+    def test_begin_translates_contention(self) -> None:
+        db = self._db()
+        conn = connect(db)
+        conn.execute(f"PRAGMA busy_timeout = {CONTENDED_BUSY_TIMEOUT_MS}")
+        holder = _WriteLockHolder(db)
+        holder.start_holding()
+        try:
+            with self.assertRaises(QueueBusy) as raised:
+                with immediate(conn):
+                    conn.execute("SELECT 1")
+        finally:
+            holder.stop_holding()
+            conn.close()
+        self.assertIn(LOCK_ERROR_TEXT, str(raised.exception))
+
+    def test_commit_translates_contention(self) -> None:
+        # The COMMIT branch is unreachable end-to-end (a WAL commit does not
+        # block once BEGIN IMMEDIATE succeeded), so drive it directly: without it
+        # a contended commit escapes as a raw OperationalError to the defensive
+        # boundary -- the exact class of bug this module exists for.
+        conn = connect(self._db())
+        failing = _CommitRaises(conn, sqlite3.OperationalError("database is locked"))
+        with self.assertRaises(QueueBusy) as raised:
+            with immediate(failing):
+                failing.execute("SELECT 1")
+        self.assertEqual(failing.commits, 1)
+        self.assertIn(LOCK_ERROR_TEXT, str(raised.exception))
+        # The transaction must not be left open for the next writer.
+        self.assertEqual(failing.rollbacks, 1)
+        self.assertFalse(conn.in_transaction)
+        conn.close()
+
+    def test_a_non_contention_operational_error_is_not_relabelled(self) -> None:
+        # Only busy/locked becomes QueueBusy. Anything else keeps its identity so
+        # a genuine disk or schema fault is not reported as "retry me".
+        conn = connect(self._db())
+        failing = _CommitRaises(conn, sqlite3.OperationalError("disk I/O error"))
+        with self.assertRaises(sqlite3.OperationalError) as raised:
+            with immediate(failing):
+                failing.execute("SELECT 1")
+        self.assertNotIsInstance(raised.exception, QueueBusy)
+        conn.close()
+
+    def test_reconcile_apply_never_reports_an_unwritten_decision_as_applied(
+        self,
+    ) -> None:
+        # recovery._apply's CAS guard treats a QueueError as "a concurrent op won
+        # the race, leave the newer state alone" and returns quietly. Contention
+        # is not that: nothing was written, so swallowing it makes reconcile
+        # report applied: true / result: success for work it did not do.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                head = git(repo, "rev-parse", "HEAD")
+                conn.execute(
+                    "UPDATE deploy_queue SET status='needs_reconcile', "
+                    "pending_deploy_sha=?, pending_deploy_remote='origin', "
+                    "pending_deploy_refs='main', push_status='pending' WHERE id=?",
+                    (head, job.id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            with patch(
+                "mergetrain.recovery.mark_job",
+                side_effect=QueueBusy("queue database is busy: database is locked"),
+            ):
+                with self.assertRaises(QueueBusy):
+                    reconcile(config, connect(config.state.db), apply=True)
+
+
+class ProcessOneContentionTests(unittest.TestCase):
+    """process_one has its own QueueBusy clause, and it is the one run-next uses.
+
+    Everything else in this module drives process_batch, so the two clauses could
+    drift apart -- an adversarial review found process_one's entered by no test at
+    all, meaning a landed single-job deploy could have been reported as a bare
+    retryable failure without anything going red.
+    """
+
+    def test_prepush_contention_raises_instead_of_blaming_the_branch(self) -> None:
+        # The clause's real job is the NOT-landed case. Without it, QueueBusy
+        # reaches `except MergetrainError` and parks 'blocked' -- "fix the branch
+        # before this can merge" -- for a database that was merely busy. (The
+        # landed case cannot prove the clause: finish_after_error's landed-push
+        # guard overrides any status to 'deployed' there anyway.)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            conn.execute(f"PRAGMA busy_timeout = {CONTENDED_BUSY_TIMEOUT_MS}")
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                claimed = claim_next_job(
+                    conn, owner=f"runner:{os.getpid()}", deploy=True
+                )
+                self.assertIsNotNone(claimed)
+                holder = _WriteLockHolder(config.state.db)
+                real_mark_job = git_runner_module.mark_job
+                contended = {"n": 0}
+
+                def wrapper(conn_arg, job_id, **kwargs):
+                    # Contend the opening write, i.e. before anything is pushed.
+                    if kwargs.get("status") == "in_progress" and not contended["n"]:
+                        contended["n"] += 1
+                        holder.start_holding()
+                        try:
+                            return real_mark_job(conn_arg, job_id, **kwargs)
+                        finally:
+                            holder.stop_holding()
+                    return real_mark_job(conn_arg, job_id, **kwargs)
+
+                with patch("mergetrain.git_runner.mark_job", wrapper):
+                    with self.assertRaises(QueueBusy):
+                        GitRunner(config).process_one(
+                            conn, claimed, deploy=True, owner=f"runner:{os.getpid()}"
+                        )
+                holder.assert_clean()
+                self.assertEqual(contended["n"], 1)
+                final = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            self.assertNotIn(final.status, ("blocked", "failed"))
+            self.assertEqual(final.push_status, "not_run")
+            self.assertEqual(
+                git(root / "remote.git", "rev-parse", "main"),
+                git(repo, "rev-parse", "origin/main"),
+            )
 
 
 class ContentionContractTests(unittest.TestCase):

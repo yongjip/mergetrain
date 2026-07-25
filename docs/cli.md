@@ -302,6 +302,7 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `d
 - `cancel_and_reenqueue_legacy_validated_jobs` — pre-migration validated jobs lack safe train identity.
 - `run_daemon_or_run_batch_deploy_when_approved` — auto-approved jobs are queued.
 - `run_batch_validate` — manual jobs are queued; validate them.
+- `recover_stranded_claim` — a job is `in_progress` but no runner holds the lock: a crashed runner, or a run that raised after releasing its lease (queue contention does this). Run `mergetrain recover`. Left alone, the next deploy requeues it automatically and clears its validated-train identity, so an approved train can become a different set; retry an approved deploy with its `--train-id`, which fails closed instead.
 - `initialize_config` — the repository has no `.mergetrain.yaml`. Every queue-advancing command (`enqueue`, `run-batch`, `run-next`, the daemons) refuses without one rather than shipping against guessed defaults, so this outranks the queue actions above; recovery and read-only commands still work. Run `mergetrain init --write`.
 - `gc_available` — only cleanup remains.
 - `enqueue_clean_branch` — the queue is empty.

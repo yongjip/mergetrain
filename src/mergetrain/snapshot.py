@@ -49,6 +49,7 @@ NEXT_ACTION_VALUES = frozenset(
         "cancel_and_reenqueue_legacy_validated_jobs",
         "run_daemon_or_run_batch_deploy_when_approved",
         "run_batch_validate",
+        "recover_stranded_claim",
         "initialize_config",
         "gc_available",
         "enqueue_clean_branch",
@@ -105,6 +106,13 @@ def next_action(
     # A reconcile-finalized deploy whose post-push verify could not be proven.
     if count_data.get("deployed_verify_unknown", 0):
         return "verify_reconciled_deploy"
+    # Work claimed by a runner that is no longer holding the lock: a crash, or a
+    # run that raised after its lease was released (queue contention does this).
+    # The next deploy requeues it automatically, which also clears its
+    # validated-train identity -- so an approved train can quietly become a
+    # different set. Name it instead of letting doctor report an idle queue.
+    if not lock and in_progress:
+        return "recover_stranded_claim"
     # Every queue-advancing command refuses without a config -- the deploy path
     # is fail-closed on purpose -- so pointing at queue work here would send the
     # reader into a refusal. Ranked below the recovery actions above, which stay
