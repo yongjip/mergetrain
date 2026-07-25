@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Point `next_action` at the actual blocker in an unconfigured repository. An
+  agent following the mandated read got `enqueue_clean_branch`, and `enqueue`
+  then refused with `config_error` — every queue-advancing command does, on
+  purpose, rather than shipping against guessed defaults. `doctor` and `status`
+  now return the new `initialize_config` value, ranked below the recovery
+  actions, which keep working without a config. Additive: a new `next_action`
+  value does not bump `contract_version`.
+
 - Close the contract gate's coverage gaps before the 0.9.0 freeze. `init`,
   `run-batch --preview`, `hub add`, `hub list`, and `hub remove` emit
   contract-stamped payloads that no fingerprint covered, so their shapes could

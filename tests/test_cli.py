@@ -282,6 +282,30 @@ class CliTests(unittest.TestCase):
             # The two mandated reads (status/doctor) are now symmetric.
             self.assertIn("next_action", payload)
 
+    def test_next_action_points_at_init_before_any_queue_advice(self) -> None:
+        # An unconfigured repo used to be told to enqueue a branch, which
+        # enqueue then refused with config_error. next_action is the signal
+        # agents are told to act on, so it has to name the actual blocker.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            for command in (["doctor", "--json"], ["status", "--json"]):
+                with self.subTest(command=command[0]):
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        code = main(["--repo", str(repo), *command])
+                    payload = json.loads(out.getvalue())
+                    self.assertEqual(code, 0)
+                    self.assertEqual(payload["next_action"], "initialize_config")
+
+            main(["--repo", str(repo), "init", "--project", "demo", "--write"])
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "doctor", "--json"])
+            self.assertEqual(
+                json.loads(out.getvalue())["next_action"], "enqueue_clean_branch"
+            )
+
     def test_status_rejects_non_positive_limits(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

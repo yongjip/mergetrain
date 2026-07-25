@@ -197,7 +197,15 @@ dj=$("$MT" --repo "$NOCFG" doctor --json); drc=$?
 [ "$(echo "$dj" | jget ok)" = "True" ] && ok "doctor ok=True (command ran)" || no "ok not True"
 [ "$(echo "$dj" | jget health)" = "False" ] && ok "health=False (no config)" || no "health not False"
 [ "$(echo "$dj" | jget config_exists)" = "False" ] && ok "config_exists=False" || no "config_exists wrong"
-[ "$(echo "$dj" | jget next_action)" = "enqueue_clean_branch" ] && ok "next_action=enqueue_clean_branch" || no "next_action wrong"
+# Degrading safely means naming the blocker: every queue-advancing command
+# refuses without a config, so advising a branch enqueue here would be advice
+# that cannot succeed. status must agree -- both are mandated reads.
+[ "$(echo "$dj" | jget next_action)" = "initialize_config" ] && ok "next_action=initialize_config" || no "next_action wrong"
+sj=$("$MT" --repo "$NOCFG" status --json)
+[ "$(echo "$sj" | jget next_action)" = "initialize_config" ] && ok "status agrees on next_action" || no "status next_action disagrees"
+ej=$("$MT" --repo "$NOCFG" enqueue --task t --branch main --json 2>&1); erc=$?
+{ [ "$erc" = 1 ] && [ "$(echo "$ej" | jget error.code)" = "config_error" ]; } \
+  && ok "enqueue refuses the advised-against path (config_error)" || no "enqueue did not fail closed: rc=$erc"
 
 section "S1c  malformed config -> clean error, no traceback"
 R=$(setup s1c)

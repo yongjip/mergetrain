@@ -49,6 +49,7 @@ NEXT_ACTION_VALUES = frozenset(
         "cancel_and_reenqueue_legacy_validated_jobs",
         "run_daemon_or_run_batch_deploy_when_approved",
         "run_batch_validate",
+        "initialize_config",
         "gc_available",
         "enqueue_clean_branch",
     }
@@ -104,6 +105,12 @@ def next_action(
     # A reconcile-finalized deploy whose post-push verify could not be proven.
     if count_data.get("deployed_verify_unknown", 0):
         return "verify_reconciled_deploy"
+    # Every queue-advancing command refuses without a config -- the deploy path
+    # is fail-closed on purpose -- so pointing at queue work here would send the
+    # reader into a refusal. Ranked below the recovery actions above, which stay
+    # available precisely because they do not need a config.
+    if payload.get("config_exists") is False:
+        return "initialize_config"
     if payload.get("validated_trains"):
         if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
             return "deploy_validated_train_when_approved"

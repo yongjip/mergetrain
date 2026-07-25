@@ -441,7 +441,7 @@ def cmd_retry(args: argparse.Namespace) -> int:
             base_sha=base_sha,
             head_sha=head_sha,
         )
-        next_action = _recovery_next_action(conn)
+        next_action = _recovery_next_action(conn, config)
     finally:
         conn.close()
     payload = {
@@ -484,6 +484,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                     "counts": counts(conn),
                     "validated_trains": validated_trains,
                     "gc": {"worktree_candidates": []},
+                    "config_exists": config.config_exists,
                 },
                 config_version=config.config_version,
             ),
@@ -1291,7 +1292,7 @@ def _emit_recovery_error(
     return exit_code
 
 
-def _recovery_next_action(conn) -> str:
+def _recovery_next_action(conn, config: MergetrainConfig) -> str:
     lock = get_lock(conn)
     return _doctor_next_action(
         {
@@ -1299,7 +1300,11 @@ def _recovery_next_action(conn) -> str:
             "counts": counts(conn),
             "validated_trains": validated_train_summaries(conn),
             "gc": {"worktree_candidates": []},
-        }
+            # Recovery runs without a config on purpose, so it is exactly where
+            # a reader needs to be told that shipping still needs one.
+            "config_exists": config.config_exists,
+        },
+        config_version=config.config_version,
     )
 
 
@@ -1311,7 +1316,7 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         outcome = reconcile(config, conn, apply=args.apply)
-        next_action = _recovery_next_action(conn)
+        next_action = _recovery_next_action(conn, config)
     except LockHeld as exc:
         return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
     except RemoteUnreachable as exc:
@@ -1352,7 +1357,7 @@ def cmd_recover(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         outcome = recover(config, conn, gc=args.gc, apply=True)
-        next_action = _recovery_next_action(conn)
+        next_action = _recovery_next_action(conn, config)
     except LockHeld as exc:
         return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
     except RemoteUnreachable as exc:
@@ -1394,7 +1399,7 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         outcome = force_unlock(config, conn, force=args.force)
-        next_action = _recovery_next_action(conn)
+        next_action = _recovery_next_action(conn, config)
     except RemoteUnreachable as exc:
         return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
     finally:
@@ -1438,7 +1443,7 @@ def cmd_dismiss(args: argparse.Namespace) -> int:
                 raise QueueError("dismiss requires a job id or --all")
             targets = [get_job(conn, args.job_id)]
         dismissed = [dismiss_job(conn, job.id, note=args.note or "").to_dict() for job in targets]
-        next_action = _recovery_next_action(conn)
+        next_action = _recovery_next_action(conn, config)
     finally:
         conn.close()
     payload = {"ok": True, "dismissed": dismissed, "next_action": next_action}
@@ -1491,7 +1496,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 note = f"verify re-run against {job.deploy_sha}: {outcome}"
             updated = resolve_verify_status(conn, job.id, verify_status=outcome, note=note)
             resolved.append({"job_id": updated.id, "verify_status": updated.verify_status})
-        next_action = _recovery_next_action(conn)
+        next_action = _recovery_next_action(conn, config)
     finally:
         conn.close()
     result = (
