@@ -655,12 +655,18 @@ class ContentionTranslationTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            with patch(
-                "mergetrain.recovery.mark_job",
-                side_effect=QueueBusy("queue database is busy: database is locked"),
-            ):
-                with self.assertRaises(QueueBusy):
-                    reconcile(config, connect(config.state.db), apply=True)
+            # Windows will not remove the temp dir while a connection is open,
+            # so close it explicitly rather than leaning on refcounting.
+            conn = connect(config.state.db)
+            try:
+                with patch(
+                    "mergetrain.recovery.mark_job",
+                    side_effect=QueueBusy("queue database is busy: database is locked"),
+                ):
+                    with self.assertRaises(QueueBusy):
+                        reconcile(config, conn, apply=True)
+            finally:
+                conn.close()
 
 
 class ProcessOneContentionTests(unittest.TestCase):
