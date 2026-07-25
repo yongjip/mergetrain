@@ -511,16 +511,18 @@ deploy:
         to go find. Statuses and notes name the cause in the failure itself.
         """
 
-        parts: list[str] = []
+        lines: list[str] = []
         for branch in branches:
             job = jobs.get(branch)
             if not job:
-                parts.append(f"{branch}=missing")
+                lines.append(f"  {branch}=missing")
                 continue
-            note = " ".join(str(job.get("note", "")).split())[:120]
-            status = job.get("status", "unknown")
-            parts.append(f"{branch}={status}" + (f" ({note})" if note else ""))
-        return "; ".join(parts)
+            lines.append(f"  {branch}={job.get('status', 'unknown')}")
+            # The note carries the failing command and its output tail, which is
+            # the part a reader needs; keep enough of it to name the cause.
+            for line in str(job.get("note", "")).strip().splitlines()[:6]:
+                lines.append(f"    {line[:200]}")
+        return "\n" + "\n".join(lines)
 
     @staticmethod
     def _jobs_by_branch(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
