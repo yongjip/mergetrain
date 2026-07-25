@@ -129,7 +129,29 @@ def _cap_run_validate(repo):
 
 
 def _cap_gc(repo):
+    # Seed a terminal job so branch_candidates[] is NON-empty: keyset() renders an
+    # empty list as "[]?" and pins nothing inside it, which is how a string
+    # job_id sat next to an int job_id in this very payload without CI noticing.
+    from mergetrain.store import mark_job
+
+    conn = connect(_db(repo))
+    job = enqueue_job(conn, task="a", branch="feature/gc")
+    mark_job(conn, job.id, status="deployed", note="done")
+    conn.close()
     return _run_json(["--repo", str(repo), "gc"])
+
+
+def _cap_gc_applied(repo):
+    # `gc --apply` returns a different object (result{removed_worktrees,
+    # deleted_branches, failed, swept_pending_refs}) that docs/contract.md claims
+    # is covered. It was not.
+    from mergetrain.store import mark_job
+
+    conn = connect(_db(repo))
+    job = enqueue_job(conn, task="a", branch="feature/gc")
+    mark_job(conn, job.id, status="deployed", note="done")
+    conn.close()
+    return _run_json(["--repo", str(repo), "gc", "--apply"])
 
 
 def _cap_reconcile(repo):
@@ -229,6 +251,73 @@ def _cap_jsonl_frames(repo):
     for line in out.getvalue().splitlines():
         rec = json.loads(line)
         frames[rec["type"]] = keyset(rec)
+
+    # The one-shot path above emits stream_start + event only. A follower also
+    # sees heartbeat, and any stream that ends emits stream_end -- the frame that
+    # says WHY it stopped, and the one docs/contract.md promises carries ok:false
+    # and error. Both were outside the gate, so capture them too.
+    #
+    # stream_end (normal): a scoped follow over a terminal job returns at once.
+    conn = connect(_db(repo))
+    terminal_job = enqueue_job(conn, task="b", branch="feature/b")
+    conn.execute(
+        "UPDATE deploy_queue SET status='deployed' WHERE id=?", (terminal_job.id,)
+    )
+    conn.commit()
+    conn.close()
+    ended = io.StringIO()
+    with redirect_stdout(ended):
+        main(
+            [
+                "--repo",
+                str(repo),
+                "events",
+                "--job",
+                str(terminal_job.id),
+                "--jsonl",
+                "--follow",
+                "--poll-interval",
+                "0.05",
+            ]
+        )
+    for line in ended.getvalue().splitlines():
+        rec = json.loads(line)
+        frames.setdefault(rec["type"], keyset(rec))
+
+    # stream_end (interrupted) is emitted by main()'s KeyboardInterrupt handler
+    # and has a DIFFERENT key set from the normal one, which is exactly the kind
+    # of divergence an un-pinned family hides.
+    interrupted = io.StringIO()
+    with (
+        mock.patch("mergetrain.cli.cmd_events", side_effect=KeyboardInterrupt),
+        redirect_stdout(interrupted),
+    ):
+        main(["--repo", str(repo), "events", "--jsonl"])
+    for line in interrupted.getvalue().splitlines():
+        rec = json.loads(line)
+        frames[f"{rec['type']}_interrupted"] = keyset(rec)
+
+    # heartbeat needs a live lease mid-run, which a bounded capture cannot hold
+    # open, so pin the builder the CLI prints verbatim (_print_event_record adds
+    # nothing to it).
+    from mergetrain.models import RunnerLock
+    from mergetrain.observability import heartbeat_record
+
+    frames["heartbeat"] = keyset(
+        heartbeat_record(
+            [terminal_job],
+            RunnerLock(
+                name="runner",
+                owner="runner:1",
+                token="t",
+                acquired_at="2026-07-25T00:00:00Z",
+                heartbeat_at="2026-07-25T00:00:10Z",
+                expires_at="2026-07-25T00:30:00Z",
+            ),
+            after_event_id=0,
+            latest_event=None,
+        )
+    )
     return frames
 
 
@@ -379,6 +468,7 @@ SURFACES = {
     "retry": _cap_retry,
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
+    "gc_applied": _cap_gc_applied,
     "hub_add": _cap_hub_add,
     "hub_list": _cap_hub_list,
     "hub_remove": _cap_hub_remove,
@@ -508,6 +598,87 @@ class ErrorTaxonomyTests(unittest.TestCase):
         error = _run_json(["--repo", str(repo), "run-batch", "--deploy"])["error"]
         self.assertEqual(error["code"], "lock_held")
         self.assertTrue(error["retryable"])
+
+    def test_remote_unreachable_from_recovery_is_retryable(self) -> None:
+        # The recovery commands use a SECOND rule -- exit code 3 or 7 means
+        # retryable -- so a code can be retryable there while its class is not
+        # on the generic path. docs/contract.md got this wrong for
+        # remote_unreachable until this test existed.
+        repo = self._repo()
+        conn = connect(_db(repo))
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            conn.execute(
+                "UPDATE deploy_queue SET status='needs_reconcile', "
+                "pending_deploy_sha=?, push_status='pending' WHERE id=?",
+                ("a" * 40, job.id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        # Do NOT rewrite the config here: make_demo_repo points state.db at an
+        # absolute path, so a fresh config would send reconcile at an empty
+        # database and it would never reach the remote at all.
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", str(repo / "does-not-exist.git")],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        payload = _run_json(["--repo", str(repo), "reconcile"])
+        self.assertEqual(payload["error"]["code"], "remote_unreachable")
+        self.assertTrue(payload["error"]["retryable"])
+
+    def test_documented_error_codes_match_the_implementation(self) -> None:
+        # The freeze tells consumers to branch on error.code, so the documented
+        # vocabulary has to BE the vocabulary. Two codes were absent from every
+        # document until this cycle; nothing compared the two lists.
+        import re
+
+        from mergetrain import errors as errors_module
+
+        doc = (
+            Path(__file__).resolve().parents[1] / "docs" / "contract.md"
+        ).read_text(encoding="utf-8")
+        table = doc.split("## `error.code` vocabulary")[1].split("\n\n##")[0]
+        documented = {
+            row.group(1): "yes" in row.group(2).lower()
+            for row in re.finditer(r"^\| `([a-z_]+)` \| ([^|]+) \|", table, re.M)
+        }
+
+        def wire_code(name: str) -> str:
+            return "".join(
+                f"_{char.lower()}" if char.isupper() else char for char in name
+            ).lstrip("_")
+
+        implemented = {
+            wire_code(name)
+            for name, obj in vars(errors_module).items()
+            if isinstance(obj, type)
+            and issubclass(obj, Exception)
+            and obj.__module__ == errors_module.__name__
+        }
+        cli_source = (
+            Path(__file__).resolve().parents[1] / "src" / "mergetrain" / "cli.py"
+        ).read_text(encoding="utf-8")
+        implemented |= set(re.findall(r'error_code="([a-z_]+)"', cli_source))
+        implemented |= set(re.findall(r'_error_payload\(\s*\n?\s*"([a-z_]+)"', cli_source))
+
+        self.assertEqual(
+            implemented - set(documented),
+            set(),
+            "error.code values the code can emit but docs/contract.md does not list",
+        )
+        self.assertEqual(
+            set(documented) - implemented,
+            set(),
+            "error.code values documented but not emitted anywhere",
+        )
+        # And the flags the other tests pin must agree with the table.
+        self.assertTrue(documented["lock_held"])
+        self.assertTrue(documented["lost_lease"])
+        self.assertTrue(documented["remote_unreachable"])
+        self.assertFalse(documented["config_error"])
 
     def test_interrupted_envelope_has_the_full_shape(self) -> None:
         repo = self._repo()

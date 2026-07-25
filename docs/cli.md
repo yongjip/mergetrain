@@ -426,8 +426,15 @@ mergetrain run-next --integrate
 ```
 
 `--keep-worktree` leaves the temporary integration worktree in place for inspection. See [Design → Runner behavior](design.md#runner-behavior).
+
 Validated jobs are deployed through `run-batch --deploy` so train identity is
-preserved, including when the train contains only one job.
+preserved, including when the train contains only one job. That is **enforced**:
+while any deploy-eligible validated train is pending, `run-next` with a push mode
+refuses with `error.code: validated_train_pending`, listing the pending
+`train_id`s and setting `next_action: deploy_validated_train_when_approved`.
+`run-next` claims the next *queued* job, so it would push a different commit and
+move the integration ref out from under the exact train a human approved. Deploy
+the train, or dismiss it first if you mean to ship something else.
 
 ## `run-batch`
 

@@ -566,8 +566,22 @@ def event_record(
         "gate": gate_details(event),
         "elapsed_seconds": elapsed_seconds(start, event.created_at),
         "heartbeat_at": lock.heartbeat_at if lease_matches and lock else "",
-        "lease_liveness": lock.liveness if lease_matches and lock else "inactive",
+        # Distinguish a stranded run from an idle queue, the way inspect already
+        # does: work still marked in_progress whose lease no longer matches means
+        # the runner is gone ("lost"), not that no runner is needed
+        # ("inactive"). A one-shot events reader -- which is how the MCP server
+        # reads progress -- has no other lease signal, and collapsing the two
+        # made an abandoned train look like an idle one.
+        "lease_liveness": (
+            lock.liveness
+            if lease_matches and lock
+            else ("lost" if _any_in_progress(jobs) else "inactive")
+        ),
     }
+
+
+def _any_in_progress(jobs: Sequence[Job]) -> bool:
+    return any(job.status == "in_progress" for job in jobs)
 
 
 def heartbeat_record(

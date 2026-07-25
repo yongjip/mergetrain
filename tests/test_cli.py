@@ -28,6 +28,7 @@ from mergetrain.store import (
     connect,
     enqueue_job,
     get_job,
+    list_jobs,
     mark_job,
     record_run_event,
     release_runner_lock,
@@ -305,6 +306,59 @@ class CliTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(out.getvalue())["next_action"], "enqueue_clean_branch"
             )
+
+    def test_run_next_deploy_refuses_while_a_validated_train_is_pending(self) -> None:
+        # run-next claims the next *queued* job, so it never picks up a pending
+        # train's `validated` members. Left unguarded it pushes a different
+        # commit and moves the integration ref out from under the exact train a
+        # human approved, silently invalidating that validation.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("guard"), encoding="utf-8"
+            )
+            conn = connect(db)
+            try:
+                approved = enqueue_job(conn, task="approved", branch="agent/one")
+                mark_job(
+                    conn,
+                    approved.id,
+                    status="validated",
+                    train_id="t-guard",
+                    train_size=1,
+                    validated_at="2026-07-25T00:00:00Z",
+                    validated_head_sha="a" * 40,
+                    validation_base_sha="b" * 40,
+                    validation_sha="a" * 40,
+                )
+                enqueue_job(conn, task="later", branch="agent/two")
+            finally:
+                conn.close()
+
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = main(
+                    ["--repo", str(repo), "--db", str(db), "run-next", "--deploy", "--json"]
+                )
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 1)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "validated_train_pending")
+            self.assertEqual(payload["pending_train_ids"], ["t-guard"])
+            self.assertEqual(
+                payload["next_action"], "deploy_validated_train_when_approved"
+            )
+            self.assertIn("run-batch --deploy --train-id t-guard", payload["error"]["message"])
+
+            # The queued job must be untouched — refusing is not claiming.
+            conn = connect(db)
+            try:
+                queued = [job for job in list_jobs(conn, limit=10) if job.task == "later"]
+            finally:
+                conn.close()
+            self.assertEqual(queued[0].status, "queued")
 
     def test_status_rejects_non_positive_limits(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -674,7 +728,11 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["human_vocabulary"]["completed"], "integrated")
             self.assertEqual(payload["human_vocabulary"]["cli_flag"], "--integrate")
             self.assertEqual(payload["human_vocabulary"]["machine_status"], "deployed")
-            self.assertEqual(payload["boundary"]["deploy_requires"], "run-next --deploy or run-batch --deploy")
+            self.assertEqual(
+                payload["boundary"]["deploy_requires"],
+                "run-batch --deploy for a validated train; run-next --deploy only "
+                "when none is pending",
+            )
 
     def test_integration_human_status_preserves_json_machine_status(self) -> None:
         with tempfile.TemporaryDirectory() as td:

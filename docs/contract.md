@@ -78,15 +78,23 @@ listed here as an unexpected failure and fall back to `message`.
 | `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |
 | `push_rejected` | no | the remote refused the push on policy or permissions; the job parks `blocked` |
 | `ambiguous_push` | no | the push failed for a non-rejection reason, so the remote may have accepted it; the job parks `needs_reconcile` |
-| `remote_unreachable` | no | `reconcile` could not reach the remote to establish deploy truth |
+| `remote_unreachable` | **yes** | `reconcile` could not reach the remote to establish deploy truth; retry when connectivity returns |
 | `cancellation_requested` | no | the active train was asked to stop |
 | `reconcile_pending_deploy` | no | a deploy was refused because jobs are pending reconcile; carries `next_action` and a `needs_reconcile` count |
+| `validated_train_pending` | no | `run-next` with a push mode was refused because a validated train is pending; carries `next_action` and `pending_train_ids`. Use `run-batch --deploy --train-id <id>` |
 | `interrupted` | no | `Ctrl-C`; exit code `130` |
 | `mergetrain_error` | no | an expected failure with no more specific class |
 
 Retryable means only that the same call may succeed later without operator
 intervention. Everything else needs a decision — read `message` and, when
 present, `next_action`.
+
+`retryable` comes from two rules, which is worth knowing because they can
+disagree for the same class: the generic handler marks `LockHeld` and
+`LostLease` retryable, while the recovery commands (`reconcile`, `recover`,
+`unlock`) mark their exit-code 3 and 7 failures retryable — which is why
+`lock_held` and `remote_unreachable` are retryable there. A consumer should read
+the flag rather than infer it from the code.
 
 The MCP server adds refusal codes of its own for the surface it guards
 (`confirmation_required`, `deploy_not_confirmed`, `train_id_required`,

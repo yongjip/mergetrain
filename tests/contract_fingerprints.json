@@ -21,6 +21,45 @@
         "state": null,
         "type": null
       },
+      "heartbeat": {
+        "after_event_id": null,
+        "elapsed_seconds": null,
+        "gate": null,
+        "heartbeat_at": null,
+        "job_ids": "[]",
+        "lease_liveness": null,
+        "phase": null,
+        "type": null
+      },
+      "stream_end": {
+        "after_event_id": null,
+        "exit_code": null,
+        "job_ids": "[]",
+        "outcome": {
+          "category": null,
+          "failure_categories": "[]?",
+          "failures": "[]?",
+          "severity": null,
+          "status_counts": {
+            "deployed": null
+          },
+          "warning_categories": "[]?",
+          "warnings": "[]?"
+        },
+        "reason": null,
+        "type": null
+      },
+      "stream_end_interrupted": {
+        "error": {
+          "code": null,
+          "message": null,
+          "retryable": null
+        },
+        "exit_code": null,
+        "ok": null,
+        "reason": null,
+        "type": null
+      },
       "stream_start": {
         "after_event_id": null,
         "contract_version": null,
@@ -291,11 +330,41 @@
     },
     "gc": {
       "apply": null,
-      "branch_candidates": "[]?",
+      "branch_candidates": {
+        "[]": {
+          "branch": null,
+          "eligible": null,
+          "exists": null,
+          "job_id": null,
+          "status": null
+        }
+      },
       "contract_version": null,
       "delete_branches": null,
       "ok": null,
       "result": null,
+      "worktree_candidates": "[]?"
+    },
+    "gc_applied": {
+      "apply": null,
+      "branch_candidates": {
+        "[]": {
+          "branch": null,
+          "eligible": null,
+          "exists": null,
+          "job_id": null,
+          "status": null
+        }
+      },
+      "contract_version": null,
+      "delete_branches": null,
+      "ok": null,
+      "result": {
+        "deleted_branches": "[]?",
+        "failed": "[]?",
+        "removed_worktrees": "[]?",
+        "swept_pending_refs": "[]?"
+      },
       "worktree_candidates": "[]?"
     },
     "history": {
