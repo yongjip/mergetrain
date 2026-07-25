@@ -35,6 +35,7 @@ mergetrain stats [--since TIMESTAMP] [--json]
 mergetrain logs JOB_ID [--follow] [--tail N]
 mergetrain doctor [--json]
 mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
+mergetrain mcp
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
 mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
 mergetrain daemon [--interval SECONDS] [--once] [--notify] [--keep-worktree]
@@ -329,6 +330,28 @@ time.
 
 Remote binding expands access to queue metadata and status notes. Prefer the
 loopback default; there are no authentication or TLS layers in this local tool.
+
+## `mcp`
+
+Serve the queue to coding agents over the Model Context Protocol on stdio:
+
+```sh
+mergetrain mcp                       # this repository
+mergetrain --repo /path/to/svc mcp   # another one
+```
+
+Needs the optional extra (`pip install 'mergetrain[mcp]'`); without it the
+command prints the install hint and exits 1. Register it with
+`claude mcp add mergetrain -- mergetrain mcp`, or the Codex/Gemini equivalent.
+
+Each tool shells out to the matching `--json` command and returns that payload
+verbatim, so there is no second contract. The tool surface is smaller than the
+CLI on purpose: `daemon`, `enqueue --auto`, `gc --apply`, `gc --delete-branches`,
+`cancel`, `unlock`, `dismiss` and the recovery mutations are not exposed and have
+no reachable parameter, and `mergetrain_deploy` requires a client-rendered human
+accept — refusing with `confirmation_required` and the terminal command when the
+client cannot show one. Full tool table and refusal codes in
+[docs/mcp.md](mcp.md).
 
 ## `hub`
 

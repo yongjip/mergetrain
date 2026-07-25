@@ -356,6 +356,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 - [Hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md) — every repo on one read-only board
 - [Manage from your phone](https://github.com/yongjip/mergetrain/blob/main/docs/mobile.md) — drive mergetrain via Cowork Dispatch
 - [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) — the rules agents follow
+- [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) — `mergetrain mcp` for Claude Code, Codex CLI, and Gemini CLI, with a deploy a human has to accept
 - [Machine contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md) — the versioned JSON/config shape agents parse
 - [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) · [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) · [Development](https://github.com/yongjip/mergetrain/blob/main/docs/development.md) · [Release](https://github.com/yongjip/mergetrain/blob/main/docs/release.md)
 

@@ -289,6 +289,14 @@ def cmd_demo(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    # Imported here so the zero-dependency core keeps importing without the MCP
+    # SDK; run_server prints the install hint when the extra is missing.
+    from .mcp_server import run_server
+
+    return run_server(Path(args.repo))
+
+
 def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
     try:
         return git_rev_parse(path, ref)
@@ -1727,6 +1735,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show only milestone results (useful for recordings and presentations)",
     )
     p_demo.set_defaults(func=cmd_demo)
+
+    p_mcp = subparsers.add_parser(
+        "mcp", help="Serve the queue to coding agents over MCP (stdio)"
+    )
+    p_mcp.set_defaults(func=cmd_mcp)
 
     p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the integration queue")
     p_enqueue.add_argument("--task", required=True)
