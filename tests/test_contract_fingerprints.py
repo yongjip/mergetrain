@@ -308,6 +308,61 @@ def _cap_hub_status(repo):
     return _run_json(["--repo", str(repo), "hub", "status", "--registry", str(registry)])
 
 
+def _cap_init(repo):
+    # `init --write` reports the scaffold it produced and what to do next. It
+    # has no --json flag: the payload is unconditional, so capture it directly.
+    out = io.StringIO()
+    with redirect_stdout(out):
+        main(["--repo", str(repo), "init", "--project", "demo", "--write", "--force"])
+    return json.loads(out.getvalue())
+
+
+def _cap_run_preview(repo):
+    # The pre-deploy preview is its own shape -- push plan, reuse decision, and
+    # the exact train -- and it is what an operator or agent reads *before*
+    # approving a push, so it belongs under the freeze like any other surface.
+    _run_json(
+        [
+            "--repo",
+            str(repo),
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "feature/a",
+            "--no-ready-check",
+        ]
+    )
+    _run_json(["--repo", str(repo), "run-batch", "--validate-only"])
+    return _run_json(["--repo", str(repo), "run-batch", "--deploy", "--preview"])
+
+
+def _hub_registry(repo: Path) -> Path:
+    return repo / "hub-repos.json"
+
+
+def _cap_hub_add(repo):
+    return _run_json(
+        ["hub", "add", str(repo), "--registry", str(_hub_registry(repo))]
+    )
+
+
+def _cap_hub_list(repo):
+    from mergetrain.registry import add_repo
+
+    add_repo(repo, _hub_registry(repo))
+    return _run_json(["hub", "list", "--registry", str(_hub_registry(repo))])
+
+
+def _cap_hub_remove(repo):
+    from mergetrain.registry import add_repo
+
+    add_repo(repo, _hub_registry(repo))
+    return _run_json(
+        ["hub", "remove", str(repo), "--registry", str(_hub_registry(repo))]
+    )
+
+
 SURFACES = {
     "doctor": _cap_doctor,
     "status": _cap_status,
@@ -324,6 +379,11 @@ SURFACES = {
     "retry": _cap_retry,
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
+    "hub_add": _cap_hub_add,
+    "hub_list": _cap_hub_list,
+    "hub_remove": _cap_hub_remove,
+    "init": _cap_init,
+    "run_batch_preview": _cap_run_preview,
     "inspect": _cap_inspect,
     "history": _cap_history,
     "stats": _cap_stats,

@@ -61,6 +61,39 @@ hub `REGISTRY_VERSION`.
   `stream_end` frame, so a stream that emitted `stream_start` always terminates
   with a machine-readable record.
 
+## `error.code` vocabulary
+
+Branching on `error.code` only works if the codes are enumerated, so here they
+are. Most are the snake-cased name of the raising error class; treat any code not
+listed here as an unexpected failure and fall back to `message`.
+
+| `error.code` | `retryable` | Means |
+| --- | --- | --- |
+| `config_error` | no | `.mergetrain.yaml` is missing, unparseable, invalid, or declares a `version` this build does not support |
+| `queue_error` | no | a queue or lock precondition failed (nothing to run, bad job id, terminal job) |
+| `duplicate_active_branch` | no | that branch already has a non-terminal job queued |
+| `lock_held` | **yes** | another runner owns the queue lock; retry after it finishes |
+| `lost_lease` | **yes** | this runner no longer owns the lease it was given; re-read state and retry |
+| `merge_blocked` | no | the branch cannot be merged into the integration train |
+| `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |
+| `push_rejected` | no | the remote refused the push on policy or permissions; the job parks `blocked` |
+| `ambiguous_push` | no | the push failed for a non-rejection reason, so the remote may have accepted it; the job parks `needs_reconcile` |
+| `remote_unreachable` | no | `reconcile` could not reach the remote to establish deploy truth |
+| `cancellation_requested` | no | the active train was asked to stop |
+| `reconcile_pending_deploy` | no | a deploy was refused because jobs are pending reconcile; carries `next_action` and a `needs_reconcile` count |
+| `interrupted` | no | `Ctrl-C`; exit code `130` |
+| `mergetrain_error` | no | an expected failure with no more specific class |
+
+Retryable means only that the same call may succeed later without operator
+intervention. Everything else needs a decision — read `message` and, when
+present, `next_action`.
+
+The MCP server adds refusal codes of its own for the surface it guards
+(`confirmation_required`, `deploy_not_confirmed`, `train_id_required`,
+`train_not_found`, `no_validated_train`, `cli_timeout`,
+`cli_output_unreadable`, `log_unavailable`); see [mcp.md](mcp.md). They never
+appear on CLI output.
+
 ## Compatibility policy
 
 **Additive changes do not bump `contract_version`.** Consumers **must ignore
@@ -97,6 +130,16 @@ Any shape change fails CI and is classified — added keys are additive
 changelog); removed or renamed keys are breaking and require bumping
 `contract_version` first. It cannot detect a same-keys value-meaning change;
 that residual rests on review.
+
+Coverage is **every payload a command can emit**, currently 25 surfaces plus the
+JSONL frames: `doctor`, `status`, `version`, `agent_contract`, `init`, `enqueue`,
+`retry`, `inspect`, `history`, `stats`, `gc`, `run_batch_validate`,
+`run_batch_preview`, `reconcile`, `recover`, `unlock`, `verify`, `dismiss`,
+`cancel`, `hub_status`, `hub_add`, `hub_list`, `hub_remove`, `failure_envelope`,
+and `_jsonl_frames`. A new `--json` payload must be added to `SURFACES` in the
+same change that introduces it, or the gate silently does not cover it. Run
+results share one builder, so `run_batch_validate` also pins `run-batch --deploy`
+and `run-next`.
 
 ## Freeze linkage (0.9.0)
 
