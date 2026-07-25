@@ -490,7 +490,9 @@ class CliTests(unittest.TestCase):
             payload = json.loads(out.getvalue())
 
             self.assertEqual(code, 0)
-            self.assertEqual(payload["dismissed"]["status"], "canceled")
+            # retry dismisses exactly one outcome, so the key is singular and the
+            # value is an object; `dismiss` keeps `dismissed` for its array.
+            self.assertEqual(payload["dismissed_job"]["status"], "canceled")
             self.assertEqual(payload["job"]["status"], "queued")
             self.assertEqual(payload["job"]["task"], "fix retry")
             self.assertEqual(payload["job"]["note"], "gate failed")
