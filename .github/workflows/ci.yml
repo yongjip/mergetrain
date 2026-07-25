@@ -87,6 +87,31 @@ jobs:
           fi
           echo "packaged dashboard is current"
 
+  mcp:
+    # `mergetrain mcp` is the only code path that needs the MCP SDK, and the SDK
+    # pulls ~30 packages, so it stays out of the dev extra and off the test
+    # matrix. This leg installs it so the deploy gate's confirmation paths --
+    # the ones that need a real pydantic schema -- actually run somewhere.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install with the mcp extra
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[mcp,dev]"
+      - name: MCP server tests
+        run: python -m pytest tests/test_mcp_server.py -q
+      - name: Assert nothing is skipped for a missing extra
+        run: |
+          python -m pytest tests/test_mcp_server.py -q -rs 2>&1 | tee result.txt
+          if grep -q "the mcp extra is not installed" result.txt; then
+            echo "::error::the mcp extra did not install; these tests only ran as skips"
+            exit 1
+          fi
+
   no-yaml:
     # The package ships zero runtime deps, so the built-in YAML fallback parser
     # is the DEFAULT install path. Every other leg installs .[dev] (which pins

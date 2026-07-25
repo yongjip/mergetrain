@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Add `mergetrain mcp`, a stdio Model Context Protocol server behind the
+  optional `mcp` extra (#172, phase 1). Every tool shells out to the CLI with
+  `--json` and returns that payload verbatim, so `contract_version` stays the
+  single machine interface. The surface is deliberately smaller than the CLI:
+  `daemon`, `enqueue --auto`, `gc --apply`/`--delete-branches`, `cancel`,
+  `unlock`, `dismiss` and the recovery mutations have no tool and no reachable
+  parameter, and annotations describe real side effects — `mergetrain_validate`
+  is free to run but is not claimed read-only, because it runs gates and moves
+  job status. `mergetrain_deploy` takes no `confirm` argument: it re-reads
+  doctor/status, refuses to choose between several pending trains, and requires
+  a client-rendered human accept, refusing with `confirmation_required` plus the
+  terminal command when the client cannot show one. See docs/mcp.md.
+
 - Add `mergetrain demo`, a network-free nine-step walkthrough that creates a
   disposable repo and local bare remote, enqueues four real agent worktrees,
   exposes a two-branch semantic conflict through `conflict_with`, and deploys

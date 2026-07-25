@@ -32,6 +32,9 @@ dependencies = []
 
 [project.optional-dependencies]
 yaml = ["PyYAML>=6.0"]
+# `mergetrain mcp` only. Pinned below 2 because the SDK's own README warns that
+# a v2 beta exists; the core stays dependency-free either way.
+mcp = ["mcp>=1.16,<2"]
 dev = [
   "build>=1.0",
   "hatchling>=1.21",
