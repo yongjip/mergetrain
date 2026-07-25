@@ -27,6 +27,47 @@ class DemoFailure(RuntimeError):
     """A safe, user-facing demo failure."""
 
 
+def _shell_argument(value: str) -> str:
+    """Quote one argument for the shell that will run gates and verify hooks.
+
+    Gate commands are strings executed through the platform shell (``/bin/sh``
+    where it exists, ``cmd.exe`` on Windows), so the generated config has to
+    carry quoting the *target* shell understands. Double quotes work on both,
+    and keep the rendered command free of single quotes so it stays
+    representable as a YAML single-quoted scalar (see ``_yaml_scalar``).
+    """
+
+    if os.name == "nt":
+        # cmd.exe has no escape for a literal double quote, and Windows paths
+        # cannot contain one, so wrapping is both necessary and sufficient.
+        return f'"{value}"'
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
+    return f'"{escaped}"'
+
+
+def _yaml_scalar(value: str) -> str:
+    """Render a command as a scalar PyYAML and the built-in parser read alike.
+
+    The dependency-free fallback parser strips the outer quotes without undoing
+    YAML escapes, so any scalar that needs escaping would be read differently
+    depending on whether PyYAML happens to be installed. A single-quoted scalar
+    with no embedded single quote is the one form both parsers agree on, so
+    refuse rather than write a config whose meaning depends on the environment.
+    """
+
+    if "'" in value:
+        raise DemoFailure(
+            "the demo cannot generate a gate for a path containing a single "
+            f"quote: {value}"
+        )
+    return f"'{value}'"
+
+
 @dataclass(slots=True)
 class DemoSandbox:
     root: Path
@@ -321,8 +362,13 @@ class DemoWalkthrough:
         )
 
     def _write_demo_config(self) -> None:
-        python = shlex.quote(sys.executable)
-        remote = shlex.quote(str(self.remote))
+        gate = _yaml_scalar(
+            f"{_shell_argument(sys.executable)} -m unittest discover -s tests"
+        )
+        verify = _yaml_scalar(
+            f"git --git-dir={_shell_argument(str(self.remote))} "
+            "log -1 --format=%H main"
+        )
         config = f"""version: 1
 
 project:
@@ -352,12 +398,12 @@ agent:
 
 gates:
   - name: tests
-    run: {python} -m unittest discover -s tests
+    run: {gate}
 
 deploy:
   verify:
     - name: bare-remote-main
-      run: git --git-dir={remote} log -1 --format=%H main
+      run: {verify}
   reuse:
     enabled: false
     max_age_minutes: 60
