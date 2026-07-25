@@ -50,6 +50,18 @@ def _shell_argument(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _write_repo_file(path: Path, content: str) -> None:
+    """Write demo repository content with LF endings on every platform.
+
+    A text-mode write translates ``\\n`` to ``os.linesep``, so on Windows every
+    seeded and agent-authored file landed as CRLF. The runner's built-in
+    ``git diff --check`` then read each carriage return as trailing whitespace
+    and failed the train before any gate ran.
+    """
+
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
 def _yaml_scalar(value: str) -> str:
     """Render a command as a scalar PyYAML and the built-in parser read alike.
 
@@ -348,17 +360,15 @@ class DemoWalkthrough:
         self._git("clone", str(self.remote), str(self.repo))
         (self.repo / "app").mkdir()
         (self.repo / "tests").mkdir()
-        (self.repo / "app" / "__init__.py").write_text("", encoding="utf-8")
-        (self.repo / "app" / "config.py").write_text(
-            "DEFAULT_TIMEOUT = 30\n", encoding="utf-8"
-        )
-        (self.repo / "tests" / "test_config.py").write_text(
+        _write_repo_file(self.repo / "app" / "__init__.py", "")
+        _write_repo_file(self.repo / "app" / "config.py", "DEFAULT_TIMEOUT = 30\n")
+        _write_repo_file(
+            self.repo / "tests" / "test_config.py",
             "import unittest\n\n"
             "from app.config import DEFAULT_TIMEOUT\n\n\n"
             "class ConfigTests(unittest.TestCase):\n"
             "    def test_default_timeout(self):\n"
             "        self.assertEqual(DEFAULT_TIMEOUT, 30)\n",
-            encoding="utf-8",
         )
 
     def _write_demo_config(self) -> None:
@@ -410,9 +420,9 @@ deploy:
     on_mismatch: rerun
     fingerprints: []
 """
-        (self.repo / ".mergetrain.yaml").write_text(config, encoding="utf-8")
-        (self.repo / ".gitignore").write_text(
-            ".mergetrain/\n__pycache__/\n*.py[cod]\n", encoding="utf-8"
+        _write_repo_file(self.repo / ".mergetrain.yaml", config)
+        _write_repo_file(
+            self.repo / ".gitignore", ".mergetrain/\n__pycache__/\n*.py[cod]\n"
         )
 
     def _commit_seed(self) -> None:
@@ -430,7 +440,7 @@ deploy:
         for relative, content in files.items():
             path = worktree / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            _write_repo_file(path, content)
         self._git("add", ".", cwd=worktree)
         self._git("commit", "-m", branch, cwd=worktree)
         return worktree

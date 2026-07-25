@@ -283,6 +283,34 @@ class DemoConfigTests(unittest.TestCase):
         self.assertIn("single quote", str(raised.exception))
 
     @unittest.skipUnless(shutil.which("git"), "git is required")
+    def test_seeded_repository_commits_lf_line_endings(self) -> None:
+        # Text-mode writes translate "\n" to os.linesep, so on Windows every
+        # demo file was committed with CRLF and the runner's built-in
+        # `git diff --check` failed the train on the carriage returns. The
+        # committed blob is what the runner reads, so assert on that.
+        walkthrough = self._walkthrough("crlf", make_repo=False)
+        walkthrough._bootstrap()
+        walkthrough._commit_seed()
+        walkthrough._make_agent_branch(
+            "agent/probe", {"app/probe.py": "PROBE = 1\n"}
+        )
+
+        for ref, path in (
+            ("main", "app/config.py"),
+            ("main", "tests/test_config.py"),
+            ("main", ".mergetrain.yaml"),
+            ("agent/probe", "app/probe.py"),
+        ):
+            blob = subprocess.run(
+                ["git", "show", f"{ref}:{path}"],
+                cwd=walkthrough.repo,
+                env=walkthrough.env,
+                check=True,
+                capture_output=True,
+            ).stdout
+            self.assertNotIn(b"\r", blob, f"{ref}:{path} was committed with CRLF")
+
+    @unittest.skipUnless(shutil.which("git"), "git is required")
     def test_generated_commands_run_through_the_platform_shell(self) -> None:
         walkthrough = self._walkthrough("space in name", make_repo=False)
         walkthrough._bootstrap()
