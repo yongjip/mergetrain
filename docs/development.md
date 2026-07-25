@@ -95,6 +95,35 @@ mergetrain --version
 Supported and tested Python: 3.10 through 3.14. See the
 [release checklist](release.md) for the full publish flow.
 
+## Dogfooding: mergetrain deploys mergetrain
+
+The repository commits its own `.mergetrain.yaml`, so `doctor` reports real
+configuration instead of running on defaults, and a train through this repo runs
+the checks CI runs:
+
+| Gate | Covers |
+| --- | --- |
+| `diff-check` | whitespace errors against the integration ref |
+| `ruff`, `mypy` | the blocking `lint` CI job |
+| `tests` | the unit suite on this machine's Python 3.12 |
+
+One machine cannot reproduce the whole matrix, so the CI legs it cannot run
+(Windows, Python 3.10-3.14, `e2e`, `package`) are covered *after* the push by
+the `github-ci` verify hook — [`scripts/verify-ci.sh`](../scripts/verify-ci.sh)
+waits for the `ci.yml` run on the pushed SHA. Tunables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MERGETRAIN_CI_WAIT_SECONDS` | `900` | how long to wait for a conclusion |
+| `MERGETRAIN_CI_POLL_SECONDS` | `15` | interval between polls |
+| `MERGETRAIN_CI_WORKFLOW` | `ci.yml` | workflow to watch |
+
+A verify failure records a post-push verify warning on the already-deployed job
+(`verify_status: failed`); it cannot un-land a push, and it is deliberately not
+reported as a failed deploy. The hook skips when `gh` is missing or has no
+credentials, because an unavailable CLI is not evidence about the commit, and it
+treats "still running" as needing attention rather than as a pass.
+
 ## Conventions
 
 - Keep the core provider-neutral. Service-specific deploy logic belongs in `gates`/`deploy.verify` config or an [adapter](adapter-pattern.md), never in the core package.

@@ -1,0 +1,59 @@
+version: 1
+
+# mergetrain deploys mergetrain. The gates below are the checks CI runs that a
+# single machine can reproduce; the post-push verify hook covers the ones it
+# cannot (the Windows and Python 3.10-3.14 legs). See docs/development.md.
+
+project:
+  name: mergetrain
+
+state:
+  db: .mergetrain/queue.sqlite
+  logs: .mergetrain/logs
+  worktree_root: .mergetrain/worktrees
+
+git:
+  remote: origin
+  integration_branch: main
+  push_refs:
+    - main
+
+queue:
+  lock_ttl_minutes: 30
+  daemon_interval_seconds: 15
+  heartbeat_interval_seconds: 10
+  command_timeout_seconds: 3600
+
+agent:
+  require_clean_worktree_before_enqueue: true
+  require_explicit_auto_approval: true
+  prefer_json_status: true
+
+terminology:
+  # Human-facing label only. Machine status remains `deployed`.
+  git_operation: deploy
+
+gates:
+  - name: diff-check
+    run: git diff --check ${integration_ref}..HEAD
+  # ruff and mypy are the blocking CI lint job. They ran only in CI before, so
+  # a lint error could land on main and stay there; both are dev extras
+  # (`pip install -e ".[dev]"`), and a missing tool fails the gate on purpose.
+  - name: ruff
+    run: ruff check .
+  - name: mypy
+    run: mypy
+  # docs/development.md pins 3.12: macOS /usr/bin/python3 is 3.9 and the suite
+  # needs 3.10+ for dataclass(slots=True).
+  - name: tests
+    run: PYTHONPATH=src python3.12 -m unittest discover -s tests
+
+deploy:
+  verify:
+    - name: github-ci
+      run: scripts/verify-ci.sh
+  reuse:
+    enabled: false
+    max_age_minutes: 60
+    on_mismatch: rerun
+    fingerprints: []
