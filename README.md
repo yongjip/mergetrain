@@ -367,8 +367,8 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 
 `v0.9.0`, the **API-freeze release candidate**. From here the machine contract is
 additive-only within contract major 1: a key may be added, never removed or
-renamed, and a golden key-set fingerprint over 26 payload surfaces fails CI on any
-un-versioned shape change (see [contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
+renamed, and a golden key-set fingerprint over 25 payload surfaces plus the JSONL frames
+fails CI on any un-versioned shape change (see [contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
 
 The core — queue, runner lock, merge train, gates (with bisected joint-failure
 isolation and semantic-conflict reporting), atomic push, crash-safe

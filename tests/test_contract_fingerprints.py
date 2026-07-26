@@ -629,6 +629,30 @@ class ErrorTaxonomyTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "remote_unreachable")
         self.assertTrue(payload["error"]["retryable"])
 
+    def test_documented_surface_coverage_matches_the_golden(self) -> None:
+        # docs/contract.md describes the coverage the freeze promises, and it had
+        # already drifted: gc_applied was under the gate but missing from the
+        # list. A hand-maintained description of the enforcement mechanism is the
+        # worst place for a stale claim, so check it rather than trust it.
+        import re
+
+        doc = (
+            Path(__file__).resolve().parents[1] / "docs" / "contract.md"
+        ).read_text(encoding="utf-8")
+        paragraph = doc.split("Coverage is")[1].split("Run results share")[0]
+        documented = set(re.findall(r"`([a-z_]+)`", paragraph))
+        golden = set(json.loads(GOLDEN.read_text(encoding="utf-8"))["surfaces"])
+
+        self.assertEqual(
+            golden - documented,
+            set(),
+            "surfaces under the gate that docs/contract.md does not list",
+        )
+        stated = re.search(r"currently (\d+) surfaces", paragraph)
+        self.assertIsNotNone(stated, "the coverage paragraph no longer states a count")
+        # The count is payload surfaces; _jsonl_frames is named separately.
+        self.assertEqual(int(stated.group(1)), len(golden) - 1)
+
     def test_documented_error_codes_match_the_implementation(self) -> None:
         # The freeze tells consumers to branch on error.code, so the documented
         # vocabulary has to BE the vocabulary. Two codes were absent from every
