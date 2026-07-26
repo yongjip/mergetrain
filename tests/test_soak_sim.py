@@ -180,10 +180,10 @@ class ScenarioMutationTests(unittest.TestCase):
             )
             core.write_text(original, encoding="utf-8")
 
-            SOAK.write_conflicting_change("a")(repo)
+            SOAK.write_conflicting_change("a", 5)(repo)
             branch_a = core.read_text(encoding="utf-8")
             core.write_text(original, encoding="utf-8")
-            SOAK.write_conflicting_change("b")(repo)
+            SOAK.write_conflicting_change("b", 5)(repo)
             branch_b = core.read_text(encoding="utf-8")
 
             self.assertNotEqual(branch_a, branch_b)
@@ -191,6 +191,28 @@ class ScenarioMutationTests(unittest.TestCase):
                 namespace: dict[str, object] = {}
                 exec(body, namespace)
                 self.assertEqual(namespace["add"](1, 2), 3)
+
+    def test_later_conflict_batch_always_changes_prior_contested_body(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            core = repo / "src" / "soaktarget" / "core.py"
+            core.parent.mkdir(parents=True)
+            core.write_text(
+                "def add(a: int, b: int) -> int:\n"
+                "    return a + b  # batch 5 b contested\n",
+                encoding="utf-8",
+            )
+            prior = core.read_text(encoding="utf-8")
+
+            SOAK.write_conflicting_change("a", 10)(repo)
+            branch_a = core.read_text(encoding="utf-8")
+            core.write_text(prior, encoding="utf-8")
+            SOAK.write_conflicting_change("b", 10)(repo)
+            branch_b = core.read_text(encoding="utf-8")
+
+            self.assertNotEqual(prior, branch_a)
+            self.assertNotEqual(prior, branch_b)
+            self.assertNotEqual(branch_a, branch_b)
 
 
 class EvidenceTests(unittest.TestCase):

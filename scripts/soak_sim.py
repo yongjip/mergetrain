@@ -758,7 +758,7 @@ _ADD_BODY_RE = re.compile(
 )
 
 
-def write_conflicting_change(label: str):
+def write_conflicting_change(label: str, batch_no: int):
     """Rewrite add()'s single-line body via regex, not append-only text.
 
     An append-only mutation (two branches both adding a new function at the
@@ -776,7 +776,9 @@ def write_conflicting_change(label: str):
         # comments still replace the exact same line from the same parent, so
         # Git must surface the joint textual conflict without turning branch B
         # into an unrelated unit-test failure.
-        replacement = f"    return a + b  # {label} contested\n"
+        # Include the batch number so a later conflict scenario never tries
+        # to commit the same winner/loser text already present on main.
+        replacement = f"    return a + b  # batch {batch_no} {label} contested\n"
         new_text, count = _ADD_BODY_RE.subn(
             lambda m: m.group(1) + replacement, text, count=1
         )
@@ -1085,8 +1087,8 @@ def scenario_conflict(
     sync_main(repo)
     a = f"soak-{namespace}-conflict-{batch_no}-a"
     b = f"soak-{namespace}-conflict-{batch_no}-b"
-    new_branch(repo, a, write_conflicting_change("a"))
-    new_branch(repo, b, write_conflicting_change("b"))
+    new_branch(repo, a, write_conflicting_change("a", batch_no))
+    new_branch(repo, b, write_conflicting_change("b", batch_no))
     job_a = mt.enqueue(task=a, branch=a, scenario="conflict")["job"]
     job_b = mt.enqueue(task=b, branch=b, scenario="conflict")["job"]
     result = mt.validate_only(scenario="conflict")
@@ -1113,7 +1115,7 @@ def scenario_conflict(
     sync_main(repo)
     label = "a" if loser["id"] == job_a["id"] else "b"
     retry_branch = f"{loser['branch']}-retry"
-    new_branch(repo, retry_branch, write_conflicting_change(label))
+    new_branch(repo, retry_branch, write_conflicting_change(label, batch_no))
     mt.enqueue(task=retry_branch, branch=retry_branch, scenario="conflict")
     result = mt.validate_only(scenario="conflict")
     if result["result"] != "success":
