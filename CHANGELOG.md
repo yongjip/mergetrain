@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-07-26
 
 - Say so when crash recovery dissolves an approved train (#194). Requeuing a
   stranded row clears its validated-train identity on purpose — a row asserting a

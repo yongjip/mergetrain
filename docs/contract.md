@@ -144,7 +144,8 @@ Coverage is **every payload a command can emit**, currently 25 surfaces plus the
 JSONL frames: `doctor`, `status`, `version`, `agent_contract`, `init`, `enqueue`,
 `retry`, `inspect`, `history`, `stats`, `gc`, `run_batch_validate`,
 `run_batch_preview`, `reconcile`, `recover`, `unlock`, `verify`, `dismiss`,
-`cancel`, `hub_status`, `hub_add`, `hub_list`, `hub_remove`, `failure_envelope`,
+`cancel`, `gc_applied`, `hub_status`, `hub_add`, `hub_list`, `hub_remove`,
+`failure_envelope`,
 and `_jsonl_frames`. A new `--json` payload must be added to `SURFACES` in the
 same change that introduces it, or the gate silently does not cover it. Run
 results share one builder, so `run_batch_validate` also pins `run-batch --deploy`
