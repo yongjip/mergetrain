@@ -37,7 +37,7 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: release candidate (`v0.9.0`). The machine contract is frozen — additive-only within contract major 1 — and under a real-repo soak before 1.0. Built to scratch my own itch first — published in case it scratches yours too.
+> Status: release candidate (`v0.9.1`). The machine contract is frozen — additive-only within contract major 1 — and the real-repo soak gate for 1.0 is complete. Built to scratch my own itch first — published in case it scratches yours too.
 
 ---
 
@@ -365,7 +365,7 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 
 ## Status
 
-`v0.9.0`, the **API-freeze release candidate**. From here the machine contract is
+`v0.9.1`, the **API-freeze release candidate**. From here the machine contract is
 additive-only within contract major 1: a key may be added, never removed or
 renamed, and a golden key-set fingerprint over 25 payload surfaces plus the JSONL frames
 fails CI on any un-versioned shape change (see [contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
@@ -381,11 +381,13 @@ and Windows, including a fault-injection matrix that SIGKILLs a real
 `git push --atomic` with the remote's refs applied and without, to prove the queue
 never lies about what shipped.
 
-What 1.0 still waits on is evidence, not features: a real-repo soak measured in
-landed trains and in every operator intervention it takes. Built for my own
-multi-agent workflow first; issues and ideas welcome. Review your config trust
-boundary, gate commands, and secret handling before enabling unattended deploys —
-see [security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md).
+The 1.0 evidence gate is now met: a dedicated GitHub repository completed 20
+landed trains at a 100% land rate, including planned gate and conflict recovery
+and one real `git push --atomic` SIGKILL whose recovered queue verdict matched
+the remote. Built for my own multi-agent workflow first; issues and ideas
+welcome. Review your config trust boundary, gate commands, and secret handling
+before enabling unattended deploys — see
+[security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md).
 
 ## License
 

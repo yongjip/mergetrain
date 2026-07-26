@@ -53,9 +53,9 @@ land the required trains.
 Run the soak against the published artifact rather than a source checkout:
 
 ```sh
-python3.12 -m venv /tmp/mergetrain-090-soak
-/tmp/mergetrain-090-soak/bin/pip install mergetrain==0.9.0
-/tmp/mergetrain-090-soak/bin/mergetrain version --json
+python3.12 -m venv /tmp/mergetrain-091-soak
+/tmp/mergetrain-091-soak/bin/pip install mergetrain==0.9.1
+/tmp/mergetrain-091-soak/bin/mergetrain version --json
 ```
 
 Choose an explicit UTC baseline at or after the release. The first invocation
@@ -72,9 +72,9 @@ killing a push:
 python3 scripts/soak_sim.py \
   --repo /path/to/target \
   --confirm-repo owner/name \
-  --expected-version 0.9.0 \
+  --expected-version 0.9.1 \
   --baseline 2026-07-26T01:56:04Z \
-  --mt /tmp/mergetrain-090-soak/bin/mergetrain \
+  --mt /tmp/mergetrain-091-soak/bin/mergetrain \
   --skip-crash \
   --target-landed 6
 ```
@@ -92,8 +92,8 @@ the issue's minimum):
 python3 scripts/soak_sim.py \
   --repo /path/to/target \
   --confirm-repo owner/name \
-  --expected-version 0.9.0 \
-  --mt /tmp/mergetrain-090-soak/bin/mergetrain
+  --expected-version 0.9.1 \
+  --mt /tmp/mergetrain-091-soak/bin/mergetrain
 ```
 
 The full mode refuses a target below 20. It attempts to observe and SIGKILL only
@@ -117,8 +117,8 @@ Every unplanned operator action needs a bug or documentation-gap issue:
 python3 scripts/soak_sim.py \
   --repo /path/to/target \
   --confirm-repo owner/name \
-  --expected-version 0.9.0 \
-  --mt /tmp/mergetrain-090-soak/bin/mergetrain \
+  --expected-version 0.9.1 \
+  --mt /tmp/mergetrain-091-soak/bin/mergetrain \
   --record-intervention reconcile \
   --classification bug \
   --reason "remote and queue required manual comparison" \

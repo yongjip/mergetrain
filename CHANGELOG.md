@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.1 - 2026-07-26
+
+- Add a fail-closed real-remote soak harness for the 1.0 evidence gate. It
+  requires an exact disposable-repository sentinel, a clean and idle queue,
+  authenticated GitHub access, a post-push verify hook, and an installed wheel
+  matching the requested version. Baseline, namespace, recovery events, crash
+  truth, and classified interventions persist into a final report.
+
+- Keep repeated conflict exercises unique by including the batch number in the
+  contested edit. A second conflict batch could previously reproduce the value
+  already on `main`, leaving no change to commit; the regression now proves
+  later batches always differ from both their parent and each other.
+
+- Complete the real-repository soak against the published 0.9.0 wheel: 20
+  landed trains at a 100% land rate, planned gate-failure and merge-conflict
+  recovery, and one real `git push --atomic` SIGKILL whose remote truth matched
+  recovery's queued verdict and then deployed through a normal verified train.
+  No mergetrain runtime defect was found.
+
 ## 0.9.0 - 2026-07-26
 
 - Say so when crash recovery dissolves an approved train (#194). Requeuing a
