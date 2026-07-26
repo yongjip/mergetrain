@@ -37,7 +37,7 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: alpha (`v0.8.1`). The core is implemented and tested; interfaces may still change. Built to scratch my own itch first — published in case it scratches yours too.
+> Status: release candidate (`v0.9.0`). The machine contract is frozen — additive-only within contract major 1 — and under a real-repo soak before 1.0. Built to scratch my own itch first — published in case it scratches yours too.
 
 ---
 
@@ -365,7 +365,27 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 
 ## Status
 
-`v0.8.1`, alpha. The core — queue, runner lock, merge train, gates (with bisected joint-failure isolation and semantic-conflict reporting), atomic push, crash-safe reconciliation/recovery (`reconcile`/`recover`/`unlock`/`verify`/`dismiss`), auto-only daemon, resumable CLI events/inspection/log following, a [versioned machine contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md) across every JSON/JSONL surface, the local read-only dashboard, and the multi-repo hub (registry, aggregated board, `hub status`, auto-only `hub daemon` with a machine-wide concurrency cap and desktop notifications) — is implemented with a passing test suite on macOS, Linux, and Windows. Built for my own multi-agent workflow first; issues and ideas welcome. Review your config trust boundary, gate commands, and secret handling before enabling unattended deploys — see [security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md).
+`v0.9.0`, the **API-freeze release candidate**. From here the machine contract is
+additive-only within contract major 1: a key may be added, never removed or
+renamed, and a golden key-set fingerprint over 26 payload surfaces fails CI on any
+un-versioned shape change (see [contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
+
+The core — queue, runner lock, merge train, gates (with bisected joint-failure
+isolation and semantic-conflict reporting), atomic push, crash-safe
+reconciliation/recovery (`reconcile`/`recover`/`unlock`/`verify`/`dismiss`),
+auto-only daemon, resumable CLI events/inspection/log following, the local
+read-only dashboard, the multi-repo hub, and an
+[MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) whose
+deploy tool requires a human accept — is implemented and tested on macOS, Linux,
+and Windows, including a fault-injection matrix that SIGKILLs a real
+`git push --atomic` with the remote's refs applied and without, to prove the queue
+never lies about what shipped.
+
+What 1.0 still waits on is evidence, not features: a real-repo soak measured in
+landed trains and in every operator intervention it takes. Built for my own
+multi-agent workflow first; issues and ideas welcome. Review your config trust
+boundary, gate commands, and secret handling before enabling unattended deploys —
+see [security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md).
 
 ## License
 
