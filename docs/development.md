@@ -95,6 +95,11 @@ python -m pytest -q -n auto
 That is ~30s wall time versus ~160s serial on a 10-core machine, which is what
 makes fault injection cheap enough to run on every push. CI uses `-n auto`.
 
+The remaining non-enumerable evidence is the
+[real-remote soak](soak.md): repeated released-wheel use on a confirmed
+throwaway GitHub repository, classified operator interventions, and one
+deliberate crash whose queue verdict is compared with the real remote.
+
 ## Dashboard authoring
 
 The published wheel does not need Node at runtime; it serves committed assets
