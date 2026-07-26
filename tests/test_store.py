@@ -476,6 +476,31 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(requeued.validation_train_sha, "")
         self.assertEqual(requeued.reused_validation_sha, "")
 
+    def test_orphan_requeue_note_singles_out_the_dissolved_train(self) -> None:
+        # Only the row that actually carried an approved identity gets the
+        # warning; a plain queued job keeps the plain note, so the message stays
+        # a signal rather than boilerplate on every recovered row.
+        conn = self.make_conn()
+        approved = enqueue_job(conn, task="a", branch="a")
+        plain = enqueue_job(conn, task="b", branch="b")
+        conn.execute(
+            """
+            UPDATE deploy_queue
+            SET status = 'in_progress', claim_token = 'dead-token',
+                train_id = CASE WHEN id = ? THEN 'train-9' ELSE '' END
+            """,
+            (approved.id,),
+        )
+        conn.commit()
+
+        lock = acquire_runner_lock(conn, owner=default_owner())
+        self.addCleanup(
+            release_runner_lock, conn, owner=default_owner(), token=lock.token
+        )
+
+        self.assertIn("train-9", get_job(conn, approved.id).note)
+        self.assertNotIn("dissolved", get_job(conn, plain.id).note)
+
     def test_orphan_requeue_clears_validated_train_identity(self) -> None:
         conn = self.make_conn()
         job = enqueue_job(conn, task="a", branch="a", auto_deploy=True)
@@ -502,6 +527,15 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(requeued.validated_at, "")
         self.assertEqual(requeued.validation_sha, "")
         self.assertEqual(requeued.validated_head_sha, "")
+
+        # Clearing the identity is right (#160), but dissolving an APPROVED train
+        # must not be silent: the operator who retries the failed deploy gets
+        # whatever is queued now, gated together as a NEW train, which may not be
+        # the set they confirmed. The note is the one field that survives the
+        # wipe, so it has to name the train and say what to do.
+        self.assertIn("train-1", requeued.note)
+        self.assertIn("dissolved", requeued.note)
+        self.assertIn("re-approve", requeued.note)
 
         release_runner_lock(
             conn, owner=default_owner(), token=lock.token

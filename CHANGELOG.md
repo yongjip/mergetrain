@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Say so when crash recovery dissolves an approved train (#194). Requeuing a
+  stranded row clears its validated-train identity on purpose — a row asserting a
+  validation it no longer holds collateral-blocks unrelated auto deploys — but
+  the operator retrying a failed deploy then gets whatever is queued now, gated
+  together as a new train, which need not be the set they confirmed. The requeue
+  now writes that into the job's `note`, naming the dissolved train and saying to
+  validate and re-approve; a plain requeued job keeps its plain note, so the
+  message stays a signal.
+
 - Name a stranded claim in `next_action`. A job left `in_progress` while no
   runner holds the lock — a crashed runner, or a run that raised after releasing
   its lease — read as an idle queue: `doctor` said `enqueue_clean_branch`, the
