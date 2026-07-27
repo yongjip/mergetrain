@@ -4,7 +4,7 @@ The hub aggregates every registered repo into a single read-only dashboard:
 each repo's queue, runner, validated trains, and next safe action on one page,
 with a per-repo drill-down into the full single-repo view.
 
-![Hub overview: repo cards with live state, counts, and the next safe action](./images/hub-overview.png)
+![Hub overview: unified repository table with live state, queue counts, runner activity, and the next safe action](./images/hub-overview.png)
 
 ![Drill-down: the full single-repo view mid-gates, fed from that repo's own queue](./images/hub-drilldown.png)
 
