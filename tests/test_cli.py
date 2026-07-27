@@ -55,6 +55,72 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["error"]["code"], "queue_error")
             self.assertIn("ISO-8601", payload["error"]["message"])
 
+    def test_stats_text_mode_renders_the_payload_it_is_given(self) -> None:
+        # Text mode is the only reader of stats_payload that is not covered by
+        # the JSON contract fingerprint, so a payload key rename can (and did,
+        # in 0.9.0/0.9.1) crash it with a KeyError while every other test and
+        # the fingerprint gate stay green. Seed a real finished train so the
+        # duration/gate branches actually execute rather than short-circuiting
+        # on empty data.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("statstext"), encoding="utf-8"
+            )
+            conn = connect(db)
+            try:
+                enqueue_job(conn, task="a", branch="agent/a")
+                # Claim it rather than marking it terminal directly: started_at
+                # is written by the claim, and without it the train has no
+                # measurable duration and the branch under test prints None.
+                claimed = claim_next_job(conn)
+                assert claimed is not None
+                mark_job(
+                    conn,
+                    claimed.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="succeeded",
+                    train_id="t-stats",
+                    train_size=1,
+                    expected_claim_token=claimed.claim_token,
+                )
+                # Must match observability.GATE_EVENT or the per-gate branch
+                # of the text renderer is never reached.
+                record_run_event(
+                    conn,
+                    job_id=claimed.id,
+                    phase="gate",
+                    state="running",
+                    message="Running gate 1/1: tests",
+                )
+                record_run_event(
+                    conn,
+                    job_id=claimed.id,
+                    phase="gate",
+                    state="succeeded",
+                    message="Passed gate 1/1: tests",
+                )
+                release_runner_lock(conn)
+            finally:
+                conn.close()
+
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = main(["--repo", str(repo), "--db", str(db), "stats"])
+
+            self.assertEqual(code, 0, f"stats text mode failed: {err.getvalue()}")
+            text = out.getvalue()
+            self.assertIn("trains:", text)
+            self.assertIn("land rate:", text)
+            self.assertIn("duration:", text)
+            self.assertIn("average queue=", text)
+            # A KeyError-driven regression would print the literal repr of a
+            # missing value rather than a number, so pin that the duration
+            # line actually carries the flat keys' values.
+            self.assertNotIn("None", text.split("duration:")[1].split("\n")[0])
+
     def test_single_repo_daemon_accepts_notify_and_builds_configured_chain(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
