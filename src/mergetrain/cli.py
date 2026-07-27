@@ -737,9 +737,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
             f"{trains['blocked']} blocked · {trains['failed']} failed"
         )
         print(f"land rate: {rate_text}")
-        duration = payload["duration_seconds"]
         print(
-            f"duration: median={duration['median']}s p95={duration['p95']}s · "
+            f"duration: median={payload['median_duration_seconds']}s "
+            f"p95={payload['p95_duration_seconds']}s · "
             f"average queue={payload['average_queue_seconds']}s"
         )
         for gate in payload["gates"]:
