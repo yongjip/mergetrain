@@ -290,8 +290,18 @@ gates, the snapshot exposes structured gate position and a redacted command
 template so the current-check panel and Activity timeline can explain what is
 running instead of only repeating a log message.
 
+The same bounded event store supplies the ETA read model. For each running
+train, the snapshot exposes medians from at most the newest 20 completed spans
+per phase and gate, excluding the active claim. An ETA is published only when
+every remaining comparable span has a sample; otherwise the UI says that it is
+building history. No build cache or wall-clock guess participates in the
+estimate. Gate duration bars, the activity density controls, stateful tab
+identity, and the phone glance view are presentation-only consumers of that
+read model.
+
 The dashboard has no write endpoint, form, cancel, retry, validate, deploy, or
-shell-execution control. It is single-repository and desktop-first in v0.1. The
+shell-execution control. The full train remains desktop-first; at phone widths a
+compact single-column glance shows state, next action, and attention. The
 default bind address is loopback, and non-loopback binding requires explicit
 `--allow-remote` acknowledgement.
 

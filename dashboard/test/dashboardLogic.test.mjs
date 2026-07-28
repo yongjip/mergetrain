@@ -5,12 +5,16 @@ import {
   NEXT_ACTION_COPY,
   SSE_RECONNECT_GRACE_MS,
   actionCopy,
+  browserIndicator,
+  etaRemainingSeconds,
+  gateWaterfallModel,
   jobActivityAt,
   latestRepoJob,
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
   repoStateForEntry,
+  stateFavicon,
   workspaceStepForSnapshot,
 } from "../src/dashboardLogic.js";
 
@@ -116,4 +120,47 @@ test("hub selects the most recently active job for repository context", () => {
   ]);
   assert.equal(latest.id, 50);
   assert.equal(jobActivityAt(latest), "2026-07-23T15:42:09Z");
+});
+
+test("ETA counts down from the server-calculated completion time", () => {
+  const eta = {
+    available: true,
+    expected_at: "2026-07-29T12:01:00Z",
+    gates: [
+      { name: "diff-check", median_seconds: 10 },
+      { name: "unit", median_seconds: 30 },
+    ],
+  };
+  assert.equal(
+    etaRemainingSeconds(eta, Date.parse("2026-07-29T12:00:35Z")),
+    25,
+  );
+  assert.equal(
+    etaRemainingSeconds(eta, Date.parse("2026-07-29T12:01:05Z")),
+    0,
+  );
+  assert.equal(etaRemainingSeconds({ available: false }), null);
+  assert.deepEqual(
+    gateWaterfallModel(eta).map(({ name, widthPercent }) => [name, widthPercent]),
+    [["diff-check", 33], ["unit", 100]],
+  );
+});
+
+test("browser indicator drives the state dot, failure count, and favicon", () => {
+  const indicator = browserIndicator({
+    counts: { blocked: 2, failed: 1 },
+    train: { selection: "running" },
+  });
+  assert.deepEqual(
+    {
+      state: indicator.state,
+      count: indicator.count,
+      glyph: indicator.glyph,
+    },
+    { state: "attention", count: 3, glyph: "🔴" },
+  );
+  const favicon = decodeURIComponent(stateFavicon(indicator));
+  assert.match(favicon, /^data:image\/svg\+xml,/);
+  assert.match(favicon, />3<\/text>/);
+  assert.match(favicon, /#d1242f/);
 });

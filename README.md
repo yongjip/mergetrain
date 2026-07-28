@@ -207,9 +207,12 @@ narrated presentation.
 
 The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
 runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
-the exact current gate and command template, and the next safe action. `CONNECTED`
-describes the browser's data stream; `RUNNER ACTIVE` separately describes the
-process that owns the train. It has no mutation endpoints or deploy controls.
+the exact current gate and command template, history-derived ETA and gate
+timing, and the next safe action. On phone-sized screens it collapses to the
+three facts needed for a remote glance: state, next action, and attention.
+`CONNECTED` describes the browser's data stream; `RUNNER ACTIVE` separately
+describes the process that owns the train. It has no mutation endpoints or
+deploy controls.
 
 Running agents across several repos? Register each one and serve every queue
 on a single board:

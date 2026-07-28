@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from statistics import median
 from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig
 from .errors import redact_secrets
-from .models import Job, RunnerLock
+from .models import Job, RunEvent, RunnerLock
+from .observability import _gate_runs, elapsed_seconds
 from .store import (
     _parse_utc,
     connect,
     counts,
     get_lock,
+    list_history_events,
     list_jobs,
     list_jobs_fifo,
-    list_run_events,
     owner_liveness,
     utc_now,
     validated_train_summaries,
@@ -37,6 +40,8 @@ PHASES = (
 GATE_EVENT = re.compile(
     r"^(?:Running|Passed|Reused|Skipped) gate (\d+)/(\d+): (.+)$"
 )
+ESTIMATE_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
+ESTIMATE_SAMPLE_LIMIT = 20
 
 NEXT_ACTION_VALUES = frozenset(
     {
@@ -201,6 +206,220 @@ def _selected_jobs(conn) -> tuple[list[Job], str]:
     return [], "idle"
 
 
+def _median_samples(
+    samples: list[tuple[int, float]], *, limit: int = ESTIMATE_SAMPLE_LIMIT
+) -> tuple[int, float | None]:
+    recent = [duration for _, duration in sorted(samples)[-limit:]]
+    if not recent:
+        return 0, None
+    return len(recent), round(median(recent), 3)
+
+
+def _sum_complete(values: list[float | None]) -> float | None:
+    if not values or any(value is None for value in values):
+        return None
+    return round(sum(value for value in values if value is not None), 3)
+
+
+def _phase_duration_samples(
+    events: list[RunEvent], *, exclude_token: str = ""
+) -> dict[str, list[tuple[int, float]]]:
+    """Return completed phase spans grouped by phase.
+
+    A batch emits nested per-job assembly and per-gate events. The phase span is
+    deliberately the first active event through the last terminal event for the
+    same claim token and phase, so those nested milestones do not shorten the
+    estimate.
+    """
+
+    grouped: dict[tuple[str, str], list[RunEvent]] = defaultdict(list)
+    for event in events:
+        if (
+            not event.claim_token
+            or event.claim_token == exclude_token
+            or event.phase not in ESTIMATE_PHASES
+        ):
+            continue
+        grouped[(event.claim_token, event.phase)].append(event)
+
+    samples: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    for (_, phase), phase_events in grouped.items():
+        ordered = sorted(phase_events, key=lambda event: event.id)
+        started = next(
+            (event for event in ordered if event.state == "active"), None
+        )
+        finished = next(
+            (
+                event
+                for event in reversed(ordered)
+                if event.state in {"success", "warning", "error"}
+                and (started is None or event.id > started.id)
+            ),
+            None,
+        )
+        if started is None or finished is None:
+            continue
+        duration = elapsed_seconds(started.created_at, finished.created_at)
+        if duration is not None:
+            samples[phase].append((finished.id, duration))
+    return samples
+
+
+def _current_phase_started_at(
+    run_events: list[RunEvent], phase: str
+) -> str:
+    return next(
+        (
+            event.created_at
+            for event in run_events
+            if event.phase == phase and event.state == "active"
+        ),
+        "",
+    )
+
+
+def _eta_payload(
+    *,
+    events: list[RunEvent],
+    selected_jobs: list[Job],
+    progress: dict[str, Any],
+    selection: str,
+    gate_names: tuple[str, ...],
+    calculated_at: str,
+) -> dict[str, Any]:
+    token = next((job.claim_token for job in selected_jobs if job.claim_token), "")
+    run_events = [
+        event for event in events if token and event.claim_token == token
+    ]
+    phase_samples = _phase_duration_samples(events, exclude_token=token)
+    phases: list[dict[str, Any]] = []
+    phase_estimates: dict[str, tuple[int, float | None]] = {}
+    for phase in ESTIMATE_PHASES:
+        sample_count, estimate = _median_samples(phase_samples.get(phase, []))
+        phase_estimates[phase] = (sample_count, estimate)
+        phases.append(
+            {
+                "name": phase,
+                "sample_count": sample_count,
+                "median_seconds": estimate,
+            }
+        )
+
+    historical_events = [
+        event for event in events if not token or event.claim_token != token
+    ]
+    gate_samples: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    for ordinal, run in enumerate(_gate_runs(historical_events), start=1):
+        duration = run.get("duration_seconds")
+        if duration is None:
+            continue
+        gate_samples[str(run["name"])].append(
+            (ordinal, float(duration))
+        )
+
+    progress_gates = {
+        str(gate.get("name")): gate for gate in progress.get("gates", [])
+    }
+    gates: list[dict[str, Any]] = []
+    gate_remaining: list[float | None] = []
+    gate_sample_counts: list[int] = []
+    for index, name in enumerate(gate_names, start=1):
+        sample_count, estimate = _median_samples(gate_samples.get(name, []))
+        current = progress_gates.get(name, {})
+        state = str(current.get("state") or "waiting")
+        started_at = str(current.get("started_at") or "")
+        current_elapsed = (
+            elapsed_seconds(started_at, calculated_at) if started_at else None
+        )
+        if state in {"success", "reused", "skipped"}:
+            remaining: float | None = 0.0
+        elif estimate is None:
+            remaining = None
+        elif state == "active" and current_elapsed is not None:
+            remaining = round(max(0.0, estimate - current_elapsed), 3)
+        else:
+            remaining = estimate
+        if state not in {"success", "reused", "skipped"}:
+            gate_remaining.append(remaining)
+            if remaining is not None:
+                gate_sample_counts.append(sample_count)
+        gates.append(
+            {
+                "index": index,
+                "name": name,
+                "state": state,
+                "sample_count": sample_count,
+                "median_seconds": estimate,
+                "elapsed_seconds": current_elapsed,
+                "remaining_seconds": remaining,
+            }
+        )
+
+    remaining_parts: list[float | None] = []
+    used_sample_counts: list[int] = []
+    current_phase = str(progress.get("phase") or "")
+    deploying = any(
+        job.status == "in_progress" and bool(job.train_id)
+        for job in selected_jobs
+    ) or current_phase in {"pushing", "verifying", "complete"}
+    target_phases = list(ESTIMATE_PHASES[:3])
+    if deploying:
+        target_phases.extend(ESTIMATE_PHASES[3:])
+
+    if selection == "running":
+        try:
+            current_index = target_phases.index(current_phase)
+        except ValueError:
+            current_index = 0
+        for phase in target_phases[current_index:]:
+            sample_count, estimate = phase_estimates[phase]
+            if phase == "gating" and current_phase == "gating" and gate_remaining:
+                gate_total = _sum_complete(gate_remaining)
+                if gate_total is not None:
+                    remaining_parts.append(gate_total)
+                    used_sample_counts.extend(gate_sample_counts)
+                else:
+                    remaining_parts.append(None)
+                continue
+            if estimate is None:
+                remaining_parts.append(None)
+                continue
+            if phase == current_phase:
+                started_at = _current_phase_started_at(run_events, phase)
+                current_elapsed = (
+                    elapsed_seconds(started_at, calculated_at)
+                    if started_at
+                    else None
+                )
+                remaining_parts.append(
+                    round(max(0.0, estimate - float(current_elapsed or 0.0)), 3)
+                )
+            else:
+                remaining_parts.append(estimate)
+            used_sample_counts.append(sample_count)
+
+    estimated_remaining = _sum_complete(remaining_parts)
+    available = estimated_remaining is not None
+    expected_at = ""
+    if estimated_remaining is not None:
+        expected_at = (
+            _parse_utc(calculated_at) + timedelta(seconds=estimated_remaining)
+        ).isoformat(timespec="seconds").replace("+00:00", "Z")
+    has_history = any(item["sample_count"] for item in (*phases, *gates))
+    return {
+        "basis": "median_recent_completed_runs",
+        "sample_limit": ESTIMATE_SAMPLE_LIMIT,
+        "available": available,
+        "coverage": "complete" if available else "partial" if has_history else "none",
+        "sample_count": min(used_sample_counts) if used_sample_counts else 0,
+        "calculated_at": calculated_at,
+        "expected_at": expected_at,
+        "estimated_remaining_seconds": estimated_remaining,
+        "phases": phases,
+        "gates": gates,
+    }
+
+
 def _progress(
     selected_jobs: list[Job],
     events,
@@ -238,13 +457,28 @@ def _progress(
         gate_match = GATE_EVENT.match(event.message)
         if gate_match:
             gate_index = int(gate_match.group(1))
+            previous = gate_events.get(gate_index)
+            started_at = (
+                event.created_at
+                if event.state == "active"
+                else str(previous.get("started_at") or "")
+                if previous
+                else ""
+            )
+            finished_at = "" if event.state == "active" else event.created_at
             latest_gate = {
                 "index": gate_index,
                 "total": int(gate_match.group(2)),
                 "name": gate_match.group(3),
                 "state": event.state,
                 "command": event.detail,
-                "started_at": event.created_at,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_seconds": (
+                    elapsed_seconds(started_at, finished_at)
+                    if started_at and finished_at
+                    else None
+                ),
             }
             gate_events[gate_index] = latest_gate
         if event.phase == "gating" and event.state == "success" and event.message == "All train gates passed":
@@ -283,11 +517,21 @@ def _progress(
                 "name": name,
                 "state": gate_state,
                 "command": observed["command"] if observed else "",
+                "started_at": observed["started_at"] if observed else "",
+                "finished_at": observed["finished_at"] if observed else "",
+                "duration_seconds": (
+                    observed["duration_seconds"] if observed else None
+                ),
             }
         )
 
     current_gate = None
-    if latest and latest.phase == "gating" and latest.message != "All train gates passed":
+    if (
+        latest
+        and latest.phase == "gating"
+        and latest_gate
+        and latest_gate["state"] == "active"
+    ):
         current_gate = latest_gate
 
     started_at = next((job.started_at for job in selected_jobs if job.started_at), "")
@@ -324,7 +568,8 @@ def build_dashboard_snapshot(
     try:
         recent_jobs = list_jobs(conn, limit=job_limit)
         selected_jobs, selection = _selected_jobs(conn)
-        raw_events = list_run_events(conn, limit=event_limit)
+        history_events = list_history_events(conn)
+        raw_events = history_events[-max(1, min(int(event_limit), 200)):]
         lock = _public_lock(get_lock(conn))
         gate_names = ("diff-check", *(gate.name for gate in config.gates))
         payload: dict[str, Any] = {
@@ -373,6 +618,14 @@ def build_dashboard_snapshot(
             selection,
             gate_names,
             config.terminology.noun,
+        )
+        payload["eta"] = _eta_payload(
+            events=history_events,
+            selected_jobs=selected_jobs,
+            progress=payload["progress"],
+            selection=selection,
+            gate_names=gate_names,
+            calculated_at=payload["generated_at"],
         )
         payload["next_action"] = next_action(
             payload, config_version=config.config_version

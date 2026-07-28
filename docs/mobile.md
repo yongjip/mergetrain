@@ -70,5 +70,6 @@ Dispatch gives your phone a path to real actions on your computer — including 
 
 - **Remote Control** — run `claude remote-control` in your repo, then drive that live session from the Claude app or `claude.ai/code`. Best when you want to steer an in-progress terminal session rather than fire off a task. See the [docs](https://code.claude.com/docs/en/remote-control).
 - **SSH from a phone terminal** (Termius, Blink, Termux) — since every command is JSON-first and non-interactive, the wrappers in `scripts/` work well over SSH. Pair with Tailscale for secure access.
+- **Read-only dashboard glance** — if you already place the loopback dashboard behind a reviewed authenticated tunnel or reverse proxy, phone widths show only state, next action, and attention. `--allow-remote` adds no authentication or TLS by itself; follow [the dashboard security guidance](security.md#dashboard) before exposing it.
 
 > Note: **Claude Code on the web** runs in Anthropic's cloud, not on your machine, so it can't see your local mergetrain queue/SQLite — it's the wrong tool for managing a local deploy train.

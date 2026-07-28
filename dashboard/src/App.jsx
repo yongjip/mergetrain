@@ -31,12 +31,16 @@ import {
 import {
   REMEDIAL_ACTIONS,
   actionCopy,
+  browserIndicator,
+  etaRemainingSeconds,
+  gateWaterfallModel,
   jobActivityAt,
   latestRepoJob,
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
   repoStateForEntry,
+  stateFavicon,
   workspaceStepForSnapshot,
 } from "./dashboardLogic.js";
 
@@ -540,16 +544,38 @@ function DeploymentHistory({ jobs, words }) {
 }
 
 function Activity({ events, jobCount, words }) {
+  const [density, setDensity] = useState("compact");
+  const [visibleCount, setVisibleCount] = useState(5);
   const hasTrainAssembly = events.some((event) => event.phase === "assembling" && event.job_id === null);
-  const visible = events
-    .filter((event) => !(hasTrainAssembly && event.phase === "assembling" && event.job_id !== null))
-    .slice(-5)
+  const filtered = events
+    .filter((event) => !(hasTrainAssembly && event.phase === "assembling" && event.job_id !== null));
+  const visible = filtered
+    .slice(-visibleCount)
     .reverse();
+  const changeDensity = (value) => {
+    setDensity(value);
+    setVisibleCount(value === "compact" ? 5 : 10);
+  };
   return (
-    <section className="activity">
+    <section className={`activity ${density}`}>
       <div className="activity-heading">
-        <h2>Activity</h2>
-        <span>Newest first · runner milestones</span>
+        <div><h2>Activity</h2><span>Newest first · runner milestones</span></div>
+        <div className="activity-controls" aria-label="Activity density">
+          <button
+            className={density === "compact" ? "active" : ""}
+            type="button"
+            onClick={() => changeDensity("compact")}
+          >
+            Compact
+          </button>
+          <button
+            className={density === "expanded" ? "active" : ""}
+            type="button"
+            onClick={() => changeDensity("expanded")}
+          >
+            Expanded
+          </button>
+        </div>
       </div>
       {!visible.length && <p className="empty-copy">Runner events will appear here as the train moves.</p>}
       <div className="activity-list">
@@ -581,6 +607,15 @@ function Activity({ events, jobCount, words }) {
           );
         })}
       </div>
+      {filtered.length > visibleCount && (
+        <button
+          className="activity-more"
+          type="button"
+          onClick={() => setVisibleCount((count) => count + 10)}
+        >
+          Show {Math.min(10, filtered.length - visibleCount)} more
+        </button>
+      )}
     </section>
   );
 }
@@ -906,6 +941,7 @@ function BatchStatusBanner({ snapshot, model, now }) {
   const currentGate = progress.current_gate
     || progress.gates?.find((gate) => gate.state === "active")
     || null;
+  const etaSeconds = etaRemainingSeconds(snapshot.eta, now.getTime());
 
   let tone = "idle";
   let title = "No active batch";
@@ -963,6 +999,15 @@ function BatchStatusBanner({ snapshot, model, now }) {
           <dd>{runner}</dd>
           <small>{runnerDetail}</small>
         </div>
+        <div>
+          <dt>Estimated</dt>
+          <dd>{etaSeconds === null ? "Building history" : `~${duration(etaSeconds)} left`}</dd>
+          <small>
+            {snapshot.eta?.sample_count
+              ? `${snapshot.eta.sample_count} recent run${snapshot.eta.sample_count === 1 ? "" : "s"} · median`
+              : "appears after a completed comparable run"}
+          </small>
+        </div>
       </dl>
       <div className="batch-next-action">
         <span>Next action</span>
@@ -972,7 +1017,69 @@ function BatchStatusBanner({ snapshot, model, now }) {
   );
 }
 
-function CurrentTrainWorkspace({ snapshot, demoStep, model = currentTrainModel(snapshot) }) {
+function GateWaterfall({ snapshot, now }) {
+  const gates = gateWaterfallModel(snapshot.eta);
+  if (!gates.some((gate) => gate.sample_count)) return null;
+  return (
+    <section className="gate-waterfall" aria-labelledby="gate-waterfall-title">
+      <header>
+        <div>
+          <span className="workspace-eyebrow">Recent local history</span>
+          <h2 id="gate-waterfall-title">Gate timing</h2>
+        </div>
+        <span>Median of up to {snapshot.eta.sample_limit} completed runs</span>
+      </header>
+      <ol>
+        {gates.map((gate) => {
+          const liveStartedAt = snapshot.progress?.gates?.find(
+            (item) => item.index === gate.index,
+          )?.started_at;
+          const liveStarted = parseTime(liveStartedAt);
+          const liveElapsed = gate.state === "active" && liveStarted
+            ? Math.max(0, (now.getTime() - liveStarted) / 1000)
+            : gate.elapsed_seconds;
+          const progressPercent = gate.median_seconds && liveElapsed !== null
+            ? Math.min(100, Math.round((liveElapsed / gate.median_seconds) * 100))
+            : gate.state === "success"
+              ? 100
+              : 0;
+          return (
+            <li className={gate.state} key={`${gate.index}-${gate.name}`}>
+              <div>
+                <span>{gate.index}</span>
+                <strong>{gate.name}</strong>
+                <small>
+                  {gate.state === "active" && liveElapsed !== null
+                    ? `${duration(liveElapsed)} elapsed`
+                    : gate.median_seconds !== null
+                      ? `${duration(gate.median_seconds)} median`
+                      : "building history"}
+                </small>
+              </div>
+              <span
+                className="gate-duration-track"
+                style={{
+                  "--gate-width": `${gate.widthPercent}%`,
+                  "--gate-progress": `${progressPercent}%`,
+                }}
+              >
+                <i />
+              </span>
+              <em>{gate.sample_count} run{gate.sample_count === 1 ? "" : "s"}</em>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function CurrentTrainWorkspace({
+  snapshot,
+  demoStep,
+  now,
+  model = currentTrainModel(snapshot),
+}) {
   const { blockedJobs, currentJobs, validatedTrain, selection } = model;
   const step = demoStep ?? workspaceStepForSnapshot(snapshot);
   const blockedIds = new Set(blockedJobs.map((job) => String(job.id)));
@@ -980,6 +1087,7 @@ function CurrentTrainWorkspace({ snapshot, demoStep, model = currentTrainModel(s
   return (
     <section className="current-train-card" aria-label="Current batch details">
       <WorkspacePhaseRail step={step} approval={selection === "validated"} />
+      <GateWaterfall snapshot={snapshot} now={now} />
 
       <div className="train-table" role="table" aria-label="Current batch FIFO requests and outcomes">
         <div className="train-table-head" role="row">
@@ -1091,7 +1199,41 @@ function TrainInspector({ inspector }) {
   );
 }
 
-function SingleRepoBody({ snapshot, now, demoStep }) {
+function MobileGlance({ snapshot, model, now }) {
+  const indicator = browserIndicator(snapshot);
+  const [nextTitle] = actionCopy(snapshot.next_action, terminology(snapshot));
+  const etaSeconds = etaRemainingSeconds(snapshot.eta, now.getTime());
+  const attention = model.attentionJobs || [];
+  const stateTitle = model.selection === "validated"
+    ? "Awaiting deploy approval"
+    : model.selection === "running"
+      ? "Runner active"
+      : model.selection === "queued"
+        ? "Queued for validation"
+        : "Queue clear";
+  return (
+    <section className={`mobile-glance ${indicator.state}`} aria-label="Phone glance status">
+      <article>
+        <span>State</span>
+        <strong>{indicator.glyph} {stateTitle}</strong>
+        <small>
+          {etaSeconds === null ? snapshot.progress?.message : `About ${duration(etaSeconds)} remaining`}
+        </small>
+      </article>
+      <article>
+        <span>Next action</span>
+        <strong>{nextTitle}</strong>
+      </article>
+      <article className={attention.length ? "attention" : "clear"}>
+        <span>Attention</span>
+        <strong>{attention.length ? `${attention.length} request${attention.length === 1 ? "" : "s"} blocked` : "Nothing needs intervention"}</strong>
+        {!!attention.length && <small>{attention.slice(0, 3).map((job) => `#${job.id} ${jobLabel(job)}`).join(" · ")}</small>}
+      </article>
+    </section>
+  );
+}
+
+export function SingleRepoBody({ snapshot, now, demoStep }) {
   const recentJobs = snapshot.jobs || [];
   const words = terminology(snapshot);
   const model = currentTrainModel(snapshot);
@@ -1100,10 +1242,11 @@ function SingleRepoBody({ snapshot, now, demoStep }) {
   const step = demoStep ?? workspaceStepForSnapshot(snapshot);
   return (
     <main className="workspace-shell">
+      <MobileGlance snapshot={snapshot} model={model} now={now} />
       <BatchStatusBanner snapshot={snapshot} model={model} now={now} />
       {!!model.currentJobs.length && (
         <div className={`train-workspace-grid ${showInspector ? "with-inspector" : ""}`}>
-          <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} model={model} />
+          <CurrentTrainWorkspace snapshot={snapshot} demoStep={demoStep} model={model} now={now} />
           {showInspector && <TrainInspector inspector={inspector} />}
         </div>
       )}
@@ -1521,17 +1664,10 @@ export function App() {
 
   useEffect(() => {
     if (!snapshot) return;
-    if (snapshot.hub) {
-      const attention = snapshot.repos.filter((entry) => {
-        const [state] = repoStateForEntry(entry);
-        return ["error", "warning"].includes(state);
-      }).length;
-      document.title = `${attention ? `(${attention}) ` : ""}mergetrain · hub`;
-      return;
-    }
-    const failures = (snapshot.counts?.blocked || 0) + (snapshot.counts?.failed || 0) + (snapshot.counts?.needs_reconcile || 0);
-    const state = failures ? "attention" : snapshot.train.selection === "running" ? "running" : snapshot.train.selection === "validated" ? "ready" : "idle";
-    document.title = `${failures ? `(${failures}) ` : ""}mergetrain · ${state}`;
+    const indicator = browserIndicator(snapshot);
+    document.title = `${indicator.glyph} ${indicator.count ? `(${indicator.count}) ` : ""}mergetrain · ${indicator.label}`;
+    const favicon = document.querySelector('link[rel="icon"]');
+    if (favicon) favicon.setAttribute("href", stateFavicon(indicator));
   }, [snapshot]);
 
   const selectRepo = (path) => {

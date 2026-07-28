@@ -1,0 +1,188 @@
+{
+  "ok": true,
+  "generated_at": "2026-07-29T12:00:35Z",
+  "project": {
+    "name": "fixture",
+    "integration_ref": "main",
+    "remote": "origin",
+    "push_specs": ["HEAD:main"],
+    "terminology": {
+      "action": "deploy",
+      "in_progress": "deploying",
+      "completed": "deployed",
+      "noun": "deployment"
+    },
+    "preview": false,
+    "gate_count": 2
+  },
+  "counts": {
+    "queued": 0,
+    "in_progress": 1,
+    "blocked": 1,
+    "validated": 0,
+    "deployed": 0,
+    "needs_reconcile": 0
+  },
+  "lock": {
+    "owner": "local:4242",
+    "liveness": "alive",
+    "heartbeat_at": "2026-07-29T12:00:34Z",
+    "expires_at": "2026-07-29T12:05:34Z"
+  },
+  "jobs": [
+    {
+      "id": 41,
+      "task": "Add ETA",
+      "branch": "codex/eta",
+      "status": "in_progress",
+      "head_sha": "1111111111111111111111111111111111111111",
+      "started_at": "2026-07-29T12:00:00Z",
+      "requested_at": "2026-07-29T11:59:30Z"
+    },
+    {
+      "id": 42,
+      "task": "Conflicting copy",
+      "branch": "codex/copy",
+      "status": "blocked",
+      "head_sha": "2222222222222222222222222222222222222222",
+      "started_at": "2026-07-29T12:00:00Z",
+      "finished_at": "2026-07-29T12:00:18Z",
+      "note": "semantic incompatibility",
+      "conflict_with": "41"
+    }
+  ],
+  "train": {
+    "selection": "running",
+    "jobs": [
+      {
+        "id": 41,
+        "task": "Add ETA",
+        "branch": "codex/eta",
+        "status": "in_progress",
+        "head_sha": "1111111111111111111111111111111111111111",
+        "started_at": "2026-07-29T12:00:00Z",
+        "requested_at": "2026-07-29T11:59:30Z"
+      }
+    ]
+  },
+  "events": [
+    {
+      "id": 101,
+      "phase": "fetching",
+      "state": "success",
+      "message": "Integration worktree prepared",
+      "created_at": "2026-07-29T12:00:05Z",
+      "job_id": null,
+      "detail": ""
+    },
+    {
+      "id": 102,
+      "phase": "assembling",
+      "state": "success",
+      "message": "Assembled 1 job(s)",
+      "created_at": "2026-07-29T12:00:20Z",
+      "job_id": null,
+      "detail": ""
+    },
+    {
+      "id": 103,
+      "phase": "gating",
+      "state": "success",
+      "message": "Passed gate 1/2: diff-check",
+      "created_at": "2026-07-29T12:00:30Z",
+      "job_id": null,
+      "detail": "git diff --check"
+    },
+    {
+      "id": 104,
+      "phase": "gating",
+      "state": "active",
+      "message": "Running gate 2/2: unit",
+      "created_at": "2026-07-29T12:00:30Z",
+      "job_id": null,
+      "detail": "python -m unittest"
+    }
+  ],
+  "validated_trains": [],
+  "progress": {
+    "phase": "gating",
+    "state": "active",
+    "message": "Running gate 2/2: unit",
+    "detail": "python -m unittest",
+    "job_id": null,
+    "started_at": "2026-07-29T12:00:00Z",
+    "updated_at": "2026-07-29T12:00:30Z",
+    "completed_phases": ["fetching", "assembling"],
+    "completed_job_ids": [41],
+    "gates": [
+      {
+        "index": 1,
+        "total": 2,
+        "name": "diff-check",
+        "state": "success",
+        "command": "git diff --check",
+        "started_at": "2026-07-29T12:00:20Z",
+        "finished_at": "2026-07-29T12:00:30Z",
+        "duration_seconds": 10
+      },
+      {
+        "index": 2,
+        "total": 2,
+        "name": "unit",
+        "state": "active",
+        "command": "python -m unittest",
+        "started_at": "2026-07-29T12:00:30Z",
+        "finished_at": "",
+        "duration_seconds": null
+      }
+    ],
+    "current_gate": {
+      "index": 2,
+      "total": 2,
+      "name": "unit",
+      "state": "active",
+      "command": "python -m unittest",
+      "started_at": "2026-07-29T12:00:30Z",
+      "finished_at": "",
+      "duration_seconds": null
+    }
+  },
+  "eta": {
+    "basis": "median_recent_completed_runs",
+    "sample_limit": 20,
+    "available": true,
+    "coverage": "complete",
+    "sample_count": 3,
+    "calculated_at": "2026-07-29T12:00:35Z",
+    "expected_at": "2026-07-29T12:01:00Z",
+    "estimated_remaining_seconds": 25,
+    "phases": [
+      {"name": "fetching", "sample_count": 3, "median_seconds": 10},
+      {"name": "assembling", "sample_count": 3, "median_seconds": 20},
+      {"name": "gating", "sample_count": 3, "median_seconds": 40},
+      {"name": "pushing", "sample_count": 0, "median_seconds": null},
+      {"name": "verifying", "sample_count": 0, "median_seconds": null}
+    ],
+    "gates": [
+      {
+        "index": 1,
+        "name": "diff-check",
+        "state": "success",
+        "sample_count": 3,
+        "median_seconds": 10,
+        "elapsed_seconds": 10,
+        "remaining_seconds": 0
+      },
+      {
+        "index": 2,
+        "name": "unit",
+        "state": "active",
+        "sample_count": 3,
+        "median_seconds": 30,
+        "elapsed_seconds": 5,
+        "remaining_seconds": 25
+      }
+    ]
+  },
+  "next_action": "wait_for_runner"
+}

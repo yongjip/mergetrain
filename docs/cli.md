@@ -338,7 +338,12 @@ same advisory next action used by `doctor`. Server-sent events deliver live
 snapshots; the client falls back to two-second polling if the stream is
 interrupted. The connection indicator is distinct from runner ownership, and the
 current-check panel explains the active gate, scope, command template, and elapsed
-time.
+time. When comparable local history exists, the running banner shows a
+median-based ETA and the train shows per-gate duration bars; missing samples are
+reported as "building history", not guessed. Activity can switch between compact
+and expanded density and reveal older events incrementally. Phone-sized screens
+reduce the first read to state, next action, and attention. The tab title and
+favicon carry the current state and attention count.
 
 | Option | Meaning |
 |---|---|

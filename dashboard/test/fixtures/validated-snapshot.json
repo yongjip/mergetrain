@@ -1,0 +1,100 @@
+{
+  "ok": true,
+  "generated_at": "2026-07-29T13:00:00Z",
+  "project": {
+    "name": "fixture",
+    "integration_ref": "main",
+    "remote": "origin",
+    "push_specs": ["HEAD:main"],
+    "terminology": {
+      "action": "deploy",
+      "in_progress": "deploying",
+      "completed": "deployed",
+      "noun": "deployment"
+    },
+    "preview": false,
+    "gate_count": 2
+  },
+  "counts": {
+    "queued": 0,
+    "in_progress": 0,
+    "blocked": 0,
+    "validated": 1,
+    "deployed": 0,
+    "needs_reconcile": 0
+  },
+  "lock": null,
+  "jobs": [
+    {
+      "id": 43,
+      "task": "Ready feature",
+      "branch": "codex/ready",
+      "status": "validated",
+      "validated_head_sha": "3333333333333333333333333333333333333333",
+      "train_id": "train-fixture",
+      "validated_at": "2026-07-29T12:59:55Z"
+    }
+  ],
+  "train": {
+    "selection": "validated",
+    "jobs": [
+      {
+        "id": 43,
+        "task": "Ready feature",
+        "branch": "codex/ready",
+        "status": "validated",
+        "validated_head_sha": "3333333333333333333333333333333333333333",
+        "train_id": "train-fixture",
+        "validated_at": "2026-07-29T12:59:55Z"
+      }
+    ]
+  },
+  "events": [],
+  "validated_trains": [
+    {
+      "train_id": "train-fixture",
+      "job_ids": [43],
+      "deploy_eligible": true,
+      "reuse_identity_complete": true,
+      "branches": [
+        {
+          "job_id": 43,
+          "branch": "codex/ready",
+          "validated_head_sha": "3333333333333333333333333333333333333333"
+        }
+      ]
+    }
+  ],
+  "progress": {
+    "phase": "ready",
+    "state": "success",
+    "message": "Validated train is waiting for deployment approval",
+    "detail": "",
+    "job_id": null,
+    "started_at": "2026-07-29T12:59:00Z",
+    "updated_at": "2026-07-29T12:59:55Z",
+    "completed_phases": ["fetching", "assembling", "gating"],
+    "completed_job_ids": [43],
+    "gates": [
+      {"index": 1, "total": 2, "name": "diff-check", "state": "success", "command": "", "started_at": "", "finished_at": "", "duration_seconds": 10},
+      {"index": 2, "total": 2, "name": "unit", "state": "success", "command": "", "started_at": "", "finished_at": "", "duration_seconds": 30}
+    ],
+    "current_gate": null
+  },
+  "eta": {
+    "basis": "median_recent_completed_runs",
+    "sample_limit": 20,
+    "available": false,
+    "coverage": "partial",
+    "sample_count": 0,
+    "calculated_at": "2026-07-29T13:00:00Z",
+    "expected_at": "",
+    "estimated_remaining_seconds": null,
+    "phases": [],
+    "gates": [
+      {"index": 1, "name": "diff-check", "state": "success", "sample_count": 3, "median_seconds": 10, "elapsed_seconds": null, "remaining_seconds": 0},
+      {"index": 2, "name": "unit", "state": "success", "sample_count": 3, "median_seconds": 30, "elapsed_seconds": null, "remaining_seconds": 0}
+    ]
+  },
+  "next_action": "deploy_validated_train_when_approved"
+}

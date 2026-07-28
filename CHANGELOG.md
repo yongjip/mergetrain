@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Complete the dashboard history-and-glance follow-up (#178). Running trains
+  get a fail-honest ETA from the median of up to 20 recent completed phase and
+  gate spans; missing comparable samples show "building history" instead of an
+  invented duration. The same read model drives gate waterfall bars. Activity
+  gains compact/expanded density and incremental history, phones get a
+  state/next-action/attention glance view, and tab titles plus favicons carry
+  live state and failure counts. Shared running/validated snapshot fixtures now
+  render the actual React components in frontend smoke tests.
+
 - Add an opt-in persistent validation workspace (#200) for build caches whose
   keys include the checkout's absolute path. The stable path is runner-locked,
   hard-resets tracked inputs, preserves only explicitly declared Git-ignored

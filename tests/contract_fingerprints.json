@@ -501,6 +501,34 @@
               "queued": null,
               "validated": null
             },
+            "eta": {
+              "available": null,
+              "basis": null,
+              "calculated_at": null,
+              "coverage": null,
+              "estimated_remaining_seconds": null,
+              "expected_at": null,
+              "gates": {
+                "[]": {
+                  "elapsed_seconds": null,
+                  "index": null,
+                  "median_seconds": null,
+                  "name": null,
+                  "remaining_seconds": null,
+                  "sample_count": null,
+                  "state": null
+                }
+              },
+              "phases": {
+                "[]": {
+                  "median_seconds": null,
+                  "name": null,
+                  "sample_count": null
+                }
+              },
+              "sample_count": null,
+              "sample_limit": null
+            },
             "events": "[]?",
             "generated_at": null,
             "jobs": {
@@ -546,8 +574,11 @@
               "gates": {
                 "[]": {
                   "command": null,
+                  "duration_seconds": null,
+                  "finished_at": null,
                   "index": null,
                   "name": null,
+                  "started_at": null,
                   "state": null,
                   "total": null
                 }

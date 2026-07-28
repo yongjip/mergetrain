@@ -137,6 +137,8 @@ class DashboardTests(unittest.TestCase):
                     "state": "active",
                     "command": "git diff --check ${integration_ref}..HEAD",
                     "started_at": payload["progress"]["updated_at"],
+                    "finished_at": "",
+                    "duration_seconds": None,
                 },
             )
             self.assertEqual(
@@ -145,6 +147,8 @@ class DashboardTests(unittest.TestCase):
             )
             self.assertFalse(payload["project"]["reuse"]["enabled"])
             self.assertEqual(payload["project"]["reuse"]["max_age_minutes"], 60)
+            self.assertFalse(payload["eta"]["available"])
+            self.assertEqual(payload["eta"]["coverage"], "none")
             self.assertEqual(payload["lock"]["owner"], f"local:{os.getpid()}")
             self.assertIn("heartbeat_at", payload["lock"])
             self.assertNotIn("worktree_path", payload["jobs"][0])
@@ -157,6 +161,211 @@ class DashboardTests(unittest.TestCase):
             cleanup = connect(config.state.db)
             try:
                 release_runner_lock(cleanup, owner=owner, token=claimed[0].claim_token)
+            finally:
+                cleanup.close()
+
+    def test_snapshot_estimates_running_gate_eta_from_recent_history(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: unit
+    run: python -m unittest
+""",
+                encoding="utf-8",
+            )
+            config = self.make_config(root)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+
+            def event(
+                token: str,
+                phase: str,
+                state: str,
+                message: str,
+                created_at: str,
+            ) -> None:
+                recorded = record_run_event(
+                    conn,
+                    claim_token=token,
+                    phase=phase,
+                    state=state,
+                    message=message,
+                )
+                conn.execute(
+                    "UPDATE run_events SET created_at = ? WHERE id = ?",
+                    (created_at, recorded.id),
+                )
+
+            try:
+                event(
+                    "history",
+                    "fetching",
+                    "active",
+                    "Fetching main",
+                    "2026-07-29T11:00:00Z",
+                )
+                event(
+                    "history",
+                    "fetching",
+                    "success",
+                    "Integration worktree prepared",
+                    "2026-07-29T11:00:10Z",
+                )
+                event(
+                    "history",
+                    "assembling",
+                    "active",
+                    "Assembling train with 1 job(s)",
+                    "2026-07-29T11:00:10Z",
+                )
+                event(
+                    "history",
+                    "assembling",
+                    "success",
+                    "Assembled 1 job(s)",
+                    "2026-07-29T11:00:30Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "active",
+                    "Running train gates",
+                    "2026-07-29T11:00:30Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "active",
+                    "Running gate 1/2: diff-check",
+                    "2026-07-29T11:00:30Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "success",
+                    "Passed gate 1/2: diff-check",
+                    "2026-07-29T11:00:40Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "active",
+                    "Running gate 2/2: unit",
+                    "2026-07-29T11:00:40Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "success",
+                    "Passed gate 2/2: unit",
+                    "2026-07-29T11:01:10Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "success",
+                    "All train gates passed",
+                    "2026-07-29T11:01:10Z",
+                )
+                conn.commit()
+
+                enqueue_job(conn, task="dashboard ETA", branch="codex/dashboard-eta")
+                claimed = claim_all_queued(conn, owner=owner)
+                token = claimed[0].claim_token
+                event(
+                    token,
+                    "fetching",
+                    "active",
+                    "Fetching main",
+                    "2026-07-29T12:00:00Z",
+                )
+                event(
+                    token,
+                    "fetching",
+                    "success",
+                    "Integration worktree prepared",
+                    "2026-07-29T12:00:05Z",
+                )
+                event(
+                    token,
+                    "assembling",
+                    "active",
+                    "Assembling train with 1 job(s)",
+                    "2026-07-29T12:00:05Z",
+                )
+                event(
+                    token,
+                    "assembling",
+                    "success",
+                    "Assembled 1 job(s)",
+                    "2026-07-29T12:00:20Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "active",
+                    "Running train gates",
+                    "2026-07-29T12:00:20Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "active",
+                    "Running gate 1/2: diff-check",
+                    "2026-07-29T12:00:20Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "success",
+                    "Passed gate 1/2: diff-check",
+                    "2026-07-29T12:00:30Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "active",
+                    "Running gate 2/2: unit",
+                    "2026-07-29T12:00:30Z",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            with patch(
+                "mergetrain.snapshot.utc_now",
+                return_value="2026-07-29T12:00:35Z",
+            ):
+                payload = build_dashboard_snapshot(config)
+
+            self.assertTrue(payload["eta"]["available"])
+            self.assertEqual(payload["eta"]["coverage"], "complete")
+            self.assertEqual(payload["eta"]["sample_count"], 1)
+            self.assertEqual(payload["eta"]["estimated_remaining_seconds"], 25.0)
+            self.assertEqual(payload["eta"]["expected_at"], "2026-07-29T12:01:00Z")
+            self.assertEqual(
+                [
+                    (
+                        gate["name"],
+                        gate["median_seconds"],
+                        gate["remaining_seconds"],
+                    )
+                    for gate in payload["eta"]["gates"]
+                ],
+                [("diff-check", 10.0, 0.0), ("unit", 30.0, 25.0)],
+            )
+            self.assertEqual(
+                {
+                    phase["name"]: phase["median_seconds"]
+                    for phase in payload["eta"]["phases"]
+                }["gating"],
+                40.0,
+            )
+
+            cleanup = connect(config.state.db)
+            try:
+                release_runner_lock(cleanup, owner=owner, token=token)
             finally:
                 cleanup.close()
 
