@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add fail-closed path-aware pre-push gates (#199). An optional `gates[].paths`
+  list matches repository-relative POSIX globs against the exact assembled
+  train diff, including deletions and both rename endpoints. Non-matches emit
+  resumable `skipped` gate events; missing or malformed path evidence runs every
+  scoped gate. The same policy applies during single/batch validation, exact
+  validated reuse, and linear/bisect failure isolation, and participates in the
+  validation gate-policy hash.
+
 ## 0.9.1 - 2026-07-26
 
 - Add a fail-closed real-remote soak harness for the 1.0 evidence gate. It

@@ -179,6 +179,10 @@ gates:
     run: git diff --check ${integration_ref}..HEAD
   - name: tests
     run: python -m unittest discover -s tests
+    paths:
+      - src/**
+      - tests/**
+      - pyproject.toml
   - name: deploy-policy
     run: ./scripts/check-deploy-policy
     always_rerun_on_deploy: true
@@ -187,6 +191,25 @@ gates:
 Gates run before push in the temporary integration worktree. The optional
 `always_rerun_on_deploy` flag matters only when validated-gate reuse is accepted;
 that gate still runs against the exact restored validation commit.
+
+An optional non-empty `paths` list scopes a pre-push gate to the assembled
+train's changed paths. A scoped gate runs when any changed path matches any
+pattern; otherwise it emits a structured `skipped` gate event and keeps its
+normal gate index. Gates without `paths` always run, as does mergetrain's
+built-in `diff-check`.
+
+Patterns are repository-relative POSIX globs on every platform. `*`, `?`, and
+character classes match within one path segment; a segment containing only
+`**` matches zero or more complete segments. Absolute paths, `.`/`..` segments,
+backslashes, empty segments, duplicate patterns, and `**` embedded inside
+another segment are rejected. `paths` is supported only for top-level
+pre-push `gates`, not `deploy.verify` or reuse fingerprints.
+
+mergetrain computes the path set once from the captured integration-base commit
+to the exact assembled train commit. Rename and copy records include both the
+old and new path; deletions remain visible. If Git cannot produce or mergetrain
+cannot parse the path set, every scoped gate runs. A path-selection failure can
+therefore cost time but can never silently weaken validation.
 
 Every `run` string is executed by a **POSIX `sh`, on every platform** — mergetrain
 never falls back to `cmd.exe`. On Windows it uses `sh` from `PATH` or the one Git

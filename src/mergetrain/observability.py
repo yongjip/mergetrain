@@ -24,7 +24,9 @@ from .store import (
     utc_now,
 )
 
-GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
+GATE_EVENT = re.compile(
+    r"^(?:Running|Passed|Reused|Skipped) gate (\d+)/(\d+): (.+)$"
+)
 COMPLETED_STATUSES = {"validated", "deployed", "blocked", "failed", "canceled"}
 
 

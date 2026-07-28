@@ -8,6 +8,7 @@ from pathlib import Path
 from mergetrain.config import (
     AgentConfig,
     DeployConfig,
+    GateConfig,
     GitConfig,
     MergetrainConfig,
     ProjectConfig,
@@ -30,7 +31,11 @@ from mergetrain.reuse import (
 NOW = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def _config(project_name: str = "demo") -> MergetrainConfig:
+def _config(
+    project_name: str = "demo",
+    *,
+    gate_paths: tuple[str, ...] = (),
+) -> MergetrainConfig:
     return MergetrainConfig(
         project=ProjectConfig(name=project_name),
         state=StateConfig(db=Path("/x/db"), logs=Path("/x/logs"), worktree_root=Path("/x/wt")),
@@ -38,7 +43,17 @@ def _config(project_name: str = "demo") -> MergetrainConfig:
         queue=QueueConfig(),
         agent=AgentConfig(),
         terminology=TerminologyConfig(),
-        gates=(),
+        gates=(
+            (
+                GateConfig(
+                    name="tests",
+                    run="make test",
+                    paths=gate_paths,
+                ),
+            )
+            if gate_paths
+            else ()
+        ),
         deploy=DeployConfig(verify=(), reuse=ReuseConfig()),
         repo=Path("/x"),
         config_path=Path("/x/.mergetrain.yaml"),
@@ -147,6 +162,14 @@ class GatePolicyShaTests(unittest.TestCase):
         self.assertEqual(sha, gate_policy_sha(_config()))  # deterministic
         # the reuse fingerprint must change when the policy inputs change.
         self.assertNotEqual(sha, gate_policy_sha(_config(project_name="other")))
+        self.assertNotEqual(
+            gate_policy_sha(_config(gate_paths=("src/**",))),
+            gate_policy_sha(_config(gate_paths=("docs/**",))),
+        )
+        self.assertNotEqual(
+            sha,
+            gate_policy_sha(_config(gate_paths=("src/**",))),
+        )
 
 
 class ReuseDecisionTests(unittest.TestCase):

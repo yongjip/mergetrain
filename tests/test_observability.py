@@ -5,10 +5,11 @@ import unittest
 from pathlib import Path
 
 from mergetrain.config import load_config
-from mergetrain.models import Job, RunnerLock
+from mergetrain.models import Job, RunEvent, RunnerLock
 from mergetrain.observability import (
     _lease_context,
     event_record,
+    gate_details,
     history_payload,
     job_outcome,
     normalize_since,
@@ -67,6 +68,25 @@ class JobOutcomeTests(unittest.TestCase):
         self.assertEqual(warning["warning_categories"], ["post_push_verification_failed"])
         secret = job_outcome(job(status="failed", note="API_TOKEN=do-not-leak"))
         self.assertNotIn("do-not-leak", secret["message"])
+
+    def test_skipped_gate_event_has_stable_gate_details(self) -> None:
+        event = RunEvent(
+            id=1,
+            phase="gating",
+            state="skipped",
+            message="Skipped gate 2/3: docs",
+            detail="no changed paths matched configured paths",
+            created_at="2026-07-22T00:00:00Z",
+        )
+        self.assertEqual(
+            gate_details(event),
+            {
+                "index": 2,
+                "total": 3,
+                "name": "docs",
+                "state": "skipped",
+            },
+        )
 
 
 class TrainOutcomeTests(unittest.TestCase):

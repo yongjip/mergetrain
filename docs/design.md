@@ -42,7 +42,12 @@ process output.
 
 **Integration worktree** — a disposable, detached Git worktree created under `state.worktree_root`, named `{project.name}-mergetrain-{job_id}-{random8}`, starting from the integration ref. The runner merges here, so agents never check out or push the deploy branch.
 
-**Gate** — a pre-push verification command (`gates` in config) run inside the integration worktree. A gate failure is a pre-push failure: nothing ships.
+**Gate** — a pre-push verification command (`gates` in config) run inside the
+integration worktree. Top-level gates may optionally declare repository-relative
+`paths` patterns. A scoped gate runs when any path changed between the captured
+integration base and exact deploy SHA matches; path discovery failure is
+fail-closed and runs the gate. A gate failure is a pre-push failure: nothing
+ships.
 
 **Verify hook** — a post-push verification command (`deploy.verify` in config) run after the push to confirm the deploy is live.
 
@@ -173,7 +178,9 @@ verified to pass alone before being blamed; probes that hit merge conflicts
 or a non-reproducing failure abort bisection and fall back to one-by-one
 isolation. Surviving jobs re-run as a fresh train, so nothing ships without
 a full gate pass over the exact final combination. Successful jobs receive
-a shared train identity and validation SHA.
+a shared train identity and validation SHA. Path-scoped gates are evaluated
+against each probe's captured base and exact probe SHA, so a skipped gate cannot
+hide a failure during isolation.
 
 During a later validated deploy, the selected train is atomic: every current
 task branch must still resolve to its recorded `validated_head_sha`, and the
@@ -192,7 +199,10 @@ semantic gate/fingerprint policy, adapter-provided environment hash, and age.
 Only the unchanged case restores and pushes the exact `validation_sha` while
 skipping reusable gates; gates marked `always_rerun_on_deploy` still execute.
 Any mismatch either falls back to the full path or fails closed according to
-policy, and events explicitly say whether each gate was reused or run.
+policy, and events explicitly say whether each gate was reused, skipped because
+no changed path matched, or run. If changed-path discovery is unavailable while
+considering reuse, scoped gates run instead of inheriting an ambiguous skipped
+result.
 Schema v5 adds the reuse identity fields with empty defaults. Older validated
 rows remain deployable through the full gate path but cannot be reused because
 they do not claim an identity that was never recorded.

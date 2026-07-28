@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .errors import ConfigError
+from .path_gates import validate_gate_path_pattern
 
 DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 
@@ -131,6 +132,7 @@ class GateConfig:
     name: str
     run: str
     always_rerun_on_deploy: bool = False
+    paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +173,17 @@ class MergetrainConfig:
         data["git"]["integration_ref"] = self.git.integration_ref
         data["terminology"] = self.terminology.to_dict()
         data["notify"] = self.notify.to_dict()
+        for gate in data["gates"]:
+            paths = gate.get("paths", ())
+            if paths:
+                gate["paths"] = list(paths)
+            else:
+                gate.pop("paths", None)
+        for key in ("verify",):
+            for gate in data["deploy"][key]:
+                gate.pop("paths", None)
+        for gate in data["deploy"]["reuse"]["fingerprints"]:
+            gate.pop("paths", None)
         return data
 
 
@@ -482,7 +495,12 @@ def _as_mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
-def _as_gate_list(value: Any, *, key: str) -> tuple[GateConfig, ...]:
+def _as_gate_list(
+    value: Any,
+    *,
+    key: str,
+    allow_paths: bool = False,
+) -> tuple[GateConfig, ...]:
     if value in (None, {}):
         return ()
     if not isinstance(value, list):
@@ -504,11 +522,36 @@ def _as_gate_list(value: Any, *, key: str) -> tuple[GateConfig, ...]:
             raise ConfigError(
                 f"{key}[{index}].always_rerun_on_deploy must be true or false"
             )
+        raw_paths = item.get("paths")
+        paths: tuple[str, ...] = ()
+        if raw_paths is not None:
+            if not allow_paths:
+                raise ConfigError(f"{key}[{index}].paths is unsupported")
+            if not isinstance(raw_paths, list) or not raw_paths:
+                raise ConfigError(
+                    f"{key}[{index}].paths must be a non-empty list"
+                )
+            parsed_paths: list[str] = []
+            for path_index, pattern in enumerate(raw_paths):
+                if not isinstance(pattern, str):
+                    raise ConfigError(
+                        f"{key}[{index}].paths[{path_index}] must be a string"
+                    )
+                try:
+                    parsed_paths.append(validate_gate_path_pattern(pattern))
+                except ValueError as exc:
+                    raise ConfigError(
+                        f"{key}[{index}].paths[{path_index}] {exc}"
+                    ) from exc
+            if len(set(parsed_paths)) != len(parsed_paths):
+                raise ConfigError(f"{key}[{index}].paths must not contain duplicates")
+            paths = tuple(parsed_paths)
         gates.append(
             GateConfig(
                 name=name,
                 run=run,
                 always_rerun_on_deploy=always_rerun,
+                paths=paths,
             )
         )
     return tuple(gates)
@@ -730,7 +773,7 @@ def load_config(
             fingerprints=fingerprints,
         ),
     )
-    gates = _as_gate_list(data.get("gates", []), key="gates")
+    gates = _as_gate_list(data.get("gates", []), key="gates", allow_paths=True)
     gate_names = [
         gate.name
         for gate in (*gates, *deploy.verify, *deploy.reuse.fingerprints)

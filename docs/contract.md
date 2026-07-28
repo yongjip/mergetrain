@@ -110,6 +110,11 @@ unknown keys** and **must dispatch JSONL on `type`**. Additive means: a new key
 on a payload, a new optional field, a new JSONL frame type, a new command, a new
 `next_action` value.
 
+The optional `paths` array on top-level gate configuration and the `skipped`
+gate event state are additive contract changes. Consumers must continue to
+ignore unknown configuration keys and event state values. A skipped gate
+includes the stable detail `no changed paths matched configured paths`.
+
 **Breaking changes bump `contract_version`** (a deliberate, reviewed decision):
 removing or renaming a key, changing a value's type or meaning, changing the
 `ok`/`result` semantics, changing exit codes, or changing the JSONL frame or

@@ -96,6 +96,7 @@ def make_demo_repo(
     reuse_on_mismatch: str = "rerun",
     always_rerun_on_deploy: bool = False,
     fingerprint_command: str | None = None,
+    gate_paths: tuple[str, ...] = (),
 ) -> tuple[Path, Path]:
     """Create a remote+clone with a ``feature/a`` branch and return (repo, marker).
 
@@ -136,6 +137,12 @@ def make_demo_repo(
     always_rerun_config = (
         "\n    always_rerun_on_deploy: true" if always_rerun_on_deploy else ""
     )
+    paths_config = ""
+    if gate_paths:
+        rendered_paths = "".join(
+            f"\n      - {json.dumps(pattern)}" for pattern in gate_paths
+        )
+        paths_config = f"\n    paths:{rendered_paths}"
     config_text = f"""project:
   name: demo
 state:
@@ -154,7 +161,7 @@ queue:
   command_timeout_seconds: 30
 gates:
   - name: marker
-    run: {gate_command}{always_rerun_config}
+    run: {gate_command}{always_rerun_config}{paths_config}
 deploy:
 {verify_config}
   reuse:
@@ -168,6 +175,107 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_path_scoped_gate_skips_without_a_match_and_records_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("src/**",))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(
+                    conn, [job], deploy=False
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+            self.assertFalse(marker.exists())
+            skipped = next(
+                event
+                for event in events
+                if event.message == "Skipped gate 2/2: marker"
+            )
+            self.assertEqual(skipped.state, "skipped")
+            self.assertEqual(
+                skipped.detail, "no changed paths matched configured paths"
+            )
+
+    def test_path_scoped_gate_runs_for_a_train_wide_match(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("b.txt",))
+            git(repo, "switch", "-c", "agent/b", "main")
+            (repo / "b.txt").write_text("b\n", encoding="utf-8")
+            git(repo, "add", "b.txt")
+            git(repo, "commit", "-m", "b")
+            git(repo, "switch", "main")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [
+                    enqueue_job(conn, task="a", branch="feature/a"),
+                    enqueue_job(conn, task="b", branch="agent/b"),
+                ]
+                results = GitRunner(config).process_batch(
+                    conn, jobs, deploy=False
+                )
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+
+            self.assertEqual(
+                [result.status for result in results],
+                ["validated", "validated"],
+            )
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            self.assertIn(
+                "Running gate 2/2: marker",
+                [event.message for event in events],
+            )
+
+    def test_path_discovery_failure_runs_scoped_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("src/**",))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                with patch(
+                    "mergetrain.git_runner.parse_name_status_z",
+                    side_effect=ValueError("broken diff"),
+                ):
+                    result = runner.process_batch(conn, [job], deploy=False)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+
+    def test_renamed_path_matches_both_old_and_new_names(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("app.txt",))
+            git(repo, "switch", "feature/a")
+            git(repo, "mv", "app.txt", "renamed.txt")
+            git(repo, "commit", "-m", "rename app")
+            git(repo, "switch", "main")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="rename", branch="feature/a")
+                result = GitRunner(config).process_batch(
+                    conn, [job], deploy=False
+                )[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+
     def test_windows_stop_uses_taskkill_for_the_process_tree(self) -> None:
         process = Mock()
         process.pid = 4321
@@ -343,6 +451,72 @@ class GitRunnerTests(unittest.TestCase):
                 [event.message for event in reused],
                 ["Reused gate 1/2: diff-check", "Reused gate 2/2: marker"],
             )
+
+    def test_path_skipped_gate_remains_skipped_during_exact_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("src/**",))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                validated = runner.process_batch(conn, [job], deploy=False)[0]
+                deployed = runner.process_batch(
+                    conn,
+                    [validated],
+                    deploy=True,
+                    reuse_validated=True,
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+
+            self.assertEqual(deployed.status, "deployed")
+            self.assertEqual(
+                deployed.reused_validation_sha, validated.validation_sha
+            )
+            self.assertFalse(marker.exists())
+            self.assertEqual(
+                [
+                    event.message
+                    for event in events
+                    if event.state == "skipped"
+                ],
+                [
+                    "Skipped gate 2/2: marker",
+                    "Skipped gate 2/2: marker",
+                ],
+            )
+
+    def test_reuse_runs_scoped_gate_when_path_discovery_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("src/**",))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                validated = runner.process_batch(conn, [job], deploy=False)[0]
+                with patch(
+                    "mergetrain.git_runner.parse_name_status_z",
+                    side_effect=ValueError("broken diff"),
+                ):
+                    deployed = runner.process_batch(
+                        conn,
+                        [validated],
+                        deploy=True,
+                        reuse_validated=True,
+                    )[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(deployed.status, "deployed")
+            self.assertEqual(
+                deployed.reused_validation_sha, validated.validation_sha
+            )
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
 
     def test_reuse_preview_json_names_exact_validation_sha_without_claiming(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1270,7 +1444,9 @@ class BisectIsolationTests(unittest.TestCase):
                 f"{SHELL_PYTHON} -c \"import sys, pathlib; "
                 "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
             )
-            repo, _ = make_demo_repo(root, gate_command=gate)
+            repo, _ = make_demo_repo(
+                root, gate_command=gate, gate_paths=("bad.txt",)
+            )
             add_branch(repo, "agent/bad", "bad.txt")
             add_branch(repo, "agent/b", "b.txt")
             add_branch(repo, "agent/c", "c.txt")
@@ -1300,6 +1476,7 @@ class BisectIsolationTests(unittest.TestCase):
             messages = [event.message for event in events]
             self.assertIn("Train gate failed; bisecting 5 jobs", messages)
             self.assertIn("Bisect isolation complete: 4 job(s) rejoin the train", messages)
+            self.assertIn("Skipped gate 2/2: marker", messages)
 
     def test_bisect_reports_semantic_conflict_pair_with_conflict_with(self) -> None:
         with tempfile.TemporaryDirectory() as td:

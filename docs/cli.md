@@ -196,7 +196,9 @@ The `--jsonl` framing contract is one compact JSON object followed by one newlin
   the stream's `contract_version` and does not consume an event ID.
 - `type=event` is a persisted event. Its integer `id` is the resume cursor. It
   includes phase/state, optional job and gate index/name, elapsed seconds, and
-  the latest lease heartbeat visible when read.
+  the latest lease heartbeat visible when read. A path-aware gate with no
+  matching train path uses `state=skipped` and the stable detail
+  `no changed paths matched configured paths`.
 - `type=heartbeat` is an ephemeral follow-only liveness frame emitted when the
   persisted runner heartbeat advances during a long command. It does not consume
   an event ID.

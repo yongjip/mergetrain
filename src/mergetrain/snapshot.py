@@ -34,7 +34,9 @@ PHASES = (
     "complete",
 )
 
-GATE_EVENT = re.compile(r"^(?:Running|Passed|Reused) gate (\d+)/(\d+): (.+)$")
+GATE_EVENT = re.compile(
+    r"^(?:Running|Passed|Reused|Skipped) gate (\d+)/(\d+): (.+)$"
+)
 
 NEXT_ACTION_VALUES = frozenset(
     {
@@ -264,7 +266,9 @@ def _progress(
     gate_progress: list[dict[str, Any]] = []
     for index, name in enumerate(gate_names, start=1):
         observed = gate_events.get(index)
-        if all_gates_passed:
+        if observed and observed["state"] in {"reused", "skipped"}:
+            gate_state = observed["state"]
+        elif all_gates_passed:
             gate_state = "success"
         elif observed:
             gate_state = observed["state"]

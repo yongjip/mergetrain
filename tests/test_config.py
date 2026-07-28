@@ -244,6 +244,71 @@ deploy:
             self.assertEqual(config.deploy.reuse.fingerprints[0].name, "toolchain")
             self.assertTrue(config.gates[0].always_rerun_on_deploy)
 
+    def test_path_scoped_gate_parses_and_is_visible_in_public_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: tests
+    run: make test
+    paths:
+      - src/**
+      - tests/**/*.py
+      - pyproject.toml
+""",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+
+            self.assertEqual(
+                config.gates[0].paths,
+                ("src/**", "tests/**/*.py", "pyproject.toml"),
+            )
+            self.assertEqual(
+                config.to_dict()["gates"][0]["paths"],
+                ["src/**", "tests/**/*.py", "pyproject.toml"],
+            )
+
+    def test_invalid_or_unsupported_gate_paths_are_rejected(self) -> None:
+        invalid = [
+            (
+                "gates:\n  - name: tests\n    run: echo true\n    paths: []\n",
+                "non-empty list",
+            ),
+            (
+                "gates:\n  - name: tests\n    run: echo true\n    paths:\n      - /src/**\n",
+                "repository-relative",
+            ),
+            (
+                "gates:\n  - name: tests\n    run: echo true\n    paths:\n      - ../src/**\n",
+                "path segments",
+            ),
+            (
+                "gates:\n  - name: tests\n    run: echo true\n    paths:\n      - src/foo**bar\n",
+                "complete path segment",
+            ),
+            (
+                "gates:\n  - name: tests\n    run: echo true\n    paths:\n      - src/**\n      - src/**\n",
+                "duplicates",
+            ),
+            (
+                "deploy:\n  verify:\n    - name: live\n      run: echo true\n      paths:\n        - src/**\n",
+                "unsupported",
+            ),
+            (
+                "deploy:\n  reuse:\n    fingerprints:\n      - name: toolchain\n        run: echo true\n        paths:\n          - src/**\n",
+                "unsupported",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            path = repo / ".mergetrain.yaml"
+            for document, message in invalid:
+                with self.subTest(document=document):
+                    path.write_text(document, encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigError, message):
+                        load_config(repo=repo)
+
     def test_config_version_defaults_absent_records_and_tolerates_newer(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

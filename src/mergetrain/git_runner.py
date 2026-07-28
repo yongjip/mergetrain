@@ -31,6 +31,7 @@ from .errors import (
     redact_secrets,
 )
 from .models import Job
+from .path_gates import any_path_matches, parse_name_status_z
 from .reuse import (
     ReuseDecision,
     environment_sha,
@@ -722,6 +723,46 @@ class GitRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
 
+    def _changed_paths(
+        self,
+        *,
+        worktree: Path,
+        base_ref: str,
+        head_ref: str,
+        log: IO[str],
+        pulse: Pulse | None,
+    ) -> tuple[str, ...] | None:
+        """Return exact changed paths, or ``None`` to make every gate run."""
+
+        if not base_ref or not head_ref:
+            log.write(
+                "\npath-aware gate selection unavailable; running all gates\n"
+            )
+            return None
+        try:
+            completed = run_command(
+                [
+                    "git",
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "--find-renames",
+                    f"{base_ref}..{head_ref}",
+                    "--",
+                ],
+                cwd=worktree,
+                log=None,
+                pulse=pulse,
+                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                timeout_seconds=self.config.queue.command_timeout_seconds,
+            )
+            return parse_name_status_z(completed.stdout)
+        except (CommandFailed, ValueError):
+            log.write(
+                "\npath-aware gate selection failed; running all gates\n"
+            )
+            return None
+
     def _run_gates(
         self,
         *,
@@ -729,6 +770,8 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
         on_gate: GateProgress | None = None,
+        base_ref: str = "",
+        head_ref: str = "HEAD",
     ) -> None:
         total = 1 + len(self.config.gates)
         diff_command = ["git", "diff", "--check", f"{self.config.git.integration_ref}..HEAD"]
@@ -744,7 +787,26 @@ class GitRunner:
         )
         if on_gate:
             on_gate("diff-check", "success", 1, total, _dashboard_command(diff_command))
+        changed_paths = None
+        if any(gate.paths for gate in self.config.gates):
+            changed_paths = self._changed_paths(
+                worktree=worktree,
+                base_ref=base_ref,
+                head_ref=head_ref,
+                log=log,
+                pulse=pulse,
+            )
         for index, gate in enumerate(self.config.gates, start=2):
+            if (
+                gate.paths
+                and changed_paths is not None
+                and not any_path_matches(gate.paths, changed_paths)
+            ):
+                reason = "no changed paths matched configured paths"
+                log.write(f"\n## gate skipped: {gate.name} ({reason})\n")
+                if on_gate:
+                    on_gate(gate.name, "skipped", index, total, reason)
+                continue
             if on_gate:
                 on_gate(gate.name, "active", index, total, _dashboard_command(gate.run))
             self._run_gate(gate, worktree=worktree, log=log, pulse=pulse)
@@ -1000,6 +1062,7 @@ class GitRunner:
         *,
         worktree: Path,
         validation_sha: str,
+        base_ref: str,
         log: IO[str],
         pulse: Pulse | None,
         on_gate: GateProgress | None = None,
@@ -1007,8 +1070,29 @@ class GitRunner:
         total = 1 + len(self.config.gates)
         if on_gate:
             on_gate("diff-check", "reused", 1, total, validation_sha)
+        changed_paths = None
+        if any(gate.paths for gate in self.config.gates):
+            changed_paths = self._changed_paths(
+                worktree=worktree,
+                base_ref=base_ref,
+                head_ref=validation_sha,
+                log=log,
+                pulse=pulse,
+            )
         for index, gate in enumerate(self.config.gates, start=2):
-            if not gate.always_rerun_on_deploy:
+            if (
+                gate.paths
+                and changed_paths is not None
+                and not any_path_matches(gate.paths, changed_paths)
+            ):
+                reason = "no changed paths matched configured paths"
+                log.write(f"\n## gate skipped: {gate.name} ({reason})\n")
+                if on_gate:
+                    on_gate(gate.name, "skipped", index, total, reason)
+                continue
+            if not gate.always_rerun_on_deploy and not (
+                gate.paths and changed_paths is None
+            ):
                 if on_gate:
                     on_gate(gate.name, "reused", index, total, validation_sha)
                 continue
@@ -1179,9 +1263,11 @@ class GitRunner:
         def report(
             name: str, state: str, index: int, total: int, command: str
         ) -> None:
-            verb = {"active": "Running", "reused": "Reused"}.get(
-                state, "Passed"
-            )
+            verb = {
+                "active": "Running",
+                "reused": "Reused",
+                "skipped": "Skipped",
+            }.get(state, "Passed")
             self._event(
                 conn,
                 lease_token=lease_token,
@@ -1513,6 +1599,8 @@ class GitRunner:
                     log=log,
                     pulse=normal_pulse,
                     on_gate=gate_progress,
+                    base_ref=integration_base_sha,
+                    head_ref=deploy_sha,
                 )
                 self._assert_tree_unchanged_by_gates(worktree, deploy_sha)
                 self._event(
@@ -1765,7 +1853,13 @@ class GitRunner:
                         f"without its train predecessors"
                     )
             try:
-                self._run_gates(worktree=probe_worktree, log=log, pulse=pulse)
+                self._run_gates(
+                    worktree=probe_worktree,
+                    log=log,
+                    pulse=pulse,
+                    base_ref=integration_base_sha,
+                    head_ref=git_rev_parse(probe_worktree, "HEAD"),
+                )
                 passed = True
             except CommandFailed:
                 passed = False
@@ -2273,6 +2367,7 @@ class GitRunner:
                         self._run_reused_gates(
                             worktree=worktree,
                             validation_sha=reused_validation_sha,
+                            base_ref=integration_base_sha,
                             log=log,
                             pulse=normal_pulse,
                             on_gate=gate_progress,
@@ -2283,6 +2378,8 @@ class GitRunner:
                             log=log,
                             pulse=normal_pulse,
                             on_gate=gate_progress,
+                            base_ref=integration_base_sha,
+                            head_ref=deploy_sha,
                         )
                     self._assert_tree_unchanged_by_gates(worktree, deploy_sha)
                     self._event(

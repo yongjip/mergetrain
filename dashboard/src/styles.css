@@ -346,6 +346,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .state-pill.done { border-color: #91cea4; color: var(--green); background: #effaf2; }
 .state-pill.approval { border-color: #e2b276; color: var(--amber); background: #fff7e9; }
 .state-pill.reused { border-color: #a99bdd; color: #6246b5; background: #f4f1ff; }
+.state-pill.skipped { border-color: #b8c2d1; color: #69758a; background: #f3f5f7; }
 .state-pill.warning { border-color: #e2b276; color: var(--amber); background: #fff7e9; }
 .state-pill.error,
 .state-pill.failed { border-color: #e49a9d; color: var(--red); background: #fff1f1; }
@@ -377,6 +378,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .gate-list li { min-width: 0; display: grid; grid-template-columns: 19px 17px minmax(0, 1fr); align-items: center; gap: 6px; color: #748096; }
 .gate-list li.success { color: var(--green); }
 .gate-list li.reused { color: #6246b5; }
+.gate-list li.skipped { color: #69758a; }
 .gate-list li.active { color: var(--blue); }
 .gate-list li > span { font-family: "JetBrains Mono Variable", monospace; font-size: 11px; font-weight: 700; }
 .gate-list li strong { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -450,6 +452,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 .activity-row:last-child .event-icon::after { display: none; }
 .activity-row.success .event-icon { color: var(--green); }
 .activity-row.reused .event-icon { color: #6246b5; }
+.activity-row.skipped .event-icon { color: #69758a; }
 .activity-row.active .event-icon { color: var(--blue); }
 .activity-row.warning .event-icon { color: var(--amber); }
 .activity-row.error .event-icon { color: var(--red); }
@@ -996,6 +999,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 :root[data-theme="dark"] .state-pill.success,
 :root[data-theme="dark"] .state-pill.done { border-color: #2e6b41; color: var(--green); background: var(--green-soft); }
 :root[data-theme="dark"] .state-pill.approval { border-color: #725824; color: #e3b65e; background: var(--amber-soft); }
+:root[data-theme="dark"] .state-pill.skipped { border-color: #4a5563; color: #9aa9bb; background: var(--surface-subtle); }
 :root[data-theme="dark"] .state-pill.warning { border-color: #725824; color: #e3b65e; background: var(--amber-soft); }
 :root[data-theme="dark"] .state-pill.error,
 :root[data-theme="dark"] .state-pill.failed { border-color: #74383c; color: var(--red); background: var(--red-soft); }

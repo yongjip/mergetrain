@@ -19,6 +19,7 @@ mergetrain/
     snapshot.py        # privacy-conscious dashboard read model
     dashboard_dist/    # packaged production dashboard assets
     models.py          # Job, RunnerLock, and RunEvent dataclasses
+    path_gates.py      # POSIX glob matching and NUL-safe Git diff parsing
     store.py           # SQLite schema, queue ops, runner lock, events
   dashboard/           # React/Vite dashboard source
   docs/                # this documentation set

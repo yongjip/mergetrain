@@ -322,6 +322,10 @@ gates:
     run: git diff --check ${integration_ref}..HEAD
   - name: tests
     run: python -m pytest
+    paths:
+      - src/**
+      - tests/**
+      - pyproject.toml
 
 deploy:
   verify:

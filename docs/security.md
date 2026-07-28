@@ -57,6 +57,20 @@ missing, failed, multiline, or oversized fingerprint prevents reuse and follows
 the configured rerun/fail-closed policy. Fingerprint commands should be
 deterministic and side-effect-free because reuse preview executes them too.
 
+## Path-aware gates fail closed
+
+Top-level train gates may declare repository-relative `paths` patterns. The
+runner discovers changed paths from the captured integration base to the exact
+deploy SHA and skips a scoped gate only when that comparison succeeds and no
+path matches.
+
+If either revision is unavailable, `git diff` fails, or its machine-readable
+output cannot be parsed, mergetrain runs every affected scoped gate. Rename and
+copy records retain both the old and new path so moving a file out of a guarded
+area cannot bypass its gate. Patterns are validated as normalized relative
+POSIX paths; absolute paths, traversal segments, backslashes, and ambiguous
+embedded `**` forms are refused.
+
 ## Dashboard exposure
 
 `mergetrain dashboard` binds to `127.0.0.1:8765` by default and has no action

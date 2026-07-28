@@ -43,6 +43,7 @@ def gate_policy_sha(config: MergetrainConfig) -> str:
                     "name": gate.name,
                     "run": gate.run,
                     "always_rerun_on_deploy": gate.always_rerun_on_deploy,
+                    "paths": list(gate.paths),
                 }
                 for gate in config.gates
             ],

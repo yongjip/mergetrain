@@ -180,6 +180,56 @@ terminology:
             self.assertEqual(payload["project"]["remote"], "upstream")
             self.assertEqual(payload["project"]["push_specs"], ["HEAD:main", "HEAD:release"])
 
+    def test_snapshot_preserves_skipped_gate_after_train_gates_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: docs
+    run: make docs
+    paths:
+      - docs/**
+""",
+                encoding="utf-8",
+            )
+            config = self.make_config(root)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            try:
+                enqueue_job(conn, task="dashboard", branch="codex/dashboard")
+                claimed = claim_all_queued(conn, owner=owner)
+                token = claimed[0].claim_token
+                record_run_event(
+                    conn,
+                    claim_token=token,
+                    phase="gating",
+                    state="skipped",
+                    message="Skipped gate 2/2: docs",
+                    detail="no changed paths matched configured paths",
+                )
+                record_run_event(
+                    conn,
+                    claim_token=token,
+                    phase="gating",
+                    state="success",
+                    message="All train gates passed",
+                )
+            finally:
+                conn.close()
+
+            payload = build_dashboard_snapshot(config)
+            self.assertEqual(
+                [gate["state"] for gate in payload["progress"]["gates"]],
+                ["success", "skipped"],
+            )
+            self.assertIsNone(payload["progress"]["current_gate"])
+
+            cleanup = connect(config.state.db)
+            try:
+                release_runner_lock(cleanup, owner=owner, token=token)
+            finally:
+                cleanup.close()
+
     def test_http_server_serves_read_only_api_and_static_assets(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             config = self.make_config(Path(td))
