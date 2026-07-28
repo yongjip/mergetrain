@@ -1,5 +1,7 @@
 # mergetrain
 
+<!-- mcp-name: io.github.yongjip/mergetrain -->
+
 [![CI](https://github.com/yongjip/mergetrain/actions/workflows/ci.yml/badge.svg)](https://github.com/yongjip/mergetrain/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mergetrain)](https://pypi.org/project/mergetrain/)
 [![Python](https://img.shields.io/pypi/pyversions/mergetrain)](https://pypi.org/project/mergetrain/)
@@ -354,6 +356,21 @@ When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
 `events --follow --jsonl` stream instead of probing the OS process tree.
 
 `mergetrain init` writes `AGENTS.mergetrain.md` / `CLAUDE.mergetrain.md` so your agents pick this up automatically.
+
+Claude Code can install the same contract plus the human-gated MCP deploy tool
+as a plugin. Install the CLI with its MCP extra first, then add this repository
+as a marketplace:
+
+```text
+uv tool install 'mergetrain[mcp]'
+/plugin marketplace add yongjip/mergetrain
+/plugin install mergetrain@mergetrain
+```
+
+The plugin contributes `/mergetrain:mergetrain` for normal queue work and the
+manual-only `/mergetrain:deploy` flow. A deploy still requires the MCP client's
+attributable human confirmation; installing the plugin does not enable
+unattended deployment or validated-gate reuse.
 
 ## Documentation
 

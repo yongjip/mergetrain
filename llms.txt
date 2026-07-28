@@ -30,6 +30,14 @@ Core commands:
 - `mergetrain hub add REPO` / `mergetrain hub status --json` / `mergetrain hub` (dashboard)
 - `mergetrain hub daemon --once` (auto-only, across registered repos)
 
+Agent integrations:
+- MCP server: install `mergetrain[mcp]`, then run `mergetrain mcp`.
+- Claude Code plugin: add marketplace `yongjip/mergetrain`, then install
+  `mergetrain@mergetrain`.
+- `/mergetrain:mergetrain` loads the queue protocol.
+- `/mergetrain:deploy` is manual-only and still requires the MCP client's human
+  confirmation dialog.
+
 Vocabulary compatibility:
 - `terminology.git_operation: integrate` makes human output prefer `--integrate`;
   `push` similarly prefers `--push`. Both are aliases of `--deploy`.

@@ -95,10 +95,13 @@ include = [
   "/dashboard",
   "/examples",
   "/scripts",
+  "/integrations",
+  "/.claude-plugin",
   "/README.md",
   "/LICENSE",
   "/CHANGELOG.md",
   "/AGENTS.md",
+  "/CLAUDE.md",
   "/llms.txt",
   "/llms-full.txt",
 ]

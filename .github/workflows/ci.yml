@@ -112,6 +112,26 @@ jobs:
             exit 1
           fi
 
+  claude-plugin:
+    # Keep the distributable plugin valid against a pinned Claude Code CLI and
+    # keep its operating protocol synchronized with the CLI-generated agent
+    # contract. The MCP executable itself is exercised by the mcp job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Assert agent protocol surfaces match
+        run: python scripts/check_agent_protocol.py
+      - name: Validate the Claude Code plugin
+        run: npx --yes @anthropic-ai/claude-code@2.1.220 plugin validate integrations/claude/plugin --strict
+      - name: Validate the self-marketplace
+        run: npx --yes @anthropic-ai/claude-code@2.1.220 plugin validate . --strict
+
   no-yaml:
     # The package ships zero runtime deps, so the built-in YAML fallback parser
     # is the DEFAULT install path. Every other leg installs .[dev] (which pins

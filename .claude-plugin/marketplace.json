@@ -1,0 +1,24 @@
+{
+  "name": "mergetrain",
+  "owner": {
+    "name": "Yongjip Kim"
+  },
+  "metadata": {
+    "description": "Agent-native tools for operating local mergetrain queues."
+  },
+  "plugins": [
+    {
+      "name": "mergetrain",
+      "source": "./integrations/claude/plugin",
+      "description": "Operate mergetrain through its human-gated MCP server and queue protocol.",
+      "category": "development",
+      "tags": [
+        "git",
+        "merge-queue",
+        "mcp",
+        "coding-agents"
+      ],
+      "strict": true
+    }
+  ]
+}

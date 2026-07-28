@@ -24,7 +24,7 @@ mergetrain/
   dashboard/           # React/Vite dashboard source
   docs/                # this documentation set
   examples/            # example .mergetrain.yaml and agent metadata
-  integrations/        # thin service wrapper examples
+  integrations/        # provider-neutral adapters and the Claude Code plugin
   tests/               # unittest suite
   pyproject.toml
   AGENTS.md  CHANGELOG.md  LICENSE  README.md
@@ -135,6 +135,24 @@ The CI `dashboard` job runs those same three commands and then fails if
 UI change that forgets the rebuild cannot ship. That check needs the build to be
 reproducible: use `npm ci` (not `npm install`, which can move dependencies off
 the lockfile) and the Node major pinned in `dashboard/.nvmrc`.
+
+## Claude Code plugin authoring
+
+The self-marketplace manifest lives at `.claude-plugin/marketplace.json`; the
+plugin itself lives under `integrations/claude/plugin`. Validate both surfaces
+with the same strict CLI checks used by CI:
+
+```sh
+claude plugin validate integrations/claude/plugin --strict
+claude plugin validate . --strict
+python scripts/check_agent_protocol.py
+```
+
+The generated block in `CLAUDE.md` and the plugin's operating skill come
+from the CLI's `render_agent_contract()` output. After intentionally changing
+that contract, run `python scripts/check_agent_protocol.py --write` and review
+the result. The checker also requires the skill reference tables to enumerate every
+implemented `next_action` and MCP-local error code.
 
 ## Packaging
 

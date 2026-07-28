@@ -2,13 +2,51 @@
 
 This repository ships **mergetrain**, a local deploy train for coding-agent worktrees (see [README.md](./README.md) and [docs/](./docs/)). This file tells you, the agent, how to **operate the mergetrain queue** when a task is dispatched from the phone (Cowork Dispatch). Optimize for short, reliable, phone-readable results. Setup and the phone phrasebook live in [docs/mobile.md](./docs/mobile.md).
 
-## Ground rules
+## Shared operating protocol
 
-- **English only for everything that lands in the repo or the tracker**: issues, PRs, commit messages, comments, docs, release notes, labels. (Conversation with the owner may be in any language; artifacts may not.)
-- mergetrain runs locally on this machine's git repo. Run commands from the repo root that contains `.mergetrain.yaml`, or pass `--repo <path>` to operate another service repo.
-- **Always read state first:** run `mergetrain doctor --json` and `mergetrain status --json` before acting, and decide from that JSON — never from assumptions.
-- Every command is non-interactive and JSON-first. Prefer `--json`, then summarize. Don't paste raw JSON unless asked.
-- Every `--json` payload carries `contract_version` (the shape you can rely on). `ok` means only "the command ran"; read `result` for a run's outcome, `health` for repo health, `error.code` for failures. See [docs/contract.md](./docs/contract.md).
+<!-- BEGIN GENERATED: mergetrain-agent-protocol -->
+Purpose: Serialize committed local task branches through one merge/test/push/verify runner.
+
+### Rules
+
+1. Work on a task-specific branch and worktree.
+2. Commit all changes before enqueueing.
+3. Do not push configured Git refs directly; enqueue the branch instead.
+4. Read doctor --json or status --json before deciding the next action.
+5. Use --auto only after explicit unattended-deployment approval from the user/operator.
+6. Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.
+7. Let one runner or daemon own merge, test, push, and verify.
+8. Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.
+9. After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.
+
+### Safety boundary
+
+- Git deployment requires `run-next --deploy` or `run-batch --deploy`; `--deploy` remains the canonical compatibility flag.
+- Validation requires `run-next --validate-only` or `run-batch --validate-only`.
+- A validated train is deployed as one exact identity by `run-batch --deploy`.
+- Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
+- `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
+- The daemon processes only jobs enqueued with `--auto`.
+- The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
+- The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
+- Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
+- After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the remote; `run-batch --deploy` is refused while any job is `needs_reconcile`. `unlock --force` clears a wedged lock (remote-reachable first).
+
+### Stable machine contract
+
+- Human output says `deploy`, `deploying`, and `deployed`.
+- JSON/SQLite continue to use `status=deployed`, `deploy_sha`, `push_status`, and `verify_status`.
+- This operation is an atomic Git ref push. Configured `deploy.verify` hooks report an independent post-push outcome; a provider release is separate and requires its own authorization.
+<!-- END GENERATED: mergetrain-agent-protocol -->
+
+Repository-specific additions:
+
+- **English only for everything that lands in the repo or the tracker**:
+  issues, PRs, commit messages, comments, docs, release notes, and labels.
+- Run commands from the repo root containing `.mergetrain.yaml`, or pass
+  `--repo <path>`.
+- Prefer machine-readable output and summarize it. `events` uses JSONL; `logs`
+  is raw text and may contain sensitive command output.
 
 ## GitHub CLI authentication
 

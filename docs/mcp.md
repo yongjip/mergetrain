@@ -22,6 +22,27 @@ gemini mcp add mergetrain mergetrain mcp
 Pass `--repo` to operate a repository other than the working directory:
 `mergetrain --repo /path/to/service mcp`.
 
+## Claude Code plugin
+
+The repository is also a Claude Code self-marketplace. The plugin bundles this
+MCP registration with an operating skill and a separate manual-only deploy
+skill:
+
+```text
+/plugin marketplace add yongjip/mergetrain
+/plugin install mergetrain@mergetrain
+```
+
+It exposes `/mergetrain:mergetrain` for normal queue operation and
+`/mergetrain:deploy` for the explicit deploy path. The plugin does not bundle
+the Python executable: install `mergetrain[mcp]` first. Its `.mcp.json` uses the
+bare `mergetrain mcp` command so the same installed CLI and queue state remain
+the source of truth.
+
+The deploy skill has `disable-model-invocation: true`. Claude cannot select it
+automatically, and invoking it still calls the MCP deploy tool whose
+client-rendered elicitation is the actual confirmation boundary.
+
 ## What the tools return
 
 Every tool shells out to the CLI with `--json` and returns that payload

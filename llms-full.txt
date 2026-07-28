@@ -49,6 +49,15 @@ mergetrain hub list --json
 mergetrain hub status --json
 ```
 
+## Agent integrations
+
+Install `mergetrain[mcp]` to expose the same JSON contract through the local
+stdio MCP server. Claude Code users can add the `yongjip/mergetrain`
+self-marketplace and install `mergetrain@mergetrain`. The plugin supplies
+`/mergetrain:mergetrain` for queue work and `/mergetrain:deploy` as a
+manual-only skill. The latter still goes through the MCP elicitation boundary;
+the skill itself cannot manufacture confirmation.
+
 The hub is a machine-level, read-only aggregate over registered repos. It
 owns no queue state: every repo keeps its own SQLite database, runner lock,
 and recovery markers, and observing a repo never creates queue data or migrates

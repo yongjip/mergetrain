@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "mergetrain",
+  "displayName": "mergetrain",
+  "version": "0.1.0",
+  "description": "Operate a local mergetrain queue with agent instructions and a human-gated deploy tool.",
+  "author": {
+    "name": "Yongjip Kim",
+    "url": "https://github.com/yongjip"
+  },
+  "homepage": "https://github.com/yongjip/mergetrain",
+  "repository": "https://github.com/yongjip/mergetrain",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "merge-queue",
+    "mcp",
+    "coding-agents"
+  ]
+}

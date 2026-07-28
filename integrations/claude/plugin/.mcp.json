@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mergetrain": {
+      "command": "mergetrain",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

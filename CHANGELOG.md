@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add the in-repo Claude Code plugin and self-marketplace for #172. The plugin
+  bundles the local MCP server, an auto-invocable queue-operation skill, and a
+  manual-only deploy skill whose action still passes through the MCP human
+  confirmation gate. A CI leg runs Claude Code's strict plugin validator and
+  checks the operating skill and repository CLAUDE.md against the
+  CLI-generated agent contract, including complete `next_action` and MCP error
+  tables. README and LLM guides now include plugin installation and official
+  MCP Registry ownership metadata.
+
 - Complete the dashboard history-and-glance follow-up (#178). Running trains
   get a fail-honest ETA from the median of up to 20 recent completed phase and
   gate spans; missing comparable samples show "building history" instead of an
