@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import shlex
@@ -705,6 +706,21 @@ class GitRunner:
         suffix = uuid.uuid4().hex[:8]
         name = f"{self.config.project.name}-mergetrain-{first_job_id}-{suffix}"
         return self.config.state.worktree_root / name
+
+    def _primary_worktree_path(self, first_job_id: int, *, deploy: bool) -> tuple[Path, bool]:
+        persistent = (
+            not deploy
+            and self.config.state.validation_workspace.mode == "persistent"
+        )
+        if persistent:
+            return self.config.validation_worktree_path, True
+        return self._worktree_path(first_job_id), False
+
+    def _persistent_workspace_marker(self) -> Path:
+        return (
+            self.config.state.worktree_root
+            / f".{self.config.project.name}-validation-workspace.json"
+        )
 
     def _cleanup_worktree(self, worktree: Path, *, log: IO[str] | None, keep_worktree: bool) -> None:
         if keep_worktree:
@@ -1428,9 +1444,190 @@ class GitRunner:
                 detail=f"exit_code={exc.returncode}",
             )
 
+    @staticmethod
+    def _git_common_dir(path: Path) -> Path | None:
+        completed = run_command(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=path,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return None
+        common = Path(completed.stdout.strip())
+        if not common.is_absolute():
+            common = path / common
+        return common.resolve()
+
+    def _persistent_cache_directories(
+        self, worktree: Path
+    ) -> list[tuple[str, Path]]:
+        directories: list[tuple[str, Path]] = []
+        root = worktree.resolve()
+        for relative in self.config.state.validation_workspace.cache_paths:
+            path = worktree.joinpath(*relative.split("/"))
+            if path.is_symlink():
+                raise MergetrainError(
+                    f"persistent validation cache path is a symlink: {relative}"
+                )
+            try:
+                path.resolve().relative_to(root)
+            except ValueError as exc:
+                raise MergetrainError(
+                    f"persistent validation cache escapes the worktree: {relative}"
+                ) from exc
+            tracked = run_command(
+                ["git", "ls-files", "--", relative],
+                cwd=worktree,
+                check=True,
+            )
+            if tracked.stdout.strip():
+                raise MergetrainError(
+                    f"persistent validation cache path contains tracked files: {relative}"
+                )
+            path.mkdir(parents=True, exist_ok=True)
+            ignored = run_command(
+                ["git", "check-ignore", "--no-index", "--quiet", "--", relative],
+                cwd=worktree,
+                check=False,
+            )
+            if ignored.returncode != 0:
+                raise MergetrainError(
+                    f"persistent validation cache path must be ignored by Git: {relative}"
+                )
+            directories.append((relative, path))
+        return directories
+
+    def _clean_untracked_except_validation_cache(
+        self,
+        *,
+        worktree: Path,
+        log: IO[str],
+    ) -> list[tuple[str, Path]]:
+        directories = self._persistent_cache_directories(worktree)
+        command = ["git", "clean", "-ffdx"]
+        for relative, _ in directories:
+            command.append(f"--exclude=/{relative}/")
+        run_command(command, cwd=worktree, log=log, check=True)
+        return directories
+
+    def _prepare_persistent_worktree(
+        self,
+        *,
+        worktree: Path,
+        log: IO[str],
+        pulse: Pulse | None,
+    ) -> bool:
+        reused = worktree.exists()
+        if reused:
+            repo_common = self._git_common_dir(self.repo)
+            worktree_common = self._git_common_dir(worktree)
+            if repo_common is None or worktree_common != repo_common:
+                raise MergetrainError(
+                    "persistent validation workspace exists but is not a worktree "
+                    "owned by this repository; move it aside or run gc after "
+                    "switching validation_workspace.mode to ephemeral"
+                )
+            run_command(
+                ["git", "reset", "--hard", self.config.git.integration_ref],
+                cwd=worktree,
+                log=log,
+                pulse=pulse,
+                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                timeout_seconds=self.config.queue.command_timeout_seconds,
+            )
+        else:
+            # Missing paths can leave stale worktree administration records after
+            # a crash or manual cleanup. Prune only those records, then recreate
+            # the deterministic path.
+            self._persistent_workspace_marker().unlink(missing_ok=True)
+            run_command(
+                ["git", "worktree", "prune"],
+                cwd=self.repo,
+                log=log,
+                check=True,
+            )
+            run_command(
+                [
+                    "git",
+                    "worktree",
+                    "add",
+                    "--detach",
+                    str(worktree),
+                    self.config.git.integration_ref,
+                ],
+                cwd=self.repo,
+                log=log,
+                pulse=pulse,
+                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                timeout_seconds=self.config.queue.command_timeout_seconds,
+            )
+        self._clean_untracked_except_validation_cache(
+            worktree=worktree,
+            log=log,
+        )
+        if not git_worktree_clean(worktree):
+            raise MergetrainError(
+                "persistent validation workspace could not be restored cleanly"
+            )
+        return reused
+
+    def _activate_persistent_validation_cache(
+        self,
+        *,
+        worktree: Path,
+        log: IO[str],
+        pulse: Pulse | None,
+    ) -> bool:
+        workspace = self.config.state.validation_workspace
+        identity = {
+            "version": 1,
+            "cache_key": workspace.cache_key,
+            "gate_policy_sha": gate_policy_sha(self.config),
+            "environment_sha": self._environment_fingerprint(
+                worktree=worktree,
+                log=log,
+                pulse=pulse,
+            ),
+        }
+        marker = self._persistent_workspace_marker()
+        previous: object = None
+        try:
+            previous = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        retained = previous == identity
+        directories = self._persistent_cache_directories(worktree)
+        if not retained:
+            for _, directory in directories:
+                if directory.is_symlink():
+                    raise MergetrainError(
+                        f"persistent validation cache path became a symlink: {directory}"
+                    )
+                shutil.rmtree(directory)
+                directory.mkdir(parents=True)
+        # Fingerprint commands are allowed to create scratch files. Remove every
+        # ignored/untracked path except the declared cache before gates run.
+        self._clean_untracked_except_validation_cache(
+            worktree=worktree,
+            log=log,
+        )
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker.with_name(f"{marker.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, marker)
+        return retained
+
     def _prepare_worktree(
-        self, *, worktree: Path, log: IO[str], pulse: Pulse | None
-    ) -> None:
+        self,
+        *,
+        worktree: Path,
+        log: IO[str],
+        pulse: Pulse | None,
+        persistent: bool = False,
+    ) -> bool:
         run_command(
             ["git", "fetch", self.config.git.remote],
             cwd=self.repo,
@@ -1439,6 +1636,12 @@ class GitRunner:
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
+        if persistent:
+            return self._prepare_persistent_worktree(
+                worktree=worktree,
+                log=log,
+                pulse=pulse,
+            )
         run_command(
             ["git", "worktree", "add", "--detach", str(worktree), self.config.git.integration_ref],
             cwd=self.repo,
@@ -1447,6 +1650,7 @@ class GitRunner:
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
+        return False
 
     def _merge_sha_for_job(self, job: Job, *, deploying_validated: bool) -> str:
         """Resolve and verify the exact task commit that may be merged."""
@@ -1483,7 +1687,9 @@ class GitRunner:
     ) -> Job:
         self._ensure_state_dirs()
         log_path = self._log_path("job", job.id)
-        worktree = self._worktree_path(job.id)
+        worktree, persistent_workspace = self._primary_worktree_path(
+            job.id, deploy=deploy
+        )
         lease_token = job.claim_token
         deploy_sha = ""
         integration_base_sha = ""
@@ -1556,14 +1762,27 @@ class GitRunner:
                     state="active",
                     message=f"Fetching {self.config.git.integration_ref}",
                 )
-                self._prepare_worktree(worktree=worktree, log=log, pulse=normal_pulse)
+                workspace_reused = self._prepare_worktree(
+                    worktree=worktree,
+                    log=log,
+                    pulse=normal_pulse,
+                    persistent=persistent_workspace,
+                )
                 self._event(
                     conn,
                     lease_token=lease_token,
                     job_id=job.id,
                     phase="fetching",
                     state="success",
-                    message="Integration worktree prepared",
+                    message=(
+                        "Persistent validation workspace reused"
+                        if workspace_reused
+                        else (
+                            "Persistent validation workspace created"
+                            if persistent_workspace
+                            else "Integration worktree prepared"
+                        )
+                    ),
                 )
                 integration_base_sha = git_rev_parse(worktree, "HEAD")
                 if deploying_validated and job.validation_base_sha != integration_base_sha:
@@ -1603,6 +1822,24 @@ class GitRunner:
                 )
                 deploy_sha = git_rev_parse(worktree, "HEAD")
                 normal_pulse()
+                if persistent_workspace:
+                    cache_reused = self._activate_persistent_validation_cache(
+                        worktree=worktree,
+                        log=log,
+                        pulse=normal_pulse,
+                    )
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        job_id=job.id,
+                        phase="gating",
+                        state="reused" if cache_reused else "success",
+                        message=(
+                            "Persistent validation cache reused"
+                            if cache_reused
+                            else "Persistent validation cache initialized"
+                        ),
+                    )
                 self._event(
                     conn,
                     lease_token=lease_token,
@@ -1721,7 +1958,11 @@ class GitRunner:
             except Exception as exc:  # pragma: no cover - defensive boundary
                 return finish_after_error(status="failed", note=f"unexpected error: {exc}")
             finally:
-                self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
+                self._cleanup_worktree(
+                    worktree,
+                    log=log,
+                    keep_worktree=keep_worktree or persistent_workspace,
+                )
 
     def _process_isolated_jobs(
         self,
@@ -2068,7 +2309,9 @@ class GitRunner:
         deploying_validated = deploy and bool(validated_train_ids)
         self._ensure_state_dirs()
         log_path = self._log_path("batch", jobs[0].id)
-        worktree = self._worktree_path(jobs[0].id)
+        worktree, persistent_workspace = self._primary_worktree_path(
+            jobs[0].id, deploy=deploy
+        )
         merged_jobs: list[Job] = []
         results: list[Job] = []
         merge_shas: dict[int, str] = {}
@@ -2183,13 +2426,26 @@ class GitRunner:
                     state="active",
                     message=f"Fetching {self.config.git.integration_ref}",
                 )
-                self._prepare_worktree(worktree=worktree, log=log, pulse=normal_pulse)
+                workspace_reused = self._prepare_worktree(
+                    worktree=worktree,
+                    log=log,
+                    pulse=normal_pulse,
+                    persistent=persistent_workspace,
+                )
                 self._event(
                     conn,
                     lease_token=lease_token,
                     phase="fetching",
                     state="success",
-                    message="Integration worktree prepared",
+                    message=(
+                        "Persistent validation workspace reused"
+                        if workspace_reused
+                        else (
+                            "Persistent validation workspace created"
+                            if persistent_workspace
+                            else "Integration worktree prepared"
+                        )
+                    ),
                 )
                 integration_base_sha = git_rev_parse(worktree, "HEAD")
                 if deploying_validated:
@@ -2358,6 +2614,23 @@ class GitRunner:
                     )
                     deploy_sha = git_rev_parse(worktree, "HEAD")
                 normal_pulse()
+                if persistent_workspace:
+                    cache_reused = self._activate_persistent_validation_cache(
+                        worktree=worktree,
+                        log=log,
+                        pulse=normal_pulse,
+                    )
+                    self._event(
+                        conn,
+                        lease_token=lease_token,
+                        phase="gating",
+                        state="reused" if cache_reused else "success",
+                        message=(
+                            "Persistent validation cache reused"
+                            if cache_reused
+                            else "Persistent validation cache initialized"
+                        ),
+                    )
                 try:
                     if reuse_fallback_reason:
                         self._event(
@@ -2431,7 +2704,11 @@ class GitRunner:
                             message="Train gate failed; isolating jobs",
                             detail=f"exit_code={exc.returncode}",
                         )
-                        self._cleanup_worktree(worktree, log=log, keep_worktree=False)
+                        self._cleanup_worktree(
+                            worktree,
+                            log=log,
+                            keep_worktree=persistent_workspace,
+                        )
                         results.extend(
                             self._process_isolated_jobs(
                                 conn,
@@ -2466,7 +2743,7 @@ class GitRunner:
                             log_path=log_path,
                             lease_token=lease_token,
                             deploy=deploy,
-                            keep_worktree=keep_worktree,
+                            keep_worktree=keep_worktree or persistent_workspace,
                             owner=owner,
                             ttl_minutes=ttl_minutes,
                             pulse=normal_pulse,
@@ -2562,7 +2839,11 @@ class GitRunner:
                     status="failed", note=f"unexpected error: {exc}"
                 )
             finally:
-                self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
+                self._cleanup_worktree(
+                    worktree,
+                    log=log,
+                    keep_worktree=keep_worktree or persistent_workspace,
+                )
 
 
 def find_worktree_gc_candidates(
@@ -2578,7 +2859,34 @@ def find_worktree_gc_candidates(
     protected = {str(Path(p)) for p in protect if p}
     candidates = []
     for path in sorted(root.iterdir()):
-        if not (path.is_dir() and path.name.startswith(prefix)):
+        if not path.is_dir():
+            continue
+        if path == config.validation_worktree_path:
+            if str(path) in protected:
+                candidates.append(
+                    {
+                        "path": str(path),
+                        "reason": "active runner worktree, skipped",
+                        "protected": True,
+                    }
+                )
+            elif config.state.validation_workspace.mode == "persistent":
+                candidates.append(
+                    {
+                        "path": str(path),
+                        "reason": "configured persistent validation workspace, skipped",
+                        "protected": True,
+                    }
+                )
+            else:
+                candidates.append(
+                    {
+                        "path": str(path),
+                        "reason": "disabled persistent validation workspace",
+                    }
+                )
+            continue
+        if not path.name.startswith(prefix):
             continue
         if str(path) in protected:
             candidates.append(
@@ -2625,6 +2933,12 @@ def apply_gc(
             shutil.rmtree(path, ignore_errors=True)
         if not path.exists():
             removed_worktrees.append(candidate)
+            if path == config.validation_worktree_path:
+                config_marker = (
+                    config.state.worktree_root
+                    / f".{config.project.name}-validation-workspace.json"
+                )
+                config_marker.unlink(missing_ok=True)
         else:
             failed.append({"path": str(path), "reason": "could not remove worktree"})
     active_branch = current_branch(config.repo)

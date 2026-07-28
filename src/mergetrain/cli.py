@@ -842,6 +842,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "state": {
             "logs": str(config.state.logs),
             "worktree_root": str(config.state.worktree_root),
+            "validation_workspace": {
+                "mode": config.state.validation_workspace.mode,
+                "path": str(config.validation_worktree_path),
+                "exists": config.validation_worktree_path.exists(),
+                "cache_key": config.state.validation_workspace.cache_key,
+                "cache_paths": list(
+                    config.state.validation_workspace.cache_paths
+                ),
+                "initialized": (
+                    config.state.worktree_root
+                    / f".{config.project.name}-validation-workspace.json"
+                ).is_file(),
+            },
         },
         "git": {
             "repo_root": git_repo_root(config.repo),

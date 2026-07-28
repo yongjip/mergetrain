@@ -223,6 +223,12 @@
         "state": {
           "db": null,
           "logs": null,
+          "validation_workspace": {
+            "cache_key": null,
+            "cache_paths": "[]?",
+            "mode": null,
+            "path": null
+          },
           "worktree_root": null
         },
         "terminology": {
@@ -278,6 +284,14 @@
       },
       "state": {
         "logs": null,
+        "validation_workspace": {
+          "cache_key": null,
+          "cache_paths": "[]?",
+          "exists": null,
+          "initialized": null,
+          "mode": null,
+          "path": null
+        },
         "worktree_root": null
       },
       "validated_trains": "[]?",

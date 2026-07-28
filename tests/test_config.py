@@ -269,6 +269,74 @@ deploy:
                 ["src/**", "tests/**/*.py", "pyproject.toml"],
             )
 
+    def test_persistent_validation_workspace_requires_explicit_safe_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """project:
+  name: demo
+state:
+  worktree_root: .state/worktrees
+  validation_workspace:
+    mode: persistent
+    cache_key: unity-2026-07
+    cache_paths:
+      - unity/Teratorn/Library
+""",
+                encoding="utf-8",
+            )
+
+            config = load_config(repo=repo)
+
+            self.assertEqual(config.state.validation_workspace.mode, "persistent")
+            self.assertEqual(
+                config.state.validation_workspace.cache_paths,
+                ("unity/Teratorn/Library",),
+            )
+            self.assertEqual(
+                config.validation_worktree_path,
+                (repo / ".state/worktrees/demo-validation-workspace").resolve(),
+            )
+            self.assertEqual(
+                config.to_dict()["state"]["validation_workspace"]["path"],
+                str(config.validation_worktree_path),
+            )
+
+    def test_invalid_persistent_validation_workspace_is_rejected(self) -> None:
+        invalid = [
+            (
+                "mode: shared\n    cache_key: v1\n    cache_paths:\n      - .cache\n",
+                "mode must be",
+            ),
+            (
+                "mode: persistent\n    cache_paths:\n      - .cache\n",
+                "cache_key is required",
+            ),
+            (
+                "mode: persistent\n    cache_key: v1\n    cache_paths: []\n",
+                "must not be empty",
+            ),
+            (
+                "mode: persistent\n    cache_key: v1\n    cache_paths:\n      - ../cache\n",
+                "repository-relative",
+            ),
+            (
+                "mode: persistent\n    cache_key: v1\n    cache_paths:\n      - cache/**\n",
+                "does not support glob",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            config_path = repo / ".mergetrain.yaml"
+            for workspace, message in invalid:
+                with self.subTest(workspace=workspace):
+                    config_path.write_text(
+                        "state:\n  validation_workspace:\n    " + workspace,
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ConfigError, message):
+                        load_config(repo=repo)
+
     def test_invalid_or_unsupported_gate_paths_are_rejected(self) -> None:
         invalid = [
             (

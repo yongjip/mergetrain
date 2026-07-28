@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -35,10 +35,18 @@ class ProjectConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ValidationWorkspaceConfig:
+    mode: str = "ephemeral"
+    cache_key: str = ""
+    cache_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class StateConfig:
     db: Path
     logs: Path
     worktree_root: Path
+    validation_workspace: ValidationWorkspaceConfig = ValidationWorkspaceConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,9 +173,22 @@ class MergetrainConfig:
     notify: NotifyConfig = NotifyConfig()
     config_version: int = CONFIG_VERSION
 
+    @property
+    def validation_worktree_path(self) -> Path:
+        return (
+            self.state.worktree_root
+            / f"{self.project.name}-validation-workspace"
+        )
+
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["state"] = {key: str(value) for key, value in data["state"].items()}
+        workspace = data["state"].pop("validation_workspace")
+        data["state"] = {
+            key: str(value) for key, value in data["state"].items()
+        }
+        workspace["cache_paths"] = list(workspace["cache_paths"])
+        workspace["path"] = str(self.validation_worktree_path)
+        data["state"]["validation_workspace"] = workspace
         data["repo"] = str(self.repo)
         data["config_path"] = str(self.config_path)
         data["git"]["integration_ref"] = self.git.integration_ref
@@ -399,6 +420,11 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "db": ".mergetrain/queue.sqlite",
             "logs": ".mergetrain/logs",
             "worktree_root": ".mergetrain/worktrees",
+            "validation_workspace": {
+                "mode": "ephemeral",
+                "cache_key": "",
+                "cache_paths": [],
+            },
         },
         "git": {"remote": "origin", "integration_branch": "main", "push_refs": ["main"]},
         "queue": {
@@ -433,6 +459,10 @@ state:
   db: .mergetrain/queue.sqlite
   logs: .mergetrain/logs
   worktree_root: .mergetrain/worktrees
+  validation_workspace:
+    mode: ephemeral
+    cache_key: ""
+    cache_paths: []
 
 git:
   remote: origin
@@ -595,6 +625,26 @@ def _boolean(value: Any, *, key: str) -> bool:
     return value
 
 
+def _validation_cache_path(value: Any, *, key: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{key} must be a non-empty directory path")
+    path = value.strip()
+    pure = PurePosixPath(path)
+    if (
+        "\\" in path
+        or pure.is_absolute()
+        or path.endswith("/")
+        or any(part in {"", ".", "..", ".git"} for part in pure.parts)
+        or re.match(r"^[A-Za-z]:", path)
+    ):
+        raise ConfigError(
+            f"{key} must be a normalized repository-relative POSIX directory path"
+        )
+    if any(character in path for character in "*?["):
+        raise ConfigError(f"{key} does not support glob patterns")
+    return pure.as_posix()
+
+
 def _resolve_path(repo: Path, value: Any, default: str, *, key: str) -> Path:
     if value is None:
         raw = default
@@ -636,6 +686,42 @@ def load_config(
 
     state_data = _as_mapping(data, "state")
     db_value = db_override if db_override is not None else state_data.get("db")
+    workspace_data = state_data.get("validation_workspace", {})
+    if workspace_data is None:
+        workspace_data = {}
+    if not isinstance(workspace_data, dict):
+        raise ConfigError("state.validation_workspace must be a mapping")
+    workspace_mode = str(workspace_data.get("mode", "ephemeral")).strip()
+    if workspace_mode not in {"ephemeral", "persistent"}:
+        raise ConfigError(
+            "state.validation_workspace.mode must be 'ephemeral' or 'persistent'"
+        )
+    cache_key_value = workspace_data.get("cache_key", "")
+    if not isinstance(cache_key_value, str):
+        raise ConfigError("state.validation_workspace.cache_key must be a string")
+    cache_key = cache_key_value.strip()
+    cache_paths_value = workspace_data.get("cache_paths", [])
+    if not isinstance(cache_paths_value, list):
+        raise ConfigError("state.validation_workspace.cache_paths must be a list")
+    cache_paths = tuple(
+        _validation_cache_path(
+            value, key=f"state.validation_workspace.cache_paths[{index}]"
+        )
+        for index, value in enumerate(cache_paths_value)
+    )
+    if len(set(cache_paths)) != len(cache_paths):
+        raise ConfigError(
+            "state.validation_workspace.cache_paths must not contain duplicates"
+        )
+    if workspace_mode == "persistent":
+        if not cache_key:
+            raise ConfigError(
+                "state.validation_workspace.cache_key is required in persistent mode"
+            )
+        if not cache_paths:
+            raise ConfigError(
+                "state.validation_workspace.cache_paths must not be empty in persistent mode"
+            )
     state = StateConfig(
         db=_resolve_path(
             repo_path, db_value, ".mergetrain/queue.sqlite", key="state.db"
@@ -648,6 +734,11 @@ def load_config(
             state_data.get("worktree_root"),
             ".mergetrain/worktrees",
             key="state.worktree_root",
+        ),
+        validation_workspace=ValidationWorkspaceConfig(
+            mode=workspace_mode,
+            cache_key=cache_key,
+            cache_paths=cache_paths,
         ),
     )
 

@@ -40,7 +40,16 @@ fetching, assembly, gates, readiness, push, verification, and terminal outcomes.
 The local dashboard uses these records rather than parsing logs or guessing from
 process output.
 
-**Integration worktree** — a disposable, detached Git worktree created under `state.worktree_root`, named `{project.name}-mergetrain-{job_id}-{random8}`, starting from the integration ref. The runner merges here, so agents never check out or push the deploy branch.
+**Integration worktree** — normally a disposable, detached Git worktree created
+under `state.worktree_root`, named
+`{project.name}-mergetrain-{job_id}-{random8}`, starting from the integration
+ref. An opt-in persistent validation workspace instead uses the derived stable
+path `{project.name}-validation-workspace` and preserves only declared,
+Git-ignored cache directories across compatible validations. Deploy reassembly
+and bisect probes always remain disposable. The runner lock serializes the
+persistent path, resets tracked inputs and cleans undeclared generated content
+before use, and never pushes from it. Agents therefore never check out or push
+the deploy branch.
 
 **Gate** — a pre-push verification command (`gates` in config) run inside the
 integration worktree. Top-level gates may optionally declare repository-relative

@@ -174,6 +174,30 @@ deploy:
     return repo, marker
 
 
+def enable_persistent_validation_workspace(
+    repo: Path,
+    *,
+    cache_key: str = "test-cache-v1",
+    cache_paths: tuple[str, ...] = (".cache",),
+) -> None:
+    config_path = repo / ".mergetrain.yaml"
+    rendered_paths = "".join(f"\n      - {path}" for path in cache_paths)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "  worktree_root:",
+            (
+                "  validation_workspace:\n"
+                "    mode: persistent\n"
+                f"    cache_key: {cache_key}\n"
+                f"    cache_paths:{rendered_paths}\n"
+                "  worktree_root:"
+            ),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+
 class GitRunnerTests(unittest.TestCase):
     def test_command_env_prioritizes_the_runner_python_tool_directory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -205,6 +229,194 @@ class GitRunnerTests(unittest.TestCase):
                 env["MERGETRAIN_RUNNER_PYTHON"],
                 str(runner_python),
             )
+
+    def test_persistent_validation_workspace_reuses_only_declared_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            observed = root / "observed-cache-count.txt"
+            gate = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                "p=Path('.cache/count'); p.parent.mkdir(parents=True, exist_ok=True); "
+                "p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1'); "
+                f"Path('{py_path(observed)}').write_text(p.read_text())\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            (repo / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore generated validation cache")
+            git(repo, "push", "origin", "main")
+            enable_persistent_validation_workspace(repo)
+            config = load_config(repo=repo)
+            runner = GitRunner(config)
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="first", branch="feature/a")
+                first_result = runner.process_batch(
+                    conn, [first], deploy=False
+                )[0]
+                self.assertEqual(first_result.status, "validated")
+                self.assertEqual(observed.read_text(encoding="utf-8"), "1")
+
+                workspace = config.validation_worktree_path
+                self.assertTrue(workspace.is_dir())
+                (workspace / "app.txt").write_text("dirty\n", encoding="utf-8")
+                (workspace / "scratch.tmp").write_text("remove me\n", encoding="utf-8")
+
+                second = enqueue_job(
+                    conn,
+                    task="second",
+                    branch="feature/a",
+                    allow_duplicate=True,
+                )
+                second_result = runner.process_batch(
+                    conn, [second], deploy=False
+                )[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+
+            self.assertEqual(second_result.status, "validated")
+            self.assertEqual(observed.read_text(encoding="utf-8"), "2")
+            self.assertEqual(
+                (config.validation_worktree_path / "app.txt").read_text(
+                    encoding="utf-8"
+                ),
+                "base\n",
+            )
+            self.assertFalse(
+                (config.validation_worktree_path / "scratch.tmp").exists()
+            )
+            self.assertIn(
+                "Persistent validation workspace reused",
+                [event.message for event in events],
+            )
+            self.assertIn(
+                "Persistent validation cache reused",
+                [event.message for event in events],
+            )
+
+    def test_persistent_validation_cache_key_change_invalidates_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            observed = root / "observed-cache-count.txt"
+            gate = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                "p=Path('.cache/count'); p.parent.mkdir(parents=True, exist_ok=True); "
+                "p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1'); "
+                f"Path('{py_path(observed)}').write_text(p.read_text())\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            (repo / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore generated validation cache")
+            git(repo, "push", "origin", "main")
+            enable_persistent_validation_workspace(repo, cache_key="cache-v1")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="first", branch="feature/a")
+                self.assertEqual(
+                    GitRunner(config).process_batch(
+                        conn, [first], deploy=False
+                    )[0].status,
+                    "validated",
+                )
+                config_path = repo / ".mergetrain.yaml"
+                config_path.write_text(
+                    config_path.read_text(encoding="utf-8").replace(
+                        "cache-v1", "cache-v2"
+                    ),
+                    encoding="utf-8",
+                )
+                changed = load_config(repo=repo)
+                second = enqueue_job(
+                    conn,
+                    task="second",
+                    branch="feature/a",
+                    allow_duplicate=True,
+                )
+                result = GitRunner(changed).process_batch(
+                    conn, [second], deploy=False
+                )[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+            self.assertEqual(observed.read_text(encoding="utf-8"), "1")
+
+    def test_persistent_validation_toolchain_fingerprint_invalidates_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            observed = root / "observed-cache-count.txt"
+            toolchain = root / "toolchain.txt"
+            toolchain.write_text("tool-a\n", encoding="utf-8")
+            gate = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                "p=Path('.cache/count'); p.parent.mkdir(parents=True, exist_ok=True); "
+                "p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1'); "
+                f"Path('{py_path(observed)}').write_text(p.read_text())\""
+            )
+            fingerprint = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                f"print(Path('{py_path(toolchain)}').read_text().strip())\""
+            )
+            repo, _ = make_demo_repo(
+                root,
+                gate_command=gate,
+                fingerprint_command=fingerprint,
+            )
+            (repo / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore generated validation cache")
+            git(repo, "push", "origin", "main")
+            enable_persistent_validation_workspace(repo)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="first", branch="feature/a")
+                self.assertEqual(
+                    GitRunner(config).process_batch(
+                        conn, [first], deploy=False
+                    )[0].status,
+                    "validated",
+                )
+                toolchain.write_text("tool-b\n", encoding="utf-8")
+                second = enqueue_job(
+                    conn,
+                    task="second",
+                    branch="feature/a",
+                    allow_duplicate=True,
+                )
+                result = GitRunner(config).process_batch(
+                    conn, [second], deploy=False
+                )[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+            self.assertEqual(observed.read_text(encoding="utf-8"), "1")
+
+    def test_persistent_validation_cache_rejects_tracked_or_unignored_paths(self) -> None:
+        cases = (("app.txt", "tracked files"), ("generated-cache", "ignored by Git"))
+        for cache_path, expected in cases:
+            with self.subTest(cache_path=cache_path), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                repo, _ = make_demo_repo(root)
+                enable_persistent_validation_workspace(
+                    repo, cache_paths=(cache_path,)
+                )
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    job = enqueue_job(conn, task="unsafe cache", branch="feature/a")
+                    result = GitRunner(config).process_batch(
+                        conn, [job], deploy=False
+                    )[0]
+                finally:
+                    conn.close()
+
+                self.assertEqual(result.status, "blocked")
+                self.assertIn(expected, result.note)
 
     def test_command_env_does_not_prepend_cwd_without_a_python_executable(
         self,
@@ -1876,6 +2088,54 @@ class PushRejectionTests(unittest.TestCase):
 
 
 class GcWorktreeGuardTests(unittest.TestCase):
+    def test_gc_protects_configured_persistent_workspace_and_removes_it_when_disabled(
+        self,
+    ) -> None:
+        from mergetrain.git_runner import apply_gc, find_worktree_gc_candidates
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            enable_persistent_validation_workspace(repo)
+            config = load_config(repo=repo)
+            workspace = config.validation_worktree_path
+            workspace.mkdir(parents=True)
+            marker = (
+                config.state.worktree_root
+                / f".{config.project.name}-validation-workspace.json"
+            )
+            marker.write_text("{}\n", encoding="utf-8")
+
+            configured = find_worktree_gc_candidates(config)
+
+            self.assertEqual(
+                configured,
+                [
+                    {
+                        "path": str(workspace),
+                        "reason": "configured persistent validation workspace, skipped",
+                        "protected": True,
+                    }
+                ],
+            )
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    "mode: persistent", "mode: ephemeral"
+                ),
+                encoding="utf-8",
+            )
+            disabled = load_config(repo=repo)
+            preview = find_worktree_gc_candidates(disabled)
+            result = apply_gc(disabled)
+
+            self.assertEqual(
+                preview[0]["reason"], "disabled persistent validation workspace"
+            )
+            self.assertFalse(workspace.exists())
+            self.assertFalse(marker.exists())
+            self.assertEqual(result["removed_worktrees"], preview)
+
     def test_gc_never_removes_a_live_runners_worktree(self) -> None:
         # Blocker: gc --apply force-removed the worktree a running deploy was
         # merging/gating inside. A live runner's worktree must be protected.

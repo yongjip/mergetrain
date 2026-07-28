@@ -288,7 +288,14 @@ Diagnose config, queue, Git remote, integration ref, GC candidates, and the next
 mergetrain doctor --json
 ```
 
-Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`, `db_existed_before`, `state.logs`, `state.worktree_root`, `git.repo_root`, `git.current_branch`, `git.worktree_clean`, `git.remote_url`, `git.remote_exists`, `git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`, `validated_trains`, `gc.worktree_candidates`, and `next_action`. `runtime` has the same provenance contract as `version --json`.
+Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`,
+`db_existed_before`, `state.logs`, `state.worktree_root`,
+`state.validation_workspace` (mode, derived path, existence, initialization,
+cache key, and declared paths), `git.repo_root`, `git.current_branch`,
+`git.worktree_clean`, `git.remote_url`, `git.remote_exists`,
+`git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`,
+`validated_trains`, `gc.worktree_candidates`, and `next_action`. `runtime` has
+the same provenance contract as `version --json`.
 
 `next_action` is one of:
 

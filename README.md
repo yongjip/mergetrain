@@ -147,7 +147,7 @@ Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, 
                                   post-push verify hooks
 ```
 
-Agents commit their work and **enqueue** a branch. They never push deploy refs themselves. A single **runner** (or unattended **daemon**) claims the queue, builds a throwaway integration worktree on top of your integration branch, merges the queued branches in FIFO order, runs your gates once over the whole train, and only then pushes — atomically — to your deploy refs. Every important state is readable as JSON so an agent can follow the result instead of inferring it.
+Agents commit their work and **enqueue** a branch. They never push deploy refs themselves. A single **runner** (or unattended **daemon**) claims the queue, builds an isolated integration worktree on top of your integration branch, merges the queued branches in FIFO order, runs your gates once over the whole train, and only then pushes — atomically — to your deploy refs. Validation worktrees are disposable by default; path-sensitive build caches can opt into a runner-locked stable validation path while deploy worktrees remain disposable. Every important state is readable as JSON so an agent can follow the result instead of inferring it.
 
 ## Quickstart
 
@@ -256,7 +256,7 @@ Every agent-facing command is non-interactive and requires explicit intent: `--v
 - **Validated train** — an exact, deployable group of jobs that passed gates together and is waiting for explicit deploy approval.
 - **Runner lock** — gives every claim a unique lease token, heartbeats through long-running commands, and prevents a stale runner from overwriting a newer owner.
 - **Run event** — a persisted, secret-conscious phase transition with an integer resume cursor; follow mode adds ephemeral heartbeat and terminal frames.
-- **Integration worktree** — a disposable, detached Git worktree built on your integration ref. The runner merges here, so agents never checkout or push the deploy branch.
+- **Integration worktree** — an isolated, detached Git worktree built on your integration ref. It is disposable by default; validation may opt into a stable path that preserves only declared ignored caches. Deploy worktrees remain disposable, so agents never checkout or push the deploy branch.
 - **Gate** — a verification command (diff-check, tests, secret-scan…) run once over the assembled train *before* push. A gate failure means nothing ships.
 - **Verify hook** — a command run *after* push to confirm the deploy is live.
 - **Auto job** — a job enqueued with `--auto`, the only kind the unattended daemon will touch. Manual jobs are left for a human-initiated runner.

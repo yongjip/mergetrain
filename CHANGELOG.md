@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add an opt-in persistent validation workspace (#200) for build caches whose
+  keys include the checkout's absolute path. The stable path is runner-locked,
+  hard-resets tracked inputs, preserves only explicitly declared Git-ignored
+  cache directories, and invalidates them when the cache key, gate policy, or
+  environment fingerprint changes. Deploy and bisect worktrees stay isolated;
+  doctor, events, and gc expose the persistent workspace lifecycle.
+
 - Make local validation environment-stable. Pytest now imports the active
   checkout's `src` tree without caller-supplied `PYTHONPATH`, and gate,
   fingerprint, and verify commands prioritize tools installed beside the Python

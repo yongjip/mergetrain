@@ -47,9 +47,52 @@ state:
   db: .mergetrain/queue.sqlite
   logs: .mergetrain/logs
   worktree_root: .mergetrain/worktrees
+  validation_workspace:
+    mode: ephemeral
+    cache_key: ""
+    cache_paths: []
 ```
 
 Relative paths are resolved from the repository root.
+
+Validation worktrees are disposable by default. Projects with path-sensitive
+generated caches may opt into one runner-owned stable validation path:
+
+```yaml
+state:
+  validation_workspace:
+    mode: persistent
+    cache_key: unity-library-v1
+    cache_paths:
+      - unity/Teratorn/Library
+```
+
+Persistent mode derives
+`{worktree_root}/{project.name}-validation-workspace`; it does not accept an
+arbitrary path. Only validate runs use that path. Deploy reassembly and bisect
+probes remain in isolated, disposable worktrees, and the existing runner lock
+serializes all access.
+
+Each `cache_paths` entry must name a normalized, repository-relative directory
+that is ignored by Git and contains no tracked files. Globs, absolute paths,
+backslashes, `.git`, and `.`/`..` segments are rejected. Before every validation,
+mergetrain hard-resets tracked inputs to the fetched integration ref and removes
+all ignored and untracked content except those declared directories. A symlink,
+foreign worktree, tracked cache path, non-ignored cache path, or workspace that
+cannot be restored cleanly blocks validation.
+
+The cache is retained only while `cache_key`, the gate/fingerprint policy, and
+the configured environment fingerprint outputs match its marker. Change
+`cache_key` whenever the build cache schema or an un-fingerprinted toolchain
+changes. Marker corruption or an identity mismatch clears only the declared
+cache directories before gates run. Gate tree-integrity checks, SHA-pinned train
+identity, and push behavior are unchanged; generated cache files are never added
+or pushed by mergetrain.
+
+`doctor --json` reports the mode, derived path, existence, initialization state,
+key, and declared cache paths. `gc` protects the workspace while persistent mode
+is configured. To remove it, switch back to `mode: ephemeral`, inspect
+`gc --json`, then explicitly run `gc --apply`.
 
 ## `git`
 
