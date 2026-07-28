@@ -175,6 +175,86 @@ deploy:
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_command_env_prioritizes_the_runner_python_tool_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            runner_bin = root / "runner env" / "bin"
+            runner_python = runner_bin / "python"
+            first = root / "first"
+            second = root / "second"
+            inherited_path = os.pathsep.join(
+                (str(first), str(runner_bin), str(second))
+            )
+            with (
+                patch.object(
+                    git_runner_module.sys,
+                    "executable",
+                    str(runner_python),
+                ),
+                patch.dict(os.environ, {"PATH": inherited_path}),
+            ):
+                env = command_env(config=config, worktree=repo)
+
+            self.assertEqual(
+                env["PATH"].split(os.pathsep),
+                [str(runner_bin), str(first), str(second)],
+            )
+            self.assertEqual(
+                env["MERGETRAIN_RUNNER_PYTHON"],
+                str(runner_python),
+            )
+
+    def test_command_env_does_not_prepend_cwd_without_a_python_executable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            inherited_path = os.pathsep.join(
+                (str(root / "first"), str(root / "second"))
+            )
+            with (
+                patch.object(git_runner_module.sys, "executable", ""),
+                patch.dict(os.environ, {"PATH": inherited_path}),
+            ):
+                env = command_env(config=config, worktree=repo)
+
+            self.assertEqual(env["PATH"], inherited_path)
+            self.assertEqual(env["MERGETRAIN_RUNNER_PYTHON"], "")
+
+    def test_gate_finds_tool_beside_runner_python_without_activation(self) -> None:
+        runner_bin = Path(sys.executable).parent
+        if shutil.which("ruff", path=str(runner_bin)) is None:
+            self.skipTest("ruff is not installed beside the test interpreter")
+        runner_bin_key = os.path.normcase(os.path.abspath(runner_bin))
+        inherited_path = os.pathsep.join(
+            entry
+            for entry in os.environ.get("PATH", "").split(os.pathsep)
+            if entry
+            and os.path.normcase(os.path.abspath(entry)) != runner_bin_key
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root, gate_command="ruff --version")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="runner tools", branch="feature/a")
+                with patch.dict(os.environ, {"PATH": inherited_path}):
+                    result = GitRunner(config).process_batch(
+                        conn,
+                        [job],
+                        deploy=False,
+                    )[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+
     def test_path_scoped_gate_skips_without_a_match_and_records_progress(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

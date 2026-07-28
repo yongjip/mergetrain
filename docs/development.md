@@ -56,6 +56,20 @@ python -m pip install -e .
 python -m unittest discover -s tests
 ```
 
+Pytest is configured with `pythonpath = ["src"]`, so its normal CI command
+always imports the current checkout even if the selected interpreter also has
+an older mergetrain installed:
+
+```sh
+python -m pytest -q -n auto
+```
+
+Some tests intentionally bind localhost sockets or inspect child processes. If
+a restricted sandbox reports `PermissionError` for socket binding or `ps`,
+rerun the full suite once outside that sandbox; repeating the same sandboxed
+suite cannot add evidence. Use focused tests inside the sandbox before that
+single full run.
+
 ## Testing strategy
 
 The suite covers the behaviors that make the queue safe:

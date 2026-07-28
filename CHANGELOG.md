@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make local validation environment-stable. Pytest now imports the active
+  checkout's `src` tree without caller-supplied `PYTHONPATH`, and gate,
+  fingerprint, and verify commands prioritize tools installed beside the Python
+  interpreter running mergetrain. This prevents stale installed packages and
+  unactivated virtualenvs from producing misleading validation failures.
+
 - Add fail-closed path-aware pre-push gates (#199). An optional `gates[].paths`
   list matches repository-relative POSIX globs against the exact assembled
   train diff, including deletions and both rename endpoints. Non-matches emit

@@ -289,7 +289,15 @@ Equivalent environment variables:
 MERGETRAIN_PROJECT
 MERGETRAIN_INTEGRATION_REF
 MERGETRAIN_REPO
+MERGETRAIN_RUNNER_PYTHON
 MERGETRAIN_WORKTREE
 ```
+
+mergetrain prepends the directory containing `MERGETRAIN_RUNNER_PYTHON` to
+`PATH` for gates, reuse fingerprints, and verify hooks. Invoking mergetrain
+through a virtualenv or pipx interpreter therefore makes sibling tools such as
+`ruff`, `mypy`, and versioned Python launchers available without activating that
+environment in the parent shell. Existing `PATH` entries retain their order
+after the runner's tool directory.
 
 Commands are executed through `/bin/sh`; treat config files as trusted code.

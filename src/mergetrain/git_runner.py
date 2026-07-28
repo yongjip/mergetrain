@@ -9,6 +9,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -545,11 +546,27 @@ def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) ->
 
 def command_env(*, config: MergetrainConfig, worktree: Path) -> dict[str, str]:
     env = os.environ.copy()
+    inherited_path = env.get("PATH", "")
+    runner_python = ""
+    command_path = inherited_path
+    if sys.executable:
+        runner_python = os.path.abspath(os.path.expanduser(sys.executable))
+        runner_bin = str(Path(runner_python).parent)
+        runner_bin_key = os.path.normcase(os.path.abspath(runner_bin))
+        path_entries = [
+            entry
+            for entry in inherited_path.split(os.pathsep)
+            if entry
+            and os.path.normcase(os.path.abspath(entry)) != runner_bin_key
+        ]
+        command_path = os.pathsep.join((runner_bin, *path_entries))
     env.update(
         {
+            "PATH": command_path,
             "MERGETRAIN_PROJECT": config.project.name,
             "MERGETRAIN_INTEGRATION_REF": config.git.integration_ref,
             "MERGETRAIN_REPO": str(config.repo),
+            "MERGETRAIN_RUNNER_PYTHON": runner_python,
             "MERGETRAIN_WORKTREE": str(worktree),
         }
     )

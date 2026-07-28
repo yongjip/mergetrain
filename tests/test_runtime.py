@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from importlib import metadata
+from importlib import metadata, util
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
@@ -30,6 +30,34 @@ class FakeDistribution:
 
 
 class RuntimeProvenanceTests(unittest.TestCase):
+    @unittest.skipUnless(util.find_spec("pytest"), "pytest is not installed")
+    def test_pytest_collects_current_src_checkout_without_pythonpath(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--collect-only",
+                "-q",
+                "tests/test_path_gates.py",
+            ],
+            cwd=root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
     def test_cli_import_does_not_load_cold_provenance_dependencies(self) -> None:
         root = Path(__file__).resolve().parents[1]
         env = os.environ.copy()

@@ -18,10 +18,18 @@ worktrees.
 ## Useful commands
 
 ```sh
+python -m pytest -q -n auto
 PYTHONPATH=src python -m unittest discover -s tests
 PYTHONPATH=src python -m mergetrain agent-contract --json
 PYTHONPATH=src python -m mergetrain init --project demo
 ```
+
+Pytest is configured to import the current `src/` checkout without an external
+`PYTHONPATH`. If the full suite hits sandbox-only `PermissionError` failures for
+localhost sockets or process inspection, do not repeat it in the same sandbox:
+rerun it once outside the sandbox. Invoke mergetrain with the intended
+virtualenv's Python; gate commands automatically prioritize sibling tools from
+that environment.
 
 ## GitHub CLI authentication
 
