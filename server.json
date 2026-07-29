@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yongjip/mergetrain",
+  "title": "Mergetrain",
+  "description": "Operate local deploy trains for coding-agent worktrees with approval-gated deploys.",
+  "repository": {
+    "url": "https://github.com/yongjip/mergetrain",
+    "source": "github"
+  },
+  "version": "1.1.0",
+  "websiteUrl": "https://github.com/yongjip/mergetrain",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mergetrain",
+      "version": "1.1.0",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

@@ -4,6 +4,11 @@
 
 ## 1.1.0 - 2026-07-29
 
+- Add the official MCP Registry `server.json` for #202, including the PyPI
+  package identity, exact 1.1.0 version, stdio transport, and fixed `mcp`
+  subcommand. Release metadata checks now keep the manifest version, README
+  ownership marker, and executable arguments synchronized.
+
 - Match the repository deploy gate to CI's parallel pytest execution (#201).
   The full suite now uses Python 3.12 and pytest-xdist instead of serial
   `unittest` discovery, cutting the measured local gate from roughly five

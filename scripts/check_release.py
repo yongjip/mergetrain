@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -61,6 +62,41 @@ def check_release(*, tag: str = "") -> list[str]:
     if tag and tag != f"v{project_version}":
         errors.append(
             f"release tag mismatch: expected v{project_version}, received {tag}"
+        )
+
+    server_path = ROOT / "server.json"
+    try:
+        server = json.loads(server_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"server.json is missing or invalid JSON: {exc}")
+        return errors
+
+    server_name = str(server.get("name", ""))
+    if server.get("version") != project_version:
+        errors.append(
+            f"server.json version mismatch: expected {project_version}, "
+            f"received {server.get('version')}"
+        )
+    if f"mcp-name: {server_name}" not in (
+        ROOT / "README.md"
+    ).read_text(encoding="utf-8"):
+        errors.append(
+            "README.md MCP Registry ownership marker does not match "
+            f"server.json name {server_name!r}"
+        )
+
+    packages = server.get("packages")
+    expected_package = {
+        "registryType": "pypi",
+        "identifier": "mergetrain",
+        "version": project_version,
+        "packageArguments": [{"type": "positional", "value": "mcp"}],
+        "transport": {"type": "stdio"},
+    }
+    if not isinstance(packages, list) or expected_package not in packages:
+        errors.append(
+            "server.json needs the exact PyPI mergetrain package, release "
+            "version, stdio transport, and fixed 'mcp' package argument"
         )
 
     return errors

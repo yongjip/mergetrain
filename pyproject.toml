@@ -104,4 +104,5 @@ include = [
   "/CLAUDE.md",
   "/llms.txt",
   "/llms-full.txt",
+  "/server.json",
 ]
