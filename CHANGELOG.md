@@ -4,6 +4,12 @@
 
 ## 1.1.0 - 2026-07-29
 
+- Match the repository deploy gate to CI's parallel pytest execution (#201).
+  The full suite now uses Python 3.12 and pytest-xdist instead of serial
+  `unittest` discovery, cutting the measured local gate from roughly five
+  minutes to about one while preserving plain `unittest` as the documented
+  dependency-light contributor fallback.
+
 - Add the in-repo Claude Code plugin and self-marketplace for #172. The plugin
   bundles the local MCP server, an auto-invocable queue-operation skill, and a
   manual-only deploy skill whose action still passes through the MCP human

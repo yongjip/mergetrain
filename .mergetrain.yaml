@@ -43,10 +43,10 @@ gates:
     run: ruff check .
   - name: mypy
     run: mypy
-  # docs/development.md pins 3.12: macOS /usr/bin/python3 is 3.9 and the suite
-  # needs 3.10+ for dataclass(slots=True).
+  # Match CI's parallel pytest invocation. The repo already requires the dev
+  # extra for ruff and mypy, so a missing pytest/xdist fails closed too.
   - name: tests
-    run: PYTHONPATH=src python3.12 -m unittest discover -s tests
+    run: python3.12 -m pytest -q -n auto
 
 deploy:
   verify:

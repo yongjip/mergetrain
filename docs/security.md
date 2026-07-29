@@ -7,7 +7,7 @@
 Their environment prioritizes the directory containing the Python interpreter
 that launched mergetrain, then preserves the inherited `PATH`. Run mergetrain
 from a reviewed virtualenv or installation because executables beside that
-interpreter can satisfy bare gate commands such as `ruff` or `mypy`.
+interpreter can satisfy bare gate commands such as `ruff`, `mypy`, or `pytest`.
 
 ## Secrets
 

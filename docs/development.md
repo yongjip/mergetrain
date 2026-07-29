@@ -43,7 +43,9 @@ repo pins `.python-version` to a 3.12 build so bare `python` resolves correctly
 under pyenv shims; note that a system `python3` earlier on your `PATH` can still
 shadow it, so prefer `python` or a versioned `python3.12` when in doubt.
 
-The suite is plain `unittest`. With the `src/` layout, put the package on the path:
+The suite remains compatible with plain `unittest`. This is the
+dependency-light contributor fallback; with the `src/` layout, put the package
+on the path:
 
 ```sh
 PYTHONPATH=src python -m unittest discover -s tests
@@ -56,11 +58,13 @@ python -m pip install -e .
 python -m unittest discover -s tests
 ```
 
-Pytest is configured with `pythonpath = ["src"]`, so its normal CI command
-always imports the current checkout even if the selected interpreter also has
-an older mergetrain installed:
+Pytest is configured with `pythonpath = ["src"]`, so the blocking CI and local
+deploy-gate command always imports the current checkout even if the selected
+interpreter also has an older mergetrain installed. Install the dev extra first;
+it supplies pytest-xdist, Ruff, and mypy:
 
 ```sh
+python -m pip install -e ".[dev]"
 python -m pytest -q -n auto
 ```
 
@@ -177,7 +181,14 @@ the checks CI runs:
 | --- | --- |
 | `diff-check` | whitespace errors against the integration ref |
 | `ruff`, `mypy` | the blocking `lint` CI job |
-| `tests` | the unit suite on this machine's Python 3.12 |
+| `tests` | the full unit suite on Python 3.12, parallelized with pytest-xdist |
+
+These gates require the `dev` extra. Invoke mergetrain from the same reviewed
+virtualenv so its `bin` directory supplies `ruff`, `mypy`, `pytest`, and the
+`python3.12` launcher. Plain `unittest` discovery remains available as a
+dependency-light contributor command, but it is intentionally not the deploy
+gate: serial execution turns the current suite into a roughly five-minute
+delay, while the CI-shaped parallel run completes in about one minute.
 
 One machine cannot reproduce the whole matrix, so the CI legs it cannot run
 (Windows, Python 3.10-3.14, `e2e`, `package`) are covered *after* the push by
