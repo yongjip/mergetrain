@@ -118,13 +118,41 @@ an upload that already succeeded.
    ```
 
 5. Publishing the GitHub Release triggers `.github/workflows/release.yml`,
-   which builds and uploads to PyPI with no further prompt — the Release
-   publication in step 4 **is** the approval.
-6. Verify <https://pypi.org/project/mergetrain/> and install from PyPI in a
-   fresh environment.
+   which builds and uploads to PyPI, then publishes `server.json` to the
+   official MCP Registry with GitHub OIDC. There is no further prompt — the
+   Release publication in step 4 **is** the approval.
+6. Verify <https://pypi.org/project/mergetrain/>, install from PyPI in a fresh
+   environment, and confirm the Registry API returns the released version:
+
+   ```sh
+   curl \
+     "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yongjip%2Fmergetrain"
+   ```
+
 7. The Homebrew tap picks the release up on its own daily cron. To make that
    immediate, see the optional dispatch below; otherwise check
    `brew install yongjip/tap/mergetrain` the next day.
+
+## Publish or repair MCP Registry metadata
+
+`.github/workflows/mcp-registry.yml` is also manually dispatchable from
+**Actions → Publish MCP Registry → Run workflow**. Use that path to bootstrap
+the first Registry entry or repair a release whose Registry job failed after
+PyPI succeeded.
+
+The workflow:
+
+- verifies that `pyproject.toml`, `server.json`, and the changelog describe one
+  release;
+- downloads a pinned `mcp-publisher` binary and verifies its SHA-256;
+- validates `server.json` against the public Registry;
+- authenticates with short-lived GitHub Actions OIDC; and
+- publishes the manifest.
+
+It stores no Registry or GitHub PAT. The manual workflow must run from `main`,
+where `server.json` describes the already-public PyPI version. Registry versions
+are immutable, so do not rerun a successful publication without first releasing
+a new package version.
 
 ## Optional: bump the Homebrew tap on release
 

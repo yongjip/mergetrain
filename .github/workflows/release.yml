@@ -45,6 +45,13 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # v1.14.1
 
+  publish-mcp-registry:
+    needs: publish
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/mcp-registry.yml
+
   bump-tap:
     # The Homebrew tap bumps itself from PyPI on a daily cron, which GitHub
     # disables after 60 days without repository activity — exactly what a quiet
