@@ -39,7 +39,10 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: release candidate (`v0.9.1`). The machine contract is frozen — additive-only within contract major 1 — and the real-repo soak gate for 1.0 is complete. Built to scratch my own itch first — published in case it scratches yours too.
+> Status: current release (`v1.1.0`). The machine contract is frozen —
+> additive-only within contract major 1 — and the real-repo soak gate is
+> complete. Built to scratch my own itch first — published in case it scratches
+> yours too.
 
 ---
 
@@ -389,10 +392,11 @@ unattended deployment or validated-gate reuse.
 
 ## Status
 
-`v0.9.1`, the **API-freeze release candidate**. From here the machine contract is
-additive-only within contract major 1: a key may be added, never removed or
-renamed, and a golden key-set fingerprint over 25 payload surfaces plus the JSONL frames
-fails CI on any un-versioned shape change (see [contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
+`v1.1.0` is the current release. The machine contract is additive-only within
+contract major 1: a key may be added, never removed or renamed, and a golden
+key-set fingerprint over 25 payload surfaces plus the JSONL frames fails CI on
+any un-versioned shape change (see
+[contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
 
 The core — queue, runner lock, merge train, gates (with bisected joint-failure
 isolation and semantic-conflict reporting), atomic push, crash-safe

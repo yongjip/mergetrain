@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.0 - 2026-07-29
+
 - Add the in-repo Claude Code plugin and self-marketplace for #172. The plugin
   bundles the local MCP server, an auto-invocable queue-operation skill, and a
   manual-only deploy skill whose action still passes through the MCP human
@@ -40,6 +42,11 @@
   scoped gate. The same policy applies during single/batch validation, exact
   validated reuse, and linear/bisect failure isolation, and participates in the
   validation gate-policy hash.
+
+- Fix plain-text `mergetrain stats` when no `--json` flag is supplied (#197).
+  The CLI now reads the aggregate payload's top-level status correctly instead
+  of raising `KeyError`, with regression coverage for both empty and populated
+  histories.
 
 ## 0.9.1 - 2026-07-26
 
