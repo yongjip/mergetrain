@@ -326,6 +326,64 @@ class CliTests(unittest.TestCase):
         self.assertTrue(payload["config_drift"]["matches"])
         self.assertEqual(payload["recommendations"], [])
 
+    def test_doctor_normalizes_worktree_line_endings_for_config_drift(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            config_text = render_default_config("drift")
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(config_text, encoding="utf-8")
+            subprocess.run(
+                ["git", "add", ".mergetrain.yaml"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    "HEAD",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "core.autocrlf", "true"],
+                cwd=repo,
+                check=True,
+            )
+            config_path.write_bytes(
+                config_text.replace("\n", "\r\n").encode("utf-8")
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+
+        drift = payload["config_drift"]
+        self.assertEqual(code, 0)
+        self.assertEqual(drift["state"], "in_sync")
+        self.assertTrue(drift["matches"])
+        self.assertEqual(
+            drift["local"]["blob_sha"],
+            drift["integration"]["blob_sha"],
+        )
+
     def test_doctor_warns_when_operator_config_drifted_from_integration_ref(
         self,
     ) -> None:

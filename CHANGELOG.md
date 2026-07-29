@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-## 1.2.0 - 2026-07-29
+## 1.2.0 - 2026-07-30
+
+- Normalize checkout line endings before comparing operator configuration with
+  the integration-ref blob, avoiding false drift warnings on Windows CRLF
+  worktrees.
 
 - Add `supersede`, an atomic validated-train replacement workflow that retires
   the old train without erasing its validation evidence, captures exact clean

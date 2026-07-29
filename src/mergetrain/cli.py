@@ -975,7 +975,7 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
 
     local_sha = _git_object_sha(
         repo_path,
-        ["hash-object", "--no-filters", "--", relative_path],
+        ["hash-object", "--", relative_path],
     )
     integration_sha = _git_object_sha(
         repo_path,
