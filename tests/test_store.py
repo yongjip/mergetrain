@@ -726,8 +726,25 @@ class StoreTests(unittest.TestCase):
         events = list_run_events(conn)
         self.assertEqual(events[-1].phase, "claiming")
         self.assertEqual(events[-1].state, "active")
+        self.assertEqual(events[-1].detail, "mode=validate")
+        self.assertIn("Validation runner", events[-1].message)
         self.assertEqual(events[-1].claim_token, claimed[0].claim_token)
         self.assertNotIn("claim_token", events[-1].to_dict())
+
+    def test_deploy_claim_records_machine_mode_with_custom_terminology(
+        self,
+    ) -> None:
+        conn = self.make_conn()
+        enqueue_job(conn, task="a", branch="feature/a")
+        claimed = claim_deploy_batch(
+            conn,
+            owner=f"owner:{os.getpid()}",
+            operation_label="integrate",
+        )
+        event = list_run_events(conn)[-1]
+        self.assertEqual(event.message, "Integrate runner claimed 1 job(s)")
+        self.assertEqual(event.detail, "mode=deploy")
+        self.assertEqual(event.claim_token, claimed[0].claim_token)
 
     def test_event_resume_and_job_scope_include_shared_batch_events(self) -> None:
         conn = self.make_conn()

@@ -94,6 +94,11 @@ key, and declared cache paths. `gc` protects the workspace while persistent mode
 is configured. To remove it, switch back to `mode: ephemeral`, inspect
 `gc --json`, then explicitly run `gc --apply`.
 
+Keep ephemeral mode unless measurements show that a project-local cold build is
+the dominant gate cost. The [efficient-operation guide](best-practices.md)
+explains the cache decision, rollout measurements, and project-specific
+tradeoffs.
+
 ## `git`
 
 ```yaml

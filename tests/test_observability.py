@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mergetrain.config import load_config
@@ -253,9 +254,286 @@ class HistoryStatsTests(unittest.TestCase):
             self.assertEqual(stats["average_queue_seconds"], 45.0)
             self.assertEqual(stats["gates"][0]["name"], "tests")
             self.assertEqual(stats["gates"][0]["median_seconds"], 10.0)
+            self.assertEqual(stats["gates"][0]["timed_runs"], 1)
+            self.assertEqual(
+                stats["latency"]["coverage"]["observed_runs"], 1
+            )
+            self.assertEqual(stats["recommendations"], [])
             empty = stats_payload(config, since="2026-07-23T00:00:00Z")
             self.assertEqual(empty["trains"]["total"], 0)
             self.assertIsNone(empty["trains"]["land_rate"])
+
+    def test_stats_attributes_runner_phases_and_recommends_slow_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                "project:\n  name: timings\n"
+                "gates:\n"
+                "  - name: tests\n"
+                "    run: python -m pytest\n",
+                encoding="utf-8",
+            )
+            config = load_config(repo=root, db_override=root / "queue.sqlite")
+            conn = connect(config.state.db)
+
+            def stamp(base: datetime, seconds: int) -> str:
+                return (
+                    (base + timedelta(seconds=seconds))
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z")
+                )
+
+            try:
+                for index in range(3):
+                    base = datetime(
+                        2026, 7, 22, index, tzinfo=timezone.utc
+                    )
+                    queued = enqueue_job(
+                        conn,
+                        task=f"job-{index}",
+                        branch=f"agent/{index}",
+                    )
+                    conn.execute(
+                        "UPDATE deploy_queue SET status='deployed', "
+                        "train_id=?, train_size=1, requested_at=?, "
+                        "validated_at=?, started_at=?, finished_at=?, "
+                        "push_status='succeeded', verify_status='succeeded' "
+                        "WHERE id=?",
+                        (
+                            f"train-{index}",
+                            stamp(base, 0),
+                            stamp(base, 110),
+                            stamp(base, 170),
+                            stamp(base, 282),
+                            queued.id,
+                        ),
+                    )
+                    validation = f"validation-{index}"
+                    deploy = f"deploy-{index}"
+                    conn.executemany(
+                        "INSERT INTO run_events "
+                        "(claim_token, job_id, phase, state, message, detail, "
+                        "created_at) VALUES (?, ?, ?, ?, ?, '', ?)",
+                        [
+                            (
+                                validation,
+                                None,
+                                "claiming",
+                                "active",
+                                "Runner claimed 1 job(s)",
+                                stamp(base, 30),
+                            ),
+                            (
+                                validation,
+                                None,
+                                "fetching",
+                                "active",
+                                "Fetching origin/main",
+                                stamp(base, 30),
+                            ),
+                            (
+                                validation,
+                                None,
+                                "fetching",
+                                "success",
+                                "Integration worktree prepared",
+                                stamp(base, 32),
+                            ),
+                            (
+                                validation,
+                                queued.id,
+                                "assembling",
+                                "active",
+                                f"Merging agent/{index}",
+                                stamp(base, 33),
+                            ),
+                            (
+                                validation,
+                                queued.id,
+                                "assembling",
+                                "success",
+                                f"Merged agent/{index}",
+                                stamp(base, 35),
+                            ),
+                            (
+                                validation,
+                                None,
+                                "gating",
+                                "active",
+                                "Running gate 1/1: tests",
+                                stamp(base, 40),
+                            ),
+                            (
+                                validation,
+                                None,
+                                "gating",
+                                "success",
+                                "Passed gate 1/1: tests",
+                                stamp(base, 110),
+                            ),
+                            (
+                                validation,
+                                queued.id,
+                                "ready",
+                                "success",
+                                f"Job #{queued.id} validated",
+                                stamp(base, 110),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "claiming",
+                                "active",
+                                "Integrate runner claimed 1 job(s)",
+                                stamp(base, 170),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "fetching",
+                                "active",
+                                "Fetching origin/main",
+                                stamp(base, 170),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "fetching",
+                                "success",
+                                "Integration worktree prepared",
+                                stamp(base, 172),
+                            ),
+                            (
+                                deploy,
+                                queued.id,
+                                "assembling",
+                                "active",
+                                f"Merging agent/{index}",
+                                stamp(base, 173),
+                            ),
+                            (
+                                deploy,
+                                queued.id,
+                                "assembling",
+                                "success",
+                                f"Merged agent/{index}",
+                                stamp(base, 175),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "gating",
+                                "active",
+                                "Running gate 1/1: tests",
+                                stamp(base, 180),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "gating",
+                                "success",
+                                "Passed gate 1/1: tests",
+                                stamp(base, 250),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "pushing",
+                                "active",
+                                "Pushing verified HEAD atomically",
+                                stamp(base, 250),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "pushing",
+                                "success",
+                                "Atomic push completed",
+                                stamp(base, 252),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "verifying",
+                                "active",
+                                "Running post-push verification",
+                                stamp(base, 252),
+                            ),
+                            (
+                                deploy,
+                                None,
+                                "verifying",
+                                "success",
+                                "Post-push verification passed",
+                                stamp(base, 282),
+                            ),
+                            (
+                                deploy,
+                                queued.id,
+                                "complete",
+                                "success",
+                                f"Job #{queued.id} deployed",
+                                stamp(base, 282),
+                            ),
+                        ],
+                    )
+                    conn.commit()
+                conn.execute(
+                    "INSERT INTO run_events "
+                    "(claim_token, phase, state, message, detail, created_at) "
+                    "VALUES ('partial', 'gating', 'active', "
+                    "'Running gate 1/1: tests', '', "
+                    "'2026-07-22T05:00:00Z')"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            stats = stats_payload(config)
+            latency = stats["latency"]
+            self.assertEqual(latency["queue_wait"]["samples"], 3)
+            self.assertEqual(latency["queue_wait"]["median_seconds"], 30.0)
+            self.assertEqual(latency["approval_wait"]["samples"], 3)
+            self.assertEqual(latency["approval_wait"]["median_seconds"], 60.0)
+            self.assertEqual(latency["runs"]["validate"]["samples"], 3)
+            self.assertEqual(latency["runs"]["validate"]["median_seconds"], 80.0)
+            self.assertEqual(latency["runs"]["deploy"]["samples"], 3)
+            self.assertEqual(latency["runs"]["deploy"]["median_seconds"], 112.0)
+            self.assertEqual(latency["coverage"]["observed_runs"], 7)
+            self.assertEqual(
+                latency["coverage"]["runs_with_observed_start"], 6
+            )
+            self.assertEqual(latency["coverage"]["runs_with_terminal"], 6)
+            self.assertEqual(latency["coverage"]["complete_runs"], 6)
+            self.assertEqual(latency["coverage"]["runs_with_job_identity"], 6)
+            self.assertEqual(latency["coverage"]["retained_events"], 61)
+            self.assertEqual(latency["coverage"]["retention_limit"], 5000)
+            self.assertTrue(latency["coverage"]["history_complete"])
+            tests_gate = next(
+                gate for gate in stats["gates"] if gate["name"] == "tests"
+            )
+            self.assertEqual(tests_gate["timed_runs"], 6)
+            recommendation = stats["recommendations"][0]
+            self.assertEqual(
+                recommendation["code"], "slow_unscoped_gate"
+            )
+            self.assertEqual(
+                recommendation["evidence"]["p95_seconds"], 70.0
+            )
+            self.assertEqual(
+                recommendation["evidence"]["threshold_seconds"], 60.0
+            )
+
+            partial = stats_payload(
+                config, since="2026-07-22T00:00:50Z"
+            )["latency"]
+            self.assertEqual(partial["runs"]["validate"]["samples"], 2)
+            self.assertEqual(partial["queue_wait"]["samples"], 2)
+            self.assertEqual(
+                partial["coverage"]["runs_with_observed_start"], 5
+            )
+            self.assertEqual(partial["coverage"]["runs_with_terminal"], 6)
+            self.assertEqual(partial["coverage"]["complete_runs"], 5)
 
     def test_event_frame_reports_a_stranded_runner_as_lost(self) -> None:
         # A one-shot events reader (how the MCP server reads progress) has no

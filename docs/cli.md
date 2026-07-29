@@ -255,14 +255,22 @@ mergetrain stats --since 2026-07-01T00:00:00Z --json
 
 The payload reports `trains{total,landed,blocked,failed,finished,land_rate}`,
 `median_duration_seconds` and `p95_duration_seconds`, `average_queue_seconds`,
-and per-gate `state_counts` with `median_seconds`/`p95_seconds`. `finished`
+and per-gate `state_counts` with `timed_runs`, `median_seconds`, and
+`p95_seconds`. `latency` attributes queue wait, approval wait, validation/deploy
+runner duration, and fetch/assembly/gate/push/verify phases. Its `coverage`
+reports retained event counts, the 5,000-row limit, complete runs, and runs with
+job identity; incomplete histories are never reported as zero-duration samples.
+Evidence-backed `recommendations` appear only after at least three timed
+samples. `finished`
 counts deployed + blocked + failed — every train that reached an end state,
 excluding canceled and still-open ones — and is the denominator of `land_rate`;
 it is deliberately not called `completed`, which is configured human vocabulary
 for the success end state alone. Queue
 rows are not automatically pruned, so their history is unbounded. Gate timing
-is explicitly marked as covering the latest 5,000 retained runner events; it
-never pretends an older truncated event tail is complete.
+and phase attribution are explicitly marked as covering the latest 5,000
+retained runner events; they never pretend an older truncated event tail is
+complete. See [efficient operation](best-practices.md) for how to act on each
+timing without weakening gates.
 
 ## `logs`
 
@@ -293,9 +301,16 @@ Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`,
 `state.validation_workspace` (mode, derived path, existence, initialization,
 cache key, and declared paths), `git.repo_root`, `git.current_branch`,
 `git.worktree_clean`, `git.remote_url`, `git.remote_exists`,
-`git.integration_ref`, `git.integration_ref_exists`, `lock`, `counts`,
-`validated_trains`, `gc.worktree_candidates`, and `next_action`. `runtime` has
-the same provenance contract as `version --json`.
+`git.integration_ref`, `git.integration_ref_exists`, `config_drift`,
+`recommendations`, `lock`, `counts`, `validated_trains`,
+`gc.worktree_candidates`, and `next_action`. `runtime` has the same provenance
+contract as `version --json`.
+
+`config_drift` compares the local config blob with the config at the locally
+known integration ref without fetching or changing either checkout. A
+`drifted` state adds an `operator_config_drift` warning; missing refs/configs
+and an outside-repo `--config` path are explicit non-comparable states. The
+warning is advisory and does not replace `next_action`.
 
 `next_action` is one of:
 

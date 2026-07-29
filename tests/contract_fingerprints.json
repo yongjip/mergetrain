@@ -239,6 +239,22 @@
           "noun": null
         }
       },
+      "config_drift": {
+        "comparable": null,
+        "integration": {
+          "blob_sha": null,
+          "config_exists": null,
+          "ref": null,
+          "ref_exists": null
+        },
+        "local": {
+          "blob_sha": null,
+          "exists": null,
+          "path": null
+        },
+        "matches": null,
+        "state": null
+      },
       "config_exists": null,
       "contract_version": null,
       "counts": {
@@ -274,6 +290,7 @@
       "lock": null,
       "next_action": null,
       "ok": null,
+      "recommendations": "[]?",
       "runtime": {
         "distribution_version": null,
         "install_mode": null,
@@ -918,6 +935,7 @@
       "contract_version": null,
       "coverage": {
         "gate_events": null,
+        "phase_events": null,
         "queue_history": null
       },
       "gates": {
@@ -928,15 +946,61 @@
           "runs": null,
           "state_counts": {
             "success": null
-          }
+          },
+          "timed_runs": null
         }
       },
       "jobs": {
         "total": null
       },
+      "latency": {
+        "approval_wait": {
+          "median_seconds": null,
+          "p95_seconds": null,
+          "samples": null
+        },
+        "coverage": {
+          "complete_runs": null,
+          "history_complete": null,
+          "observed_runs": null,
+          "retained_events": null,
+          "retention_limit": null,
+          "runs_with_job_identity": null,
+          "runs_with_observed_start": null,
+          "runs_with_terminal": null,
+          "source": null
+        },
+        "phases": {
+          "[]": {
+            "median_seconds": null,
+            "mode": null,
+            "name": null,
+            "p95_seconds": null,
+            "samples": null
+          }
+        },
+        "queue_wait": {
+          "median_seconds": null,
+          "p95_seconds": null,
+          "samples": null
+        },
+        "runs": {
+          "deploy": {
+            "median_seconds": null,
+            "p95_seconds": null,
+            "samples": null
+          },
+          "validate": {
+            "median_seconds": null,
+            "p95_seconds": null,
+            "samples": null
+          }
+        }
+      },
       "median_duration_seconds": null,
       "ok": null,
       "p95_duration_seconds": null,
+      "recommendations": "[]?",
       "since": null,
       "trains": {
         "blocked": null,

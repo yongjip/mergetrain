@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.1.1 - 2026-07-29
+
+- Attribute queue wait, approval wait, validation/deploy runtime, and runner
+  phase latency in `stats`, including retained-history coverage and
+  evidence-backed slow-gate recommendations (#203).
+
+- Make `doctor` detect a local operator configuration that differs from the
+  locally known integration-ref configuration without fetching or modifying
+  the checkout (#204).
+
+- Add an efficient-operation guide for train sizing, gate design, path scopes,
+  deterministic environments, persistent-cache and validated-reuse decisions,
+  project profiles, and recovery practice (#205).
+
 ## 1.1.0 - 2026-07-29
 
 - Add the official MCP Registry `server.json` for #202, including the PyPI

@@ -152,6 +152,7 @@ def daemon_tick(
                 owner=owner,
                 ttl_minutes=lock_ttl_minutes,
                 auto_only=True,
+                deploy=True,
             )
             if jobs:
                 lease_token = jobs[0].claim_token

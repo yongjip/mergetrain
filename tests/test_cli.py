@@ -279,6 +279,185 @@ class CliTests(unittest.TestCase):
         )
         self.assertNotIn("fixture-secret", out.getvalue())
 
+    def test_doctor_reports_operator_config_in_sync_with_integration_ref(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("drift"), encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "add", ".mergetrain.yaml"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    "HEAD",
+                ],
+                cwd=repo,
+                check=True,
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["config_drift"]["state"], "in_sync")
+        self.assertTrue(payload["config_drift"]["comparable"])
+        self.assertTrue(payload["config_drift"]["matches"])
+        self.assertEqual(payload["recommendations"], [])
+
+    def test_doctor_warns_when_operator_config_drifted_from_integration_ref(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                render_default_config("drift"), encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "add", ".mergetrain.yaml"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    "HEAD",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            config_path.write_text(
+                render_default_config("operator-copy"), encoding="utf-8"
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+
+        drift = payload["config_drift"]
+        self.assertEqual(code, 0)
+        self.assertEqual(drift["state"], "drifted")
+        self.assertTrue(drift["comparable"])
+        self.assertFalse(drift["matches"])
+        self.assertNotEqual(
+            drift["local"]["blob_sha"],
+            drift["integration"]["blob_sha"],
+        )
+        self.assertEqual(
+            payload["recommendations"][0]["code"],
+            "operator_config_drift",
+        )
+        self.assertEqual(payload["next_action"], "enqueue_clean_branch")
+
+    def test_doctor_compares_nested_repo_config_from_git_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            nested = repo / "services" / "api"
+            nested.mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            (nested / ".mergetrain.yaml").write_text(
+                render_default_config("nested"), encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "add nested config"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    "HEAD",
+                ],
+                cwd=repo,
+                check=True,
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(nested), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["config_drift"]["state"], "in_sync")
+        self.assertEqual(
+            payload["config_drift"]["local"]["path"],
+            "services/api/.mergetrain.yaml",
+        )
+
+    def test_doctor_does_not_invent_drift_without_an_integration_ref(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("drift"), encoding="utf-8"
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            payload["config_drift"]["state"],
+            "integration_ref_missing",
+        )
+        self.assertFalse(payload["config_drift"]["comparable"])
+        self.assertIsNone(payload["config_drift"]["matches"])
+        self.assertEqual(payload["recommendations"], [])
+
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
         # ok stays true (the run executed); the outcome is graded in `result`.
         failed = _results_payload([Job(id=1, task="a", branch="a", status="failed")])

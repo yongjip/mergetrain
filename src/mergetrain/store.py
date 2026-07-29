@@ -34,6 +34,7 @@ from .models import (
 
 RUNNER_LOCK_NAME = "runner"
 SCHEMA_VERSION = 9
+RUN_EVENT_RETENTION = 5000
 
 
 class Liveness:
@@ -1175,7 +1176,10 @@ def claim_next_job(
             job_id=job_id,
             phase="claiming",
             state="active",
-            message="Runner claimed 1 job",
+            message=(
+                f"{'Deploy' if deploy else 'Validation'} runner claimed 1 job"
+            ),
+            detail=f"mode={'deploy' if deploy else 'validate'}",
         )
     return get_job(conn, job_id)
 
@@ -1186,6 +1190,7 @@ def claim_all_queued(
     owner: str | None = None,
     ttl_minutes: int = 30,
     auto_only: bool = False,
+    deploy: bool = False,
 ) -> list[Job]:
     owner = owner or default_owner()
     with immediate(conn):
@@ -1225,7 +1230,11 @@ def claim_all_queued(
             claim_token=lock.token,
             phase="claiming",
             state="active",
-            message=f"Runner claimed {len(job_ids)} job(s)",
+            message=(
+                f"{'Deploy' if deploy else 'Validation'} runner claimed "
+                f"{len(job_ids)} job(s)"
+            ),
+            detail=f"mode={'deploy' if deploy else 'validate'}",
         )
     return [get_job(conn, job_id) for job_id in job_ids]
 
@@ -1394,6 +1403,7 @@ def claim_deploy_batch(
             phase="claiming",
             state="active",
             message=f"{operation_label.capitalize()} runner claimed {len(job_ids)} job(s)",
+            detail="mode=deploy",
         )
     return [get_job(conn, job_id) for job_id in job_ids]
 
@@ -1419,8 +1429,11 @@ def _record_run_event(
     conn.execute(
         """
         DELETE FROM run_events
-        WHERE id <= (SELECT COALESCE(MAX(id), 0) - 5000 FROM run_events)
-        """
+        WHERE id <= (
+          SELECT COALESCE(MAX(id), 0) - ? FROM run_events
+        )
+        """,
+        (RUN_EVENT_RETENTION,),
     )
     row = conn.execute("SELECT * FROM run_events WHERE id = ?", (cur.lastrowid,)).fetchone()
     assert row is not None

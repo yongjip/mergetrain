@@ -747,6 +747,30 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 f"gate {gate['name']}: runs={gate['runs']} "
                 f"median={gate['median_seconds']}s p95={gate['p95_seconds']}s"
             )
+        latency = payload["latency"]
+        for label, timing in (
+            ("queue wait", latency["queue_wait"]),
+            ("approval wait", latency["approval_wait"]),
+            ("validation run", latency["runs"]["validate"]),
+            ("deploy run", latency["runs"]["deploy"]),
+        ):
+            print(
+                f"{label}: samples={timing['samples']} "
+                f"median={timing['median_seconds']}s "
+                f"p95={timing['p95_seconds']}s"
+            )
+        for phase in latency["phases"]:
+            print(
+                f"phase {phase['mode']}/{phase['name']}: "
+                f"samples={phase['samples']} "
+                f"median={phase['median_seconds']}s "
+                f"p95={phase['p95_seconds']}s"
+            )
+        for recommendation in payload["recommendations"]:
+            print(
+                f"recommendation {recommendation['code']}: "
+                f"{recommendation['summary']}"
+            )
     return 0
 
 
@@ -818,6 +842,110 @@ def cmd_logs(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def _git_object_sha(
+    repo: Path, arguments: Sequence[str]
+) -> str:
+    completed = run_command(
+        ["git", *arguments],
+        cwd=repo,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]:
+    local_path = config.config_path.resolve()
+    local_exists = config.config_exists and local_path.is_file()
+    payload: dict[str, Any] = {
+        "state": "unavailable",
+        "comparable": False,
+        "matches": None,
+        "local": {
+            "exists": local_exists,
+            "path": str(local_path),
+            "blob_sha": "",
+        },
+        "integration": {
+            "ref": config.git.integration_ref,
+            "ref_exists": False,
+            "config_exists": False,
+            "blob_sha": "",
+        },
+    }
+    if not repo_root:
+        payload["state"] = "git_unavailable"
+        return payload
+    repo_path = Path(repo_root).resolve()
+    try:
+        relative_path = local_path.relative_to(repo_path).as_posix()
+    except ValueError:
+        payload["state"] = "config_outside_repo"
+        return payload
+    payload["local"]["path"] = relative_path
+    if not local_exists:
+        payload["state"] = "local_config_missing"
+        return payload
+
+    integration_ref = config.git.integration_ref
+    ref_exists = git_ref_exists(config.repo, integration_ref)
+    payload["integration"]["ref_exists"] = ref_exists
+    if not ref_exists:
+        payload["state"] = "integration_ref_missing"
+        return payload
+
+    local_sha = _git_object_sha(
+        repo_path,
+        ["hash-object", "--no-filters", "--", relative_path],
+    )
+    integration_sha = _git_object_sha(
+        repo_path,
+        ["rev-parse", "--verify", f"{integration_ref}:{relative_path}"],
+    )
+    payload["local"]["blob_sha"] = local_sha
+    payload["integration"]["blob_sha"] = integration_sha
+    payload["integration"]["config_exists"] = bool(integration_sha)
+    if not local_sha:
+        payload["state"] = "local_config_unreadable"
+        return payload
+    if not integration_sha:
+        payload["state"] = "integration_config_missing"
+        return payload
+
+    matches = local_sha == integration_sha
+    payload["state"] = "in_sync" if matches else "drifted"
+    payload["comparable"] = True
+    payload["matches"] = matches
+    return payload
+
+
+def _doctor_recommendations(
+    config_drift: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if config_drift["state"] != "drifted":
+        return []
+    return [
+        {
+            "code": "operator_config_drift",
+            "severity": "warning",
+            "summary": (
+                "The operator checkout configuration differs from the "
+                "known integration-ref configuration."
+            ),
+            "evidence": {
+                "local_blob_sha": config_drift["local"]["blob_sha"],
+                "integration_ref": config_drift["integration"]["ref"],
+                "integration_blob_sha": config_drift["integration"]["blob_sha"],
+            },
+            "actions": [
+                "review the configuration diff before queue-advancing commands",
+                "synchronize a clean operator checkout without discarding local work",
+            ],
+        }
+    ]
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     from .runtime import runtime_provenance
 
@@ -831,6 +959,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
+    repo_root = git_repo_root(config.repo)
+    config_drift = _config_drift(config, repo_root=repo_root)
     payload: dict[str, Any] = {
         "ok": True,
         "version": __version__,
@@ -857,14 +987,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             },
         },
         "git": {
-            "repo_root": git_repo_root(config.repo),
+            "repo_root": repo_root,
             "current_branch": git_current_branch(config.repo),
-            "worktree_clean": git_worktree_clean(config.repo) if git_repo_root(config.repo) else False,
+            "worktree_clean": git_worktree_clean(config.repo) if repo_root else False,
             "remote_url": remote_url,
             "remote_exists": bool(remote_url) or git_remote_exists(config.repo, config.git.remote),
             "integration_ref": config.git.integration_ref,
-            "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if git_repo_root(config.repo) else False,
+            "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if repo_root else False,
         },
+        "config_drift": config_drift,
+        "recommendations": _doctor_recommendations(config_drift),
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
         "validated_trains": validated_trains,
@@ -907,6 +1039,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "next action: "
             f"{_human_next_action(payload['next_action'], config.terminology)}"
         )
+        for recommendation in payload["recommendations"]:
+            print(
+                f"warning {recommendation['code']}: "
+                f"{recommendation['summary']}"
+            )
     return 0
 
 

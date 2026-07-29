@@ -14,6 +14,7 @@ from .config import MergetrainConfig
 from .errors import redact_secrets
 from .models import Job, RunEvent, RunnerLock
 from .store import (
+    RUN_EVENT_RETENTION,
     connect,
     get_job,
     get_lock,
@@ -28,6 +29,11 @@ GATE_EVENT = re.compile(
     r"^(?:Running|Passed|Reused|Skipped) gate (\d+)/(\d+): (.+)$"
 )
 COMPLETED_STATUSES = {"validated", "deployed", "blocked", "failed", "canceled"}
+TIMED_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
+RUN_MODES = ("validate", "deploy")
+SLOW_GATE_P95_SECONDS = 60.0
+MIN_RECOMMENDATION_SAMPLES = 3
+TERMINAL_RUN_PHASES = {"ready", "complete", "blocked", "failed", "canceled"}
 
 
 def _timestamp(value: str) -> datetime | None:
@@ -76,6 +82,258 @@ def _percentile(values: Sequence[float], percentile: float) -> float | None:
     ordered = sorted(values)
     index = max(0, ceil(percentile * len(ordered)) - 1)
     return round(ordered[index], 3)
+
+
+def _timing_summary(values: Sequence[float]) -> dict[str, Any]:
+    return {
+        "samples": len(values),
+        "median_seconds": round(median(values), 3) if values else None,
+        "p95_seconds": _percentile(values, 0.95),
+    }
+
+
+def _run_latency(
+    jobs: Sequence[Job], events: Sequence[RunEvent]
+) -> dict[str, Any]:
+    """Attribute observed runner time without inventing missing history.
+
+    Run events are append-only and carry a claim token. Successful validation
+    and deploy runs also carry at least one job-scoped assembly/completion
+    event, which lets us distinguish pre-validation queue wait from the human
+    approval wait before a later deploy. Older or truncated event histories
+    remain visible in coverage counts but do not become misleading zeroes.
+    """
+
+    jobs_by_id = {job.id: job for job in jobs}
+    job_ids_by_token: dict[str, set[int]] = defaultdict(set)
+    for job in jobs:
+        if job.claim_token:
+            job_ids_by_token[job.claim_token].add(job.id)
+    events_by_token: dict[str, list[RunEvent]] = defaultdict(list)
+    for event in events:
+        if event.claim_token:
+            events_by_token[event.claim_token].append(event)
+
+    run_totals: dict[str, list[float]] = defaultdict(list)
+    phase_totals: dict[tuple[str, str], list[float]] = defaultdict(list)
+    queue_waits: list[float] = []
+    approval_waits: list[float] = []
+    complete_runs = 0
+    associated_runs = 0
+    observed_starts = 0
+    observed_terminals = 0
+
+    for claim_token, token_events in events_by_token.items():
+        ordered = sorted(token_events, key=lambda event: event.id)
+        if not ordered:
+            continue
+        run_phases = {event.phase for event in ordered}
+        claim_messages = [
+            event.message.lower()
+            for event in ordered
+            if event.phase == "claiming"
+        ]
+        claim_details = {
+            event.detail for event in ordered if event.phase == "claiming"
+        }
+        mode = (
+            "deploy"
+            if "mode=deploy" in claim_details
+            or {"pushing", "verifying"} & run_phases
+            or any("deploy runner" in message for message in claim_messages)
+            else "validate"
+        )
+        claim_event = next(
+            (
+                event
+                for event in ordered
+                if event.phase == "claiming" and event.state == "active"
+            ),
+            None,
+        )
+        terminal = ordered[-1]
+        has_terminal = terminal.phase in TERMINAL_RUN_PHASES
+        if claim_event is not None:
+            observed_starts += 1
+        if has_terminal:
+            observed_terminals += 1
+        if claim_event is not None and has_terminal:
+            duration = elapsed_seconds(
+                claim_event.created_at, terminal.created_at
+            )
+            if duration is not None:
+                run_totals[mode].append(duration)
+                complete_runs += 1
+
+        for phase in TIMED_PHASES:
+            observed = [event for event in ordered if event.phase == phase]
+            active = next(
+                (event for event in observed if event.state == "active"),
+                None,
+            )
+            finished = next(
+                (
+                    event
+                    for event in reversed(observed)
+                    if event.state != "active"
+                ),
+                None,
+            )
+            if active is None or finished is None or finished.id < active.id:
+                continue
+            duration = elapsed_seconds(active.created_at, finished.created_at)
+            if duration is not None:
+                phase_totals[(mode, phase)].append(duration)
+
+        job_ids = {
+            event.job_id for event in ordered if event.job_id is not None
+        }
+        job_ids.update(job_ids_by_token[claim_token])
+        members = [
+            jobs_by_id[job_id]
+            for job_id in sorted(job_ids)
+            if job_id in jobs_by_id
+        ]
+        if not members:
+            continue
+        associated_runs += 1
+        if claim_event is None:
+            continue
+        started = _timestamp(claim_event.created_at)
+        if started is None:
+            continue
+
+        validated = [
+            parsed
+            for member in members
+            if (parsed := _timestamp(member.validated_at)) is not None
+        ]
+        if mode == "deploy" and validated:
+            approval_started = max(validated)
+            if approval_started <= started:
+                approval_waits.append(
+                    round((started - approval_started).total_seconds(), 3)
+                )
+            continue
+
+        requested = [
+            parsed
+            for member in members
+            if (parsed := _timestamp(member.requested_at)) is not None
+        ]
+        if requested:
+            first_request = min(requested)
+            if first_request <= started:
+                queue_waits.append(
+                    round((started - first_request).total_seconds(), 3)
+                )
+
+    phase_summaries = [
+        {
+            "mode": mode,
+            "name": phase,
+            **_timing_summary(phase_totals[(mode, phase)]),
+        }
+        for mode in RUN_MODES
+        for phase in TIMED_PHASES
+        if phase_totals[(mode, phase)]
+    ]
+    return {
+        "queue_wait": _timing_summary(queue_waits),
+        "approval_wait": _timing_summary(approval_waits),
+        "runs": {
+            mode: _timing_summary(run_totals[mode]) for mode in RUN_MODES
+        },
+        "phases": phase_summaries,
+        "coverage": {
+            "source": "run_events",
+            "retained_events": len(events),
+            "retention_limit": RUN_EVENT_RETENTION,
+            "history_complete": len(events) < RUN_EVENT_RETENTION,
+            "observed_runs": len(events_by_token),
+            "runs_with_observed_start": observed_starts,
+            "runs_with_terminal": observed_terminals,
+            "complete_runs": complete_runs,
+            "runs_with_job_identity": associated_runs,
+        },
+    }
+
+
+def _stats_recommendations(
+    config: MergetrainConfig,
+    gates: Sequence[dict[str, Any]],
+    latency: dict[str, Any],
+) -> list[dict[str, Any]]:
+    scoped = {gate.name: bool(gate.paths) for gate in config.gates}
+    recommendations: list[dict[str, Any]] = []
+    for gate in gates:
+        name = str(gate["name"])
+        if name not in scoped:
+            continue
+        p95 = gate["p95_seconds"]
+        samples = int(gate["timed_runs"])
+        if (
+            p95 is None
+            or float(p95) < SLOW_GATE_P95_SECONDS
+            or samples < MIN_RECOMMENDATION_SAMPLES
+        ):
+            continue
+        is_scoped = scoped[name]
+        code = "slow_gate" if is_scoped else "slow_unscoped_gate"
+        actions = ["parallelize or narrow the gate command"]
+        if not is_scoped:
+            actions.append("add fail-closed paths for files that affect this gate")
+        recommendations.append(
+            {
+                "code": code,
+                "severity": "info",
+                "summary": (
+                    f"Gate {gate['name']!r} has p95 {float(p95):.3f}s "
+                    f"across {samples} timed runs."
+                ),
+                "evidence": {
+                    "gate": gate["name"],
+                    "p95_seconds": p95,
+                    "timed_runs": samples,
+                    "threshold_seconds": SLOW_GATE_P95_SECONDS,
+                    "path_scoped": is_scoped,
+                },
+                "actions": actions,
+            }
+        )
+
+    approval = latency["approval_wait"]
+    deploy = latency["runs"]["deploy"]
+    approval_p95 = approval["p95_seconds"]
+    deploy_p95 = deploy["p95_seconds"]
+    if (
+        approval["samples"] >= MIN_RECOMMENDATION_SAMPLES
+        and approval_p95 is not None
+        and float(approval_p95) >= SLOW_GATE_P95_SECONDS
+        and deploy_p95 is not None
+        and float(approval_p95) > float(deploy_p95)
+    ):
+        recommendations.append(
+            {
+                "code": "approval_wait_dominates",
+                "severity": "info",
+                "summary": (
+                    f"Approval wait p95 {float(approval_p95):.3f}s exceeds "
+                    f"deploy-run p95 {float(deploy_p95):.3f}s."
+                ),
+                "evidence": {
+                    "approval_wait_p95_seconds": approval_p95,
+                    "deploy_run_p95_seconds": deploy_p95,
+                    "samples": approval["samples"],
+                    "threshold_seconds": SLOW_GATE_P95_SECONDS,
+                },
+                "actions": [
+                    "validate only after the intended train is final",
+                    "request approval immediately after validation",
+                ],
+            }
+        )
+    return recommendations
 
 
 def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
@@ -302,11 +560,13 @@ def stats_payload(
             {
                 "name": name,
                 "runs": len(runs),
+                "timed_runs": len(elapsed),
                 "state_counts": dict(sorted(states.items())),
                 "median_seconds": round(median(elapsed), 3) if elapsed else None,
                 "p95_seconds": _percentile(elapsed, 0.95),
             }
         )
+    latency = _run_latency(jobs, events)
     return {
         "ok": True,
         "since": since,
@@ -330,9 +590,12 @@ def stats_payload(
         "p95_duration_seconds": _percentile(durations, 0.95),
         "average_queue_seconds": round(mean(queue_times), 3) if queue_times else None,
         "gates": per_gate,
+        "latency": latency,
+        "recommendations": _stats_recommendations(config, per_gate, latency),
         "coverage": {
             "queue_history": "unbounded",
-            "gate_events": "latest_5000",
+            "gate_events": f"latest_{RUN_EVENT_RETENTION}",
+            "phase_events": f"latest_{RUN_EVENT_RETENTION}",
         },
     }
 

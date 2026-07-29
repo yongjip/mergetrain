@@ -8,6 +8,9 @@ integration spine. This page takes about five minutes; the
 [README](../README.md#the-problem) explains what goes wrong without a queue.
 If you are deciding between one PR per agent branch and a local train, read the
 [PR-first comparison](pr-workflows.md) before adopting either workflow.
+After the first few trains, use the [efficient-operation
+guide](best-practices.md) to interpret latency, size batches, scope gates, and
+decide whether a persistent cache is warranted.
 
 ## 1. Initialize config
 

@@ -39,7 +39,7 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: current release (`v1.1.0`). The machine contract is frozen —
+> Status: current release (`v1.1.1`). The machine contract is frozen —
 > additive-only within contract major 1 — and the real-repo soak gate is
 > complete. Built to scratch my own itch first — published in case it scratches
 > yours too.
@@ -377,7 +377,7 @@ unattended deployment or validated-gate reuse.
 
 ## Documentation
 
-- [Quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md) · [Install](https://github.com/yongjip/mergetrain/blob/main/docs/install.md)
+- [Quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md) · [Efficient operation](https://github.com/yongjip/mergetrain/blob/main/docs/best-practices.md) · [Install](https://github.com/yongjip/mergetrain/blob/main/docs/install.md)
 - [CLI reference](https://github.com/yongjip/mergetrain/blob/main/docs/cli.md) — every command and flag
 - [Config reference](https://github.com/yongjip/mergetrain/blob/main/docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
 - [Design & architecture](https://github.com/yongjip/mergetrain/blob/main/docs/design.md) — the model, data model, and safety guarantees
@@ -392,7 +392,7 @@ unattended deployment or validated-gate reuse.
 
 ## Status
 
-`v1.1.0` is the current release. The machine contract is additive-only within
+`v1.1.1` is the current release. The machine contract is additive-only within
 contract major 1: a key may be added, never removed or renamed, and a golden
 key-set fingerprint over 25 payload surfaces plus the JSONL frames fails CI on
 any un-versioned shape change (see
