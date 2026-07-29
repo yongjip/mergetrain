@@ -33,6 +33,12 @@ terminology:
   # Human-facing label only. Machine status remains `deployed`.
   git_operation: deploy
 
+gate_parallelism:
+  # ruff and mypy are independent; the pytest-xdist gate consumes the full
+  # local gate budget and therefore never overlaps another check.
+  max_workers: 4
+  timeout_seconds: 3600
+
 gates:
   - name: diff-check
     run: git diff --check ${integration_ref}..HEAD
@@ -41,12 +47,20 @@ gates:
   # (`pip install -e ".[dev]"`), and a missing tool fails the gate on purpose.
   - name: ruff
     run: ruff check .
+    parallel_group: quality
+    workers: 1
   - name: mypy
     run: mypy
+    parallel_group: quality
+    workers: 1
   # Match CI's parallel pytest invocation. The repo already requires the dev
   # extra for ruff and mypy, so a missing pytest/xdist fails closed too.
   - name: tests
     run: python3.12 -m pytest -q -n auto
+    needs:
+      - ruff
+      - mypy
+    workers: 4
 
 deploy:
   verify:

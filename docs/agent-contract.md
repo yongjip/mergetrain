@@ -15,6 +15,8 @@ Agents interacting with mergetrain must follow this contract.
 7. Let one runner or daemon own merge, test, push, and verify.
 8. Fix blocked or failed work in the owning branch, commit a clean result, then
    run `mergetrain retry <job-id>` to enqueue a fresh SHA-pinned job.
+9. Replace a validated train only with `mergetrain supersede`; validate and
+   approve the replacement as a new SHA-pinned train.
 
 ## Machine-readable contract
 
@@ -64,6 +66,10 @@ identity and member HEADs. A later deploy must not silently include newer
 queued jobs. Validated-but-not-deployed branches are not GC deletion candidates.
 Deploy approval by itself does not authorize gate reuse; that is a separate,
 explicit policy decision.
+
+Changing an approved train also invalidates approval. `supersede` records the
+old/new relationship atomically for audit, but the replacement never inherits
+validation, gate-reuse identity, or deploy authorization.
 
 When a runner is active, observe it with read-only commands instead of inspecting
 the process tree:

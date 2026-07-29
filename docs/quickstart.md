@@ -113,6 +113,17 @@ Only an unchanged safety identity reuses the exact validation SHA. Otherwise the
 normal full gate path runs (or the policy fails closed), and post-push verify
 hooks still run.
 
+If the approved contents change before deploy, replace the train atomically
+instead of canceling and enqueueing its members one at a time:
+
+```sh
+mergetrain supersede --train-id <old-id> \
+  --replacement "updated task" codex/updated /path/to/clean-worktree --json
+```
+
+The replacement captures exact HEADs but carries no validation or approval.
+Run `run-batch --validate-only` again and approve the new train identity.
+
 ## 7. Auto-only daemon
 
 Use `--auto` only when unattended deploy is explicitly approved:

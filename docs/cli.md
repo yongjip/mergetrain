@@ -27,6 +27,7 @@ mergetrain version [--json]
 mergetrain demo [--dir PATH] [--keep] [--pause]
 mergetrain enqueue --task TASK --branch BRANCH [options]
 mergetrain retry JOB_ID [--rebase] [--json]
+mergetrain supersede --train-id ID --replacement TASK BRANCH WORKTREE [--replacement ...] [--json]
 mergetrain status [--json] [--limit N]
 mergetrain events [--job ID | --train-id ID] [--after EVENT_ID] [--follow] [--jsonl]
 mergetrain inspect JOB_ID [--event-limit N] [--json]
@@ -504,12 +505,43 @@ configured policy for that command; `deploy.reuse.enabled: true` is the persiste
 alternative. `--preview` does not claim, gate, or push, but configured fingerprint
 commands still run so the decision matches a real deploy.
 Its JSON `reuse` object reports `authorized`, `eligible`, `action`, mismatch
-`reasons`, `validation_sha`, and the exact `reused_validation_sha` when safe.
+`reasons`, exact `identity_checks`, a per-gate plan, `validation_sha`, and the
+exact `reused_validation_sha` when safe. `estimated_savings` includes the
+history-derived seconds, sample count, coverage, and confidence. It is advisory
+only and always carries `authorizes_reuse: false`; an estimate cannot enable
+reuse.
 Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
 `reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
 Preview JSON includes `push_plan.remote` and each exact `HEAD:<ref>` refspec.
 `terminology.git_operation` changes only human wording and the preferred alias;
 machine JSON continues to report `mode=deploy` and `status=deployed`.
+
+## `supersede`
+
+Atomically retire one validated train and enqueue an exact replacement train
+from clean task worktrees:
+
+```sh
+mergetrain supersede \
+  --train-id <validated-train-id> \
+  --replacement "update API" codex/api /path/to/api-worktree \
+  --replacement "update docs" codex/docs /path/to/docs-worktree \
+  --note "combined release" \
+  --json
+```
+
+Each `--replacement` takes exactly `TASK BRANCH WORKTREE`. mergetrain verifies
+the worktree's current branch, requires a clean tree, and captures its exact
+HEAD plus the current integration-base SHA. In one SQLite transaction it marks
+every member of the old train `canceled`, preserves its validation evidence for
+audit, and creates manual queued replacement jobs linked by `supersession_id`
+and `supersedes_train_id`. The new rows never inherit validation, validated-gate
+reuse identity, `--auto`, or deploy approval. A partial write rolls back.
+
+The command refuses a non-validated or partial train, duplicate/active
+replacement branches, and a live runner lock. `status`, `events`, and `inspect`
+show both sides of the relationship. Validate the new train and obtain fresh
+approval for its new train ID before deployment.
 
 ## `daemon`
 

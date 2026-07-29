@@ -13,6 +13,7 @@ from .config import CONFIG_VERSION, MergetrainConfig
 from .errors import redact_secrets
 from .models import Job, RunEvent, RunnerLock
 from .observability import _gate_runs, elapsed_seconds
+from .reuse import reuse_explanation
 from .store import (
     _parse_utc,
     connect,
@@ -38,7 +39,7 @@ PHASES = (
 )
 
 GATE_EVENT = re.compile(
-    r"^(?:Running|Passed|Reused|Skipped) gate (\d+)/(\d+): (.+)$"
+    r"^(?:Running|Passed|Reused|Skipped|Failed|Canceled) gate (\d+)/(\d+): (.+)$"
 )
 ESTIMATE_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
 ESTIMATE_SAMPLE_LIMIT = 20
@@ -611,6 +612,12 @@ def build_dashboard_snapshot(
             },
             "events": [event.to_dict() for event in raw_events],
             "validated_trains": validated_train_summaries(conn),
+            "reuse": reuse_explanation(
+                config,
+                selected_jobs,
+                decision=None,
+                gate_runs=_gate_runs(history_events),
+            ),
         }
         payload["progress"] = _progress(
             selected_jobs,

@@ -16,6 +16,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
@@ -35,6 +36,7 @@ from .errors import (
 from .models import Job
 from .path_gates import any_path_matches, parse_name_status_z
 from .reuse import (
+    ReuseCheck,
     ReuseDecision,
     environment_sha,
     gate_policy_sha,
@@ -184,12 +186,15 @@ def _run_managed(
     pulse: Pulse | None,
     pulse_interval_seconds: float,
     timeout_seconds: float | None,
+    cancel_event: threading.Event | None = None,
 ) -> subprocess.CompletedProcess[str]:
     # Always an argv list, never a platform shell. A gate string is turned into
     # argv by `_shell_command`, which resolves a POSIX sh even on Windows, so
     # `${repo}`/`${worktree}` escaping has one dialect to target. Reintroducing
     # `shell=True` here would silently run gates under cmd.exe on Windows and
     # break that contract, so the option is deliberately absent.
+    if cancel_event is not None and cancel_event.is_set():
+        raise CancellationRequested("command canceled before it started")
     if pulse is not None:
         pulse()
     process = subprocess.Popen(
@@ -236,9 +241,16 @@ def _run_managed(
     started = time.monotonic()
     next_pulse = started + max(0.1, pulse_interval_seconds)
     timed_out = False
+    canceled = False
     try:
         while process.poll() is None:
             now = time.monotonic()
+            if cancel_event is not None and cancel_event.is_set():
+                if _stop_process(process):
+                    canceled = True
+                    stderr_tail.append("command canceled by gate scheduler\n")
+                    break
+                continue
             if timeout_seconds is not None and now - started >= timeout_seconds:
                 if _stop_process(process):
                     timed_out = True
@@ -277,6 +289,8 @@ def _run_managed(
     if timed_out:
         returncode = 124
     completed = subprocess.CompletedProcess(command, returncode, stdout, stderr)
+    if canceled:
+        raise CancellationRequested("command canceled by gate scheduler")
     if check and completed.returncode != 0:
         raise CommandFailed(command, completed.returncode, stdout, stderr, str(cwd))
     return completed
@@ -351,6 +365,7 @@ def run_shell(
     pulse: Pulse | None = None,
     pulse_interval_seconds: float = 10,
     timeout_seconds: float | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> subprocess.CompletedProcess[str]:
     if log:
         log.write(f"\n$ /bin/sh -c {redact_secrets(command)!r}\n")
@@ -368,6 +383,7 @@ def run_shell(
             pulse=pulse,
             pulse_interval_seconds=pulse_interval_seconds,
             timeout_seconds=timeout_seconds,
+            cancel_event=cancel_event,
         )
     completed = subprocess.run(
         _shell_command(command), cwd=str(cwd), env=env, shell=False,
@@ -578,6 +594,41 @@ class _BisectAbort(Exception):
     """Bisect isolation cannot classify the failure from gate evidence."""
 
 
+@dataclass(slots=True)
+class _GateOutcome:
+    output: str
+    error: BaseException | None = None
+
+
+def _gate_dependencies(gates: Sequence[GateConfig]) -> dict[str, tuple[str, ...]]:
+    """Resolve omitted dependencies into deterministic sequential stages.
+
+    Contiguous gates with the same non-empty ``parallel_group`` form one stage.
+    Every member of a stage defaults to depending on every member of the prior
+    stage. Ungrouped gates are one-gate stages, preserving the legacy strictly
+    sequential order. Explicit ``needs`` replaces that default.
+    """
+
+    stages: list[list[GateConfig]] = []
+    for gate in gates:
+        if (
+            gate.parallel_group
+            and stages
+            and stages[-1][0].parallel_group == gate.parallel_group
+        ):
+            stages[-1].append(gate)
+        else:
+            stages.append([gate])
+
+    dependencies: dict[str, tuple[str, ...]] = {}
+    prior_names: tuple[str, ...] = ("diff-check",)
+    for stage in stages:
+        for gate in stage:
+            dependencies[gate.name] = gate.needs or prior_names
+        prior_names = tuple(gate.name for gate in stage)
+    return dependencies
+
+
 class GitRunner:
     """Executes queued branches in temporary Git worktrees."""
 
@@ -741,6 +792,7 @@ class GitRunner:
         worktree: Path,
         log: IO[str],
         pulse: Pulse | None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         command = expand_command(gate.run, config=self.config, worktree=worktree)
         env = command_env(config=self.config, worktree=worktree)
@@ -753,8 +805,243 @@ class GitRunner:
             check=True,
             pulse=pulse,
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            timeout_seconds=(
+                gate.timeout_seconds
+                if gate.timeout_seconds is not None
+                else self.config.queue.command_timeout_seconds
+            ),
+            cancel_event=cancel_event,
         )
+
+    def _run_configured_gate_plan(
+        self,
+        *,
+        worktree: Path,
+        log: IO[str],
+        pulse: Pulse | None,
+        on_gate: GateProgress | None,
+        initial_states: dict[str, tuple[str, str]],
+    ) -> None:
+        """Run configured gates in deterministic, resource-bounded waves.
+
+        Only gates sharing an explicit ``parallel_group`` may overlap. Each
+        wave emits active and terminal events in declaration order and buffers
+        per-gate logs before appending them in that same order, so completion
+        races never leak into JSON or log ordering. Worker threads never touch
+        SQLite; the main scheduler alone invokes ``pulse`` and ``on_gate``.
+        """
+
+        gates = self.config.gates
+        if not gates:
+            return
+        total = 1 + len(gates)
+        indexes = {gate.name: index for index, gate in enumerate(gates, start=2)}
+        dependencies = _gate_dependencies(gates)
+        completed = {"diff-check"}
+        pending = [gate for gate in gates if gate.name not in initial_states]
+
+        for gate in gates:
+            initial_state = initial_states.get(gate.name)
+            if initial_state is None:
+                continue
+            event_state, detail = initial_state
+            if event_state == "skipped":
+                log.write(f"\n## gate skipped: {gate.name} ({detail})\n")
+            if on_gate:
+                on_gate(
+                    gate.name,
+                    event_state,
+                    indexes[gate.name],
+                    total,
+                    detail,
+                )
+            completed.add(gate.name)
+
+        plan_started = time.monotonic()
+        plan_timeout = self.config.gate_parallelism.timeout_seconds
+        pulse_interval = max(
+            0.1, float(self.config.queue.heartbeat_interval_seconds)
+        )
+        next_pulse = time.monotonic() + pulse_interval
+
+        while pending:
+            ready = [
+                gate
+                for gate in pending
+                if set(dependencies[gate.name]).issubset(completed)
+            ]
+            if not ready:
+                unresolved = ", ".join(gate.name for gate in pending)
+                raise MergetrainError(
+                    f"configured gate dependencies cannot make progress: {unresolved}"
+                )
+
+            first = ready[0]
+            candidates = (
+                [
+                    gate
+                    for gate in ready
+                    if gate.parallel_group == first.parallel_group
+                ]
+                if first.parallel_group
+                else [first]
+            )
+            selected: list[GateConfig] = []
+            used_workers = 0
+            for gate in candidates:
+                if (
+                    used_workers + gate.workers
+                    > self.config.gate_parallelism.max_workers
+                ):
+                    continue
+                selected.append(gate)
+                used_workers += gate.workers
+            if not selected:
+                # Config validation rejects an individual gate whose weight is
+                # over the ceiling, so this is defensive rather than reachable.
+                raise MergetrainError(
+                    f"gate {first.name!r} exceeds the configured worker ceiling"
+                )
+
+            for gate in selected:
+                if on_gate:
+                    on_gate(
+                        gate.name,
+                        "active",
+                        indexes[gate.name],
+                        total,
+                        _dashboard_command(gate.run),
+                    )
+
+            cancel_event = threading.Event()
+
+            def execute(
+                gate: GateConfig,
+                *,
+                batch_cancel: threading.Event = cancel_event,
+            ) -> _GateOutcome:
+                gate_log = io.StringIO()
+                try:
+                    self._run_gate(
+                        gate,
+                        worktree=worktree,
+                        log=gate_log,
+                        pulse=None,
+                        cancel_event=batch_cancel,
+                    )
+                except BaseException as exc:
+                    if not isinstance(exc, CancellationRequested):
+                        batch_cancel.set()
+                    return _GateOutcome(gate_log.getvalue(), exc)
+                return _GateOutcome(gate_log.getvalue())
+
+            futures: dict[str, Future[_GateOutcome]] = {}
+            monitor_error: BaseException | None = None
+            with ThreadPoolExecutor(
+                max_workers=len(selected),
+                thread_name_prefix="mergetrain-gate",
+            ) as executor:
+                for gate in selected:
+                    futures[gate.name] = executor.submit(execute, gate)
+                unfinished = set(futures.values())
+                while unfinished:
+                    _, unfinished = wait(unfinished, timeout=0.1)
+                    now = time.monotonic()
+                    if (
+                        plan_timeout is not None
+                        and now - plan_started >= plan_timeout
+                        and monitor_error is None
+                    ):
+                        monitor_error = CommandFailed(
+                            "configured gate plan",
+                            124,
+                            stderr=(
+                                "gate plan timed out after "
+                                f"{plan_timeout:g} seconds"
+                            ),
+                            cwd=str(worktree),
+                        )
+                        cancel_event.set()
+                    if pulse is not None and now >= next_pulse:
+                        try:
+                            pulse()
+                        except BaseException as exc:
+                            if monitor_error is None:
+                                monitor_error = exc
+                                cancel_event.set()
+                        next_pulse = now + pulse_interval
+
+            outcomes = {
+                gate.name: futures[gate.name].result() for gate in selected
+            }
+            for gate in selected:
+                output = outcomes[gate.name].output
+                if output:
+                    log.write(output)
+            log.flush()
+
+            for gate in selected:
+                error = outcomes[gate.name].error
+                if error is None and monitor_error is None:
+                    terminal_state = "success"
+                elif error is None:
+                    terminal_state = "canceled"
+                elif isinstance(error, CancellationRequested):
+                    terminal_state = "canceled"
+                else:
+                    terminal_state = "failure"
+                if on_gate:
+                    failure_detail = "canceled"
+                    if isinstance(error, CommandFailed):
+                        failure_detail = f"exit_code={error.returncode}"
+                    elif error is not None:
+                        failure_detail = type(error).__name__
+                    elif monitor_error is not None:
+                        failure_detail = type(monitor_error).__name__
+                    on_gate(
+                        gate.name,
+                        terminal_state,
+                        indexes[gate.name],
+                        total,
+                        (
+                            _dashboard_command(gate.run)
+                            if terminal_state == "success"
+                            else failure_detail
+                        ),
+                    )
+
+            if monitor_error is not None:
+                raise monitor_error
+            failure = next(
+                (
+                    outcome.error
+                    for gate in selected
+                    if (outcome := outcomes[gate.name]).error is not None
+                    and not isinstance(
+                        outcome.error, CancellationRequested
+                    )
+                ),
+                None,
+            )
+            if failure is not None:
+                raise failure
+            cancellation = next(
+                (
+                    outcome.error
+                    for gate in selected
+                    if isinstance(
+                        (outcome := outcomes[gate.name]).error,
+                        CancellationRequested,
+                    )
+                ),
+                None,
+            )
+            if cancellation is not None:
+                raise cancellation
+
+            for gate in selected:
+                completed.add(gate.name)
+                pending.remove(gate)
 
     def _changed_paths(
         self,
@@ -829,22 +1116,22 @@ class GitRunner:
                 log=log,
                 pulse=pulse,
             )
-        for index, gate in enumerate(self.config.gates, start=2):
+        initial_states: dict[str, tuple[str, str]] = {}
+        for gate in self.config.gates:
             if (
                 gate.paths
                 and changed_paths is not None
                 and not any_path_matches(gate.paths, changed_paths)
             ):
                 reason = "no changed paths matched configured paths"
-                log.write(f"\n## gate skipped: {gate.name} ({reason})\n")
-                if on_gate:
-                    on_gate(gate.name, "skipped", index, total, reason)
-                continue
-            if on_gate:
-                on_gate(gate.name, "active", index, total, _dashboard_command(gate.run))
-            self._run_gate(gate, worktree=worktree, log=log, pulse=pulse)
-            if on_gate:
-                on_gate(gate.name, "success", index, total, _dashboard_command(gate.run))
+                initial_states[gate.name] = ("skipped", reason)
+        self._run_configured_gate_plan(
+            worktree=worktree,
+            log=log,
+            pulse=pulse,
+            on_gate=on_gate,
+            initial_states=initial_states,
+        )
 
     def _run_verify_hooks(
         self, *, worktree: Path, log: IO[str], pulse: Pulse | None
@@ -941,28 +1228,185 @@ class GitRunner:
                 action="rerun",
                 validation_sha=validation_sha,
                 reasons=("validated gate reuse is not authorized",),
+                checks=(
+                    ReuseCheck(
+                        code="authorization",
+                        status="mismatch",
+                        expected=True,
+                        actual=False,
+                        detail="validated gate reuse is not authorized",
+                    ),
+                ),
             )
 
         reasons: list[str] = []
-        if not jobs or len({job.train_id for job in jobs}) != 1:
+        checks: list[ReuseCheck] = [
+            ReuseCheck(
+                code="authorization",
+                status="match",
+                expected=True,
+                actual=True,
+                detail="reuse was explicitly authorized",
+            )
+        ]
+
+        train_ids = sorted({job.train_id for job in jobs if job.train_id})
+        membership_matches = bool(jobs) and len(train_ids) == 1
+        checks.append(
+            ReuseCheck(
+                code="train_membership",
+                status="match" if membership_matches else "mismatch",
+                expected="one non-empty train id",
+                actual=train_ids,
+                detail=(
+                    "train membership is complete"
+                    if membership_matches
+                    else "train membership is incomplete or mixed"
+                ),
+            )
+        )
+        if not membership_matches:
             reasons.append("train membership is incomplete or mixed")
-        if len({job.train_size for job in jobs}) != 1 or (
-            jobs and jobs[0].train_size != len(jobs)
-        ):
+
+        train_sizes = sorted({job.train_size for job in jobs})
+        size_matches = bool(
+            jobs
+            and len(train_sizes) == 1
+            and jobs[0].train_size == len(jobs)
+        )
+        checks.append(
+            ReuseCheck(
+                code="train_size",
+                status="match" if size_matches else "mismatch",
+                expected=len(jobs),
+                actual=train_sizes,
+                detail=(
+                    "validated train size matches membership"
+                    if size_matches
+                    else "train size does not match its validated membership"
+                ),
+            )
+        )
+        if not size_matches:
             reasons.append("train size does not match its validated membership")
-        if len(validation_shas) != 1:
+
+        validation_sha_matches = len(validation_shas) == 1
+        checks.append(
+            ReuseCheck(
+                code="validation_commit",
+                status="match" if validation_sha_matches else "mismatch",
+                expected="one shared validation SHA",
+                actual=sorted(validation_shas),
+                detail=(
+                    "validated jobs share one validation SHA"
+                    if validation_sha_matches
+                    else "validated jobs do not share one validation SHA"
+                ),
+            )
+        )
+        if not validation_sha_matches:
             reasons.append("validated jobs do not share one validation SHA")
-        if len({job.validation_base_sha for job in jobs}) != 1 or (
-            jobs and jobs[0].validation_base_sha != integration_base_sha
-        ):
+
+        validation_bases = sorted(
+            {job.validation_base_sha for job in jobs if job.validation_base_sha}
+        )
+        base_matches = bool(
+            jobs
+            and len(validation_bases) == 1
+            and jobs[0].validation_base_sha == integration_base_sha
+        )
+        checks.append(
+            ReuseCheck(
+                code="integration_base",
+                status="match" if base_matches else "mismatch",
+                expected=integration_base_sha,
+                actual=validation_bases,
+                detail=(
+                    "integration ref still matches validation"
+                    if base_matches
+                    else "integration ref moved since validation"
+                ),
+            )
+        )
+        if not base_matches:
             reasons.append("integration ref moved since validation")
-        if jobs and train_identity_sha(jobs) != jobs[0].validation_train_sha:
+
+        current_train_identity = train_identity_sha(jobs) if jobs else ""
+        recorded_train_identity = jobs[0].validation_train_sha if jobs else ""
+        train_identity_matches = bool(
+            jobs
+            and recorded_train_identity
+            and current_train_identity == recorded_train_identity
+        )
+        checks.append(
+            ReuseCheck(
+                code="train_identity",
+                status="match" if train_identity_matches else "mismatch",
+                expected=recorded_train_identity,
+                actual=current_train_identity,
+                detail=(
+                    "train membership identity matches validation"
+                    if train_identity_matches
+                    else "train membership identity changed since validation"
+                ),
+            )
+        )
+        if jobs and current_train_identity != recorded_train_identity:
             reasons.append("train membership identity changed since validation")
-        if jobs and gate_policy_sha(self.config) != jobs[0].validation_gate_policy_sha:
+
+        current_policy_sha = gate_policy_sha(self.config)
+        recorded_policy_sha = jobs[0].validation_gate_policy_sha if jobs else ""
+        policy_matches = bool(
+            jobs
+            and recorded_policy_sha
+            and current_policy_sha == recorded_policy_sha
+        )
+        checks.append(
+            ReuseCheck(
+                code="gate_policy",
+                status="match" if policy_matches else "mismatch",
+                expected=recorded_policy_sha,
+                actual=current_policy_sha,
+                detail=(
+                    "gate and fingerprint policy matches validation"
+                    if policy_matches
+                    else "gate or fingerprint policy changed since validation"
+                ),
+            )
+        )
+        if jobs and current_policy_sha != recorded_policy_sha:
             reasons.append("gate or fingerprint policy changed since validation")
-        if jobs and validation_age_minutes(jobs[0].validated_at) > (
-            self.config.deploy.reuse.max_age_minutes
-        ):
+
+        age_minutes = (
+            validation_age_minutes(jobs[0].validated_at)
+            if jobs
+            else float("inf")
+        )
+        age_matches = (
+            age_minutes <= self.config.deploy.reuse.max_age_minutes
+        )
+        checks.append(
+            ReuseCheck(
+                code="validation_age",
+                status="match" if age_matches else "mismatch",
+                expected={
+                    "maximum_minutes": self.config.deploy.reuse.max_age_minutes
+                },
+                actual={
+                    "age_minutes": (
+                        round(age_minutes, 3)
+                        if age_minutes != float("inf")
+                        else None
+                    )
+                },
+                detail=(
+                    "validation is within the configured reuse age"
+                    if age_matches
+                    else "validation is older than the configured reuse age"
+                ),
+            )
+        )
+        if jobs and not age_matches:
             reasons.append("validation is older than the configured reuse age")
 
         required_fields = (
@@ -972,18 +1416,65 @@ class GitRunner:
             "validation_train_sha",
         )
         for field in required_fields:
-            values = {getattr(job, field) for job in jobs if getattr(job, field)}
-            if len(values) != 1 or len(values) != len(
-                {getattr(job, field) for job in jobs}
-            ):
-                reasons.append(f"validated jobs lack one shared {field}")
+            all_values = {getattr(job, field) for job in jobs}
+            values = {value for value in all_values if value}
+            shared = len(values) == 1 and len(values) == len(all_values)
+            detail = (
+                f"validated jobs share {field}"
+                if shared
+                else f"validated jobs lack one shared {field}"
+            )
+            checks.append(
+                ReuseCheck(
+                    code=f"shared_{field}",
+                    status="match" if shared else "mismatch",
+                    expected="one shared non-empty SHA",
+                    actual=sorted(values),
+                    detail=detail,
+                )
+            )
+            if not shared:
+                reasons.append(detail)
 
-        if validation_sha and not git_ref_exists(worktree, validation_sha):
+        commit_exists = bool(
+            validation_sha and git_ref_exists(worktree, validation_sha)
+        )
+        checks.append(
+            ReuseCheck(
+                code="validation_commit_available",
+                status="match" if commit_exists else "mismatch",
+                expected=True,
+                actual=commit_exists,
+                detail=(
+                    "validation commit exists in the local repository"
+                    if commit_exists
+                    else "validation commit is missing from the local repository"
+                ),
+            )
+        )
+        if validation_sha and not commit_exists:
             reasons.append("validation commit is missing from the local repository")
         elif validation_sha and jobs:
-            if git_tree_sha(worktree, validation_sha) != jobs[0].validation_tree_sha:
+            current_tree_sha = git_tree_sha(worktree, validation_sha)
+            recorded_tree_sha = jobs[0].validation_tree_sha
+            tree_matches = current_tree_sha == recorded_tree_sha
+            checks.append(
+                ReuseCheck(
+                    code="validation_tree",
+                    status="match" if tree_matches else "mismatch",
+                    expected=recorded_tree_sha,
+                    actual=current_tree_sha,
+                    detail=(
+                        "validation commit tree matches recorded identity"
+                        if tree_matches
+                        else "validation commit tree does not match its recorded identity"
+                    ),
+                )
+            )
+            if not tree_matches:
                 reasons.append("validation commit tree does not match its recorded identity")
 
+        environment_check_recorded = False
         if not reasons and jobs:
             reset = run_command(
                 ["git", "reset", "--hard", validation_sha],
@@ -1007,11 +1498,43 @@ class GitRunner:
                     # re-run gates that were legitimately reusable.
                     raise
                 except (CommandFailed, MergetrainError):
+                    environment_check_recorded = True
+                    checks.append(
+                        ReuseCheck(
+                            code="environment",
+                            status="mismatch",
+                            expected=jobs[0].validation_environment_sha,
+                            actual="unavailable",
+                            detail=(
+                                "required environment fingerprint could not be reproduced"
+                            ),
+                        )
+                    )
                     reasons.append(
                         "required environment fingerprint could not be reproduced"
                     )
                 else:
-                    if current_environment_sha != jobs[0].validation_environment_sha:
+                    environment_check_recorded = True
+                    environment_matches = (
+                        current_environment_sha
+                        == jobs[0].validation_environment_sha
+                    )
+                    checks.append(
+                        ReuseCheck(
+                            code="environment",
+                            status=(
+                                "match" if environment_matches else "mismatch"
+                            ),
+                            expected=jobs[0].validation_environment_sha,
+                            actual=current_environment_sha,
+                            detail=(
+                                "environment fingerprint matches validation"
+                                if environment_matches
+                                else "environment or toolchain fingerprint changed"
+                            ),
+                        )
+                    )
+                    if not environment_matches:
                         reasons.append("environment or toolchain fingerprint changed")
                 finally:
                     run_command(
@@ -1034,8 +1557,33 @@ class GitRunner:
                         timeout_seconds=self.config.queue.command_timeout_seconds,
                     )
 
+        if not environment_check_recorded:
+            checks.append(
+                ReuseCheck(
+                    code="environment",
+                    status="not_evaluated",
+                    expected=(
+                        jobs[0].validation_environment_sha if jobs else ""
+                    ),
+                    actual=None,
+                    detail=(
+                        "environment check was skipped because an earlier "
+                        "identity check did not match"
+                    ),
+                )
+            )
+
         eligible = not reasons
         action = "reuse" if eligible else self.config.deploy.reuse.on_mismatch
+        changed_paths: tuple[str, ...] | None = ()
+        if eligible and any(gate.paths for gate in self.config.gates):
+            changed_paths = self._changed_paths(
+                worktree=worktree,
+                base_ref=integration_base_sha,
+                head_ref=validation_sha,
+                log=log,
+                pulse=pulse,
+            )
         return ReuseDecision(
             authorized=True,
             eligible=eligible,
@@ -1043,6 +1591,8 @@ class GitRunner:
             validation_sha=validation_sha,
             reused_validation_sha=validation_sha if eligible else "",
             reasons=tuple(reasons),
+            checks=tuple(checks),
+            changed_paths=changed_paths,
         )
 
     def preview_validated_reuse(
@@ -1063,6 +1613,15 @@ class GitRunner:
                 action="rerun",
                 validation_sha=validation_sha,
                 reasons=("validated gate reuse is not authorized",),
+                checks=(
+                    ReuseCheck(
+                        code="authorization",
+                        status="mismatch",
+                        expected=True,
+                        actual=False,
+                        detail="validated gate reuse is not authorized",
+                    ),
+                ),
             )
         self._ensure_state_dirs()
         worktree = self._worktree_path(jobs[0].id if jobs else 0)
@@ -1086,6 +1645,15 @@ class GitRunner:
                 action=self.config.deploy.reuse.on_mismatch,
                 validation_sha=validation_sha,
                 reasons=(str(exc),),
+                checks=(
+                    ReuseCheck(
+                        code="assembly",
+                        status="mismatch",
+                        expected="validated branch SHAs assemble cleanly",
+                        actual=False,
+                        detail=str(exc),
+                    ),
+                ),
             )
         finally:
             self._cleanup_worktree(worktree, log=None, keep_worktree=False)
@@ -1112,28 +1680,27 @@ class GitRunner:
                 log=log,
                 pulse=pulse,
             )
-        for index, gate in enumerate(self.config.gates, start=2):
+        initial_states: dict[str, tuple[str, str]] = {}
+        for gate in self.config.gates:
             if (
                 gate.paths
                 and changed_paths is not None
                 and not any_path_matches(gate.paths, changed_paths)
             ):
                 reason = "no changed paths matched configured paths"
-                log.write(f"\n## gate skipped: {gate.name} ({reason})\n")
-                if on_gate:
-                    on_gate(gate.name, "skipped", index, total, reason)
+                initial_states[gate.name] = ("skipped", reason)
                 continue
             if not gate.always_rerun_on_deploy and not (
                 gate.paths and changed_paths is None
             ):
-                if on_gate:
-                    on_gate(gate.name, "reused", index, total, validation_sha)
-                continue
-            if on_gate:
-                on_gate(gate.name, "active", index, total, _dashboard_command(gate.run))
-            self._run_gate(gate, worktree=worktree, log=log, pulse=pulse)
-            if on_gate:
-                on_gate(gate.name, "success", index, total, _dashboard_command(gate.run))
+                initial_states[gate.name] = ("reused", validation_sha)
+        self._run_configured_gate_plan(
+            worktree=worktree,
+            log=log,
+            pulse=pulse,
+            on_gate=on_gate,
+            initial_states=initial_states,
+        )
 
     def reverify_deploy(self, *, deploy_sha: str, log: IO[str]) -> bool:
         """Re-run the configured post-push verify hooks against a deploy_sha.
@@ -1300,6 +1867,8 @@ class GitRunner:
                 "active": "Running",
                 "reused": "Reused",
                 "skipped": "Skipped",
+                "failure": "Failed",
+                "canceled": "Canceled",
             }.get(state, "Passed")
             self._event(
                 conn,

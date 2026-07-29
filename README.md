@@ -39,7 +39,7 @@ re-pushed and a lost one is never mislabeled as shipped).
 > gates stay local. Configured Git remotes and post-deploy verification may
 > still use external services.
 
-> Status: current release (`v1.1.1`). The machine contract is frozen —
+> Status: current release (`v1.2.0`). The machine contract is frozen —
 > additive-only within contract major 1 — and the real-repo soak gate is
 > complete. Built to scratch my own itch first — published in case it scratches
 > yours too.
@@ -253,8 +253,16 @@ integration base used for the check. The later deploy reassembles that same
 train on the current integration ref, reruns all gates, and refuses changed
 task branches. Newly queued work is not silently added to the approved train.
 Expensive gates may be reused only through an explicit validated-reuse policy or
-`--reuse-validated`; a non-deploying `--preview --json` reports the exact reused SHA
-or why the full safe path will run.
+`--reuse-validated`; a non-deploying `--preview --json` reports the exact reused
+SHA or why the full safe path will run, plus identity facts and a
+coverage-qualified savings estimate that never grants authorization. Independent
+gates can opt into resource-bounded parallel groups while the default remains
+strictly sequential.
+
+If the intended contents change after validation, `supersede` atomically retires
+the old train and captures clean replacement HEADs as a new queued train. The
+audit relationship is preserved, but validation, reuse identity, and deploy
+approval are never inherited.
 
 Every agent-facing command is non-interactive and requires explicit intent: `--validate-only` or `--deploy`, never a bare `run-batch`.
 
@@ -392,7 +400,7 @@ unattended deployment or validated-gate reuse.
 
 ## Status
 
-`v1.1.1` is the current release. The machine contract is additive-only within
+`v1.2.0` is the current release. The machine contract is additive-only within
 contract major 1: a key may be added, never removed or renamed, and a golden
 key-set fingerprint over 25 payload surfaces plus the JSONL frames fails CI on
 any un-versioned shape change (see
@@ -400,7 +408,8 @@ any un-versioned shape change (see
 
 The core — queue, runner lock, merge train, gates (with bisected joint-failure
 isolation and semantic-conflict reporting), atomic push, crash-safe
-reconciliation/recovery (`reconcile`/`recover`/`unlock`/`verify`/`dismiss`),
+reconciliation/recovery
+(`reconcile`/`recover`/`unlock`/`verify`/`dismiss`/`supersede`),
 auto-only daemon, resumable CLI events/inspection/log following, the local
 read-only dashboard, the multi-repo hub, and an
 [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) whose

@@ -115,6 +115,21 @@ gate event state are additive contract changes. Consumers must continue to
 ignore unknown configuration keys and event state values. A skipped gate
 includes the stable detail `no changed paths matched configured paths`.
 
+The optional `parallel_group`, `needs`, `workers`, and `timeout_seconds` fields
+on top-level gates plus the top-level `gate_parallelism` object are additive.
+Parallel terminal gate events may use `failure` or `canceled` states; their
+declaration-order indexes remain stable even when commands finish in a different
+order.
+
+Public job objects may include `supersession_id` and `supersedes_train_id`.
+They link an atomically retired validated train to freshly queued replacement
+jobs; they do not imply that validation or deploy approval transferred.
+
+Dashboard snapshots and deploy-preview JSON may include the structured `reuse`
+explanation with `identity_checks`, per-gate actions, and
+`estimated_savings`. `eligible` is `null` when the dashboard has not performed
+an exact preview, and `estimated_savings.authorizes_reuse` is always false.
+
 **Breaking changes bump `contract_version`** (a deliberate, reviewed decision):
 removing or renaming a key, changing a value's type or meaning, changing the
 `ok`/`result` semantics, changing exit codes, or changing the JSONL frame or

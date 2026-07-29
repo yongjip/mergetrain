@@ -190,6 +190,12 @@ dependency-light contributor command, but it is intentionally not the deploy
 gate: serial execution turns the current suite into a roughly five-minute
 delay, while the CI-shaped parallel run completes in about one minute.
 
+The repository's gate plan also exercises the resource scheduler shipped in
+1.2: `ruff` and `mypy` share the `quality` parallel group, while `tests`
+explicitly depends on both and consumes the complete four-token budget. This
+shortens the independent lint phase without overlapping pytest-xdist's
+CPU-heavy worker pool. The built-in integrity check still finishes first.
+
 One machine cannot reproduce the whole matrix, so the CI legs it cannot run
 (Windows, Python 3.10-3.14, `e2e`, `package`) are covered *after* the push by
 the `github-ci` verify hook — [`scripts/verify-ci.sh`](../scripts/verify-ci.sh)

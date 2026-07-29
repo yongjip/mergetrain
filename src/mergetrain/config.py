@@ -141,6 +141,24 @@ class GateConfig:
     run: str
     always_rerun_on_deploy: bool = False
     paths: tuple[str, ...] = ()
+    parallel_group: str = ""
+    needs: tuple[str, ...] = ()
+    workers: int = 1
+    timeout_seconds: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GateParallelismConfig:
+    """Resource ceiling for configured pre-push gates.
+
+    ``max_workers=1`` deliberately preserves the historical sequential
+    execution model. A gate's ``workers`` value is a resource weight, not a
+    request to create that many processes; the gate command remains responsible
+    for its own internal worker pool.
+    """
+
+    max_workers: int = 1
+    timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +184,7 @@ class MergetrainConfig:
     agent: AgentConfig
     terminology: TerminologyConfig
     gates: tuple[GateConfig, ...]
+    gate_parallelism: GateParallelismConfig
     deploy: DeployConfig
     repo: Path
     config_path: Path
@@ -200,11 +219,36 @@ class MergetrainConfig:
                 gate["paths"] = list(paths)
             else:
                 gate.pop("paths", None)
+            needs = gate.get("needs", ())
+            if needs:
+                gate["needs"] = list(needs)
+            else:
+                gate.pop("needs", None)
+            if not gate.get("parallel_group"):
+                gate.pop("parallel_group", None)
+            if gate.get("workers") == 1:
+                gate.pop("workers", None)
+            if gate.get("timeout_seconds") is None:
+                gate.pop("timeout_seconds", None)
         for key in ("verify",):
             for gate in data["deploy"][key]:
-                gate.pop("paths", None)
+                for field in (
+                    "paths",
+                    "parallel_group",
+                    "needs",
+                    "workers",
+                    "timeout_seconds",
+                ):
+                    gate.pop(field, None)
         for gate in data["deploy"]["reuse"]["fingerprints"]:
-            gate.pop("paths", None)
+            for field in (
+                "paths",
+                "parallel_group",
+                "needs",
+                "workers",
+                "timeout_seconds",
+            ):
+                gate.pop(field, None)
         return data
 
 
@@ -444,6 +488,7 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "timeout_seconds": 10,
         },
         "terminology": {"git_operation": "deploy"},
+        "gate_parallelism": {"max_workers": 1},
         "gates": [{"name": "diff-check", "run": "git diff --check ${integration_ref}..HEAD"}],
         "deploy": {"verify": []},
     }
@@ -495,6 +540,12 @@ terminology:
   # Human-facing label only. Machine status remains `deployed`.
   git_operation: deploy
 
+gate_parallelism:
+  # Sequential by default. Increase only for gates explicitly grouped below.
+  max_workers: 1
+  # Optional total wall-clock ceiling for the configured gate plan.
+  # timeout_seconds: 1800
+
 gates:
   - name: diff-check
     run: git diff --check ${{integration_ref}}..HEAD
@@ -530,6 +581,7 @@ def _as_gate_list(
     *,
     key: str,
     allow_paths: bool = False,
+    allow_parallel: bool = False,
 ) -> tuple[GateConfig, ...]:
     if value in (None, {}):
         return ()
@@ -576,12 +628,67 @@ def _as_gate_list(
             if len(set(parsed_paths)) != len(parsed_paths):
                 raise ConfigError(f"{key}[{index}].paths must not contain duplicates")
             paths = tuple(parsed_paths)
+        parallel_group = ""
+        needs: tuple[str, ...] = ()
+        workers = 1
+        timeout_seconds: int | None = None
+        execution_fields = {
+            "parallel_group",
+            "needs",
+            "workers",
+            "timeout_seconds",
+        }
+        configured_execution_fields = execution_fields.intersection(item)
+        if configured_execution_fields and not allow_parallel:
+            field = sorted(configured_execution_fields)[0]
+            raise ConfigError(f"{key}[{index}].{field} is unsupported")
+        if allow_parallel:
+            raw_group = item.get("parallel_group", "")
+            if not isinstance(raw_group, str):
+                raise ConfigError(
+                    f"{key}[{index}].parallel_group must be a string"
+                )
+            parallel_group = raw_group.strip()
+            if "parallel_group" in item and not parallel_group:
+                raise ConfigError(
+                    f"{key}[{index}].parallel_group must be a non-empty string"
+                )
+            raw_needs = item.get("needs")
+            if raw_needs is not None:
+                if not isinstance(raw_needs, list) or not raw_needs:
+                    raise ConfigError(
+                        f"{key}[{index}].needs must be a non-empty list"
+                    )
+                parsed_needs = [
+                    _nonempty_string(
+                        dependency,
+                        key=f"{key}[{index}].needs[{dependency_index}]",
+                    )
+                    for dependency_index, dependency in enumerate(raw_needs)
+                ]
+                if len(set(parsed_needs)) != len(parsed_needs):
+                    raise ConfigError(
+                        f"{key}[{index}].needs must not contain duplicates"
+                    )
+                needs = tuple(parsed_needs)
+            workers = _positive_int(
+                item.get("workers", 1), key=f"{key}[{index}].workers"
+            )
+            raw_timeout = item.get("timeout_seconds")
+            if raw_timeout is not None:
+                timeout_seconds = _positive_int(
+                    raw_timeout, key=f"{key}[{index}].timeout_seconds"
+                )
         gates.append(
             GateConfig(
                 name=name,
                 run=run,
                 always_rerun_on_deploy=always_rerun,
                 paths=paths,
+                parallel_group=parallel_group,
+                needs=needs,
+                workers=workers,
+                timeout_seconds=timeout_seconds,
             )
         )
     return tuple(gates)
@@ -834,6 +941,23 @@ def load_config(
         )
     terminology = TerminologyConfig(git_operation=git_operation)
 
+    gate_parallelism_data = _as_mapping(data, "gate_parallelism")
+    raw_gate_plan_timeout = gate_parallelism_data.get("timeout_seconds")
+    gate_parallelism = GateParallelismConfig(
+        max_workers=_positive_int(
+            gate_parallelism_data.get("max_workers", 1),
+            key="gate_parallelism.max_workers",
+        ),
+        timeout_seconds=(
+            _positive_int(
+                raw_gate_plan_timeout,
+                key="gate_parallelism.timeout_seconds",
+            )
+            if raw_gate_plan_timeout is not None
+            else None
+        ),
+    )
+
     deploy_data = _as_mapping(data, "deploy")
     reuse_value = deploy_data.get("reuse", {})
     if reuse_value is None:
@@ -864,7 +988,12 @@ def load_config(
             fingerprints=fingerprints,
         ),
     )
-    gates = _as_gate_list(data.get("gates", []), key="gates", allow_paths=True)
+    gates = _as_gate_list(
+        data.get("gates", []),
+        key="gates",
+        allow_paths=True,
+        allow_parallel=True,
+    )
     gate_names = [
         gate.name
         for gate in (*gates, *deploy.verify, *deploy.reuse.fingerprints)
@@ -873,6 +1002,29 @@ def load_config(
         raise ConfigError(
             "gate, deploy.verify, and deploy.reuse.fingerprint names must be unique"
         )
+    configured_names: set[str] = set()
+    closed_groups: set[str] = set()
+    current_group = ""
+    for index, gate in enumerate(gates):
+        if gate.parallel_group != current_group:
+            if current_group:
+                closed_groups.add(current_group)
+            current_group = gate.parallel_group
+            if current_group and current_group in closed_groups:
+                raise ConfigError(
+                    f"gates[{index}].parallel_group {current_group!r} must be contiguous"
+                )
+        for dependency in gate.needs:
+            if dependency != "diff-check" and dependency not in configured_names:
+                raise ConfigError(
+                    f"gates[{index}].needs references {dependency!r}, which must be "
+                    "the built-in diff-check or an earlier configured gate"
+                )
+        if gate.workers > gate_parallelism.max_workers:
+            raise ConfigError(
+                f"gates[{index}].workers exceeds gate_parallelism.max_workers"
+            )
+        configured_names.add(gate.name)
 
     return MergetrainConfig(
         project=ProjectConfig(name=project_name),
@@ -883,6 +1035,7 @@ def load_config(
         notify=notify,
         terminology=terminology,
         gates=gates,
+        gate_parallelism=gate_parallelism,
         deploy=deploy,
         repo=repo_path,
         config_path=path,

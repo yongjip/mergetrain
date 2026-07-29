@@ -26,7 +26,7 @@ from .store import (
 )
 
 GATE_EVENT = re.compile(
-    r"^(?:Running|Passed|Reused|Skipped) gate (\d+)/(\d+): (.+)$"
+    r"^(?:Running|Passed|Reused|Skipped|Failed|Canceled) gate (\d+)/(\d+): (.+)$"
 )
 COMPLETED_STATUSES = {"validated", "deployed", "blocked", "failed", "canceled"}
 TIMED_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
@@ -714,7 +714,11 @@ def _latest_run_events(job: Job, events: Sequence[RunEvent]) -> list[RunEvent]:
         )
     if not latest_token:
         return list(events)
-    return [event for event in events if event.claim_token == latest_token]
+    return [
+        event
+        for event in events
+        if event.claim_token == latest_token or not event.claim_token
+    ]
 
 
 def _lease_context(job: Job, lock: RunnerLock | None) -> dict[str, Any]:

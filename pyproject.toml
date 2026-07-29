@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mergetrain"
-version = "1.1.1"
+version = "1.2.0"
 description = "A local-first merge-and-push queue for coding-agent worktrees"
 readme = "README.md"
 requires-python = ">=3.10"

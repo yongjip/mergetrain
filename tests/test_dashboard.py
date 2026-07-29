@@ -147,6 +147,11 @@ class DashboardTests(unittest.TestCase):
             )
             self.assertFalse(payload["project"]["reuse"]["enabled"])
             self.assertEqual(payload["project"]["reuse"]["max_age_minutes"], 60)
+            self.assertEqual(payload["reuse"]["evaluation"], "not_evaluated")
+            self.assertIsNone(payload["reuse"]["eligible"])
+            self.assertFalse(
+                payload["reuse"]["estimated_savings"]["authorizes_reuse"]
+            )
             self.assertFalse(payload["eta"]["available"])
             self.assertEqual(payload["eta"]["coverage"], "none")
             self.assertEqual(payload["lock"]["owner"], f"local:{os.getpid()}")

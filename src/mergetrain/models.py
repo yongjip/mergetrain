@@ -49,6 +49,8 @@ class Job:
     conflict_with: str = ""
     pending_deploy_remote: str = ""
     pending_deploy_refs: str = ""
+    supersession_id: str = ""
+    supersedes_train_id: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> Job:
@@ -90,6 +92,8 @@ class Job:
             conflict_with=str(row["conflict_with"] or ""),
             pending_deploy_remote=str(row["pending_deploy_remote"] or ""),
             pending_deploy_refs=str(row["pending_deploy_refs"] or ""),
+            supersession_id=str(row["supersession_id"] or ""),
+            supersedes_train_id=str(row["supersedes_train_id"] or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:

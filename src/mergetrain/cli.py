@@ -48,6 +48,7 @@ from .git_runner import (
 )
 from .models import Job
 from .observability import (
+    _gate_runs,
     event_record,
     heartbeat_record,
     history_payload,
@@ -57,8 +58,10 @@ from .observability import (
     stream_terminal,
 )
 from .recovery import force_unlock, reconcile, recover, sweep_pending_refs
+from .reuse import reuse_explanation
 from .snapshot import next_action as _doctor_next_action
 from .store import (
+    SupersedeReplacement,
     cancel_job,
     claim_all_queued,
     claim_deploy_batch,
@@ -72,6 +75,7 @@ from .store import (
     get_job,
     get_lock,
     list_dismissable_jobs,
+    list_history_events,
     list_jobs,
     list_run_events,
     list_train_jobs,
@@ -81,6 +85,7 @@ from .store import (
     resolve_verify_status,
     retry_job,
     select_validated_train,
+    supersede_validated_train,
     terminal_branch_candidates,
     validated_train_summaries,
 )
@@ -156,6 +161,7 @@ def agent_contract_payload(
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one runner or daemon own merge, test, push, and verify.",
             "Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.",
+            "Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation and deploy approval.",
             "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
         ],
         "boundary": {
@@ -163,6 +169,7 @@ def agent_contract_payload(
             "validate_requires": "run-next --validate-only or run-batch --validate-only",
             "validated_train_deploy": "run-batch --deploy claims one exact validated train",
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
+            "validated_train_supersede": "supersede atomically retires one validated train and enqueues exact replacement SHAs without inheriting validation, reuse identity, or deploy approval",
             "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
             "daemon_processes_only": "jobs enqueued with --auto",
             "hub_observation": "hub serves a read-only aggregate; every repo keeps its own queue, lock, and recovery state",
@@ -200,6 +207,7 @@ Purpose: {payload['purpose']}
 - Validation requires `run-next --validate-only` or `run-batch --validate-only`.
 - A validated train is {words.completed} as one exact identity by `run-batch --{words.action}`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
+- `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The daemon processes only jobs enqueued with `--auto`.
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
@@ -456,6 +464,76 @@ def cmd_retry(args: argparse.Namespace) -> int:
         print(
             f"retried job {dismissed.id} as {replacement.id}: "
             f"{replacement.task} ({replacement.branch})"
+        )
+        print(f"next action: {next_action}")
+    return 0
+
+
+def cmd_supersede(args: argparse.Namespace) -> int:
+    """Replace one validated train without transferring its approval."""
+
+    config = config_from_args(args)
+    _preflight_config(config)
+    base_sha = _capture_sha_or_error(
+        config.repo, config.git.integration_ref, label="base"
+    )
+    replacements: list[SupersedeReplacement] = []
+    for task, branch, worktree_value in args.replacement:
+        worktree = Path(worktree_value).expanduser().resolve()
+        _validate_enqueue_worktree(worktree, branch)
+        head_sha = _capture_sha_or_error(worktree, branch, label="head")
+        replacements.append(
+            SupersedeReplacement(
+                task=task,
+                branch=branch,
+                worktree_path=str(worktree),
+                base_sha=base_sha,
+                head_sha=head_sha,
+                note=args.note or "",
+            )
+        )
+
+    conn = connect(config.state.db)
+    try:
+        result = supersede_validated_train(
+            conn,
+            args.train_id,
+            replacements,
+        )
+        validated_trains = validated_train_summaries(conn)
+        next_action = _doctor_next_action(
+            {
+                "lock": None,
+                "counts": counts(conn),
+                "validated_trains": validated_trains,
+                "gc": {"worktree_candidates": []},
+                "config_exists": config.config_exists,
+            },
+            config_version=config.config_version,
+        )
+    finally:
+        conn.close()
+    payload = {
+        "ok": True,
+        "supersession_id": result["supersession_id"],
+        "superseded_train_id": result["superseded_train_id"],
+        "superseded_jobs": [
+            job.to_dict() for job in result["superseded_jobs"]
+        ],
+        "replacement_jobs": [
+            job.to_dict() for job in result["replacement_jobs"]
+        ],
+        "next_action": next_action,
+    }
+    if args.json:
+        dump_json(payload)
+    else:
+        replacement_ids = ", ".join(
+            str(job["id"]) for job in payload["replacement_jobs"]
+        )
+        print(
+            f"superseded train {payload['superseded_train_id']} "
+            f"with job(s) {replacement_ids}"
         )
         print(f"next action: {next_action}")
     return 0
@@ -1285,6 +1363,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             selected, jobs = select_validated_train(
                 conn, train_id=args.train_id or ""
             )
+            history_events = list_history_events(conn)
         finally:
             conn.close()
         if selected is None or not jobs:
@@ -1307,7 +1386,12 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 ],
             },
             "train_id": selected["train_id"],
-            "reuse": decision.to_dict(),
+            "reuse": reuse_explanation(
+                config,
+                jobs,
+                decision=decision,
+                gate_runs=_gate_runs(history_events),
+            ),
             "jobs": [job.to_dict() for job in jobs],
         }
         if args.json:
@@ -1967,6 +2051,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_retry.add_argument("--json", action="store_true")
     p_retry.set_defaults(func=cmd_retry)
+
+    p_supersede = subparsers.add_parser(
+        "supersede",
+        help=(
+            "Atomically retire a validated train and enqueue SHA-pinned "
+            "replacement work"
+        ),
+    )
+    p_supersede.add_argument("--train-id", required=True)
+    p_supersede.add_argument(
+        "--replacement",
+        action="append",
+        nargs=3,
+        required=True,
+        metavar=("TASK", "BRANCH", "WORKTREE"),
+        help=(
+            "Replacement task, branch, and clean owning worktree; repeat for "
+            "a replacement set"
+        ),
+    )
+    p_supersede.add_argument("--note", default="")
+    p_supersede.add_argument("--json", action="store_true")
+    p_supersede.set_defaults(func=cmd_supersede)
 
     p_status = subparsers.add_parser("status", help="Show queue and lock status")
     p_status.add_argument("--json", action="store_true")

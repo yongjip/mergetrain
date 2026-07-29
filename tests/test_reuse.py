@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from mergetrain.config import (
     AgentConfig,
     DeployConfig,
     GateConfig,
+    GateParallelismConfig,
     GitConfig,
     MergetrainConfig,
     ProjectConfig,
@@ -19,10 +21,12 @@ from mergetrain.config import (
 )
 from mergetrain.models import Job
 from mergetrain.reuse import (
+    ReuseCheck,
     ReuseDecision,
     _sha256_json,
     environment_sha,
     gate_policy_sha,
+    reuse_explanation,
     train_identity_sha,
     validation_age_minutes,
 )
@@ -54,6 +58,7 @@ def _config(
             if gate_paths
             else ()
         ),
+        gate_parallelism=GateParallelismConfig(),
         deploy=DeployConfig(verify=(), reuse=ReuseConfig()),
         repo=Path("/x"),
         config_path=Path("/x/.mergetrain.yaml"),
@@ -173,19 +178,133 @@ class GatePolicyShaTests(unittest.TestCase):
 
 
 class ReuseDecisionTests(unittest.TestCase):
-    def test_to_dict_converts_reasons_tuple_to_list(self) -> None:
-        decision = ReuseDecision(True, True, "reuse", "x", reasons=("a", "b"))
+    def test_to_dict_exposes_structured_identity_checks(self) -> None:
+        decision = ReuseDecision(
+            True,
+            True,
+            "reuse",
+            "x",
+            reasons=("a", "b"),
+            checks=(
+                ReuseCheck(
+                    code="gate_policy",
+                    status="match",
+                    expected="old",
+                    actual="old",
+                ),
+            ),
+        )
         self.assertEqual(
             decision.to_dict(),
             {
+                "evaluation": "exact",
                 "authorized": True,
                 "eligible": True,
                 "action": "reuse",
                 "validation_sha": "x",
                 "reused_validation_sha": "",
                 "reasons": ["a", "b"],
+                "identity_checks": [
+                    {
+                        "code": "gate_policy",
+                        "status": "match",
+                        "expected": "old",
+                        "actual": "old",
+                        "detail": "",
+                    }
+                ],
             },
         )
+
+    def test_explanation_separates_exact_savings_from_authorization(self) -> None:
+        config = replace(
+            _config(),
+            gates=(
+                GateConfig(name="tests", run="pytest"),
+                GateConfig(
+                    name="smoke",
+                    run="scripts/smoke",
+                    always_rerun_on_deploy=True,
+                ),
+            ),
+        )
+        decision = ReuseDecision(
+            authorized=True,
+            eligible=True,
+            action="reuse",
+            validation_sha="a" * 40,
+            reused_validation_sha="a" * 40,
+            changed_paths=(),
+        )
+        runs = [
+            {
+                "name": name,
+                "state": "success",
+                "duration_seconds": duration,
+            }
+            for name, duration in (
+                ("diff-check", 1.0),
+                ("diff-check", 2.0),
+                ("diff-check", 3.0),
+                ("tests", 8.0),
+                ("tests", 9.0),
+                ("tests", 10.0),
+            )
+        ]
+
+        payload = reuse_explanation(
+            config,
+            [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)],
+            decision=decision,
+            gate_runs=runs,
+        )
+
+        self.assertEqual(
+            [(gate["name"], gate["action"]) for gate in payload["gates"]],
+            [
+                ("diff-check", "reuse"),
+                ("tests", "reuse"),
+                ("smoke", "rerun"),
+            ],
+        )
+        savings = payload["estimated_savings"]
+        self.assertEqual(savings["seconds"], 11.0)
+        self.assertEqual(savings["coverage"], 1.0)
+        self.assertEqual(savings["confidence"], "medium")
+        self.assertFalse(savings["authorizes_reuse"])
+
+    def test_explanation_represents_scoped_gates_without_guessing(self) -> None:
+        config = _config(gate_paths=("src/**",))
+
+        potential = reuse_explanation(
+            config,
+            [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)],
+            decision=None,
+        )
+        self.assertIsNone(potential["eligible"])
+        self.assertEqual(
+            potential["gates"][1]["action"], "conditional_reuse"
+        )
+        self.assertEqual(
+            potential["estimated_savings"]["mode"], "potential"
+        )
+        self.assertFalse(
+            potential["estimated_savings"]["authorizes_reuse"]
+        )
+
+        exact = reuse_explanation(
+            config,
+            [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)],
+            decision=ReuseDecision(
+                authorized=True,
+                eligible=True,
+                action="reuse",
+                validation_sha="a" * 40,
+                changed_paths=("docs/readme.md",),
+            ),
+        )
+        self.assertEqual(exact["gates"][1]["action"], "skip")
+        self.assertEqual(exact["gates"][1]["reason_code"], "no_matching_paths")
 
 
 if __name__ == "__main__":

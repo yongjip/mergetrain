@@ -8,6 +8,7 @@ import sqlite3
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,7 @@ from .models import (
 )
 
 RUNNER_LOCK_NAME = "runner"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 RUN_EVENT_RETENTION = 5000
 
 
@@ -41,6 +42,16 @@ class Liveness:
     ALIVE = "alive"
     DEAD = "dead"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class SupersedeReplacement:
+    task: str
+    branch: str
+    worktree_path: str
+    base_sha: str
+    head_sha: str
+    note: str = ""
 
 
 def utc_now() -> str:
@@ -271,7 +282,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           pending_deploy_sha TEXT NOT NULL DEFAULT '',
           conflict_with TEXT NOT NULL DEFAULT '',
           pending_deploy_remote TEXT NOT NULL DEFAULT '',
-          pending_deploy_refs TEXT NOT NULL DEFAULT ''
+          pending_deploy_refs TEXT NOT NULL DEFAULT '',
+          supersession_id TEXT NOT NULL DEFAULT '',
+          supersedes_train_id TEXT NOT NULL DEFAULT ''
         )
         """
         )
@@ -359,6 +372,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ("deploy_queue", "pending_deploy_refs", "TEXT NOT NULL DEFAULT ''"),
             ),
             9: (),
+            10: (
+                ("deploy_queue", "supersession_id", "TEXT NOT NULL DEFAULT ''"),
+                (
+                    "deploy_queue",
+                    "supersedes_train_id",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+            ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:
@@ -394,6 +415,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS deploy_queue_branch_status_id_idx "
                     "ON deploy_queue(branch, status, id)"
+                )
+            if next_version == 10:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_supersession_id_idx "
+                    "ON deploy_queue(supersession_id, id)"
                 )
             conn.execute(f"PRAGMA user_version = {next_version}")
 
@@ -587,6 +613,182 @@ def retry_job(
                 f"job {job_id} left '{original.status}' before retry was recorded"
             )
     return get_job(conn, job_id), get_job(conn, replacement_id)
+
+
+def supersede_validated_train(
+    conn: sqlite3.Connection,
+    train_id: str,
+    replacements: Sequence[SupersedeReplacement],
+) -> dict[str, Any]:
+    """Atomically retire one immutable validation identity and enqueue another.
+
+    Git readiness and SHA capture happen before this store boundary. This
+    transaction re-checks queue ownership, validated membership, and active
+    branch uniqueness before changing any row. Approval and validation fields
+    are deliberately not copied to replacement jobs.
+    """
+
+    train_id = train_id.strip()
+    if not train_id:
+        raise QueueError("--train-id is required")
+    if not replacements:
+        raise QueueError("at least one --replacement is required")
+    normalized: list[SupersedeReplacement] = []
+    seen_branches: set[str] = set()
+    for replacement in replacements:
+        task = replacement.task.strip()
+        branch = replacement.branch.strip()
+        if not task:
+            raise QueueError("replacement task is required")
+        if not branch:
+            raise QueueError("replacement branch is required")
+        if branch in seen_branches:
+            raise DuplicateActiveBranch(
+                f"replacement branch '{branch}' is listed more than once"
+            )
+        seen_branches.add(branch)
+        if not replacement.base_sha or not replacement.head_sha:
+            raise QueueError(
+                f"replacement branch '{branch}' needs captured base and head SHAs"
+            )
+        normalized.append(
+            SupersedeReplacement(
+                task=task,
+                branch=branch,
+                worktree_path=replacement.worktree_path,
+                base_sha=replacement.base_sha,
+                head_sha=replacement.head_sha,
+                note=replacement.note,
+            )
+        )
+
+    with immediate(conn):
+        lock = active_runner_lock(conn)
+        if lock is not None:
+            raise LockHeld(
+                f"runner lock held by {lock.owner}; wait before superseding "
+                f"validated train {train_id}"
+            )
+        rows = conn.execute(
+            "SELECT * FROM deploy_queue WHERE train_id = ? ORDER BY id ASC",
+            (train_id,),
+        ).fetchall()
+        if not rows:
+            raise QueueError(f"validated train not found: {train_id}")
+        old_jobs = [Job.from_row(row) for row in rows]
+        if any(job.status != "validated" for job in old_jobs):
+            states = ", ".join(
+                f"#{job.id}={job.status}" for job in old_jobs
+            )
+            raise QueueError(
+                f"train {train_id} is not wholly validated ({states})"
+            )
+        old_ids = [job.id for job in old_jobs]
+        old_placeholders = ",".join("?" for _ in old_ids)
+        active_placeholders = _status_placeholders(ACTIVE_STATUSES)
+        for replacement in normalized:
+            row = conn.execute(
+                f"SELECT id FROM deploy_queue "
+                f"WHERE branch = ? AND id NOT IN ({old_placeholders}) "
+                f"AND status IN ({active_placeholders}) LIMIT 1",
+                (
+                    replacement.branch,
+                    *old_ids,
+                    *ACTIVE_STATUSES,
+                ),
+            ).fetchone()
+            if row is not None:
+                raise DuplicateActiveBranch(
+                    f"branch '{replacement.branch}' already has active job "
+                    f"{int(row['id'])}"
+                )
+
+        supersession_id = uuid.uuid4().hex
+        now = utc_now()
+        replacement_ids: list[int] = []
+        for replacement in normalized:
+            cur = conn.execute(
+                """
+                INSERT INTO deploy_queue (
+                  task, branch, worktree_path, status, base_sha, head_sha,
+                  requested_at, note, auto_deploy, supersession_id,
+                  supersedes_train_id
+                ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    replacement.task,
+                    replacement.branch,
+                    replacement.worktree_path,
+                    replacement.base_sha,
+                    replacement.head_sha,
+                    now,
+                    replacement.note,
+                    supersession_id,
+                    train_id,
+                ),
+            )
+            replacement_id = cur.lastrowid
+            assert replacement_id is not None
+            replacement_ids.append(int(replacement_id))
+
+        replacement_text = ",".join(str(job_id) for job_id in replacement_ids)
+        audit_note = (
+            f"superseded by job(s) {replacement_text}; "
+            f"supersession {supersession_id}"
+        )
+        updated = conn.execute(
+            f"""
+            UPDATE deploy_queue
+            SET status = 'canceled', finished_at = ?,
+                note = CASE WHEN note = '' THEN ? ELSE note || '\n' || ? END,
+                supersession_id = ?
+            WHERE id IN ({old_placeholders}) AND status = 'validated'
+            """,
+            (now, audit_note, audit_note, supersession_id, *old_ids),
+        )
+        if updated.rowcount != len(old_ids):
+            raise QueueError(
+                f"validated train {train_id} changed while being superseded"
+            )
+
+        detail = (
+            f"supersession_id={supersession_id};"
+            f"superseded_train_id={train_id};"
+            f"replacement_job_ids={replacement_text}"
+        )
+        for old_job in old_jobs:
+            _record_run_event(
+                conn,
+                job_id=old_job.id,
+                phase="superseding",
+                state="success",
+                message=(
+                    f"Validated train {train_id} superseded by "
+                    f"job(s) {replacement_text}"
+                ),
+                detail=detail,
+            )
+        for replacement_id in replacement_ids:
+            _record_run_event(
+                conn,
+                job_id=replacement_id,
+                phase="superseding",
+                state="queued",
+                message=(
+                    f"Job #{replacement_id} replaces validated train "
+                    f"{train_id}"
+                ),
+                detail=detail,
+            )
+
+    return {
+        "supersession_id": supersession_id,
+        "superseded_train_id": train_id,
+        "superseded_jobs": [get_job(conn, job_id) for job_id in old_ids],
+        "replacement_jobs": [
+            get_job(conn, job_id) for job_id in replacement_ids
+        ],
+    }
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> Job:

@@ -269,6 +269,117 @@ deploy:
                 ["src/**", "tests/**/*.py", "pyproject.toml"],
             )
 
+    def test_parallel_gate_group_parses_resource_and_dependency_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gate_parallelism:
+  max_workers: 4
+  timeout_seconds: 900
+gates:
+  - name: lint
+    run: ruff check .
+    parallel_group: quality
+    needs:
+      - diff-check
+    workers: 1
+    timeout_seconds: 120
+  - name: types
+    run: mypy src
+    parallel_group: quality
+    workers: 2
+""",
+                encoding="utf-8",
+            )
+
+            config = load_config(repo=repo)
+
+            self.assertEqual(config.gate_parallelism.max_workers, 4)
+            self.assertEqual(config.gate_parallelism.timeout_seconds, 900)
+            self.assertEqual(config.gates[0].parallel_group, "quality")
+            self.assertEqual(config.gates[0].needs, ("diff-check",))
+            self.assertEqual(config.gates[0].timeout_seconds, 120)
+            self.assertEqual(config.gates[1].workers, 2)
+            public = config.to_dict()
+            self.assertEqual(public["gate_parallelism"]["max_workers"], 4)
+            self.assertEqual(public["gates"][0]["needs"], ["diff-check"])
+
+    def test_parallel_gate_defaults_remain_sequential_and_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: lint
+    run: ruff check .
+  - name: tests
+    run: pytest
+""",
+                encoding="utf-8",
+            )
+
+            config = load_config(repo=repo)
+
+            self.assertEqual(config.gate_parallelism.max_workers, 1)
+            self.assertEqual(config.gate_parallelism.timeout_seconds, None)
+            self.assertEqual(config.gates[0].parallel_group, "")
+            self.assertEqual(config.gates[0].workers, 1)
+            self.assertEqual(config.gates[0].timeout_seconds, None)
+
+    def test_invalid_parallel_gate_graph_and_resource_limits_are_rejected(self) -> None:
+        invalid = (
+            (
+                """gates:
+  - name: lint
+    run: lint
+    needs:
+      - tests
+  - name: tests
+    run: tests
+""",
+                "earlier configured gate",
+            ),
+            (
+                """gate_parallelism:
+  max_workers: 2
+gates:
+  - name: tests
+    run: tests
+    workers: 3
+""",
+                "exceeds",
+            ),
+            (
+                """gates:
+  - name: lint
+    run: lint
+    parallel_group: quality
+  - name: tests
+    run: tests
+  - name: types
+    run: types
+    parallel_group: quality
+""",
+                "contiguous",
+            ),
+            (
+                """deploy:
+  verify:
+    - name: live
+      run: live
+      parallel_group: network
+""",
+                "unsupported",
+            ),
+        )
+        for config_text, message in invalid:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
+                repo = Path(td)
+                (repo / ".mergetrain.yaml").write_text(
+                    config_text, encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ConfigError, message):
+                    load_config(repo=repo)
+
     def test_persistent_validation_workspace_requires_explicit_safe_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

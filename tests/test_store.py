@@ -20,6 +20,7 @@ from mergetrain.errors import (
 from mergetrain.store import (
     SCHEMA_VERSION,
     Liveness,
+    SupersedeReplacement,
     acquire_runner_lock,
     active_runner_lock,
     cancel_job,
@@ -43,6 +44,7 @@ from mergetrain.store import (
     refresh_runner_lock,
     release_runner_lock,
     retry_job,
+    supersede_validated_train,
     terminal_branch_candidates,
     unpack_push_refs,
     validated_train_summaries,
@@ -635,6 +637,17 @@ class StoreTests(unittest.TestCase):
             self.assertIn("deploy_queue_status_id_idx", queue_indexes)
             self.assertIn("deploy_queue_status_auto_id_idx", queue_indexes)
             self.assertIn("deploy_queue_branch_status_id_idx", queue_indexes)
+            self.assertIn(
+                "deploy_queue_supersession_id_idx", queue_indexes
+            )
+            queue_columns = {
+                row[1]
+                for row in migrated_db.execute(
+                    "PRAGMA table_info(deploy_queue)"
+                )
+            }
+            self.assertIn("supersession_id", queue_columns)
+            self.assertIn("supersedes_train_id", queue_columns)
         finally:
             migrated_db.close()
 
@@ -745,6 +758,162 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(event.message, "Integrate runner claimed 1 job(s)")
         self.assertEqual(event.detail, "mode=deploy")
         self.assertEqual(event.claim_token, claimed[0].claim_token)
+
+    def test_supersede_atomically_retires_validated_train_and_queues_set(
+        self,
+    ) -> None:
+        conn = self.make_conn()
+        first = enqueue_job(conn, task="old-a", branch="feature/old-a")
+        second = enqueue_job(conn, task="old-b", branch="feature/old-b")
+        for queued in (first, second):
+            mark_job(
+                conn,
+                queued.id,
+                status="validated",
+                train_id="train-old",
+                train_size=2,
+                validated_at="2026-07-29T00:00:00Z",
+                validation_base_sha="base-old",
+                validation_sha="validation-old",
+                validated_head_sha=f"head-{queued.id}",
+                validation_tree_sha="tree-old",
+                validation_gate_policy_sha="policy-old",
+                validation_environment_sha="environment-old",
+                validation_train_sha="identity-old",
+            )
+
+        result = supersede_validated_train(
+            conn,
+            "train-old",
+            [
+                SupersedeReplacement(
+                    task="new-a",
+                    branch="feature/new-a",
+                    worktree_path="/tmp/new-a",
+                    base_sha="base-new",
+                    head_sha="head-new-a",
+                ),
+                SupersedeReplacement(
+                    task="new-b",
+                    branch="feature/new-b",
+                    worktree_path="/tmp/new-b",
+                    base_sha="base-new",
+                    head_sha="head-new-b",
+                ),
+            ],
+        )
+
+        old_jobs = result["superseded_jobs"]
+        replacements = result["replacement_jobs"]
+        supersession_id = result["supersession_id"]
+        self.assertEqual([job.status for job in old_jobs], ["canceled", "canceled"])
+        self.assertEqual(
+            {job.supersession_id for job in old_jobs}, {supersession_id}
+        )
+        self.assertEqual(
+            {job.validation_sha for job in old_jobs}, {"validation-old"}
+        )
+        self.assertEqual([job.status for job in replacements], ["queued", "queued"])
+        self.assertEqual(
+            {job.supersession_id for job in replacements},
+            {supersession_id},
+        )
+        self.assertEqual(
+            {job.supersedes_train_id for job in replacements},
+            {"train-old"},
+        )
+        self.assertEqual(
+            [job.head_sha for job in replacements],
+            ["head-new-a", "head-new-b"],
+        )
+        self.assertTrue(all(not job.validated_at for job in replacements))
+        self.assertTrue(all(not job.train_id for job in replacements))
+
+        events = [
+            event
+            for event in list_run_events(conn)
+            if event.phase == "superseding"
+        ]
+        self.assertEqual(len(events), 4)
+        self.assertTrue(
+            all(f"supersession_id={supersession_id}" in event.detail for event in events)
+        )
+        self.assertTrue(
+            all("replacement_job_ids=3,4" in event.detail for event in events)
+        )
+
+    def test_supersede_rolls_back_every_row_when_audit_write_fails(
+        self,
+    ) -> None:
+        conn = self.make_conn()
+        old = enqueue_job(conn, task="old", branch="feature/old")
+        mark_job(
+            conn,
+            old.id,
+            status="validated",
+            train_id="train-old",
+            train_size=1,
+            validated_at="2026-07-29T00:00:00Z",
+            validation_sha="validation-old",
+        )
+        replacement = SupersedeReplacement(
+            task="new",
+            branch="feature/new",
+            worktree_path="/tmp/new",
+            base_sha="base-new",
+            head_sha="head-new",
+        )
+
+        with patch.object(
+            store_module,
+            "_record_run_event",
+            side_effect=RuntimeError("audit failed"),
+        ), self.assertRaisesRegex(RuntimeError, "audit failed"):
+            supersede_validated_train(conn, "train-old", [replacement])
+
+        self.assertEqual(get_job(conn, old.id).status, "validated")
+        self.assertEqual(
+            conn.execute("SELECT COUNT(*) FROM deploy_queue").fetchone()[0],
+            1,
+        )
+
+    def test_supersede_refuses_duplicate_branch_and_live_runner(
+        self,
+    ) -> None:
+        conn = self.make_conn()
+        old = enqueue_job(conn, task="old", branch="feature/old")
+        mark_job(
+            conn,
+            old.id,
+            status="validated",
+            train_id="train-old",
+            train_size=1,
+            validated_at="2026-07-29T00:00:00Z",
+            validation_sha="validation-old",
+        )
+        enqueue_job(conn, task="active", branch="feature/replacement")
+        replacement = SupersedeReplacement(
+            task="new",
+            branch="feature/replacement",
+            worktree_path="/tmp/new",
+            base_sha="base-new",
+            head_sha="head-new",
+        )
+        with self.assertRaises(DuplicateActiveBranch):
+            supersede_validated_train(conn, "train-old", [replacement])
+        self.assertEqual(get_job(conn, old.id).status, "validated")
+
+        replacement = SupersedeReplacement(
+            task="new",
+            branch="feature/other",
+            worktree_path="/tmp/other",
+            base_sha="base-new",
+            head_sha="head-other",
+        )
+        acquire_runner_lock(conn, owner=default_owner())
+        with self.assertRaises(LockHeld):
+            supersede_validated_train(conn, "train-old", [replacement])
+        self.assertEqual(get_job(conn, old.id).status, "validated")
 
     def test_event_resume_and_job_scope_include_shared_batch_events(self) -> None:
         conn = self.make_conn()

@@ -773,6 +773,128 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["job"]["base_sha"], head)
             self.assertEqual(payload["job"]["head_sha"], head)
 
+    def test_supersede_cli_captures_clean_shas_without_inheriting_approval(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("supersede"), encoding="utf-8"
+            )
+            (repo / "app.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "base"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "branch", "-M", "main"], cwd=repo, check=True
+            )
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            subprocess.run(
+                [
+                    "git",
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    base,
+                ],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "switch", "-qc", "feature/replacement"],
+                cwd=repo,
+                check=True,
+            )
+            (repo / "app.txt").write_text("replacement\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.txt"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "replacement"],
+                cwd=repo,
+                check=True,
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                old = enqueue_job(
+                    conn,
+                    task="old train",
+                    branch="feature/old",
+                )
+                mark_job(
+                    conn,
+                    old.id,
+                    status="validated",
+                    train_id="train-old",
+                    train_size=1,
+                    validated_at="2026-07-29T00:00:00Z",
+                    validation_sha="validated-old",
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "supersede",
+                        "--train-id",
+                        "train-old",
+                        "--replacement",
+                        "release finalization",
+                        "feature/replacement",
+                        str(repo),
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["superseded_train_id"], "train-old")
+        self.assertEqual(payload["superseded_jobs"][0]["status"], "canceled")
+        self.assertEqual(
+            payload["superseded_jobs"][0]["validation_sha"],
+            "validated-old",
+        )
+        replacement = payload["replacement_jobs"][0]
+        self.assertEqual(replacement["status"], "queued")
+        self.assertEqual(replacement["base_sha"], base)
+        self.assertEqual(replacement["head_sha"], head)
+        self.assertEqual(replacement["supersedes_train_id"], "train-old")
+        self.assertEqual(
+            replacement["supersession_id"],
+            payload["supersession_id"],
+        )
+        self.assertEqual(replacement["validated_at"], "")
+        self.assertEqual(replacement["train_id"], "")
+        self.assertEqual(payload["next_action"], "run_batch_validate")
+
     def test_retry_rebase_error_does_not_dismiss_original_job(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -1105,6 +1227,13 @@ terminology:
             self.assertEqual(
                 [item["spec"] for item in payload["push_plan"]["refs"]],
                 ["HEAD:main", "HEAD:release"],
+            )
+            self.assertEqual(payload["reuse"]["evaluation"], "exact")
+            self.assertEqual(
+                payload["reuse"]["estimated_savings"]["mode"], "unavailable"
+            )
+            self.assertFalse(
+                payload["reuse"]["estimated_savings"]["authorizes_reuse"]
             )
 
     def test_init_write_creates_generic_files(self) -> None:

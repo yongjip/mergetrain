@@ -222,6 +222,12 @@ the credential-bearing URL.
 ## `gates`
 
 ```yaml
+gate_parallelism:
+  # The default is 1, which preserves strictly sequential execution.
+  max_workers: 4
+  # Optional wall-clock ceiling for the complete configured gate plan.
+  timeout_seconds: 1800
+
 gates:
   - name: diff-check
     run: git diff --check ${integration_ref}..HEAD
@@ -234,6 +240,19 @@ gates:
   - name: deploy-policy
     run: ./scripts/check-deploy-policy
     always_rerun_on_deploy: true
+  - name: ruff
+    run: ruff check .
+    parallel_group: quality
+    needs:
+      - tests
+    workers: 1
+    timeout_seconds: 120
+  - name: mypy
+    run: mypy
+    parallel_group: quality
+    needs:
+      - tests
+    workers: 2
 ```
 
 Gates run before push in the temporary integration worktree. The optional
@@ -258,6 +277,29 @@ to the exact assembled train commit. Rename and copy records include both the
 old and new path; deletions remain visible. If Git cannot produce or mergetrain
 cannot parse the path set, every scoped gate runs. A path-selection failure can
 therefore cost time but can never silently weaken validation.
+
+Configured gates remain sequential unless they share the same non-empty,
+contiguous `parallel_group`. `gate_parallelism.max_workers` is a resource-token
+ceiling: a running gate consumes its positive `workers` value, and mergetrain
+starts only a set whose total fits the ceiling. The weight describes the
+command's expected CPU/worker cost; it does not rewrite an internal flag such as
+`pytest -n`, so keep the declared weight consistent with the command.
+
+Omitted `needs` preserves declaration order. A contiguous parallel group
+defaults to the complete preceding stage; the following gate waits for every
+member of that group. An explicit non-empty `needs` list may name only the
+built-in `diff-check` or earlier configured gates. Group names cannot be
+reopened later in the list, which makes the dependency graph acyclic and
+unambiguous at load time.
+
+`timeout_seconds` on a gate overrides `queue.command_timeout_seconds` for that
+gate. `gate_parallelism.timeout_seconds` optionally bounds the whole configured
+gate plan. The built-in integrity `diff-check` always completes before any
+parallel group. If one parallel gate fails, times out, or the train is canceled,
+mergetrain terminates every peer subprocess group. Per-gate logs and terminal
+events are then committed in declaration order, so concurrent completion cannot
+make JSON or logs nondeterministic. The same POSIX-shell resolution and process
+tree cleanup apply on Linux, macOS, and Git for Windows.
 
 Every `run` string is executed by a **POSIX `sh`, on every platform** — mergetrain
 never falls back to `cmd.exe`. On Windows it uses `sh` from `PATH` or the one Git
@@ -285,6 +327,17 @@ Reuse requires the recorded integration base, task heads, train membership,
 validation commit/tree, gate policy, environment fingerprints, and validation
 age to match. `on_mismatch: rerun` performs the normal full reassembly and gate
 run; `fail` blocks before push. The default remains full gate rerun.
+
+`run-batch --deploy --preview --json` and the dashboard expose the same
+structured reuse explanation: authorization, exact identity checks and mismatch
+facts, the action for each gate (`reuse`, `rerun`, `skip`, or a conditional
+preview state), and `estimated_savings`. Savings use up to 20 successful timing
+samples per gate and report sample count, history coverage, and confidence.
+They are an advisory sum of per-gate medians, not a promise of wall-clock time;
+`estimated_savings.authorizes_reuse` is always `false`. Only explicit config or
+`--reuse-validated`, followed by a matching exact identity check, can authorize
+reuse. `always_rerun_on_deploy`, path-scoped skips, and fail-closed path
+discovery are represented separately rather than counted as reused work.
 
 Each fingerprint command must print one stable, opaque, non-empty line of at
 most 512 characters. mergetrain hashes the values instead of storing them.

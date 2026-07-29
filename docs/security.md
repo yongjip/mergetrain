@@ -2,8 +2,9 @@
 
 ## Config trust boundary
 
-`.mergetrain.yaml` is trusted code. Gate and verify commands run through
-`/bin/sh` in the integration worktree. Do not use untrusted config files.
+`.mergetrain.yaml` is trusted code. Gate and verify commands run through a
+resolved POSIX `sh` (`/bin/sh`, `sh` from `PATH`, or Git-for-Windows
+`sh.exe`) in the integration worktree. Do not use untrusted config files.
 Their environment prioritizes the directory containing the Python interpreter
 that launched mergetrain, then preserves the inherited `PATH`. Run mergetrain
 from a reviewed virtualenv or installation because executables beside that
@@ -74,6 +75,21 @@ copy records retain both the old and new path so moving a file out of a guarded
 area cannot bypass its gate. Patterns are validated as normalized relative
 POSIX paths; absolute paths, traversal segments, backslashes, and ambiguous
 embedded `**` forms are refused.
+
+## Parallel gate process isolation
+
+An explicit parallel gate group starts multiple trusted shell commands in the
+same integration worktree. Configure only checks that are independent and do
+not mutate shared files. Every command gets its own process group and buffered
+log stream. A failure, timeout, lease loss, or cancellation terminates the other
+groups before the runner records terminal events; on Windows the runner uses
+`taskkill /T /F` to include descendants.
+
+`gate_parallelism.max_workers` and each gate's `workers` weight bound scheduling,
+not the operating system. A command that launches its own pool must cap that pool
+itself and declare a representative weight. Logs remain raw and potentially
+sensitive; structured failure events include only a return code or exception
+class, never subprocess output.
 
 ## Dashboard exposure
 

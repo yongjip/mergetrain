@@ -199,6 +199,205 @@ def enable_persistent_validation_workspace(
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_parallel_gate_group_is_bounded_and_events_are_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gate_parallelism:
+  max_workers: 2
+gates:
+  - name: slow
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import time; time.sleep(0.3); print(1)"'
+    parallel_group: quality
+  - name: fast
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "print(2)"'
+    parallel_group: quality
+  - name: later
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "print(3)"'
+    parallel_group: quality
+""",
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            log = io.StringIO()
+            events: list[tuple[str, str]] = []
+
+            runner._run_configured_gate_plan(
+                worktree=repo,
+                log=log,
+                pulse=None,
+                on_gate=lambda name, state, _index, _total, _detail: events.append(
+                    (name, state)
+                ),
+                initial_states={},
+            )
+
+            self.assertEqual(
+                events,
+                [
+                    ("slow", "active"),
+                    ("fast", "active"),
+                    ("slow", "success"),
+                    ("fast", "success"),
+                    ("later", "active"),
+                    ("later", "success"),
+                ],
+            )
+            rendered = log.getvalue()
+            self.assertLess(rendered.index("\n1\n"), rendered.index("\n2\n"))
+
+    def test_parallel_gate_failure_cancels_peer_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gate_parallelism:
+  max_workers: 2
+gates:
+  - name: fail
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import sys; sys.exit(3)"'
+    parallel_group: quality
+  - name: peer
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import time; time.sleep(10)"'
+    parallel_group: quality
+""",
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            events: list[tuple[str, str]] = []
+            started = time.monotonic()
+
+            with self.assertRaises(CommandFailed):
+                runner._run_configured_gate_plan(
+                    worktree=repo,
+                    log=io.StringIO(),
+                    pulse=None,
+                    on_gate=lambda name, state, _index, _total, _detail: events.append(
+                        (name, state)
+                    ),
+                    initial_states={},
+                )
+
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(
+                events[-2:],
+                [("fail", "failure"), ("peer", "canceled")],
+            )
+
+    def test_parallel_gate_honors_per_gate_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: bounded
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import time; time.sleep(10)"'
+    timeout_seconds: 1
+""",
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            started = time.monotonic()
+
+            with self.assertRaises(CommandFailed) as raised:
+                runner._run_configured_gate_plan(
+                    worktree=repo,
+                    log=io.StringIO(),
+                    pulse=None,
+                    on_gate=None,
+                    initial_states={},
+                )
+
+            self.assertEqual(raised.exception.returncode, 124)
+            self.assertLess(time.monotonic() - started, 5)
+
+    def test_parallel_gate_honors_total_plan_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """gate_parallelism:
+  max_workers: 2
+  timeout_seconds: 1
+gates:
+  - name: first
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import time; time.sleep(10)"'
+    parallel_group: bounded
+  - name: second
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import time; time.sleep(10)"'
+    parallel_group: bounded
+""",
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            events: list[tuple[str, str]] = []
+            started = time.monotonic()
+
+            with self.assertRaises(CommandFailed) as raised:
+                runner._run_configured_gate_plan(
+                    worktree=repo,
+                    log=io.StringIO(),
+                    pulse=None,
+                    on_gate=lambda name, state, _index, _total, _detail: events.append(
+                        (name, state)
+                    ),
+                    initial_states={},
+                )
+
+            self.assertEqual(raised.exception.returncode, 124)
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(
+                events[-2:],
+                [("first", "canceled"), ("second", "canceled")],
+            )
+
+    def test_builtin_integrity_gate_finishes_before_parallel_group(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    """gates:
+  - name: marker
+    run:""",
+                    """gate_parallelism:
+  max_workers: 2
+gates:
+  - name: first
+    parallel_group: quality
+    run:""",
+                    1,
+                ).replace(
+                    "deploy:\n",
+                    """  - name: second
+    parallel_group: quality
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "print(2)"'
+deploy:
+""",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            events: list[tuple[str, str]] = []
+
+            runner._run_gates(
+                worktree=repo,
+                log=io.StringIO(),
+                pulse=None,
+                on_gate=lambda name, state, _index, _total, _detail: events.append(
+                    (name, state)
+                ),
+            )
+
+            self.assertEqual(
+                events[:4],
+                [
+                    ("diff-check", "active"),
+                    ("diff-check", "success"),
+                    ("first", "active"),
+                    ("second", "active"),
+                ],
+            )
+
     def test_command_env_prioritizes_the_runner_python_tool_directory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -845,6 +1044,24 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(
                 payload["reuse"]["reused_validation_sha"],
                 validated.validation_sha,
+            )
+            checks = {
+                check["code"]: check for check in payload["reuse"]["identity_checks"]
+            }
+            self.assertEqual(checks["integration_base"]["status"], "match")
+            self.assertEqual(checks["gate_policy"]["status"], "match")
+            self.assertEqual(checks["environment"]["status"], "match")
+            self.assertTrue(
+                all(
+                    gate["action"] == "reuse"
+                    for gate in payload["reuse"]["gates"]
+                )
+            )
+            self.assertFalse(
+                payload["reuse"]["estimated_savings"]["authorizes_reuse"]
+            )
+            self.assertGreater(
+                payload["reuse"]["estimated_savings"]["timed_gate_count"], 0
             )
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
             with self.assertRaises(AssertionError):

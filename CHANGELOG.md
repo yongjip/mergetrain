@@ -2,7 +2,23 @@
 
 ## Unreleased
 
-## 1.1.1 - 2026-07-29
+## 1.2.0 - 2026-07-29
+
+- Add `supersede`, an atomic validated-train replacement workflow that retires
+  the old train without erasing its validation evidence, captures exact clean
+  replacement HEADs, records the old/new audit relationship, and never carries
+  validation, gate-reuse identity, auto mode, or deploy approval forward
+  (#206).
+
+- Add opt-in, resource-bounded parallel pre-push gate groups with explicit
+  dependencies, per-gate and plan timeouts, deterministic event/log ordering,
+  fail-fast peer process-tree cancellation, and a strictly sequential default
+  (#207).
+
+- Give reuse preview and the dashboard one structured eligibility explanation:
+  exact identity facts and mismatch causes, truthful per-gate reuse/rerun/skip
+  actions, and history-derived savings with sample coverage and confidence.
+  Estimates explicitly cannot authorize reuse (#208).
 
 - Attribute queue wait, approval wait, validation/deploy runtime, and runner
   phase latency in `stats`, including retained-history coverage and
