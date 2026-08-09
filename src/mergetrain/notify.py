@@ -1,12 +1,9 @@
-"""Transition-deduped desktop and provider-neutral webhook notifications."""
+"""Transition-deduped provider-neutral webhook notifications."""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
-import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -49,30 +46,6 @@ def _dedup_key(outcome: str, error: str) -> str:
     if outcome == "error":
         return f"error:{error or 'sweep error'}"
     return outcome
-
-
-def _escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def system_notifier(title: str, message: str) -> None:
-    """Post one desktop notification; silently do nothing off-macOS."""
-
-    if sys.platform != "darwin":
-        return
-    osascript = shutil.which("osascript")
-    if not osascript:
-        return
-    script = f'display notification "{_escape(message)}" with title "{_escape(title)}"'
-    try:
-        subprocess.run(
-            [osascript, "-e", script],
-            check=False,
-            capture_output=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
 
 
 def webhook_notifier(url: str, *, timeout_seconds: int = 10) -> Notifier:
@@ -136,7 +109,11 @@ def notifier_chain(*notifiers: Notifier) -> Notifier:
 
 
 def configured_notifier(config: NotifyConfig) -> Notifier:
-    """Webhook first (retryable), then the best-effort desktop backend."""
+    """Build the configured headless webhook chain.
+
+    Interactive desktop alerts belong to the open dashboard, which uses the
+    browser Notification API consistently across supported platforms.
+    """
 
     backends: list[Notifier] = []
     if config.webhook_url:
@@ -146,7 +123,6 @@ def configured_notifier(config: NotifyConfig) -> Notifier:
                 timeout_seconds=config.timeout_seconds,
             )
         )
-    backends.append(system_notifier)
     return notifier_chain(*backends)
 
 

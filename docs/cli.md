@@ -443,8 +443,8 @@ mergetrain hub daemon [--interval 15] [--concurrency 1] [--notify] [--once [--js
 ```
 
 `--notify` sends each repo's configured transitions through its optional JSON
-webhook and the macOS desktop backend. Without a webhook it remains a silent
-desktop no-op off macOS. Delivery is persisted and transition-deduplicated.
+webhook. Delivery is persisted and transition-deduplicated. Interactive desktop
+alerts are enabled in the open Hub page and do not require this flag.
 
 Each repo is processed by the same per-tick policy as the single-repo
 `daemon` — only `--auto` jobs, behind that repo's own lock, gates, and
@@ -555,7 +555,8 @@ mergetrain daemon --once --notify
 
 Claims only jobs enqueued with `--auto`. `--notify` uses the same persisted
 landed/blocked/reconcile/error transition dedup as `hub daemon`, plus the
-provider-neutral webhook configured under `notify`. See the
+provider-neutral webhook configured under `notify`. Browser alerts are instead
+owned by the open dashboard page. See the
 [daemon guide](daemon.md) and [config reference](config.md#notify).
 
 ## `gc`

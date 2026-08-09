@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  Bell,
+  BellSlash,
   Broadcast,
   CalendarBlank,
   CaretDown,
@@ -43,6 +45,12 @@ import {
   stateFavicon,
   workspaceStepForSnapshot,
 } from "./dashboardLogic.js";
+import {
+  claimNotification,
+  notificationCandidates,
+  readNotificationPreference,
+  writeNotificationPreference,
+} from "./notifications.js";
 
 const PHASES = [
   ["queue", "Queue"],
@@ -200,12 +208,155 @@ function StatusIcon({ state, size = 22 }) {
   return <Circle size={size} weight="regular" />;
 }
 
+function browserNotificationPermission() {
+  if (typeof window === "undefined" || !window.isSecureContext || !("Notification" in window)) {
+    return "unsupported";
+  }
+  return window.Notification.permission;
+}
+
+function showBrowserNotification(candidate) {
+  try {
+    const notification = new window.Notification(candidate.title, {
+      body: candidate.body,
+      icon: "/favicon.svg",
+      requireInteraction: candidate.kind === "attention",
+      tag: candidate.id,
+    });
+    notification.onclick = () => {
+      if (candidate.repoPath) {
+        window.location.hash = `repo=${encodeURIComponent(candidate.repoPath)}`;
+      }
+      window.focus();
+      notification.close();
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function deliverBrowserNotification(candidate) {
+  const claim = () => claimNotification(window.localStorage, candidate.id);
+  let claimed = false;
+  if (window.navigator.locks?.request) {
+    try {
+      await window.navigator.locks.request(
+        "mergetrain-dashboard-notification",
+        () => { claimed = claim(); },
+      );
+    } catch {
+      claimed = claim();
+    }
+  } else {
+    claimed = claim();
+  }
+  if (claimed) showBrowserNotification(candidate);
+}
+
+function useDashboardNotifications(snapshot) {
+  const [enabled, setEnabled] = useState(
+    () => typeof window !== "undefined" && readNotificationPreference(window.localStorage),
+  );
+  const [permission, setPermission] = useState(browserNotificationPermission);
+  const previousSnapshot = useRef(null);
+
+  const saveEnabled = (value) => {
+    setEnabled(value);
+    writeNotificationPreference(window.localStorage, value);
+  };
+
+  useEffect(() => {
+    const refreshPermission = () => {
+      const value = browserNotificationPermission();
+      setPermission(value);
+      if (["denied", "unsupported"].includes(value)) saveEnabled(false);
+    };
+    document.addEventListener("visibilitychange", refreshPermission);
+    return () => document.removeEventListener("visibilitychange", refreshPermission);
+  }, []);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const previous = previousSnapshot.current;
+    previousSnapshot.current = snapshot;
+    if (!previous || !enabled || permission !== "granted") return;
+    notificationCandidates(previous, snapshot).forEach((candidate) => {
+      void deliverBrowserNotification(candidate);
+    });
+  }, [snapshot, enabled, permission]);
+
+  const toggle = async () => {
+    if (permission === "unsupported" || permission === "denied") return;
+    if (enabled && permission === "granted") {
+      saveEnabled(false);
+      return;
+    }
+    let nextPermission = permission;
+    if (nextPermission !== "granted") {
+      try {
+        nextPermission = await window.Notification.requestPermission();
+      } catch {
+        nextPermission = browserNotificationPermission();
+      }
+      setPermission(nextPermission);
+    }
+    if (nextPermission !== "granted") {
+      saveEnabled(false);
+      return;
+    }
+    saveEnabled(true);
+    showBrowserNotification({
+      id: "mergetrain-dashboard-notifications-enabled",
+      title: "mergetrain notifications enabled",
+      body: "This dashboard will alert you when a train finishes or needs attention.",
+      kind: "enabled",
+    });
+  };
+
+  const state = permission === "unsupported"
+    ? "unsupported"
+    : permission === "denied"
+      ? "blocked"
+      : enabled && permission === "granted"
+        ? "on"
+        : "off";
+  return { state, toggle };
+}
+
+function NotificationControl({ notifications }) {
+  const copy = {
+    on: ["Notifications on", "Disable dashboard notifications"],
+    off: ["Enable notifications", "Enable browser notifications while this dashboard is open"],
+    blocked: ["Notifications blocked", "Allow site notifications or open this dashboard in a browser that supports them"],
+    unsupported: ["Notifications unavailable", "Use a secure dashboard URL in a browser that supports site notifications"],
+  }[notifications.state];
+  const unavailable = ["blocked", "unsupported"].includes(notifications.state);
+  return (
+    <button
+      aria-label={copy[1]}
+      aria-pressed={unavailable ? undefined : notifications.state === "on"}
+      className={`notification-toggle ${notifications.state}`}
+      disabled={unavailable}
+      onClick={notifications.toggle}
+      title={copy[1]}
+      type="button"
+    >
+      {notifications.state === "on"
+        ? <Bell size={17} weight="fill" />
+        : <BellSlash size={17} />}
+      <span>{copy[0]}</span>
+    </button>
+  );
+}
+
 function Header({
   snapshot,
   connection,
   now,
   hub,
   repoName,
+  notifications,
   theme,
   onToggleTheme,
   demoState,
@@ -243,6 +394,7 @@ function Header({
         </button>
       )}
       <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
+      <NotificationControl notifications={notifications} />
       <button
         className="theme-toggle"
         type="button"
@@ -1629,6 +1781,7 @@ function initialTheme() {
 
 export function App() {
   const [snapshot, connection] = useSnapshotFeed();
+  const notifications = useDashboardNotifications(snapshot);
   const [now, setNow] = useState(new Date());
   const [selectedRepo, setSelectedRepo] = useState(readRepoHash);
   const [theme, setTheme] = useState(initialTheme);
@@ -1694,6 +1847,7 @@ export function App() {
           now={now}
           hub
           repoName={drillable ? drillable.name || drillable.path : null}
+          notifications={notifications}
           theme={theme}
           onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
         />
@@ -1717,6 +1871,7 @@ export function App() {
         snapshot={snapshot}
         connection={connection}
         now={now}
+        notifications={notifications}
         theme={theme}
         onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
         demoState={{ playing: demoPlaying, step: demoStep }}

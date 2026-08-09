@@ -206,18 +206,30 @@ notify:
 ```
 
 `daemon --notify` and `hub daemon --notify` send transition-deduplicated
-notifications through a provider-neutral JSON webhook and the existing macOS
-desktop backend. The webhook receives an HTTP `POST` with
+notifications through the provider-neutral JSON webhook. The webhook receives an HTTP `POST` with
 `{"title":"...","message":"..."}` and `Content-Type: application/json`.
 Slack/Discord-specific message shaping belongs in an adapter or relay; core does
 not embed provider credentials or schemas.
 
-`transitions` selects `landed`, `blocked`/partial, `needs_reconcile`, and daemon
-error/pause messages. A disabled transition is recorded as settled so enabling
-it later does not replay old history. `timeout_seconds` must be positive, and
-the URL must use HTTP(S). Treat `webhook_url` as a secret: doctor/config JSON
-reports only `webhook_configured`, never the URL. Delivery errors likewise omit
-the credential-bearing URL.
+Interactive desktop alerts are configured in the open `dashboard` or `hub`
+page instead. Click **Enable notifications** once to grant the browser permission
+and remember the preference for that dashboard origin. Browser alerts work on
+supported macOS and Windows browsers without a platform helper, stop when the
+page closes, and focus the relevant dashboard (including the affected Hub repo)
+when clicked. They do not require `--notify` or a webhook.
+Embedded or in-app browsers may intentionally deny site notifications; in that
+case, open the same loopback dashboard URL in Safari, Chrome, Edge, or another
+desktop browser that exposes notification permission.
+Loopback HTTP is treated as a secure browser context; a remotely exposed
+dashboard needs HTTPS before browsers will offer notification permission.
+
+For headless webhook delivery, `transitions` selects `landed`,
+`blocked`/partial, `needs_reconcile`, and daemon error/pause messages. A disabled
+transition is recorded as settled so enabling it later does not replay old
+history. `timeout_seconds` must be positive, and the URL must use HTTP(S).
+Treat `webhook_url` as a secret: doctor/config JSON reports only
+`webhook_configured`, never the URL. Delivery errors likewise omit the
+credential-bearing URL.
 
 ## `gates`
 

@@ -7,13 +7,13 @@ from types import SimpleNamespace
 from unittest import mock
 from urllib.error import HTTPError
 
-from mergetrain import notify as notify_module
+from mergetrain.config import NotifyConfig
 from mergetrain.notify import (
+    configured_notifier,
     load_notify_state,
     notification_transition,
     save_notify_state,
     sweep_notifications,
-    system_notifier,
     webhook_notifier,
 )
 
@@ -154,26 +154,10 @@ class SweepNotificationTests(unittest.TestCase):
             self.assertEqual(quiet, [])
 
 
-class SystemNotifierTests(unittest.TestCase):
-    def test_darwin_invokes_osascript_with_escaped_strings(self) -> None:
-        calls = []
-        with mock.patch.object(notify_module.sys, "platform", "darwin"), mock.patch.object(
-            notify_module.shutil, "which", return_value="/usr/bin/osascript"
-        ), mock.patch.object(notify_module.subprocess, "run", lambda *a, **k: calls.append(a[0])):
-            system_notifier('mergetrain · "api"', 'landed \\ "ok"')
-        self.assertEqual(len(calls), 1)
-        script = calls[0][2]
-        self.assertIn('with title "mergetrain · \\"api\\""', script)
-        self.assertIn('display notification "landed \\\\ \\"ok\\""', script)
-
-    def test_non_darwin_is_a_silent_noop(self) -> None:
-        with mock.patch.object(notify_module.sys, "platform", "linux"), mock.patch.object(
-            notify_module.subprocess, "run", side_effect=AssertionError("must not run")
-        ):
-            system_notifier("t", "m")
-
-
 class WebhookNotifierTests(unittest.TestCase):
+    def test_no_webhook_is_a_platform_neutral_noop(self) -> None:
+        configured_notifier(NotifyConfig())("Train", "landed")
+
     def test_posts_provider_neutral_json_with_timeout(self) -> None:
         response = mock.MagicMock()
         response.__enter__.return_value.status = 204

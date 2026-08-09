@@ -106,6 +106,14 @@ it can include an imported package path, editable source path, and source-contro
 state. The dashboard snapshot and remotely bindable dashboard API do not include
 that provenance object.
 
+Browser notifications are opt-in and page-owned. Their lock-screen-visible text
+is deliberately limited to the project name, job IDs, status, and aggregate
+counts; task text, branch names, notes, paths, commands, and error details are
+not copied into an alert. The enabled preference and short-lived duplicate
+suppression keys live in origin-scoped browser storage. Clicking an alert only
+focuses the page and, in Hub, selects the affected repo; it does not call a
+mutation endpoint. Closing the page stops new browser alerts.
+
 Binding to a non-loopback host requires `--allow-remote`. That flag is an
 acknowledgement, not an authentication or encryption layer. Put a separately
 reviewed authenticated reverse proxy in front of the dashboard if it must be

@@ -81,11 +81,17 @@ The `--auto` flag remains the explicit unattended-deploy approval boundary,
 exactly as with the single-repo daemon. The hub daemon never touches
 manually enqueued jobs.
 
-`--notify` posts a desktop notification when a repo's train lands, when a
-sweep hits an error, or when deploys pause for reconcile (transitions only,
-so a broken repo doesn't re-notify every sweep). macOS `osascript` only — a
-deliberate zero-dependency choice; on other platforms the flag is a silent
-no-op.
+The open Hub page can send cross-platform browser notifications when a repo's
+train passes validation, lands, or needs attention. Enable them once from the
+header; clicking an alert focuses Hub and opens that repo's drill-down. Alerts
+are owned by the page and stop when it closes. Multiple open tabs coordinate so
+one state transition produces one alert, and the initial snapshot is a quiet
+baseline rather than a replay of old work.
+
+For headless integrations, `--notify` sends landed, blocked, reconcile, and
+daemon-pause transitions to each repo's configured JSON webhook. Delivery is
+persisted and transition-deduplicated. Without a webhook configured for a repo,
+there is no headless notification backend.
 
 ### Per-repo opt-out
 

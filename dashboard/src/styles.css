@@ -134,6 +134,30 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .theme-toggle:hover,
 .theme-toggle:focus-visible { border-color: var(--blue); color: var(--blue); outline: none; }
+.notification-toggle {
+  min-height: 34px;
+  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface);
+  font: 650 12px "Inter Variable", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.notification-toggle:hover,
+.notification-toggle:focus-visible { border-color: var(--blue); color: var(--blue); outline: none; }
+.notification-toggle.on {
+  border-color: color-mix(in srgb, var(--green) 55%, var(--line));
+  color: var(--green);
+  background: var(--green-soft);
+}
+.notification-toggle:disabled { cursor: not-allowed; opacity: 0.7; }
+.notification-toggle.blocked { color: var(--red); }
 .live {
   gap: 8px;
   color: var(--green);
@@ -1862,6 +1886,8 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 
 @media (max-width: 1220px) {
   .topbar .divider { display: none; }
+  .notification-toggle span { display: none; }
+  .notification-toggle { width: 34px; padding-inline: 0; justify-content: center; }
   .train-workspace-grid.with-inspector { grid-template-columns: minmax(0, 1fr) 300px; }
   .batch-status-banner {
     grid-template-columns: minmax(280px, 1.2fr) minmax(250px, 0.9fr) minmax(260px, 1fr);

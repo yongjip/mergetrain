@@ -1896,7 +1896,7 @@ def cmd_hub_status(args: argparse.Namespace) -> int:
 
 def cmd_hub_daemon(args: argparse.Namespace) -> int:
     from .hub_daemon import hub_daemon_loop
-    from .notify import configured_notifier, notification_transition, system_notifier
+    from .notify import configured_notifier, notification_transition
 
     if args.concurrency < 1:
         raise QueueError("hub daemon --concurrency must be at least 1")
@@ -1906,9 +1906,9 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
         try:
             config = load_config(repo=path)
         except Exception:
-            # A broken config is itself worth surfacing; its webhook cannot be
-            # trusted, but the existing desktop path remains available.
-            return system_notifier
+            # A broken config cannot provide a trusted webhook. The open Hub
+            # dashboard surfaces the repository error through browser alerts.
+            return None
         if notification_transition(key) not in config.notify.transitions:
             return None
         return configured_notifier(config.notify)
@@ -2163,7 +2163,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_daemon.add_argument(
         "--notify",
         action="store_true",
-        help="Notify configured transitions via webhook and desktop backends",
+        help="Notify configured transitions via the optional webhook",
     )
     p_daemon.add_argument("--keep-worktree", action="store_true")
     p_daemon.set_defaults(func=cmd_daemon)
@@ -2307,7 +2307,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_hub_daemon.add_argument(
         "--notify",
         action="store_true",
-        help="Notify each repo's configured transitions via webhook and desktop backends",
+        help="Notify each repo's configured transitions via its optional webhook",
     )
     p_hub_daemon.add_argument("--keep-worktree", action="store_true")
     p_hub_daemon.add_argument("--registry", help="Override the hub registry file path")

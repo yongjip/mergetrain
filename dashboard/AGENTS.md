@@ -83,3 +83,9 @@ When implementing from a selected generated mock, treat that image as the source
   action surface.
 - Recent-outcome marks must reflect real job states. Treat canceled jobs as
   neutral history, never as successful or failed work.
+- Keep interactive desktop notifications owned by the open dashboard and use
+  the browser Notification API so macOS and Windows share one implementation.
+  Permission must follow an explicit in-dashboard gesture; alerts stop with the
+  page, avoid replaying pre-existing state, and Hub alert clicks open the
+  affected repository drill-down. Native platform helpers are not part of this
+  interaction model.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Replace the macOS-only `osascript` desktop backend with opt-in browser
+  notifications owned by the open dashboard and Hub. The same implementation
+  now works in supported macOS and Windows browsers, ignores pre-existing state,
+  coordinates duplicate tabs, and focuses the affected repository when an
+  alert is clicked. Daemon `--notify` remains available for provider-neutral
+  headless webhooks.
+
 ## 1.2.0 - 2026-07-30
 
 - Normalize checkout line endings before comparing operator configuration with

@@ -217,7 +217,9 @@ timing, and the next safe action. On phone-sized screens it collapses to the
 three facts needed for a remote glance: state, next action, and attention.
 `CONNECTED` describes the browser's data stream; `RUNNER ACTIVE` separately
 describes the process that owns the train. It has no mutation endpoints or
-deploy controls.
+deploy controls. The header can enable cross-platform browser notifications
+while the page is open; validation, deployment, and attention alerts focus the
+dashboard when clicked, and Hub alerts open the affected repository.
 
 Running agents across several repos? Register each one and serve every queue
 on a single board:
