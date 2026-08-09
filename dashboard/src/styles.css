@@ -168,6 +168,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .live small { color: var(--muted); letter-spacing: 0; font-family: "Inter Variable", sans-serif; font-size: 14px; }
 .live.polling { color: var(--amber); }
+.live.degraded,
 .live.offline { color: var(--red); }
 .live-dot,
 .rail-heading .healthy i { width: 10px; height: 10px; display: inline-block; border-radius: 999px; background: currentColor; }
@@ -597,6 +598,9 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 }
 .page-footer i { font-style: normal; }
 .loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 15px; color: var(--blue); }
+.loading-error { color: var(--red); }
+.loading-error div { display: grid; gap: 5px; max-width: 560px; }
+.loading-error span { color: var(--muted); line-height: 1.45; }
 .spin { animation: spin 1.15s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -1027,6 +1031,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   .repo-table-state { grid-row: auto; justify-items: start; }
 }
 
+.feed-error-banner,
 .registry-error-banner {
   margin: 18px 36px 0;
   padding: 11px 15px;
@@ -1039,6 +1044,7 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
   color: var(--red);
   font-size: 14px;
 }
+.feed-error-banner span,
 .registry-error-banner span { color: #8a3134; }
 
 /* ---- dark theme surface corrections ---- */
@@ -1087,7 +1093,9 @@ time { font-family: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monos
 :root[data-theme="dark"] .count-chip.needs_reconcile { background: var(--amber-soft); }
 :root[data-theme="dark"] .count-chip.validated { background: var(--green-soft); }
 :root[data-theme="dark"] .repo-card-foot { border-top-color: var(--line-soft); }
+:root[data-theme="dark"] .feed-error-banner,
 :root[data-theme="dark"] .registry-error-banner { border-color: #74383c; background: var(--red-soft); }
+:root[data-theme="dark"] .feed-error-banner span,
 :root[data-theme="dark"] .registry-error-banner span { color: #ef9a9e; }
 
 /* ---- current train workspace ---- */

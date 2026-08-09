@@ -444,7 +444,9 @@ mergetrain hub daemon [--interval 15] [--concurrency 1] [--notify] [--once [--js
 
 `--notify` sends each repo's configured transitions through its optional JSON
 webhook. Delivery is persisted and transition-deduplicated. Interactive desktop
-alerts are enabled in the open Hub page and do not require this flag.
+alerts are enabled in the open Hub page and do not require this flag. If a
+transition needs delivery for a repo without `notify.webhook_url`, the daemon
+prints one warning instead of silently implying that a headless backend exists.
 
 Each repo is processed by the same per-tick policy as the single-repo
 `daemon` — only `--auto` jobs, behind that repo's own lock, gates, and
@@ -556,7 +558,8 @@ mergetrain daemon --once --notify
 Claims only jobs enqueued with `--auto`. `--notify` uses the same persisted
 landed/blocked/reconcile/error transition dedup as `hub daemon`, plus the
 provider-neutral webhook configured under `notify`. Browser alerts are instead
-owned by the open dashboard page. See the
+owned by the open dashboard page. With no `notify.webhook_url`, the command
+prints a startup warning because `--notify` has no headless delivery backend. See the
 [daemon guide](daemon.md) and [config reference](config.md#notify).
 
 ## `gc`

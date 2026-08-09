@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   claimNotification,
+  feedErrorCandidate,
   notificationCandidates,
   readNotificationPreference,
   writeNotificationPreference,
@@ -33,6 +34,27 @@ function storage() {
 test("the first dashboard snapshot is a quiet baseline", () => {
   const current = snapshot({ jobs: [{ id: 1, status: "failed" }] });
   assert.deepEqual(notificationCandidates(null, current), []);
+});
+
+test("feed failures use a stable generic attention notification", () => {
+  const current = {
+    ...snapshot({ jobs: [{ id: 1, status: "in_progress" }] }),
+    generated_at: "2026-08-09T06:00:00Z",
+  };
+  const candidate = feedErrorCandidate(current, {
+    code: "snapshot_unavailable",
+    message: "token=secret-value at /private/worktree",
+  });
+  assert.equal(candidate.kind, "attention");
+  assert.match(candidate.body, /last known state may be stale/);
+  assert.doesNotMatch(JSON.stringify(candidate), /secret-value|private/);
+  assert.deepEqual(
+    feedErrorCandidate(
+      { ...current, generated_at: "2026-08-09T06:00:05Z" },
+      { code: "snapshot_unavailable", message: "different" },
+    ),
+    candidate,
+  );
 });
 
 test("validation and deployment transitions produce one train notification", () => {

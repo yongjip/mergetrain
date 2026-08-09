@@ -59,6 +59,19 @@ function notificationTitle(snapshot, fallbackName) {
   return `mergetrain · ${projectName(snapshot, fallbackName)}`;
 }
 
+export function feedErrorCandidate(snapshot, error) {
+  if (!snapshot || !error) return null;
+  const hub = snapshot.hub === true;
+  const name = hub ? "Hub" : projectName(snapshot);
+  const key = hub ? "hub" : repoIdentity(snapshot);
+  return {
+    id: `feed-error:${key}:${stableToken(error.code || "snapshot_unavailable")}`,
+    title: `mergetrain · ${name}`,
+    body: "Live dashboard state is unavailable. The last known state may be stale.",
+    kind: "attention",
+  };
+}
+
 function repositoryCandidates(previous, current, { repoPath = "", fallbackName = "" } = {}) {
   if (!previous?.ok || !current?.ok) return [];
   const candidates = [];

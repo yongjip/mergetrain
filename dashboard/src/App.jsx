@@ -47,10 +47,16 @@ import {
 } from "./dashboardLogic.js";
 import {
   claimNotification,
+  feedErrorCandidate,
   notificationCandidates,
   readNotificationPreference,
   writeNotificationPreference,
 } from "./notifications.js";
+import {
+  INITIAL_FEED_STATE,
+  connectionLabel,
+  nextFeedState,
+} from "./feed.js";
 
 const PHASES = [
   ["queue", "Queue"],
@@ -254,12 +260,13 @@ async function deliverBrowserNotification(candidate) {
   if (claimed) showBrowserNotification(candidate);
 }
 
-function useDashboardNotifications(snapshot) {
+function useDashboardNotifications(snapshot, feedError) {
   const [enabled, setEnabled] = useState(
     () => typeof window !== "undefined" && readNotificationPreference(window.localStorage),
   );
   const [permission, setPermission] = useState(browserNotificationPermission);
   const previousSnapshot = useRef(null);
+  const previousFeedError = useRef(null);
 
   const saveEnabled = (value) => {
     setEnabled(value);
@@ -285,6 +292,14 @@ function useDashboardNotifications(snapshot) {
       void deliverBrowserNotification(candidate);
     });
   }, [snapshot, enabled, permission]);
+
+  useEffect(() => {
+    const previous = previousFeedError.current;
+    previousFeedError.current = feedError;
+    if (!snapshot || !feedError || previous || !enabled || permission !== "granted") return;
+    const candidate = feedErrorCandidate(snapshot, feedError);
+    if (candidate) void deliverBrowserNotification(candidate);
+  }, [snapshot, feedError, enabled, permission]);
 
   const toggle = async () => {
     if (permission === "unsupported" || permission === "denied") return;
@@ -363,7 +378,7 @@ function Header({
   onPlayDemo,
 }) {
   const generated = relative(snapshot.generated_at, now);
-  const connectionLabel = connection === "live" ? "CONNECTED" : connection === "offline" ? "DISCONNECTED" : "POLLING";
+  const connectionText = connectionLabel(connection);
   const preview = !hub && snapshot.project?.preview;
   return (
     <header className="topbar">
@@ -393,7 +408,7 @@ function Header({
           <span>{demoState?.playing ? `Playing ${demoState.step + 1} / 7` : "Play demo"}</span>
         </button>
       )}
-      <div className={`live ${connection}`}><span className="live-dot" />{connectionLabel}<small>· updated {generated}</small></div>
+      <div className={`live ${connection}`}><span className="live-dot" />{connectionText}<small>· updated {generated}</small></div>
       <NotificationControl notifications={notifications} />
       <button
         className="theme-toggle"
@@ -840,7 +855,18 @@ function NextAction({ snapshot }) {
   );
 }
 
-function Loading() {
+export function Loading({ error = null }) {
+  if (error) {
+    return (
+      <main className="loading loading-error" role="alert">
+        <WarningCircle size={36} weight="fill" />
+        <div>
+          <strong>Local train state unavailable</strong>
+          <span>{error.message} Retrying automatically.</span>
+        </div>
+      </main>
+    );
+  }
   return <main className="loading"><SpinnerGap size={36} className="spin" /><strong>Reading local train state…</strong></main>;
 }
 
@@ -1590,6 +1616,18 @@ function RegistryErrorBanner({ message }) {
   );
 }
 
+export function FeedErrorBanner({ error, lastSuccessAt, now }) {
+  if (!error) return null;
+  const lastKnown = lastSuccessAt ? ` Last good snapshot: ${relative(lastSuccessAt, now)}.` : "";
+  return (
+    <div className="feed-error-banner" role="alert">
+      <WarningCircle size={18} weight="fill" />
+      <strong>Live state unavailable</strong>
+      <span>{error.message} Showing the last known state.{lastKnown} Retrying automatically.</span>
+    </div>
+  );
+}
+
 const REPO_SEVERITY = {
   error: 0,
   warning: 1,
@@ -1710,7 +1748,7 @@ function readRepoHash() {
 }
 
 function useSnapshotFeed() {
-  const [snapshot, setSnapshot] = useState(null);
+  const [feed, setFeed] = useState(INITIAL_FEED_STATE);
   const [connection, setConnection] = useState("connecting");
 
   useEffect(() => {
@@ -1719,13 +1757,26 @@ function useSnapshotFeed() {
     let staleTimer = null;
     let lastLiveAt = 0;
     const update = (payload) => {
-      if (active && payload?.ok) setSnapshot(payload);
+      if (active) setFeed((current) => nextFeedState(current, payload));
+      return payload?.ok === true;
     };
     const fetchSnapshot = async () => {
       try {
         const response = await fetch("/api/snapshot", { cache: "no-store" });
-        update(await response.json());
+        const healthy = update(await response.json());
+        if (active && !healthy) setConnection("degraded");
+        if (active && healthy) {
+          setConnection((current) => ["offline", "degraded"].includes(current) ? "polling" : current);
+        }
       } catch {
+        update({
+          ok: false,
+          error: {
+            code: "dashboard_unreachable",
+            message: "The dashboard could not read the local train state.",
+            retryable: true,
+          },
+        });
         if (active) setConnection("offline");
       }
     };
@@ -1733,11 +1784,14 @@ function useSnapshotFeed() {
       if (polling) window.clearInterval(polling);
       polling = null;
     };
-    const markLive = () => {
+    const markOpen = () => {
       lastLiveAt = Date.now();
       if (staleTimer) window.clearTimeout(staleTimer);
       staleTimer = null;
       stopPolling();
+    };
+    const markLive = () => {
+      markOpen();
       if (active) setConnection("live");
     };
     const startPolling = () => {
@@ -1747,10 +1801,23 @@ function useSnapshotFeed() {
     };
     fetchSnapshot();
     const source = new EventSource("/api/events");
-    source.onopen = markLive;
+    source.onopen = markOpen;
     source.addEventListener("snapshot", (event) => {
-      update(JSON.parse(event.data));
-      markLive();
+      try {
+        const healthy = update(JSON.parse(event.data));
+        if (healthy) markLive();
+        else if (active) setConnection("degraded");
+      } catch {
+        update({
+          ok: false,
+          error: {
+            code: "invalid_snapshot",
+            message: "The dashboard received an invalid live-state update.",
+            retryable: true,
+          },
+        });
+        if (active) setConnection("degraded");
+      }
     });
     source.onerror = () => {
       if (!active) return;
@@ -1770,7 +1837,7 @@ function useSnapshotFeed() {
     };
   }, []);
 
-  return [snapshot, connection];
+  return { ...feed, connection };
 }
 
 function initialTheme() {
@@ -1780,8 +1847,9 @@ function initialTheme() {
 }
 
 export function App() {
-  const [snapshot, connection] = useSnapshotFeed();
-  const notifications = useDashboardNotifications(snapshot);
+  const feed = useSnapshotFeed();
+  const { snapshot, connection, error: feedError, lastSuccessAt } = feed;
+  const notifications = useDashboardNotifications(snapshot, feedError);
   const [now, setNow] = useState(new Date());
   const [selectedRepo, setSelectedRepo] = useState(readRepoHash);
   const [theme, setTheme] = useState(initialTheme);
@@ -1832,7 +1900,7 @@ export function App() {
     setDemoPlaying(true);
   };
 
-  if (!snapshot) return <Loading />;
+  if (!snapshot) return <Loading error={feedError} />;
 
   if (snapshot.hub) {
     const entry = selectedRepo === null
@@ -1851,6 +1919,7 @@ export function App() {
           theme={theme}
           onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
         />
+        <FeedErrorBanner error={feedError} lastSuccessAt={lastSuccessAt} now={now} />
         {snapshot.registry_error && <RegistryErrorBanner message={snapshot.registry_error} />}
         {drillable ? (
           <>
@@ -1877,6 +1946,7 @@ export function App() {
         demoState={{ playing: demoPlaying, step: demoStep }}
         onPlayDemo={playDemo}
       />
+      <FeedErrorBanner error={feedError} lastSuccessAt={lastSuccessAt} now={now} />
       <SingleRepoBody
         snapshot={snapshot}
         now={now}

@@ -25,6 +25,8 @@ htmlcov/
 # Dashboard authoring dependencies and cache
 dashboard/node_modules/
 dashboard/.npm-cache/
+dashboard/playwright-report/
+dashboard/test-results/
 
 # IDE / editor
 .idea/

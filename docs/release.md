@@ -7,8 +7,11 @@ credentials. Do not upload production artifacts from a developer machine.
 
 Every pull request runs:
 
-- unit tests on macOS and Linux with Python 3.10 through 3.14;
+- unit tests on macOS and Linux with Python 3.10 through 3.14, plus one blocking
+  Windows Python version;
 - the installed-CLI E2E suite on macOS and Linux;
+- dashboard unit/build checks and a headless Chromium interaction suite for
+  notification permission, duplicate tabs, drill-down clicks, and feed recovery;
 - version and changelog consistency checks;
 - isolated sdist and wheel builds;
 - `twine check --strict` on both distributions; and
@@ -26,6 +29,18 @@ python scripts/check_release.py --tag v0.1.0
 python -m build
 python -m twine check --strict dist/*
 ```
+
+Browser automation replaces the OS notification API with a deterministic fake,
+so each release that changes alerts also gets one native-browser smoke pass:
+
+- macOS Safari or Chrome and Windows Edge can grant permission from the
+  loopback dashboard and show the immediate confirmation alert;
+- a disposable Hub repo moving from running to validated produces one alert
+  across two open tabs, and clicking it opens that repo's drill-down;
+- a live snapshot failure shows `DEGRADED` with the last good state, then clears
+  after recovery; and
+- closing every dashboard tab stops interactive alerts. Headless webhook
+  delivery remains a separate `--notify` check.
 
 ## One-time Trusted Publishing setup
 

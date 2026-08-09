@@ -22,7 +22,7 @@ test("single-repo components render shared running and validated snapshots", asy
     server: { middlewareMode: true },
   });
   try {
-    const { SingleRepoBody } = await vite.ssrLoadModule("/src/App.jsx");
+    const { FeedErrorBanner, Loading, SingleRepoBody } = await vite.ssrLoadModule("/src/App.jsx");
     const now = new Date("2026-07-29T12:00:35Z");
     const running = renderToStaticMarkup(
       React.createElement(SingleRepoBody, {
@@ -45,6 +45,23 @@ test("single-repo components render shared running and validated snapshots", asy
     assert.match(validated, /Awaiting deploy approval/);
     assert.match(validated, /Tests passed · Not on main yet/);
     assert.match(validated, /train-fixture/);
+
+    const stale = renderToStaticMarkup(
+      React.createElement(FeedErrorBanner, {
+        error: { message: "snapshot failed" },
+        lastSuccessAt: "2026-07-29T12:00:00Z",
+        now,
+      }),
+    );
+    assert.match(stale, /Live state unavailable/);
+    assert.match(stale, /Showing the last known state/);
+    assert.match(stale, /35s ago/);
+
+    const initialFailure = renderToStaticMarkup(
+      React.createElement(Loading, { error: { message: "snapshot failed" } }),
+    );
+    assert.match(initialFailure, /Local train state unavailable/);
+    assert.match(initialFailure, /Retrying automatically/);
   } finally {
     await vite.close();
   }

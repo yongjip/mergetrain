@@ -127,14 +127,17 @@ from `src/mergetrain/dashboard_dist`. Node is only needed when editing the UI:
 ```sh
 cd dashboard
 npm ci
+npx --no-install playwright install chromium
 npm test
+npm run test:browser
 npm run build
 ```
 
 Commit both the source and rebuilt `dashboard_dist` output. The UI uses bundled
 fonts and icons and makes no external runtime requests.
 
-The CI `dashboard` job runs those same three commands and then fails if
+The CI `dashboard` job runs the same checks (installing Chromium with its Linux
+system dependencies) and then fails if
 `src/mergetrain/dashboard_dist` came out different from what is committed, so a
 UI change that forgets the rebuild cannot ship. That check needs the build to be
 reproducible: use `npm ci` (not `npm install`, which can move dependencies off

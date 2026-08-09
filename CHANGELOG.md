@@ -9,6 +9,14 @@
   alert is clicked. Daemon `--notify` remains available for provider-neutral
   headless webhooks.
 
+- Keep the last good dashboard snapshot visibly marked `DEGRADED` when a live
+  snapshot fails, notify once with generic lock-screen-safe copy, and recover
+  automatically. Add browser-level coverage for permission handling, duplicate
+  tabs, Hub drill-down clicks, degraded recovery, and denied permission. Daemon
+  `--notify` now warns when no headless webhook backend is configured. Update
+  the dashboard build to Vite 6.4.3 and refresh transitive packages to clear the
+  dependency audit.
+
 ## 1.2.0 - 2026-07-30
 
 - Normalize checkout line endings before comparing operator configuration with

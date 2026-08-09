@@ -215,8 +215,10 @@ runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
 the exact current gate and command template, history-derived ETA and gate
 timing, and the next safe action. On phone-sized screens it collapses to the
 three facts needed for a remote glance: state, next action, and attention.
-`CONNECTED` describes the browser's data stream; `RUNNER ACTIVE` separately
-describes the process that owns the train. It has no mutation endpoints or
+`CONNECTED` describes the browser's healthy data stream; `DEGRADED` keeps the
+last good snapshot visible behind an explicit retrying error banner, while
+`POLLING` and `DISCONNECTED` describe transport fallback or loss. `RUNNER ACTIVE`
+separately describes the process that owns the train. It has no mutation endpoints or
 deploy controls. The header can enable cross-platform browser notifications
 while the page is open; validation, deployment, and attention alerts focus the
 dashboard when clicked, and Hub alerts open the affected repository.

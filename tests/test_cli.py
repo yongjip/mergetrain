@@ -141,6 +141,50 @@ class CliTests(unittest.TestCase):
                 ("landed", "blocked", "needs_reconcile", "daemon_paused"),
             )
 
+    def test_single_repo_daemon_warns_when_notify_has_no_webhook(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "project:\n  name: demo\n",
+                encoding="utf-8",
+            )
+            err = io.StringIO()
+            with patch("mergetrain.cli.daemon_loop") as loop, redirect_stderr(err):
+                code = main(
+                    ["--repo", str(repo), "daemon", "--once", "--notify"]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIn("no headless notification backend", err.getvalue())
+            self.assertIsNotNone(loop.call_args.kwargs["notifier"])
+
+    def test_hub_daemon_warns_once_per_repo_when_notify_has_no_webhook(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "project:\n  name: demo\n",
+                encoding="utf-8",
+            )
+
+            def run_loop(**kwargs):  # type: ignore[no-untyped-def]
+                resolver = kwargs["notifier_resolver"]
+                self.assertIsNone(resolver(str(repo), "landed:1"))
+                self.assertIsNone(resolver(str(repo), "landed:2"))
+                return []
+
+            out, err = io.StringIO(), io.StringIO()
+            with patch(
+                "mergetrain.hub_daemon.hub_daemon_loop", side_effect=run_loop
+            ), redirect_stdout(out), redirect_stderr(err):
+                code = main(["hub", "daemon", "--once", "--json", "--notify"])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(err.getvalue().count("no configured webhook for demo"), 1)
+            self.assertEqual(
+                json.loads(out.getvalue()),
+                {"contract_version": CONTRACT_VERSION, "ok": True, "outcomes": []},
+            )
+
     def test_results_payload_exposes_exact_reused_validation_sha(self) -> None:
         sha = "a" * 40
         job = Job(

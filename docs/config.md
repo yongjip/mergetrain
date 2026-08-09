@@ -211,6 +211,11 @@ notifications through the provider-neutral JSON webhook. The webhook receives an
 Slack/Discord-specific message shaping belongs in an adapter or relay; core does
 not embed provider credentials or schemas.
 
+If `--notify` is supplied without `webhook_url`, the single-repo daemon warns at
+startup and Hub warns once per affected repository when a transition needs
+delivery. This avoids treating an intentionally empty backend chain as a
+successful headless notification.
+
 Interactive desktop alerts are configured in the open `dashboard` or `hub`
 page instead. Click **Enable notifications** once to grant the browser permission
 and remember the preference for that dashboard origin. Browser alerts work on

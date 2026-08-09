@@ -1464,6 +1464,12 @@ def cmd_daemon(args: argparse.Namespace) -> int:
     # Reject both before the loop can claim and deploy a single auto job (#84,
     # defect 6).
     _preflight_config(config)
+    if args.notify and not config.notify.webhook_url:
+        print(
+            "mergetrain warning: --notify requested but notify.webhook_url is not "
+            "configured; no headless notification backend is active",
+            file=sys.stderr,
+        )
     runner = GitRunner(config)
     owner = default_owner()
 
@@ -1901,6 +1907,7 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
     if args.concurrency < 1:
         raise QueueError("hub daemon --concurrency must be at least 1")
     say = (lambda message: None) if args.json and args.once else print
+    warned_without_webhook: set[str] = set()
 
     def resolve_notifier(path: str, key: str):
         try:
@@ -1910,6 +1917,16 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
             # dashboard surfaces the repository error through browser alerts.
             return None
         if notification_transition(key) not in config.notify.transitions:
+            return None
+        if not config.notify.webhook_url:
+            warning_key = str(config.repo)
+            if warning_key not in warned_without_webhook:
+                print(
+                    f"mergetrain warning: --notify has no configured webhook for "
+                    f"{config.project.name}; no headless notification was sent",
+                    file=sys.stderr,
+                )
+                warned_without_webhook.add(warning_key)
             return None
         return configured_notifier(config.notify)
 
