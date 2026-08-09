@@ -61,6 +61,7 @@ from mergetrain.git_runner import (
     _dashboard_command,
     _shell_command,
     command_env,
+    deploy_audit_ref_name,
     expand_command,
     run_shell,
 )
@@ -1378,6 +1379,69 @@ deploy:
             # and a clean deploy leaves no pin ref behind.
             pending = git(repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/")
             self.assertEqual(pending, "")
+            # The remote audit ref is retained after the local recovery pin is
+            # cleared. It is the durable proof used if main is later rewritten.
+            audit_ref = deploy_audit_ref_name(result.deploy_sha)
+            self.assertEqual(
+                git(root / "remote.git", "rev-parse", audit_ref),
+                result.deploy_sha,
+            )
+
+    def test_conflicting_deploy_audit_ref_is_never_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            runner = GitRunner(load_config(repo=repo))
+            base = git(repo, "rev-parse", "main")
+            target = git(repo, "rev-parse", "feature/a")
+            audit_ref = deploy_audit_ref_name(target)
+            git(repo, "push", "origin", f"{base}:{audit_ref}")
+
+            with self.assertRaisesRegex(PushRejected, "immutable audit evidence"):
+                runner.push_verified_head(worktree=repo, deploy_sha=target)
+
+            remote = root / "remote.git"
+            self.assertEqual(git(remote, "rev-parse", "main"), base)
+            self.assertEqual(git(remote, "rev-parse", audit_ref), base)
+
+    def test_matching_deploy_audit_ref_allows_idempotent_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            runner = GitRunner(load_config(repo=repo))
+            target = git(repo, "rev-parse", "feature/a")
+            audit_ref = deploy_audit_ref_name(target)
+            git(repo, "push", "origin", f"{target}:{audit_ref}")
+
+            runner.push_verified_head(worktree=repo, deploy_sha=target)
+
+            remote = root / "remote.git"
+            self.assertEqual(git(remote, "rev-parse", "main"), target)
+            self.assertEqual(git(remote, "rev-parse", audit_ref), target)
+
+    def test_audit_ref_lease_rejects_a_concurrent_creation_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            runner = GitRunner(load_config(repo=repo))
+            base = git(repo, "rev-parse", "main")
+            target = git(repo, "rev-parse", "feature/a")
+            audit_ref = deploy_audit_ref_name(target)
+            # Model another writer creating the ref after our preflight said it
+            # was absent. The lease must reject both this ref and main together.
+            git(repo, "push", "origin", f"{base}:{audit_ref}")
+
+            with patch.object(
+                runner,
+                "_audit_ref_expectation",
+                return_value=(audit_ref, ""),
+            ), self.assertRaises(CommandFailed) as raised:
+                runner.push_verified_head(worktree=repo, deploy_sha=target)
+
+            self.assertIn("stale info", raised.exception.stderr)
+            remote = root / "remote.git"
+            self.assertEqual(git(remote, "rev-parse", "main"), base)
+            self.assertEqual(git(remote, "rev-parse", audit_ref), base)
 
     def test_pin_ref_failure_blocks_before_push_and_preserves_marker(self) -> None:
         with tempfile.TemporaryDirectory() as td:

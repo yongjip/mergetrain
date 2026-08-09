@@ -224,4 +224,9 @@ really carries its SHA; a landed train is never pushed twice; and when the
 remote is unreachable, reconcile refuses to guess and exits with its own code
 instead. A successful deploy or an unambiguous policy rejection clears both the
 DB marker and pending pin; an ambiguous outcome and a reconcile conflict retain
-them as recovery evidence.
+them as recovery evidence. Each successful atomic push also retains
+`refs/mergetrain/deploys/<sha>` remotely. If every payload ref later loses that
+SHA but the audit ref remains, reconcile knows the deploy landed before the
+rewrite and blocks instead of replaying it. Deployments made before this audit
+ref existed retain the legacy ambiguity and are classified from payload
+ancestry alone.

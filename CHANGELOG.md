@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a force-with-lease-protected `refs/mergetrain/deploys/<sha>` audit ref to
+  every atomic deploy. Reconcile now uses that retained remote evidence to
+  detect a payload ref that landed and was later force-rewritten, blocking for
+  manual recovery instead of requeueing and potentially replaying the deploy.
+
 - Replace the macOS-only `osascript` desktop backend with opt-in browser
   notifications owned by the open dashboard and Hub. The same implementation
   now works in supported macOS and Windows browsers, ignores pre-existing state,

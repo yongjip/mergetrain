@@ -95,7 +95,8 @@ push; only human vocabulary changes. `--deploy` and the machine status
 `deployed` remain compatible. A provider release after this push is separate.
 
 Deploy mode runs gates first, then performs an atomic push to configured
-`git.push_refs`, then runs `deploy.verify` hooks. If a validated train is
+`git.push_refs` plus the retained `refs/mergetrain/deploys/<sha>` recovery audit
+ref, then runs `deploy.verify` hooks. If a validated train is
 pending, only that exact train is rebuilt and deployed; newly queued jobs wait
 for a later validation. Integration-ref movement is allowed because the train
 is rebuilt and gated again, but a changed task branch is blocked and must be

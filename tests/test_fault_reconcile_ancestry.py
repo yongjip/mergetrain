@@ -14,9 +14,9 @@ The three ancestry shapes pinned here, all against a real bare remote:
 
 * tip is a strict **descendant** of the recorded sha → ``deployed``, and the
   healed row keeps the *recorded* sha (not the tip) as ``deploy_sha``;
-* tip is an **ancestor** of it (remote rewound to base) → ``queued``;
-* tip has **diverged** from it → never ``deployed``, never ``failed``, remote
-  untouched (see the docstring of the diverged test for the documented verdict).
+* tip is an **ancestor** of it without a legacy audit ref → ``queued``;
+* tip has **diverged** after an audited deploy → ``blocked``, never
+  ``deployed``/``failed``, and the remote remains untouched.
 
 Every case also asserts the remote is byte-identical before and after: reconcile
 reads truth, it never pushes.
@@ -37,7 +37,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 from mergetrain.config import load_config
-from mergetrain.git_runner import git_ref_exists, pending_ref_name
+from mergetrain.git_runner import (
+    deploy_audit_ref_name,
+    git_ref_exists,
+    pending_ref_name,
+)
 from mergetrain.recovery import reconcile
 from mergetrain.store import (
     connect,
@@ -188,7 +192,8 @@ class ReconcileAncestryTests(unittest.TestCase):
         # Mirror twin of the case above: the recorded sha is absent from the
         # remote's history entirely (the push never landed, or was rolled back to
         # the base). Containment is definitively false, so requeue — and the
-        # rollback must survive reconcile untouched.
+        # rollback must survive reconcile untouched. This intentionally models
+        # a legacy deploy from before remote audit refs were written.
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, remote, config, conn, job, base, pending = self._stage(root)
@@ -219,27 +224,30 @@ class ReconcileAncestryTests(unittest.TestCase):
             self.assertEqual(after, before)
             self.assertEqual(after, base)  # reconcile did not re-push the train
             self.assertEqual(outcome.jobs[0]["push_refs"][0]["contains"], False)
+            self.assertFalse(outcome.jobs[0]["audit_ref_present"])
 
     def test_diverged_remote_tip_never_claims_deployed_or_failed(self) -> None:
         # Landed-then-rewound *sideways*: our sha reached main, then main was
         # force-pushed to a sibling commit built on the base, so the tip is
         # neither the recorded sha nor a descendant of it.
         #
-        # Verdict today is `queued`, and that is deliberate, not an oversight:
-        # docs/proposals/0.3.0-recovery.md §5 defers landed-then-rewound detection
-        # to Phase 3 because distinguishing "never landed" from "landed, then
-        # rewritten" requires the `refs/mergetrain/deploys/<sha>` audit ref, which
-        # is not pushed yet. What must hold either way is
-        # the truthfulness gate: a diverged remote may never be reported as
-        # deployed and may never be parked terminal `failed` — a `failed` row
-        # would be a lie the operator cannot recover from, and a `deployed` row
-        # would credit a sha the payload ref no longer carries. When the audit ref
-        # lands, this test is the place that should flip to `blocked`.
+        # The same atomic push writes a content-addressed audit ref. Once main is
+        # rewritten sideways, that retained evidence distinguishes "landed then
+        # rewritten" from "never landed", so reconcile must block rather than
+        # requeue a train that would undo the operator's rewrite.
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, remote, config, conn, job, base, pending = self._stage(root)
             try:
-                git(repo, "push", "origin", f"{pending}:main")  # the deploy landed
+                audit_ref = deploy_audit_ref_name(pending)
+                git(
+                    repo,
+                    "push",
+                    "--atomic",
+                    "origin",
+                    f"{pending}:main",
+                    f"{pending}:{audit_ref}",
+                )
                 other = _third_party_clone(root, remote)
                 git(other, "switch", "-c", "sidetrack", base)
                 (other / "sidetrack.txt").write_text("elsewhere\n", encoding="utf-8")
@@ -251,14 +259,9 @@ class ReconcileAncestryTests(unittest.TestCase):
                 # neither direction of ancestry holds: a true fork
                 self.assertNotEqual(diverged, pending)
                 self.assertEqual(git(remote, "rev-parse", "main"), diverged)
-                # Why the rewind is undetectable: the remote holds no record of
-                # what mergetrain pushed, only the payload ref's current value.
-                # This documents the fixture's premise, not a Phase 3 tripwire —
-                # the push here is staged by hand, so no product code could write
-                # an audit ref in this test even once Phase 3 ships.
                 self.assertEqual(
                     git(remote, "for-each-ref", "--format=%(refname)", "refs/mergetrain/"),
-                    "",
+                    audit_ref,
                 )
 
                 before = git(remote, "rev-parse", "main")
@@ -274,12 +277,18 @@ class ReconcileAncestryTests(unittest.TestCase):
             self.assertEqual(healed.deploy_sha, "")
             self.assertEqual(after, before)  # reconcile did not push over the fork
             self.assertEqual(after, diverged)
-            # the documented (Phase-2) verdict and its reason
-            self.assertEqual(healed.status, "queued")
-            self.assertEqual(outcome.summary["requeued"], 1)
-            self.assertIn("push did not land", outcome.jobs[0]["reason"])
+            self.assertEqual(outcome.exit_code, 10)
+            self.assertEqual(healed.status, "blocked")
+            self.assertEqual(outcome.summary["requeued"], 0)
+            self.assertEqual(outcome.summary["conflicts"], 1)
+            self.assertIn("audit ref proves", outcome.jobs[0]["reason"])
+            self.assertTrue(outcome.jobs[0]["audit_ref_present"])
+            self.assertEqual(outcome.jobs[0]["audit_ref"], audit_ref)
+            self.assertEqual(outcome.jobs[0]["audit_ref_sha"], pending)
             self.assertEqual(outcome.jobs[0]["push_refs"][0]["remote_sha"], diverged)
             self.assertEqual(outcome.jobs[0]["push_refs"][0]["contains"], False)
+            self.assertEqual(healed.pending_deploy_sha, pending)
+            self.assertEqual(_pending_refs(repo), pending_ref_name(job.id))
 
 
 if __name__ == "__main__":  # pragma: no cover

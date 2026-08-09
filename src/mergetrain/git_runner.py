@@ -471,6 +471,42 @@ def git_remote_exists(path: str | Path, remote: str) -> bool:
     return bool(git_remote_url(path, remote))
 
 
+def git_remote_ref_sha(
+    path: str | Path,
+    remote: str,
+    ref: str,
+    *,
+    log: IO[str] | None = None,
+    pulse: Pulse | None = None,
+    pulse_interval_seconds: float = 10,
+    timeout_seconds: float | None = None,
+) -> tuple[bool, str]:
+    """Resolve one exact remote ref without accepting a suffix match.
+
+    ``git ls-remote <remote> main`` can also return ``refs/tags/main``. Deploy
+    audit checks must never attribute a sibling ref to the target, so
+    only the exact fully-qualified name counts. A reachable remote with no such
+    ref returns ``(True, "")``; transport failures return ``(False, "")``.
+    """
+    completed = run_command(
+        ["git", "ls-remote", "--refs", remote, ref],
+        cwd=path,
+        log=log,
+        check=False,
+        pulse=pulse,
+        pulse_interval_seconds=pulse_interval_seconds,
+        timeout_seconds=timeout_seconds,
+    )
+    if completed.returncode != 0:
+        return False, ""
+    target = ref if ref.startswith("refs/") else f"refs/heads/{ref}"
+    for line in completed.stdout.strip().splitlines():
+        parts = line.split("\t") if "\t" in line else line.split()
+        if len(parts) >= 2 and parts[1].strip() == target:
+            return True, parts[0].strip()
+    return True, ""
+
+
 def git_ref_exists(path: str | Path, ref: str) -> bool:
     completed = run_command(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=path, check=False)
     return completed.returncode == 0
@@ -485,6 +521,17 @@ def git_tree_sha(path: str | Path, ref: str) -> str:
 
 
 PENDING_REF_PREFIX = "refs/mergetrain/pending/"
+DEPLOY_AUDIT_REF_PREFIX = "refs/mergetrain/deploys/"
+
+
+def deploy_audit_ref_name(deploy_sha: str) -> str:
+    """The content-addressed remote ref proving a deploy once landed."""
+    normalized = deploy_sha.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", normalized):
+        raise MergetrainError(
+            f"cannot build deploy audit ref from invalid commit id {deploy_sha!r}"
+        )
+    return f"{DEPLOY_AUDIT_REF_PREFIX}{normalized}"
 
 
 def pending_ref_name(job_id: int) -> str:
@@ -1760,6 +1807,8 @@ class GitRunner:
         deploy_sha: str = "",
         log: IO[str] | None = None,
         pulse: Pulse | None = None,
+        audit_ref: str = "",
+        audit_expected_sha: str | None = None,
     ) -> None:
         if not self.config.git.push_refs:
             raise MergetrainError(
@@ -1769,9 +1818,29 @@ class GitRunner:
         # Push the exact recorded sha, not HEAD: if anything moved HEAD after the
         # deploy sha was captured, the recorded and pinned sha is still what ships
         # (guarantee #1). Falls back to HEAD only when no sha is threaded.
-        target = deploy_sha or "HEAD"
-        push_args = ["git", "push", "--atomic", self.config.git.remote]
+        target = deploy_sha or git_rev_parse(worktree, "HEAD")
+        audit_ref = audit_ref or deploy_audit_ref_name(target)
+        if audit_expected_sha is None:
+            audit_ref, audit_expected_sha = self._audit_ref_expectation(
+                worktree=worktree,
+                deploy_sha=target,
+                log=log,
+                pulse=pulse,
+            )
+        # The lease makes the content-addressed audit ref immutable from this
+        # client: create it only when absent, or accept the exact same value on
+        # an idempotent/no-op deploy. A concurrent delete or rewrite rejects the
+        # whole atomic push, including every configured payload ref.
+        push_args = [
+            "git",
+            "push",
+            "--atomic",
+            f"--force-with-lease={audit_ref}:{audit_expected_sha}",
+            self.config.git.remote,
+        ]
         push_args.extend(f"{target}:{ref}" for ref in self.config.git.push_refs)
+        if audit_ref not in self.config.git.push_refs:
+            push_args.append(f"{target}:{audit_ref}")
         run_command(
             push_args,
             cwd=worktree,
@@ -1780,6 +1849,41 @@ class GitRunner:
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
+
+    def _audit_ref_expectation(
+        self,
+        *,
+        worktree: Path,
+        deploy_sha: str,
+        log: IO[str] | None,
+        pulse: Pulse | None = None,
+    ) -> tuple[str, str]:
+        """Read and validate the content-addressed remote audit ref.
+
+        The returned SHA becomes a ``--force-with-lease`` expectation on the
+        atomic push. A mismatched value is evidence of external corruption or a
+        hash/ref collision, so fail before writing the durable pending marker.
+        """
+        audit_ref = deploy_audit_ref_name(deploy_sha)
+        reachable, current = git_remote_ref_sha(
+            worktree,
+            self.config.git.remote,
+            audit_ref,
+            log=log,
+            pulse=pulse,
+            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+            timeout_seconds=self.config.queue.command_timeout_seconds,
+        )
+        if not reachable:
+            raise MergetrainError(
+                f"could not inspect deploy audit ref {audit_ref}; push was not attempted"
+            )
+        if current and current != deploy_sha:
+            raise PushRejected(
+                f"deploy audit ref {audit_ref} points to {current}, expected "
+                f"{deploy_sha}; refusing to rewrite immutable audit evidence"
+            )
+        return audit_ref, current
 
     def _pending_ref(self, job_id: int) -> str:
         return pending_ref_name(job_id)
@@ -1794,8 +1898,10 @@ class GitRunner:
         worktree: Path,
         log: IO[str] | None,
         pulse: Pulse | None,
+        audit_ref: str,
+        audit_expected_sha: str,
     ) -> None:
-        """Write-ahead the pending-deploy marker + pin ref, then push.
+        """Write-ahead the pending marker + pin, then push payload and audit refs.
 
         The marker commit is fsync-durable (synchronous=FULL) before the remote
         is mutated, and the pin ref keeps deploy_sha resolvable for a later
@@ -1831,7 +1937,12 @@ class GitRunner:
                     f"expected {deploy_sha}; push was not attempted"
                 )
         self.push_verified_head(
-            worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse
+            worktree=worktree,
+            deploy_sha=deploy_sha,
+            log=log,
+            pulse=pulse,
+            audit_ref=audit_ref,
+            audit_expected_sha=audit_expected_sha,
         )
 
     def _clear_pending_refs(
@@ -1907,6 +2018,29 @@ class GitRunner:
             state="active",
             message="Pushing verified HEAD atomically",
         )
+        # Probe before the durable marker is written. The later atomic push
+        # carries a force-with-lease expectation derived from this exact read,
+        # so any race changes nothing and rejects every ref update together.
+        try:
+            audit_ref, audit_expected_sha = self._audit_ref_expectation(
+                worktree=worktree,
+                deploy_sha=deploy_sha,
+                log=log,
+                pulse=ownership_pulse,
+            )
+        except CancellationRequested:
+            raise
+        except MergetrainError as exc:
+            self._event(
+                conn,
+                lease_token=lease_token,
+                job_id=event_job_id,
+                phase="pushing",
+                state="error",
+                message="Deploy audit preflight failed",
+                detail=type(exc).__name__,
+            )
+            raise
         # Mirror what the durable marker records (store.record_pending_push
         # writes push_status='pending'), so an in-memory state that outlives an
         # ambiguous push carries the same truth the DB already holds instead of
@@ -1921,6 +2055,8 @@ class GitRunner:
                 worktree=worktree,
                 log=log,
                 pulse=ownership_pulse,
+                audit_ref=audit_ref,
+                audit_expected_sha=audit_expected_sha,
             )
         except CommandFailed as exc:
             self._event(

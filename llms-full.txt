@@ -31,7 +31,10 @@ Agents should:
   for the independent push and post-push verification outcomes.
 - `needs_reconcile`: a crash or ambiguous push response left a possibly-landed
   push; run `reconcile` (dry-run) then `reconcile --apply` or `recover`. Every
-  deploy entrypoint is refused while any job is in this state.
+  deploy entrypoint is refused while any job is in this state. Successful
+  deploys retain `refs/mergetrain/deploys/<sha>` remotely; do not delete or
+  rewrite that evidence. If it proves the payload ref was later rewritten,
+  reconcile blocks for manual recovery instead of replaying the deploy.
 - `canceled`: user canceled the item.
 
 ## Safe commands

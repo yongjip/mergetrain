@@ -46,6 +46,16 @@ or lease token.
 `deploy.verify` hooks can run arbitrary network commands. Review verify hooks
 before enabling unattended daemon deployment.
 
+## Remote deploy audit refs
+
+Every deploy atomically writes `refs/mergetrain/deploys/<sha>` alongside the
+configured payload refs. The ref contains no credential or metadata beyond the
+commit ID, but it is intentionally retained as recovery evidence. Grant the
+runner permission to create that namespace and do not delete or rewrite it in
+normal repository maintenance. Mergetrain checks the exact existing value and
+uses `--force-with-lease`, so a mismatched or concurrently changed audit ref
+rejects the whole atomic push instead of being overwritten.
+
 ## Validated-gate reuse fingerprints
 
 Gate command/config text is not a complete environment fingerprint. The same

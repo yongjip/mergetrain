@@ -115,10 +115,13 @@ git:
 {remote}/{integration_branch}
 ```
 
-Deploy mode pushes the verified HEAD atomically:
+Deploy mode pushes the verified commit and its content-addressed recovery audit
+ref atomically:
 
 ```sh
-git push --atomic origin HEAD:main
+git push --atomic origin \
+  <sha>:main \
+  <sha>:refs/mergetrain/deploys/<sha>
 ```
 
 Multiple refs are allowed:
@@ -135,8 +138,17 @@ git:
 This produces:
 
 ```sh
-git push --atomic platform HEAD:develop HEAD:main
+git push --atomic platform \
+  <sha>:develop \
+  <sha>:main \
+  <sha>:refs/mergetrain/deploys/<sha>
 ```
+
+The actual command also protects the audit ref with `--force-with-lease` so it
+can only be created or retain the identical value. The configured remote must
+permit creation under `refs/mergetrain/deploys/`; these refs are permanent
+recovery evidence and are not payload targets configurable through
+`push_refs`.
 
 If `push_refs` is omitted it defaults to `integration_branch`. An explicitly
 empty list, null value, blank ref, or duplicate ref is a configuration error;

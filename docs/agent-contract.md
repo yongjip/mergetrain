@@ -17,6 +17,8 @@ Agents interacting with mergetrain must follow this contract.
    run `mergetrain retry <job-id>` to enqueue a fresh SHA-pinned job.
 9. Replace a validated train only with `mergetrain supersede`; validate and
    approve the replacement as a new SHA-pinned train.
+10. Do not delete or rewrite remote `refs/mergetrain/deploys/*`; they are
+    permanent recovery evidence.
 
 ## Machine-readable contract
 

@@ -581,6 +581,10 @@ whose owning job is terminal/failed/missing is deleted (reported under
 `result.swept_pending_refs`), while a `blocked` (reconcile-conflict forensics) or
 `needs_reconcile` job keeps its pin.
 
+It deliberately does not delete remote `refs/mergetrain/deploys/*` audit refs.
+Those content-addressed refs are permanent recovery evidence for payload refs
+that may later be force-rewritten.
+
 ## `reconcile`
 
 Resolve every `needs_reconcile` job against the **remote** after a crash or
@@ -601,8 +605,12 @@ and the `daemon` tick — since they target the same push refs.
 Per job: the deploy sha present on **every** push ref → `deployed`
 (`push_status=succeeded`, `verify_status=unknown` — the deploy is not re-pushed
 and verify is not re-run); present on **none** → `queued` (or `canceled` if a
-cancel had raced the push); present on **some** refs, or the sha is unresolvable
-→ `blocked` (human git inspection). Exit codes: `0` resolved/nothing to do · `2`
+cancel had raced the push), unless the matching
+`refs/mergetrain/deploys/<sha>` audit ref proves it landed before the payload
+refs were rewritten; present on **some** refs, proven rewritten by that audit
+ref, carrying a mismatched audit ref, or unresolvable → `blocked` (human Git
+inspection). JSON exposes `audit_ref`, `audit_ref_sha`, and
+`audit_ref_present`. Exit codes: `0` resolved/nothing to do · `2`
 usage/config · `3` lock held by a live runner (retryable) · `7` remote
 unreachable (nothing changed) · `10` ≥1 job left `blocked`.
 

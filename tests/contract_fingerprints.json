@@ -964,6 +964,12 @@
       "preview": null,
       "push_plan": {
         "atomic": null,
+        "audit_ref": {
+          "retention": null,
+          "source": null,
+          "spec": null,
+          "target": null
+        },
         "refs": {
           "[]": {
             "source": null,

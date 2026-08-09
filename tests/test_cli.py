@@ -1330,6 +1330,15 @@ terminology:
                 [item["spec"] for item in payload["push_plan"]["refs"]],
                 ["HEAD:main", "HEAD:release"],
             )
+            self.assertEqual(
+                payload["push_plan"]["audit_ref"],
+                {
+                    "source": "DEPLOY_SHA",
+                    "target": "refs/mergetrain/deploys/<DEPLOY_SHA>",
+                    "spec": "DEPLOY_SHA:refs/mergetrain/deploys/<DEPLOY_SHA>",
+                    "retention": "permanent",
+                },
+            )
             self.assertEqual(payload["reuse"]["evaluation"], "exact")
             self.assertEqual(
                 payload["reuse"]["estimated_savings"]["mode"], "unavailable"

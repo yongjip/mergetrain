@@ -19,6 +19,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 8. Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.
 9. Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation and deploy approval.
 10. After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.
+11. Do not delete or rewrite refs/mergetrain/deploys/*; they are permanent remote recovery evidence.
 
 ### Safety boundary
 

@@ -309,7 +309,10 @@ push is preceded by a durable write-ahead marker and a
 `refs/mergetrain/pending/<id>` pin ref, so `mergetrain recover` can ask the
 **remote** what actually happened. A train is marked `deployed` only when a
 push ref carries its SHA, a landed train is never pushed twice, and deploys
-are refused while any job still needs reconciling. As far as we can tell, no
+are refused while any job still needs reconciling. The same atomic push retains
+`refs/mergetrain/deploys/<sha>` on the remote; if a payload ref is later
+force-rewritten, that audit evidence makes recovery stop at `blocked` instead
+of replaying the old deploy over the rewrite. As far as we can tell, no
 other merge queue — hosted or local — documents an exactly-once push contract
 at all; the full failure catalogue is in
 [failure modes](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md).
@@ -414,6 +417,7 @@ The core — queue, runner lock, merge train, gates (with bisected joint-failure
 isolation and semantic-conflict reporting), atomic push, crash-safe
 reconciliation/recovery
 (`reconcile`/`recover`/`unlock`/`verify`/`dismiss`/`supersede`),
+remote rewrite-guard audit refs,
 auto-only daemon, resumable CLI events/inspection/log following, the local
 read-only dashboard, the multi-repo hub, and an
 [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) whose

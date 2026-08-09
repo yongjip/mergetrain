@@ -18,11 +18,18 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .config import MergetrainConfig
-from .errors import CancellationRequested, QueueBusy, QueueError, RemoteUnreachable
+from .errors import (
+    CancellationRequested,
+    MergetrainError,
+    QueueBusy,
+    QueueError,
+    RemoteUnreachable,
+)
 from .git_runner import (
     PENDING_REF_PREFIX,
     apply_gc,
     delete_pending_ref,
+    deploy_audit_ref_name,
     git_output_or_empty,
     git_ref_exists,
     resolve_pending_ref,
@@ -155,12 +162,28 @@ class JobDecision:
     refs: list[RefVerdict]
     decision: str  # deployed | queued | canceled | blocked
     reason: str
+    audit_ref: str = ""
+    audit_ref_sha: str = ""
+
+
+def _audit_ref_for_sha(sha: str) -> str:
+    """Return the content-addressed audit ref, or empty for a corrupt marker."""
+    try:
+        return deploy_audit_ref_name(sha)
+    except MergetrainError:
+        return ""
 
 
 def _classify(
-    config: MergetrainConfig, job: Job, ref_shas: dict[str, str]
+    config: MergetrainConfig,
+    job: Job,
+    ref_shas: dict[str, str],
+    *,
+    audit_ref_sha: str = "",
 ) -> JobDecision:
     pending = job.pending_deploy_sha
+    audit_ref = _audit_ref_for_sha(pending)
+    audit_ref_present = bool(audit_ref) and audit_ref_sha.lower() == pending.lower()
     resolvable = _resolvable(config, job)
     refs: list[RefVerdict] = []
     unknown = False
@@ -177,6 +200,8 @@ def _classify(
             refs,
             "blocked",
             "pending deploy sha is unresolvable (pin ref gone and object pruned)",
+            audit_ref,
+            audit_ref_sha,
         )
     if unknown:
         return JobDecision(
@@ -186,14 +211,40 @@ def _classify(
             refs,
             "blocked",
             "cannot determine remote containment for a push ref (tip unresolvable); refusing to guess",
+            audit_ref,
+            audit_ref_sha,
+        )
+    if audit_ref_sha and not audit_ref_present:
+        return JobDecision(
+            job,
+            pending,
+            True,
+            refs,
+            "blocked",
+            "deploy audit ref points to an unexpected sha; refusing to guess",
+            audit_ref,
+            audit_ref_sha,
         )
     contained = [verdict.contains for verdict in refs]
     if refs and all(contained):
         reason = "push landed: deploy sha present on every push ref"
         if job.cancel_requested_at:
             reason += "; late cancel ignored (the push had already landed)"
-        return JobDecision(job, pending, True, refs, "deployed", reason)
+        return JobDecision(
+            job, pending, True, refs, "deployed", reason, audit_ref, audit_ref_sha
+        )
     if not any(contained):
+        if audit_ref_present:
+            return JobDecision(
+                job,
+                pending,
+                True,
+                refs,
+                "blocked",
+                "deploy audit ref proves the push landed before every payload ref was rewritten; manual recovery required",
+                audit_ref,
+                audit_ref_sha,
+            )
         if job.cancel_requested_at:
             return JobDecision(
                 job,
@@ -202,6 +253,8 @@ def _classify(
                 refs,
                 "canceled",
                 "push did not land; late cancel honored",
+                audit_ref,
+                audit_ref_sha,
             )
         return JobDecision(
             job,
@@ -210,6 +263,8 @@ def _classify(
             refs,
             "queued",
             "push did not land; requeued for a fresh deploy",
+            audit_ref,
+            audit_ref_sha,
         )
     return JobDecision(
         job,
@@ -218,6 +273,8 @@ def _classify(
         refs,
         "blocked",
         "deploy sha present on some but not all push refs (mixed remote state)",
+        audit_ref,
+        audit_ref_sha,
     )
 
 
@@ -280,6 +337,12 @@ def _decision_dict(decision: JobDecision, *, applied: bool) -> dict[str, Any]:
             {"ref": v.ref, "remote_sha": v.remote_sha, "contains": v.contains}
             for v in decision.refs
         ],
+        "audit_ref": decision.audit_ref,
+        "audit_ref_sha": decision.audit_ref_sha,
+        "audit_ref_present": (
+            bool(decision.audit_ref)
+            and decision.audit_ref_sha.lower() == decision.pending_sha.lower()
+        ),
         "decision": decision.decision,
         "reason": decision.reason,
         "applied": applied,
@@ -363,8 +426,25 @@ def reconcile(
                 if not reachable:
                     raise RemoteUnreachable(f"cannot ls-remote '{ref}' on '{remote}'")
                 ref_shas[ref] = remote_sha
+            audit_shas: dict[str, str] = {}
             for job in group:
-                decisions_by_id[job.id] = _classify(effective, job, ref_shas)
+                audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
+                if not audit_ref or audit_ref in audit_shas:
+                    continue
+                reachable, audit_sha = _ls_remote(effective, audit_ref)
+                if not reachable:
+                    raise RemoteUnreachable(
+                        f"cannot ls-remote deploy audit ref on '{remote}'"
+                    )
+                audit_shas[audit_ref] = audit_sha
+            for job in group:
+                audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
+                decisions_by_id[job.id] = _classify(
+                    effective,
+                    job,
+                    ref_shas,
+                    audit_ref_sha=audit_shas.get(audit_ref, ""),
+                )
         # Emit in the original FIFO order, independent of target grouping.
         decisions = [decisions_by_id[job.id] for job in jobs]
         if apply:

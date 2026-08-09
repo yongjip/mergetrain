@@ -96,7 +96,7 @@ the truth about what shipped, against real git and a real bare remote:
 | --- | --- |
 | `test_fault_push_kill.py` | a real `git push --atomic` SIGKILLed mid-flight, once with the refs applied (`post-receive` hook) and once not (`pre-receive`), as one decision table |
 | `test_fault_push_timeout.py` | a push exceeding `command_timeout_seconds`, both hook variants — the likeliest real ambiguous push, and the one that also runs on Windows |
-| `test_fault_reconcile_ancestry.py` | a remote tip that moved *on top of* a landed deploy, plus the absent and diverged shapes |
+| `test_fault_reconcile_ancestry.py` | a remote tip that moved *on top of* a landed deploy, a legacy no-audit rewind, and an audited deploy rewritten sideways that must block |
 | `test_fault_lock_steal.py` | `unlock --force` stealing the lease between a landed push and its `deployed` write |
 | `test_fault_db_contention.py` | a SQLite writer held past `busy_timeout` across the pre-push and post-push status writes |
 

@@ -123,11 +123,24 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                 runner = GitRunner(config)
                 real_push = runner.push_verified_head
 
-                def land_then_steal(*, worktree, deploy_sha="", log=None, pulse=None):
+                def land_then_steal(
+                    *,
+                    worktree,
+                    deploy_sha="",
+                    log=None,
+                    pulse=None,
+                    audit_ref="",
+                    audit_expected_sha=None,
+                ):
                     # (1) the real push: from here on the remote is advanced and
                     # the deploy is irreversible.
                     real_push(
-                        worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse
+                        worktree=worktree,
+                        deploy_sha=deploy_sha,
+                        log=log,
+                        pulse=pulse,
+                        audit_ref=audit_ref,
+                        audit_expected_sha=audit_expected_sha,
                     )
                     # (2) the operator runs the documented wedge remedy from a
                     # separate connection, exactly in the window before the

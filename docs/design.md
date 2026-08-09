@@ -218,11 +218,22 @@ they do not claim an identity that was never recorded.
 
 ### Atomic push
 
-Deploy mode pushes the verified `HEAD` to every ref in `git.push_refs` atomically:
+Deploy mode pushes the verified commit to every ref in `git.push_refs` and to a
+content-addressed recovery audit ref in the same atomic operation:
 
 ```sh
-git push --atomic <remote> HEAD:<ref1> HEAD:<ref2> ...
+git push --atomic \
+  --force-with-lease=refs/mergetrain/deploys/<sha>:<expected-or-empty> \
+  <remote> <sha>:<ref1> <sha>:<ref2> ... \
+  <sha>:refs/mergetrain/deploys/<sha>
 ```
+
+The lease permits only creation or the identical existing value. Mergetrain
+never force-rewrites or deletes these remote audit refs. They remain after the
+local `refs/mergetrain/pending/<job_id>` recovery pin is cleared and let
+`reconcile` distinguish "never landed" from "landed, then payload refs were
+rewritten." A mismatch or concurrent audit-ref change rejects the entire atomic
+push.
 
 An explicitly empty `push_refs` value is rejected while loading config; only an
 omitted field defaults to the integration branch.

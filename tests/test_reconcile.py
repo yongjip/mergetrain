@@ -27,7 +27,7 @@ from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
 from mergetrain.errors import CommandFailed
-from mergetrain.git_runner import GitRunner, pending_ref_name
+from mergetrain.git_runner import GitRunner, deploy_audit_ref_name, pending_ref_name
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
     acquire_runner_lock,
@@ -145,6 +145,28 @@ class ReconcileClassifierTests(unittest.TestCase):
             # the remote never advanced
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
+
+    def test_mismatched_deploy_audit_ref_blocks_instead_of_guessing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            try:
+                base = git(repo, "rev-parse", "main")
+                audit_ref = deploy_audit_ref_name(pending)
+                git(repo, "push", "origin", f"{base}:{audit_ref}")
+                git(repo, "push", "origin", f"{pending}:main")
+                _set_needs_reconcile(conn, job.id, pending)
+                outcome = reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            self.assertEqual(outcome.exit_code, 10)
+            self.assertEqual(healed.status, "blocked")
+            self.assertIn("unexpected sha", outcome.jobs[0]["reason"])
+            self.assertFalse(outcome.jobs[0]["audit_ref_present"])
+            self.assertEqual(outcome.jobs[0]["audit_ref_sha"], base)
+            self.assertTrue(outcome.jobs[0]["push_refs"][0]["contains"])
 
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -367,8 +389,23 @@ class CrashRecoveryTests(unittest.TestCase):
     def _crash_after_push(self, runner: GitRunner):
         real_push = runner.push_verified_head
 
-        def push_then_crash(*, worktree, deploy_sha="", log=None, pulse=None):
-            real_push(worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse)
+        def push_then_crash(
+            *,
+            worktree,
+            deploy_sha="",
+            log=None,
+            pulse=None,
+            audit_ref="",
+            audit_expected_sha=None,
+        ):
+            real_push(
+                worktree=worktree,
+                deploy_sha=deploy_sha,
+                log=log,
+                pulse=pulse,
+                audit_ref=audit_ref,
+                audit_expected_sha=audit_expected_sha,
+            )
             raise _Crash()
 
         return patch.object(runner, "push_verified_head", side_effect=push_then_crash)
@@ -428,8 +465,23 @@ class CrashRecoveryTests(unittest.TestCase):
                 runner = GitRunner(config)
                 real_push = runner.push_verified_head
 
-                def land_then_drop(*, worktree, deploy_sha="", log=None, pulse=None):
-                    real_push(worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse)
+                def land_then_drop(
+                    *,
+                    worktree,
+                    deploy_sha="",
+                    log=None,
+                    pulse=None,
+                    audit_ref="",
+                    audit_expected_sha=None,
+                ):
+                    real_push(
+                        worktree=worktree,
+                        deploy_sha=deploy_sha,
+                        log=log,
+                        pulse=pulse,
+                        audit_ref=audit_ref,
+                        audit_expected_sha=audit_expected_sha,
+                    )
                     raise CommandFailed(
                         ["git", "push"], 1,
                         stderr="fatal: the remote end hung up unexpectedly",
@@ -469,12 +521,22 @@ class CrashRecoveryTests(unittest.TestCase):
                 runner = GitRunner(config)
                 real_push = runner.push_verified_head
 
-                def land_cancel_then_drop(*, worktree, deploy_sha="", log=None, pulse=None):
+                def land_cancel_then_drop(
+                    *,
+                    worktree,
+                    deploy_sha="",
+                    log=None,
+                    pulse=None,
+                    audit_ref="",
+                    audit_expected_sha=None,
+                ):
                     real_push(
                         worktree=worktree,
                         deploy_sha=deploy_sha,
                         log=log,
                         pulse=pulse,
+                        audit_ref=audit_ref,
+                        audit_expected_sha=audit_expected_sha,
                     )
                     control = connect(config.state.db)
                     try:
@@ -528,8 +590,23 @@ class CrashRecoveryTests(unittest.TestCase):
                 runner = GitRunner(config)
                 real_push = runner.push_verified_head
 
-                def land_then_drop(*, worktree, deploy_sha="", log=None, pulse=None):
-                    real_push(worktree=worktree, deploy_sha=deploy_sha, log=log, pulse=pulse)
+                def land_then_drop(
+                    *,
+                    worktree,
+                    deploy_sha="",
+                    log=None,
+                    pulse=None,
+                    audit_ref="",
+                    audit_expected_sha=None,
+                ):
+                    real_push(
+                        worktree=worktree,
+                        deploy_sha=deploy_sha,
+                        log=log,
+                        pulse=pulse,
+                        audit_ref=audit_ref,
+                        audit_expected_sha=audit_expected_sha,
+                    )
                     raise CommandFailed(
                         ["git", "push"], 1,
                         stderr="fatal: the remote end hung up unexpectedly",
