@@ -114,6 +114,12 @@ class CliTests(unittest.TestCase):
             text = out.getvalue()
             self.assertIn("trains:", text)
             self.assertIn("land rate:", text)
+            self.assertIn("terminal land rate:", text)
+            self.assertIn("validation runs:", text)
+            self.assertIn("validated trains:", text)
+            self.assertIn("batching:", text)
+            self.assertIn("batch savings estimate:", text)
+            self.assertIn("evidence gap recovery_reconcile_frequency:", text)
             self.assertIn("duration:", text)
             self.assertIn("average queue=", text)
             # A KeyError-driven regression would print the literal repr of a

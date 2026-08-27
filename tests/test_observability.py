@@ -263,6 +263,259 @@ class HistoryStatsTests(unittest.TestCase):
             self.assertEqual(empty["trains"]["total"], 0)
             self.assertIsNone(empty["trains"]["land_rate"])
 
+    def test_stats_reports_product_outcomes_and_conservative_batch_savings(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = load_config(repo=root, db_override=root / "queue.sqlite")
+            conn = connect(config.state.db)
+            try:
+                landed_first = enqueue_job(conn, task="land-a", branch="agent/a")
+                landed_second = enqueue_job(conn, task="land-b", branch="agent/b")
+                superseded = enqueue_job(
+                    conn, task="superseded", branch="agent/old"
+                )
+                blocked = enqueue_job(
+                    conn, task="conflict", branch="agent/conflict"
+                )
+                queued = enqueue_job(conn, task="queued", branch="agent/queued")
+                conn.execute(
+                    "UPDATE deploy_queue SET status='deployed', "
+                    "train_id='train-landed', train_size=2, "
+                    "requested_at='2026-07-22T00:00:00Z', "
+                    "validated_at='2026-07-22T00:01:20Z', "
+                    "started_at='2026-07-22T00:02:00Z', "
+                    "finished_at='2026-07-22T00:02:30Z', "
+                    "push_status='succeeded', verify_status='succeeded' "
+                    "WHERE id IN (?, ?)",
+                    (landed_first.id, landed_second.id),
+                )
+                conn.execute(
+                    "UPDATE deploy_queue SET status='canceled', "
+                    "train_id='train-old', train_size=1, "
+                    "requested_at='2026-07-22T00:00:00Z', "
+                    "validated_at='2026-07-22T00:01:00Z', "
+                    "started_at='2026-07-22T00:00:30Z', "
+                    "finished_at='2026-07-22T00:03:00Z', "
+                    "note='superseded by train-new' WHERE id=?",
+                    (superseded.id,),
+                )
+                conn.execute(
+                    "UPDATE deploy_queue SET status='blocked', "
+                    "requested_at='2026-07-22T00:03:30Z', "
+                    "started_at='2026-07-22T00:04:00Z', "
+                    "finished_at='2026-07-22T00:04:10Z', "
+                    "note='merge conflict in app.py' WHERE id=?",
+                    (blocked.id,),
+                )
+                conn.execute(
+                    "UPDATE deploy_queue SET "
+                    "requested_at='2026-07-22T00:03:30Z' WHERE id=?",
+                    (queued.id,),
+                )
+                events = [
+                    (
+                        "validate-landed",
+                        None,
+                        "claiming",
+                        "active",
+                        "Validate runner claimed 2 job(s)",
+                        "mode=validate",
+                        "2026-07-22T00:01:00Z",
+                    ),
+                    (
+                        "validate-landed",
+                        None,
+                        "gating",
+                        "active",
+                        "Running gate 1/1: tests",
+                        "",
+                        "2026-07-22T00:01:10Z",
+                    ),
+                    (
+                        "validate-landed",
+                        None,
+                        "gating",
+                        "success",
+                        "Passed gate 1/1: tests",
+                        "",
+                        "2026-07-22T00:01:20Z",
+                    ),
+                    (
+                        "validate-landed",
+                        landed_first.id,
+                        "ready",
+                        "success",
+                        f"Job #{landed_first.id} validated",
+                        "",
+                        "2026-07-22T00:01:20Z",
+                    ),
+                    (
+                        "validate-landed",
+                        landed_second.id,
+                        "ready",
+                        "success",
+                        f"Job #{landed_second.id} validated",
+                        "",
+                        "2026-07-22T00:01:20Z",
+                    ),
+                    (
+                        "deploy-landed",
+                        None,
+                        "claiming",
+                        "active",
+                        "Deploy runner claimed 2 job(s)",
+                        "mode=deploy",
+                        "2026-07-22T00:02:00Z",
+                    ),
+                    (
+                        "deploy-landed",
+                        None,
+                        "gating",
+                        "active",
+                        "Running gate 1/1: tests",
+                        "",
+                        "2026-07-22T00:02:00Z",
+                    ),
+                    (
+                        "deploy-landed",
+                        None,
+                        "gating",
+                        "success",
+                        "Passed gate 1/1: tests",
+                        "",
+                        "2026-07-22T00:02:20Z",
+                    ),
+                    (
+                        "deploy-landed",
+                        landed_first.id,
+                        "complete",
+                        "success",
+                        f"Job #{landed_first.id} deployed",
+                        "",
+                        "2026-07-22T00:02:30Z",
+                    ),
+                    (
+                        "deploy-landed",
+                        landed_second.id,
+                        "complete",
+                        "success",
+                        f"Job #{landed_second.id} deployed",
+                        "",
+                        "2026-07-22T00:02:30Z",
+                    ),
+                    (
+                        "validate-partial",
+                        None,
+                        "claiming",
+                        "active",
+                        "Validate runner claimed 2 job(s)",
+                        "mode=validate",
+                        "2026-07-22T00:04:00Z",
+                    ),
+                    (
+                        "validate-partial",
+                        None,
+                        "gating",
+                        "active",
+                        "Running gate 1/1: tests",
+                        "",
+                        "2026-07-22T00:04:01Z",
+                    ),
+                    (
+                        "validate-partial",
+                        None,
+                        "gating",
+                        "error",
+                        "Failed gate 1/1: tests",
+                        "",
+                        "2026-07-22T00:04:05Z",
+                    ),
+                    (
+                        "validate-partial",
+                        blocked.id,
+                        "blocked",
+                        "error",
+                        f"Job #{blocked.id} blocked",
+                        "",
+                        "2026-07-22T00:04:10Z",
+                    ),
+                    (
+                        "validate-partial",
+                        queued.id,
+                        "ready",
+                        "success",
+                        f"Job #{queued.id} validated",
+                        "",
+                        "2026-07-22T00:04:10Z",
+                    ),
+                ]
+                conn.executemany(
+                    "INSERT INTO run_events "
+                    "(claim_token, job_id, phase, state, message, detail, "
+                    "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    events,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            stats = stats_payload(config)
+            self.assertEqual(stats["trains"]["status_counts"]["deployed"], 1)
+            self.assertEqual(stats["trains"]["canceled"], 1)
+            self.assertEqual(stats["trains"]["open"], 1)
+            self.assertEqual(stats["trains"]["terminal"], 3)
+            self.assertEqual(stats["trains"]["terminal_land_rate"], 0.3333)
+            self.assertEqual(stats["trains"]["not_landed"], 3)
+            self.assertEqual(stats["jobs"]["status_counts"]["deployed"], 2)
+            self.assertEqual(stats["jobs"]["status_counts"]["queued"], 1)
+
+            reasons = stats["outcomes"]["not_landed_reason_counts"]
+            self.assertEqual(reasons["superseded"], 1)
+            self.assertEqual(reasons["merge_conflict"], 1)
+            self.assertEqual(reasons["queued"], 1)
+            self.assertEqual(stats["outcomes"]["conflicts"]["terminal_trains"], 3)
+            self.assertEqual(
+                stats["outcomes"]["conflicts"]["merge_conflict_rate"],
+                0.3333,
+            )
+
+            validation_runs = stats["validation"]["runs"]
+            self.assertEqual(validation_runs["attempted"], 2)
+            self.assertEqual(validation_runs["succeeded"], 1)
+            self.assertEqual(validation_runs["partial"], 1)
+            self.assertEqual(validation_runs["runs_with_failure"], 1)
+            self.assertEqual(validation_runs["failure_rate_denominator"], 2)
+            self.assertEqual(validation_runs["failure_rate"], 0.5)
+
+            validated_trains = stats["validation"]["trains"]
+            self.assertEqual(validated_trains["total"], 2)
+            self.assertEqual(validated_trains["deployed"], 1)
+            self.assertEqual(validated_trains["terminal_without_deploy"], 1)
+            self.assertEqual(validated_trains["superseded"], 1)
+            self.assertEqual(validated_trains["deployment_rate"], 0.5)
+
+            batching = stats["batching"]
+            self.assertEqual(batching["observed_runs"], 3)
+            self.assertEqual(batching["runs_with_job_count"], 3)
+            self.assertEqual(batching["jobs_per_run"]["median"], 2.0)
+            self.assertEqual(batching["multi_job_runs"], 3)
+            self.assertEqual(batching["multi_job_run_rate"], 1.0)
+            savings = batching["estimated_savings"]
+            self.assertEqual(savings["eligible_successful_multi_job_runs"], 2)
+            self.assertEqual(savings["observed_gate_executions"], 2)
+            self.assertEqual(savings["estimated_gate_executions_avoided"], 2)
+            self.assertEqual(savings["estimated_gate_seconds_avoided"], 30.0)
+            self.assertEqual(
+                stats["evidence_gaps"][0]["metric"],
+                "recovery_reconcile_frequency",
+            )
+
+            empty = stats_payload(config, since="2026-07-23T00:00:00Z")
+            self.assertIsNone(empty["validation"]["runs"]["failure_rate"])
+            self.assertEqual(empty["batching"]["jobs_per_run"]["samples"], 0)
+
     def test_stats_attributes_runner_phases_and_recommends_slow_gate(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

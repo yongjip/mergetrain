@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Extend `stats` with evidence-backed validation outcomes, validated-to-deployed
+  conversion, explicit not-landed and conflict reasons, observed jobs per run,
+  and a conservative successful-batch gate-savings estimate. Report
+  recovery/reconcile frequency as an evidence gap rather than inferring it from
+  mutable job notes.
+
 - Add a force-with-lease-protected `refs/mergetrain/deploys/<sha>` audit ref to
   every atomic deploy. Reconcile now uses that retained remote evidence to
   detect a payload ref that landed and was later force-rewritten, blocking for

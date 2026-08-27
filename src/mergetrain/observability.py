@@ -12,6 +12,7 @@ from typing import Any
 
 from .config import MergetrainConfig
 from .errors import redact_secrets
+from .evidence import history_groups, history_status, product_evidence, run_mode
 from .models import Job, RunEvent, RunnerLock
 from .store import (
     RUN_EVENT_RETENTION,
@@ -127,22 +128,7 @@ def _run_latency(
         ordered = sorted(token_events, key=lambda event: event.id)
         if not ordered:
             continue
-        run_phases = {event.phase for event in ordered}
-        claim_messages = [
-            event.message.lower()
-            for event in ordered
-            if event.phase == "claiming"
-        ]
-        claim_details = {
-            event.detail for event in ordered if event.phase == "claiming"
-        }
-        mode = (
-            "deploy"
-            if "mode=deploy" in claim_details
-            or {"pushing", "verifying"} & run_phases
-            or any("deploy runner" in message for message in claim_messages)
-            else "validate"
-        )
+        mode = run_mode(ordered)
         claim_event = next(
             (
                 event
@@ -336,10 +322,12 @@ def _stats_recommendations(
     return recommendations
 
 
-def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
+def _gate_runs_with_tokens(
+    events: Sequence[RunEvent],
+) -> list[tuple[str, dict[str, Any]]]:
     active: dict[tuple[str, int, str], tuple[RunEvent, int]] = {}
     last_by_token: dict[str, RunEvent] = {}
-    runs: list[dict[str, Any]] = []
+    runs: list[tuple[str, dict[str, Any]]] = []
     for event in events:
         if event.claim_token:
             last_by_token[event.claim_token] = event
@@ -348,43 +336,53 @@ def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
         matched = GATE_EVENT.match(event.message)
         if matched is None:
             continue
-        index, total, name = int(matched.group(1)), int(matched.group(2)), matched.group(3)
+        index = int(matched.group(1))
+        total = int(matched.group(2))
+        name = matched.group(3)
         key = (event.claim_token, index, name)
         if event.state == "active":
             previous = active.get(key)
             if previous is not None:
                 prior, prior_total = previous
                 runs.append(
-                    {
-                        "name": name,
-                        "index": index,
-                        "total": prior_total,
-                        "state": "failed",
-                        "started_at": prior.created_at,
-                        "finished_at": event.created_at,
-                        "duration_seconds": elapsed_seconds(
-                            prior.created_at, event.created_at
-                        ),
-                    }
+                    (
+                        event.claim_token,
+                        {
+                            "name": name,
+                            "index": index,
+                            "total": prior_total,
+                            "state": "failed",
+                            "started_at": prior.created_at,
+                            "finished_at": event.created_at,
+                            "duration_seconds": elapsed_seconds(
+                                prior.created_at, event.created_at
+                            ),
+                        },
+                    )
                 )
             active[key] = (event, total)
             continue
         active_run = active.pop(key, None)
         started = active_run[0] if active_run else None
         runs.append(
-            {
-                "name": name,
-                "index": index,
-                "total": total,
-                "state": "reused" if event.state == "reused" else event.state,
-                "started_at": started.created_at if started else "",
-                "finished_at": event.created_at,
-                "duration_seconds": (
-                    elapsed_seconds(started.created_at, event.created_at)
-                    if started
-                    else None
-                ),
-            }
+            (
+                event.claim_token,
+                {
+                    "name": name,
+                    "index": index,
+                    "total": total,
+                    "state": (
+                        "reused" if event.state == "reused" else event.state
+                    ),
+                    "started_at": started.created_at if started else "",
+                    "finished_at": event.created_at,
+                    "duration_seconds": (
+                        elapsed_seconds(started.created_at, event.created_at)
+                        if started
+                        else None
+                    ),
+                },
+            )
         )
     for (token, index, name), (started, total) in active.items():
         terminal = last_by_token.get(token)
@@ -394,47 +392,38 @@ def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
             and terminal.state in {"error", "warning"}
         )
         runs.append(
-            {
-                "name": name,
-                "index": index,
-                "total": total,
-                "state": "failed" if failed else "incomplete",
-                "started_at": started.created_at,
-                "finished_at": terminal.created_at if failed and terminal else "",
-                "duration_seconds": (
-                    elapsed_seconds(started.created_at, terminal.created_at)
-                    if failed and terminal
-                    else None
-                ),
-            }
+            (
+                token,
+                {
+                    "name": name,
+                    "index": index,
+                    "total": total,
+                    "state": "failed" if failed else "incomplete",
+                    "started_at": started.created_at,
+                    "finished_at": (
+                        terminal.created_at if failed and terminal else ""
+                    ),
+                    "duration_seconds": (
+                        elapsed_seconds(started.created_at, terminal.created_at)
+                        if failed and terminal
+                        else None
+                    ),
+                },
+            )
         )
     return runs
 
 
-def _history_status(jobs: Sequence[Job]) -> str:
-    statuses = {job.status for job in jobs}
-    for status in (
-        "needs_reconcile",
-        "in_progress",
-        "failed",
-        "blocked",
-        "queued",
-        "validated",
-        "canceled",
-        "deployed",
-    ):
-        if status in statuses:
-            return status
-    return "unknown"
+def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
+    """Public gate rows without the internal claim-token join key."""
+
+    return [run for _, run in _gate_runs_with_tokens(events)]
 
 
 def _group_history(
     jobs: Sequence[Job], events: Sequence[RunEvent]
 ) -> list[dict[str, Any]]:
-    grouped: dict[str, list[Job]] = {}
-    for job in jobs:
-        key = f"train:{job.train_id}" if job.train_id else f"job:{job.id}"
-        grouped.setdefault(key, []).append(job)
+    grouped = history_groups(jobs)
 
     event_times = [(event, _timestamp(event.created_at)) for event in events]
     items: list[dict[str, Any]] = []
@@ -458,7 +447,7 @@ def _group_history(
             {
                 "key": key,
                 "train_id": members[0].train_id,
-                "status": _history_status(members),
+                "status": history_status(members),
                 "requested_at": requested_at,
                 "started_at": started_at,
                 "finished_at": finished_at,
@@ -529,6 +518,9 @@ def stats_payload(
     finally:
         conn.close()
     items = _group_history(jobs, events)
+    tagged_gate_runs = _gate_runs_with_tokens(events)
+    gate_runs = [run for _, run in tagged_gate_runs]
+    evidence = product_evidence(jobs, events, gate_runs=tagged_gate_runs)
     landed = sum(item["status"] == "deployed" for item in items)
     blocked = sum(item["status"] == "blocked" for item in items)
     failed = sum(item["status"] == "failed" for item in items)
@@ -545,7 +537,7 @@ def stats_payload(
         if item["queue_seconds"] is not None
     ]
     gate_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for run in _gate_runs(events):
+    for run in gate_runs:
         gate_groups[str(run["name"])].append(run)
     per_gate: list[dict[str, Any]] = []
     for name in sorted(gate_groups):
@@ -581,8 +573,9 @@ def stats_payload(
             # denominator, so reading it as "shipped" inverts the metric.
             "finished": finished,
             "land_rate": round(landed / finished, 4) if finished else None,
+            **evidence["train_additions"],
         },
-        "jobs": {"total": len(jobs)},
+        "jobs": {"total": len(jobs), **evidence["job_additions"]},
         # Flat and unit-suffixed like every neighbour (average_queue_seconds,
         # gates[].median_seconds); history's duration_seconds is a float, and the
         # same name must not be an object here.
@@ -591,6 +584,10 @@ def stats_payload(
         "average_queue_seconds": round(mean(queue_times), 3) if queue_times else None,
         "gates": per_gate,
         "latency": latency,
+        "outcomes": evidence["outcomes"],
+        "validation": evidence["validation"],
+        "batching": evidence["batching"],
+        "evidence_gaps": evidence["evidence_gaps"],
         "recommendations": _stats_recommendations(config, per_gate, latency),
         "coverage": {
             "queue_history": "unbounded",

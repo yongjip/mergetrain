@@ -34,6 +34,12 @@ do not copy gate, push, or verify stdout/stderr into event records. Error event
 details expose a return code rather than subprocess output. Lease/claim tokens are
 never serialized.
 
+`stats --json` emits fixed status/reason categories and aggregate timing/counts.
+It may use redacted-compatible job fields and legacy note text while classifying
+an outcome, but it never emits task text, branch names, note text, or claim
+tokens. Its batching estimate joins gates to runs internally and exposes only
+aggregate counts, seconds, and the fixed estimation method.
+
 `logs` is the explicit opt-in path to raw local command output and therefore may
 show secrets that a command printed. It accepts only a job ID and refuses a stored
 path outside configured `state.logs`. Protect that directory and do not forward

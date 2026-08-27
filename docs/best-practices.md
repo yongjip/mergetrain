@@ -38,12 +38,31 @@ mergetrain stats --json
 | `latency.runs.deploy` | observed deploy runner duration | inspect gates, push, and post-push verify separately |
 | `latency.phases[]` | fetch, assembly, gates, push, and verify by run mode | optimize the phase that actually dominates |
 | `gates[]` | completion state and duration by gate | parallelize or narrow the slow gate |
+| `validation.runs.failure_rate` | validation runs with any failed member, over conclusive retained runs | inspect failure reasons before changing train size or gates |
+| `validation.trains.deployment_rate` | validated trains that eventually deployed, including pending trains in the denominator | reduce supersession and approval delay; use `resolved_deployment_rate` for closed outcomes |
+| `outcomes.not_landed_reason_counts` | mutually exclusive reasons that observed trains have not deployed | address the largest repeatable failure class first |
+| `outcomes.conflicts` | merge and semantic conflicts over terminal trains | separate high-conflict branches or improve task boundaries |
+| `trains.terminal_land_rate` | deployed trains over deployed + blocked + failed + canceled trains | compare with legacy `land_rate` to expose cancellation/supersession cost |
+| `batching.jobs_per_run` | claimed jobs per retained runner invocation | compare actual batches with the intended two-to-five-job starting heuristic |
+| `batching.estimated_savings` | conservative gate executions and seconds avoided by successful multi-job runs | weigh observed savings against validation failure and conflict rates |
 
 Recommendations require at least three timed samples and include their evidence.
 Treat them as leads, not commands. Runner events retain the newest 5,000 rows,
 and the `latency.coverage` object says how much usable history was observed.
 Incomplete runs are counted in coverage but never converted into zero-second
 samples.
+
+The batch-savings figure is a counterfactual, not observed elapsed-time savings:
+it assumes the same timed successful gate would otherwise have run once per
+job. Failed, partial, reused, skipped, and untimed gates contribute nothing.
+This makes the estimate conservative and auditable, but it still cannot account
+for per-job cache effects or parallelism. Check it alongside validation failure
+and conflict rates, never by itself.
+
+`stats.evidence_gaps` is also operational evidence. For example, current queue
+history cannot truthfully reconstruct how often operators invoked `recover` or
+`reconcile`, so the command reports that gap instead of estimating from mutable
+job notes.
 
 `average_queue_seconds` remains available for compatibility, but it aggregates
 durable job history and can include long human pauses. Prefer the attributed

@@ -12,6 +12,7 @@ mergetrain/
     cli.py             # argument parsing and command handlers
     config.py          # .mergetrain.yaml loading (+ built-in YAML subset parser)
     daemon.py          # auto-only daemon loop
+    evidence.py        # evidence-backed outcome, validation, and batching metrics
     errors.py          # MergetrainError hierarchy
     git_runner.py      # worktree merge train, gates, atomic push, verify, gc
     observability.py   # job/train outcomes and event/heartbeat read models

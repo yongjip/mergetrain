@@ -814,13 +814,82 @@ def cmd_stats(args: argparse.Namespace) -> int:
         rate_text = f"{rate * 100:.1f}%" if rate is not None else "n/a"
         print(
             f"trains: {trains['total']} total · {trains['landed']} landed · "
-            f"{trains['blocked']} blocked · {trains['failed']} failed"
+            f"{trains['blocked']} blocked · {trains['failed']} failed · "
+            f"{trains['canceled']} canceled · {trains['open']} open"
         )
         print(f"land rate: {rate_text}")
+        terminal_rate = trains["terminal_land_rate"]
+        terminal_rate_text = (
+            f"{terminal_rate * 100:.1f}%" if terminal_rate is not None else "n/a"
+        )
+        print(
+            f"terminal land rate: {terminal_rate_text} "
+            "(includes canceled outcomes)"
+        )
+        reasons = {
+            reason: count
+            for reason, count in payload["outcomes"][
+                "not_landed_reason_counts"
+            ].items()
+            if count
+        }
+        if reasons:
+            print(
+                "not landed: "
+                + " · ".join(
+                    f"{reason.replace('_', ' ')}={count}"
+                    for reason, count in reasons.items()
+                )
+            )
         print(
             f"duration: median={payload['median_duration_seconds']}s "
             f"p95={payload['p95_duration_seconds']}s · "
             f"average queue={payload['average_queue_seconds']}s"
+        )
+        validation_runs = payload["validation"]["runs"]
+        validation_failure_rate = validation_runs["failure_rate"]
+        validation_failure_text = (
+            f"{validation_failure_rate * 100:.1f}%"
+            if validation_failure_rate is not None
+            else "n/a"
+        )
+        print(
+            f"validation runs: attempted={validation_runs['attempted']} · "
+            f"with failure={validation_runs['runs_with_failure']}/"
+            f"{validation_runs['failure_rate_denominator']} "
+            f"({validation_failure_text})"
+        )
+        validated_trains = payload["validation"]["trains"]
+        deployment_rate = validated_trains["deployment_rate"]
+        deployment_rate_text = (
+            f"{deployment_rate * 100:.1f}%"
+            if deployment_rate is not None
+            else "n/a"
+        )
+        print(
+            f"validated trains: deployed={validated_trains['deployed']}/"
+            f"{validated_trains['total']} ({deployment_rate_text}) · "
+            f"pending={validated_trains['pending']} · "
+            f"superseded={validated_trains['superseded']}"
+        )
+        batching = payload["batching"]
+        jobs_per_run = batching["jobs_per_run"]
+        multi_rate = batching["multi_job_run_rate"]
+        multi_rate_text = (
+            f"{multi_rate * 100:.1f}%" if multi_rate is not None else "n/a"
+        )
+        print(
+            f"batching: observed={batching['observed_runs']} · "
+            f"jobs/run median={jobs_per_run['median']} "
+            f"p95={jobs_per_run['p95']} · "
+            f"multi-job={batching['multi_job_runs']}/"
+            f"{batching['runs_with_job_count']} ({multi_rate_text})"
+        )
+        savings = batching["estimated_savings"]
+        print(
+            "batch savings estimate: "
+            f"gate executions={savings['estimated_gate_executions_avoided']} · "
+            f"gate seconds={savings['estimated_gate_seconds_avoided']}"
         )
         for gate in payload["gates"]:
             print(
@@ -851,6 +920,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 f"recommendation {recommendation['code']}: "
                 f"{recommendation['summary']}"
             )
+        for gap in payload["evidence_gaps"]:
+            print(f"evidence gap {gap['metric']}: {gap['reason']}")
     return 0
 
 
@@ -2139,7 +2210,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_history.set_defaults(func=cmd_history)
 
     p_stats = subparsers.add_parser(
-        "stats", help="Aggregate land rate, latency, queue time, and gate timing"
+        "stats",
+        help="Aggregate outcomes, validation, batching, latency, and gate timing",
     )
     p_stats.add_argument("--since", default="", help="ISO-8601 lower time bound")
     p_stats.add_argument("--json", action="store_true")

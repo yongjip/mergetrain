@@ -254,24 +254,58 @@ Aggregate the same read-only history:
 mergetrain stats --since 2026-07-01T00:00:00Z --json
 ```
 
-The payload reports `trains{total,landed,blocked,failed,finished,land_rate}`,
-`median_duration_seconds` and `p95_duration_seconds`, `average_queue_seconds`,
-and per-gate `state_counts` with `timed_runs`, `median_seconds`, and
-`p95_seconds`. `latency` attributes queue wait, approval wait, validation/deploy
-runner duration, and fetch/assembly/gate/push/verify phases. Its `coverage`
-reports retained event counts, the 5,000-row limit, complete runs, and runs with
-job identity; incomplete histories are never reported as zero-duration samples.
+The payload reports
+`trains{total,landed,blocked,failed,canceled,open,terminal,not_landed,status_counts,finished,land_rate,terminal_land_rate}`,
+`jobs{total,status_counts}`, `median_duration_seconds` and
+`p95_duration_seconds`, `average_queue_seconds`, and per-gate `state_counts`
+with `timed_runs`, `median_seconds`, and `p95_seconds`.
+
+The additive product-evidence blocks are:
+
+- `outcomes.not_landed_reason_counts`: one mutually exclusive current/history
+  reason for each train that is not deployed. Structured conflict and push
+  fields take precedence; retained notes provide the legacy fallback.
+- `outcomes.conflicts`: merge- and semantic-conflict counts and rates. The
+  explicit `terminal_trains` field is the denominator.
+- `validation.runs`: retained validation claims split into `succeeded`,
+  `partial`, `failed`, `canceled`, and `incomplete`. `failure_rate` is
+  `runs_with_failure / failure_rate_denominator`; canceled and incomplete
+  claims are visible but excluded from that denominator.
+- `validation.trains`: trains with durable `validated_at` evidence, including
+  deployment, pending, terminal-without-deploy, and superseded counts.
+  `deployment_rate` uses every observed validated train; the additional
+  `resolved_deployment_rate` excludes still-pending trains.
+- `batching`: reconstructed claimed jobs per run and the observed multi-job
+  rate. `estimated_savings` is a labeled counterfactual: for successfully
+  completed multi-job runs only, each timed successful gate is multiplied by
+  `claimed_jobs - 1`. It does not count failed, partial, reused, skipped, or
+  untimed gates, and it is not a wall-clock benchmark.
+- `evidence_gaps`: metrics that cannot be reconstructed truthfully from current
+  durable records. In particular, historical `recover`/`reconcile` invocation
+  frequency is not inferred from mutable job notes.
+
+Each outcome/validation/batching block names its `source` as either unbounded
+`queue_history` or bounded `retained_run_events`.
+
+`latency` attributes queue wait, approval wait, validation/deploy runner
+duration, and fetch/assembly/gate/push/verify phases. Its `coverage` reports
+retained event counts, the 5,000-row limit, complete runs, and runs with job
+identity; incomplete histories are never reported as zero-duration samples.
 Evidence-backed `recommendations` appear only after at least three timed
 samples. `finished`
 counts deployed + blocked + failed — every train that reached an end state,
 excluding canceled and still-open ones — and is the denominator of `land_rate`;
 it is deliberately not called `completed`, which is configured human vocabulary
-for the success end state alone. Queue
+for the success end state alone. `terminal_land_rate` uses deployed + blocked +
+failed + canceled, making the effect of cancellation/supersession visible
+without changing the established `land_rate` contract. Queue
 rows are not automatically pruned, so their history is unbounded. Gate timing
 and phase attribution are explicitly marked as covering the latest 5,000
 retained runner events; they never pretend an older truncated event tail is
-complete. See [efficient operation](best-practices.md) for how to act on each
-timing without weakening gates.
+complete. A `--since` boundary can likewise leave a retained run incomplete if
+its claim or terminal event falls outside the window. See
+[efficient operation](best-practices.md) for how to act on each timing without
+weakening gates.
 
 ## `logs`
 

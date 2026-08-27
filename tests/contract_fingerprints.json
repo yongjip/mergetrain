@@ -1049,11 +1049,42 @@
     },
     "stats": {
       "average_queue_seconds": null,
+      "batching": {
+        "estimated_savings": {
+          "eligible_successful_multi_job_runs": null,
+          "estimated_gate_executions_avoided": null,
+          "estimated_gate_seconds_avoided": null,
+          "method": null,
+          "observed_gate_executions": null
+        },
+        "jobs_per_run": {
+          "average": null,
+          "max": null,
+          "median": null,
+          "p95": null,
+          "samples": null
+        },
+        "mode_counts": {
+          "deploy": null,
+          "validate": null
+        },
+        "multi_job_run_rate": null,
+        "multi_job_runs": null,
+        "observed_runs": null,
+        "runs_with_job_count": null,
+        "source": null
+      },
       "contract_version": null,
       "coverage": {
         "gate_events": null,
         "phase_events": null,
         "queue_history": null
+      },
+      "evidence_gaps": {
+        "[]": {
+          "metric": null,
+          "reason": null
+        }
       },
       "gates": {
         "[]": {
@@ -1068,6 +1099,16 @@
         }
       },
       "jobs": {
+        "status_counts": {
+          "blocked": null,
+          "canceled": null,
+          "deployed": null,
+          "failed": null,
+          "in_progress": null,
+          "needs_reconcile": null,
+          "queued": null,
+          "validated": null
+        },
         "total": null
       },
       "latency": {
@@ -1116,16 +1157,86 @@
       },
       "median_duration_seconds": null,
       "ok": null,
+      "outcomes": {
+        "conflicts": {
+          "merge_conflict_rate": null,
+          "merge_conflict_trains": null,
+          "semantic_conflict_rate": null,
+          "semantic_conflict_trains": null,
+          "terminal_trains": null
+        },
+        "not_landed_reason_counts": {
+          "awaiting_deploy": null,
+          "canceled": null,
+          "command_timeout": null,
+          "gate_failed": null,
+          "merge_blocked": null,
+          "merge_conflict": null,
+          "pending_reconcile": null,
+          "push_failed": null,
+          "push_rejected": null,
+          "queued": null,
+          "runner_failed": null,
+          "running": null,
+          "semantic_conflict": null,
+          "source_identity_mismatch": null,
+          "superseded": null,
+          "unknown": null,
+          "validated_reuse_mismatch": null
+        },
+        "source": null
+      },
       "p95_duration_seconds": null,
       "recommendations": "[]?",
       "since": null,
       "trains": {
         "blocked": null,
+        "canceled": null,
         "failed": null,
         "finished": null,
         "land_rate": null,
         "landed": null,
+        "not_landed": null,
+        "open": null,
+        "status_counts": {
+          "blocked": null,
+          "canceled": null,
+          "deployed": null,
+          "failed": null,
+          "in_progress": null,
+          "needs_reconcile": null,
+          "queued": null,
+          "unknown": null,
+          "validated": null
+        },
+        "terminal": null,
+        "terminal_land_rate": null,
         "total": null
+      },
+      "validation": {
+        "runs": {
+          "attempted": null,
+          "canceled": null,
+          "failed": null,
+          "failure_rate": null,
+          "failure_rate_denominator": null,
+          "incomplete": null,
+          "partial": null,
+          "runs_with_failure": null,
+          "source": null,
+          "succeeded": null,
+          "terminal": null
+        },
+        "trains": {
+          "deployed": null,
+          "deployment_rate": null,
+          "pending": null,
+          "resolved_deployment_rate": null,
+          "source": null,
+          "superseded": null,
+          "terminal_without_deploy": null,
+          "total": null
+        }
       }
     },
     "status": {
