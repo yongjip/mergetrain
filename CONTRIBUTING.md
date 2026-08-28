@@ -10,10 +10,9 @@ it works.
 python -m pip install -e ".[dev]"
 ```
 
-Python 3.10–3.14 are supported. The package ships **zero runtime dependencies**
-(PyYAML is an optional extra) — please keep it that way; the built-in fallback
-YAML parser is the default install path and must stay behaviour-compatible with
-PyYAML.
+Python 3.10–3.14 are supported. PyYAML is the one required runtime dependency;
+configuration must continue to use `safe_load`, preserve existing
+`.mergetrain.yaml` files, and fail closed during typed policy validation.
 
 ## Before you open a PR
 
@@ -47,5 +46,5 @@ changelog heading.
 
 Keep each PR focused on one logical change, with a clear conventional commit
 message. CI must be green before merge: `ruff` + `mypy` + `pytest` across the
-3.10–3.14 matrix, a no-yaml leg that exercises the fallback parser, and an
+3.10–3.14 matrix, package metadata and clean-wheel installation, and an
 end-to-end leg.

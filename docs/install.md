@@ -53,18 +53,18 @@ since a clean CI runner cannot exercise every local Git configuration.
 python -m pip install -e .
 ```
 
-## Optional YAML dependency
+## Config parser dependency
 
-`mergetrain` has no required runtime dependencies. If you want full YAML parsing
-instead of the built-in generated-config subset parser:
+PyYAML is installed automatically and `.mergetrain.yaml` is always read with
+its safe loader. Existing install commands that select the historical `yaml`
+extra remain valid, but the extra is now a no-op compatibility alias:
 
 ```sh
-uv tool install 'mergetrain[yaml]'      # or: pipx install 'mergetrain[yaml]'
-python -m pip install 'mergetrain[yaml]'  # inside a virtualenv
+uv tool install 'mergetrain[yaml]'
+python -m pip install 'mergetrain[yaml]'
 ```
 
-For an editable checkout with the same extra, use
-`python -m pip install -e '.[yaml]'`.
+New installs should simply use `mergetrain` without the extra.
 
 ## Verify installation
 

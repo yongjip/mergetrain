@@ -28,17 +28,18 @@ classifiers = [
   "Topic :: Software Development :: Version Control :: Git",
   "Topic :: Software Development :: Build Tools",
 ]
-dependencies = []
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-yaml = ["PyYAML>=6.0"]
+# Kept as a no-op compatibility extra so existing `mergetrain[yaml]` install
+# commands continue to work after PyYAML became a core dependency.
+yaml = []
 # `mergetrain mcp` only. Pinned below 2 because the SDK's own README warns that
-# a v2 beta exists; the core stays dependency-free either way.
+# a v2 beta exists; the SDK stays out of the core dependency set either way.
 mcp = ["mcp>=1.16,<2"]
 dev = [
   "build>=1.0",
   "hatchling>=1.21",
-  "PyYAML>=6.0",
   "pytest>=7",
   "pytest-cov>=4",
   # The fault matrix builds a real repo and bare remote per case, so the suite

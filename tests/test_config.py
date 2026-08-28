@@ -6,7 +6,6 @@ from pathlib import Path
 
 from mergetrain.config import (
     CONFIG_VERSION,
-    _parse_simple_yaml,
     load_config,
     load_yaml,
     render_default_config,
@@ -58,61 +57,54 @@ notify:
             with self.assertRaisesRegex(ConfigError, r"notify.transitions\[1\]"):
                 load_config(repo=repo)
 
-    def test_simple_yaml_shape_loads_without_required_dependency(self) -> None:
+    def test_generated_yaml_loads_with_required_parser(self) -> None:
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")
         self.assertEqual(data["git"]["push_refs"], ["main"])
         self.assertEqual(data["terminology"]["git_operation"], "deploy")
         self.assertEqual(data["gates"][0]["name"], "diff-check")
 
-    def test_fallback_parser_strips_inline_comments_like_pyyaml(self) -> None:
-        # The zero-dependency parser is the DEFAULT path (no runtime deps), so it
-        # must match PyYAML on inline comments — otherwise the same config parses
-        # differently with vs without PyYAML: `lock_ttl_minutes: 30  # x` would
-        # become the string "30  # x" and `- name: tests  # x` a corrupted gate.
+    def test_yaml_loader_handles_comments_and_full_yaml_syntax(self) -> None:
         doc = (
             "lock_ttl_minutes: 30  # thirty\n"
             "gates:\n"
             "  - name: tests  # unit gate\n"
+            "push_refs: [main, release]\n"
+            "gate: {name: lint, run: ruff check .}\n"
             'quoted: "a # b"\n'
             "url: http://example.com/p#frag\n"
             "# a whole-line comment\n"
             "plain: value\n"
         )
-        parsed = _parse_simple_yaml(doc)
-        self.assertEqual(parsed["lock_ttl_minutes"], 30)  # int, not "30  # thirty"
-        self.assertEqual(parsed["gates"][0]["name"], "tests")  # not "tests  # unit gate"
-        self.assertEqual(parsed["quoted"], "a # b")  # '#' inside quotes is literal
-        self.assertEqual(parsed["url"], "http://example.com/p#frag")  # no space -> not a comment
+        parsed = load_yaml(doc)
+        self.assertEqual(parsed["lock_ttl_minutes"], 30)
+        self.assertEqual(parsed["gates"][0]["name"], "tests")
+        self.assertEqual(parsed["push_refs"], ["main", "release"])
+        self.assertEqual(parsed["gate"], {"name": "lint", "run": "ruff check ."})
+        self.assertEqual(parsed["quoted"], "a # b")
+        self.assertEqual(parsed["url"], "http://example.com/p#frag")
         self.assertEqual(parsed["plain"], "value")
         self.assertNotIn("thirty", str(parsed))
-        # Parity: where PyYAML is installed, the built-in parser agrees with it.
-        try:
-            import yaml
-        except Exception:  # pragma: no cover - only when PyYAML is absent
-            return
-        self.assertEqual(parsed, yaml.safe_load(doc))
 
-    def test_fallback_parser_rejects_unsupported_flow_collections(self) -> None:
-        for value in ("[main, release]", "{name: tests}"):
-            with self.subTest(value=value):
-                with self.assertRaisesRegex(ConfigError, "flow-style YAML"):
-                    _parse_simple_yaml(f"value: {value}\n")
-
-    def test_yaml_parsers_reject_ambiguous_or_tab_indented_scalars(self) -> None:
+    def test_yaml_policy_rejects_ambiguous_or_tab_indented_scalars(self) -> None:
         cases = {
             "git:\n\tremote: upstream\n": "tab indentation",
             "agent:\n  require_explicit_auto_approval: no\n": "true/false",
             "queue:\n  lock_ttl_minutes: 010\n": "quote it",
             "queue:\n  lock_ttl_minutes: 0x10\n": "quote it",
+            "values: [yes]\n": "true/false",
+            "values: [010]\n": "quote it",
         }
         for document, message in cases.items():
-            for parser in (_parse_simple_yaml, load_yaml):
-                with self.subTest(document=document, parser=parser.__name__):
-                    with self.assertRaisesRegex(ConfigError, message):
-                        parser(document)
+            with self.subTest(document=document):
+                with self.assertRaisesRegex(ConfigError, message):
+                    load_yaml(document)
+        self.assertEqual(
+            load_yaml("values: ['yes', '010']\n"),
+            {"values": ["yes", "010"]},
+        )
 
-    def test_fallback_parser_matches_plain_yaml_shapes_used_by_config(self) -> None:
+    def test_yaml_loader_handles_plain_config_shapes(self) -> None:
         document = (
             "project:\n"
             "    name: bob's app  # comment\n"
@@ -121,16 +113,10 @@ notify:
             "        - HEAD:main\n"
             "empty:\n"
         )
-        parsed = _parse_simple_yaml(document)
+        parsed = load_yaml(document)
         self.assertEqual(parsed["project"]["name"], "bob's app")
         self.assertEqual(parsed["git"]["push_refs"], ["HEAD:main"])
         self.assertIsNone(parsed["empty"])
-
-        try:
-            import yaml
-        except Exception:  # pragma: no cover - only when PyYAML is absent
-            return
-        self.assertEqual(parsed, yaml.safe_load(document))
 
     def test_relative_paths_resolve_from_repo(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -176,8 +162,7 @@ notify:
 
 
     def test_malformed_yaml_raises_config_error(self) -> None:
-        # Whichever parser is active (PyYAML or the built-in subset parser), a
-        # malformed document must surface as ConfigError so the CLI exits cleanly
+        # Parser failures must surface as ConfigError so the CLI exits cleanly
         # with "mergetrain: error: ..." rather than dumping a raw traceback.
         with self.assertRaises(ConfigError):
             load_yaml("project:\n  name: x\n bad-indent: y\n")

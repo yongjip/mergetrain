@@ -154,7 +154,7 @@ def cmd_version(args: argparse.Namespace) -> int:
 
 def cmd_demo(args: argparse.Namespace) -> int:
     # Keep the sizeable walkthrough implementation off ordinary CLI import
-    # paths; `mergetrain --help` and agent commands remain fast and dependency-free.
+    # paths; `mergetrain --help` and agent commands avoid demo-only imports.
     from ..demo import run_demo
 
     return run_demo(

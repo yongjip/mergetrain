@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace the custom zero-dependency YAML subset parser with required PyYAML
+  `safe_load`, preserving every existing `.mergetrain.yaml` and the stricter
+  ambiguous-scalar policy while making full YAML syntax consistent across
+  installations. Keep the historical `yaml` package extra as a no-op alias.
+
 - Split SQLite persistence behind the stable `store.py` API into explicit
   transaction, connection, schema, job, lease, claim, event, and recovery
   boundaries. Preserve `BEGIN IMMEDIATE`, WAL/`synchronous=FULL`, migrations,

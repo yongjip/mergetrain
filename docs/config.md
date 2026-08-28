@@ -8,14 +8,21 @@ Default config file name:
 
 ## Parser support
 
-PyYAML is optional. Without it, mergetrain uses a dependency-free YAML subset
-parser for the block-style shape emitted by `mergetrain init`. Empty `[]` and
-`{}` values are supported, but non-empty flow-style collections such as
-`[main, release]` or `{name: tests}` require PyYAML; the fallback rejects them
-with `config_error` instead of guessing. Invalid mapping, list, string,
-boolean, path, and positive-integer values also fail closed during config
-validation. See [installation](install.md#optional-yaml-dependency) to enable
-full YAML parsing.
+PyYAML is a required dependency, and mergetrain always uses `safe_load` for
+`.mergetrain.yaml`. Existing block-style files remain unchanged, while standard
+flow-style collections such as `[main, release]` and `{name: tests}` now work
+consistently on every installation. Legacy YAML booleans (`yes`, `no`, `on`,
+`off`), prefixed or leading-zero integers, and tab indentation are rejected so
+operator policy cannot change meaning through implicit scalar conversion.
+Invalid mapping, list, string, boolean, path, and positive-integer values also
+fail closed during typed config validation.
+
+YAML remains the primary format to preserve committed project configuration and
+the existing `init`/documentation contract. Moving new files to TOML would not
+remove YAML loading for existing repositories, and Python 3.10 would require a
+second parser dependency because `tomllib` arrived in Python 3.11. Requiring one
+standards-based YAML implementation removes the custom-parser burden without
+introducing dual-format discovery, precedence, or migration rules.
 
 ## `version`
 

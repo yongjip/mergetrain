@@ -166,7 +166,7 @@ Agents commit their work and **enqueue** a branch. They never push deploy refs t
 # See the whole workflow in a disposable local sandbox (~1 minute)
 uvx mergetrain demo
 
-# Install the public alpha (zero runtime dependencies)
+# Install the public alpha
 uv tool install mergetrain     # or: pipx install mergetrain
 brew install yongjip/tap/mergetrain   # macOS, no Python needed
 # No install at all? Try it first: uvx mergetrain --help
@@ -292,7 +292,7 @@ provider. mergetrain assumes a laptop, worktrees, and `git push`.
 |---|---|---|---|
 | Forge-native queues | [GitHub Merge Queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), [GitLab Merge Trains](https://docs.gitlab.com/ci/pipelines/merge_trains/) | PRs + the forge's CI; for private repos, Enterprise Cloud (GitHub) or Premium (GitLab) as of mid-2026 | No forge app, no plan gate — any Git remote |
 | Merge-queue SaaS | [Mergify](https://mergify.com), [Aviator](https://www.aviator.co/merge-queue), [Trunk](https://trunk.io/merge-queue), [Graphite](https://graphite.com) | A GitHub App + webhooks + your CI provider + per-seat pricing | Queue state never leaves your machine |
-| Self-hosted bots | bors lineage, [Zuul](https://zuul-ci.org/), Marge-bot | A server you operate + forge webhooks + CI | One `pip install`, zero runtime dependencies, no server |
+| Self-hosted bots | bors lineage, [Zuul](https://zuul-ci.org/), Marge-bot | A server you operate + forge webhooks + CI | One `pip install`, no server or hosted service |
 | Local agent queues | [claude-code-merge-queue](https://github.com/funador/claude-code-merge-queue) | Also local-first: lands queued branches one at a time (rebase → check → push), built around Claude Code's worktree hooks | Batched **validated trains** with an exact approved identity, SQLite-durable state, remote-reconciled crash recovery, and harness-agnostic operation (Codex, Claude, anything that can run a CLI) |
 
 If your team is PR-first on a hosted forge with remote CI, use the native

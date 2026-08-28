@@ -19,7 +19,7 @@ mergetrain/
       daemon.py        # single-repository auto-only daemon command
       recovery.py      # reconcile, recover, unlock, verify, cleanup
       hub.py           # dashboard and multi-repository hub commands
-    config.py          # .mergetrain.yaml loading (+ built-in YAML subset parser)
+    config.py          # safe YAML loading + typed policy validation
     daemon.py          # auto-only daemon loop
     evidence.py        # evidence-backed outcome, validation, and batching metrics
     errors.py          # MergetrainError hierarchy
@@ -56,7 +56,9 @@ mergetrain/
   llms.txt  llms-full.txt
 ```
 
-mergetrain uses a `src/` layout and has **zero required runtime dependencies**. PyYAML is optional; when it is absent, `config.py` falls back to a small YAML-subset parser that understands the generated config shape.
+mergetrain uses a `src/` layout and requires PyYAML for safe, consistent
+`.mergetrain.yaml` parsing on every supported platform. The parser output is
+then validated into typed runtime policy by `config.py`.
 
 `cli.py` owns only parsing, handler selection, and the top-level error envelope.
 Command modules own presentation and command orchestration for one domain; they
@@ -115,7 +117,8 @@ The suite covers the behaviors that make the queue safe:
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
 - **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, resumable JSONL events, inspect/log follow termination, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
 - **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.
-- **config** — built-in YAML parsing, fail-closed deploy refs, positive queue timing, unique gate names, defaults, and path resolution.
+- **config** — safe YAML loading, ambiguous-scalar rejection, fail-closed deploy
+  refs, positive queue timing, unique gate names, defaults, and path resolution.
 
 When adding behavior, add or extend the matching `tests/test_*.py` module.
 

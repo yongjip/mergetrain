@@ -31,10 +31,9 @@ def _shell_argument(value: str) -> str:
     """Quote one argument for the shell that will run gates and verify hooks.
 
     Gate commands run through a POSIX ``sh`` on every platform (see
-    ``command_runner._posix_shell``), so one dialect is enough. Double quotes are
-    used rather than ``shlex.quote``'s single quotes to keep the rendered
-    command free of single quotes, which is what lets it stay representable as
-    a YAML single-quoted scalar (see ``_yaml_scalar``).
+    ``command_runner._posix_shell``), so one dialect is enough. Double quotes
+    keep executable paths with spaces intact while preserving the command as
+    one readable YAML scalar.
     """
 
     if os.name == "nt":
@@ -63,21 +62,13 @@ def _write_repo_file(path: Path, content: str) -> None:
 
 
 def _yaml_scalar(value: str) -> str:
-    """Render a command as a scalar PyYAML and the built-in parser read alike.
+    """Render a command as a YAML single-quoted scalar.
 
-    The dependency-free fallback parser strips the outer quotes without undoing
-    YAML escapes, so any scalar that needs escaping would be read differently
-    depending on whether PyYAML happens to be installed. A single-quoted scalar
-    with no embedded single quote is the one form both parsers agree on, so
-    refuse rather than write a config whose meaning depends on the environment.
+    YAML escapes an embedded single quote by doubling it. PyYAML decodes that
+    form consistently on every supported platform.
     """
 
-    if "'" in value:
-        raise DemoFailure(
-            "the demo cannot generate a gate for a path containing a single "
-            f"quote: {value}"
-        )
-    return f"'{value}'"
+    return "'" + value.replace("'", "''") + "'"
 
 
 @dataclass(slots=True)

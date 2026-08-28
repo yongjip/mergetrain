@@ -237,13 +237,13 @@ class DemoTests(unittest.TestCase):
 
 
 class DemoConfigTests(unittest.TestCase):
-    """The generated config carries paths into two parsers and one shell.
+    """The generated config carries paths through YAML and one shell.
 
     A quoted path used to be pasted into the YAML template raw, which produced
     an invalid document for PyYAML (`config_error`, so `doctor` failed at step
-    two) and POSIX-only quoting for the built-in parser. Every path that needs
-    quoting -- any Windows path, and any path with a space on any platform --
-    hit this, so these cases stay covered off the slow full-demo path.
+    two). Every path that needs quoting -- any Windows path, and any path with a
+    space on any platform -- hit this, so these cases stay covered off the slow
+    full-demo path.
     """
 
     def _walkthrough(self, dirname: str, *, make_repo: bool = True) -> DemoWalkthrough:
@@ -284,12 +284,16 @@ class DemoConfigTests(unittest.TestCase):
             f'"{executable}" -m unittest discover -s tests',
         )
 
-    def test_path_with_a_single_quote_is_refused_not_misparsed(self) -> None:
+    def test_path_with_a_single_quote_round_trips_through_yaml(self) -> None:
         walkthrough = self._walkthrough("quote")
         with patch.object(sys, "executable", "/opt/o'brien/python3"):
-            with self.assertRaises(DemoFailure) as raised:
-                walkthrough._write_demo_config()
-        self.assertIn("single quote", str(raised.exception))
+            walkthrough._write_demo_config()
+
+        config = load_config(repo=walkthrough.repo)
+        self.assertEqual(
+            config.gates[0].run,
+            '"/opt/o\'brien/python3" -m unittest discover -s tests',
+        )
 
     @unittest.skipUnless(shutil.which("git"), "git is required")
     def test_seeded_repository_commits_lf_line_endings(self) -> None:
