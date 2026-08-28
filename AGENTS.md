@@ -25,6 +25,7 @@ python scripts/check_critical_coverage.py .coverage.json
 PYTHONPATH=src python -m unittest discover -s tests
 PYTHONPATH=src python -m mergetrain agent-contract --json
 PYTHONPATH=src python -m mergetrain init --project demo
+python scripts/check_architecture.py
 ```
 
 Pytest is configured to import the current `src/` checkout without an external
@@ -33,6 +34,10 @@ localhost sockets or process inspection, do not repeat it in the same sandbox:
 rerun it once outside the sandbox. Invoke mergetrain with the intended
 virtualenv's Python; gate commands automatically prioritize sibling tools from
 that environment.
+
+When changing production imports, keep the one-way boundaries documented in
+`docs/design.md`; `scripts/check_architecture.py` is a blocking CI check. Do not
+silence it with broad exceptions—document and encode any legitimate new edge.
 
 ## GitHub CLI authentication
 

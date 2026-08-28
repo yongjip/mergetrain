@@ -53,6 +53,28 @@ command modules also do not call each other. This keeps command names, flags,
 exit codes, and contract-1 JSON shapes stable while making each execution path
 have one obvious implementation home.
 
+### Enforced dependency guardrails
+
+`python scripts/check_architecture.py` parses production imports and is a
+blocking CI check. It enforces the dependency direction described above:
+
+- core modules do not import `cli.py`, `cli_support.py`, or `commands/`;
+- command modules do not import one another;
+- `persistence/` depends only on persistence primitives, models, and errors,
+  while `store.py` remains a compatibility façade over that package;
+- Git/process/gate/worktree collaborators do not import the `GitRunner`
+  coordinator;
+- MCP stays independent of core implementation modules, and dashboard/Hub
+  backends use only their documented read-model and contract dependencies;
+- production modules have no internal import cycles.
+
+The same check has deliberately coarse monolith backstops: Python production
+modules fail only beyond 2,500 lines or 100 KB, and dashboard source files fail
+beyond 1,200 lines or 50 KB. These are boundary-loss alarms, not style targets;
+smaller responsibility-specific budgets can be ratcheted separately. If a new
+legitimate dependency is needed, update this document and the explicit rule in
+the same reviewed change rather than bypassing the check.
+
 ## Concepts
 
 **Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, separate `push_status` and `verify_status` outcomes, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
