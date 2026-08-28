@@ -142,26 +142,26 @@ When adding behavior, add or extend the matching `tests/test_*.py` module.
 
 Coverage is a regression guard, not a target to inflate with trivial tests.
 The blocking pytest command enforces the measured cross-platform baseline of
-87% overall coverage through `pyproject.toml`. It also writes `.coverage.json`
+88% overall coverage through `pyproject.toml`. It also writes `.coverage.json`
 and runs `scripts/check_critical_coverage.py`, which applies higher floors to
 correctness-critical modules:
 
 | Module | Minimum |
 | --- | ---: |
-| `atomic_push.py` | 90% |
+| `atomic_push.py` | 94% |
 | `command_runner.py` | 85% |
 | `gate_runner.py` | 94% |
 | `git_ops.py` | 85% |
-| `git_runner.py` | 88% |
+| `git_runner.py` | 91% |
 | `persistence/claims.py` | 90% |
 | `persistence/connection.py` | 87% |
 | `persistence/events.py` | 94% |
-| `persistence/jobs.py` | 88% |
+| `persistence/jobs.py` | 90% |
 | `persistence/leases.py` | 82% |
 | `persistence/recovery.py` | 86% |
 | `persistence/schema.py` | 95% |
 | `persistence/transactions.py` | 90% |
-| `recovery.py` | 91% |
+| `recovery.py` | 93% |
 | `reuse.py` | 94% |
 | `validation_reuse.py` | 83% |
 | `worktree_manager.py` | 91% |
@@ -169,8 +169,9 @@ correctness-critical modules:
 The original floors were chosen from the same successful Linux, macOS, and
 Windows CI matrix. The collaborator floors preserve the exercised behavior
 after the GitRunner and persistence responsibility splits, with conservative
-headroom for platform-specific branches; the blocking matrix confirms them
-before merge.
+headroom for platform-specific branches. The state-transition tests below
+support the raised atomic-push, train-orchestration, job-store, recovery, and
+overall floors; the blocking matrix confirms them before merge.
 Raise them when durable state-transition coverage improves. Lower them only
 with a documented explanation of which behavior moved or became unreachable.
 A missing critical module in coverage JSON fails closed rather than silently
@@ -185,18 +186,21 @@ keeps the stricter boundary focused on lease fencing, process control,
 worktrees, recovery, validation identity/reuse, and atomic push state rather
 than forcing a repository-wide annotation rewrite.
 
-The current baseline still leaves several high-value state transitions without
-direct execution evidence. Prefer these over tests that merely increase the
-percentage:
+The correctness ratchet directly executes the high-value state transitions
+that were previously recorded as evidence gaps. These checks live in
+`tests/test_critical_transitions.py` and cover:
 
-- successful automatic clearing and audit of a dead-owner lock, including the
-  race where that lock is replaced during the check;
-- cancellation or failure of the deploy audit-ref preflight before the durable
-  pending-push marker exists;
+- successful automatic clearing and audit of a dead-owner lock, plus the race
+  where a replacement lock appears during the remote check;
+- cancellation and failure of the deploy audit-ref preflight before the
+  durable pending-push marker exists;
 - validated-train reassembly that encounters a merge conflict or unexpectedly
   leaves the integration worktree dirty; and
 - the row-count race where an active train changes while cancellation is being
-  recorded.
+  recorded, including rollback of every partial mutation.
+
+Prefer similarly stateful boundary tests over tests that merely increase the
+percentage.
 
 ### The fault matrix
 
@@ -211,9 +215,8 @@ the truth about what shipped, against real git and a real bare remote:
 | `test_fault_lock_steal.py` | `unlock --force` stealing the lease between a landed push and its `deployed` write |
 | `test_fault_db_contention.py` | a SQLite writer held past `busy_timeout` across the pre-push and post-push status writes |
 
-Two of these tests are `@unittest.expectedFailure`, each with a comment naming an
-open defect and the file:line that causes it. That is deliberate: a recorded
-defect that keeps the suite green is better than a deleted case.
+Every fault-matrix test is now a normal passing expectation; there are no
+`@unittest.expectedFailure` markers hiding a known incorrect state transition.
 
 Run the suite in parallel — every case builds its own repo and bare remote, so the
 work is I/O-bound on git and parallelism is nearly free:
