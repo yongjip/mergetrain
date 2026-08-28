@@ -34,7 +34,7 @@ mergetrain/
     dashboard.py       # stdlib read-only HTTP/SSE server
     snapshot.py        # privacy-conscious dashboard read model
     dashboard_dist/    # packaged production dashboard assets
-    models.py          # Job, RunnerLock, and RunEvent dataclasses
+    models.py          # queue, lock, runner-event, and recovery-event dataclasses
     path_gates.py      # POSIX glob matching and NUL-safe Git diff parsing
     store.py           # stable compatibility façade for persistence APIs
     persistence/
@@ -45,6 +45,7 @@ mergetrain/
       leases.py        # liveness, token-fenced locks, orphan recovery
       claims.py        # atomic job+lease+event claim transactions
       events.py        # append-only event storage and scoped reads
+      operations.py    # append-only reconcile/recover invocation evidence
       recovery.py      # durable push markers and reconcile guards
   dashboard/           # React/Vite dashboard source
   docs/                # this documentation set
@@ -158,6 +159,7 @@ correctness-critical modules:
 | `persistence/events.py` | 94% |
 | `persistence/jobs.py` | 90% |
 | `persistence/leases.py` | 82% |
+| `persistence/operations.py` | 94% |
 | `persistence/recovery.py` | 86% |
 | `persistence/schema.py` | 95% |
 | `persistence/transactions.py` | 90% |

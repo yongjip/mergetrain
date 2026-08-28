@@ -21,6 +21,7 @@ CRITICAL_MINIMUMS = {
     "src/mergetrain/persistence/events.py": 94.0,
     "src/mergetrain/persistence/jobs.py": 90.0,
     "src/mergetrain/persistence/leases.py": 82.0,
+    "src/mergetrain/persistence/operations.py": 94.0,
     "src/mergetrain/persistence/recovery.py": 86.0,
     "src/mergetrain/persistence/schema.py": 95.0,
     "src/mergetrain/persistence/transactions.py": 90.0,

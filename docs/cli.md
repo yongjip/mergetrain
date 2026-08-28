@@ -280,12 +280,21 @@ The additive product-evidence blocks are:
   completed multi-job runs only, each timed successful gate is multiplied by
   `claimed_jobs - 1`. It does not count failed, partial, reused, skipped, or
   untimed gates, and it is not a wall-clock benchmark.
+- `recovery`: append-only `reconcile`/`recover` invocation counts for the
+  selected window, split by operation, apply mode, and terminal state. A
+  started invocation with no terminal event is counted as `incomplete` rather
+  than silently discarded. `tracking_started_at` is the durable schema-v11
+  baseline. `history_complete` is true for a database created with schema 11;
+  for an upgraded database it becomes true when `--since` is at or after that
+  baseline.
 - `evidence_gaps`: metrics that cannot be reconstructed truthfully from current
-  durable records. In particular, historical `recover`/`reconcile` invocation
-  frequency is not inferred from mutable job notes.
+  durable records. Pre-baseline `recover`/`reconcile` frequency remains unknown
+  and is never inferred from mutable job notes. Use `--since` at or after
+  `recovery.tracking_started_at` for a complete operation-frequency window.
 
-Each outcome/validation/batching block names its `source` as either unbounded
-`queue_history` or bounded `retained_run_events`.
+Each outcome/validation/batching/recovery block names its source. Queue history
+is unbounded, runner events retain the newest 5,000 rows, and recovery operation
+events are unbounded from their explicit tracking baseline.
 
 `latency` attributes queue wait, approval wait, validation/deploy runner
 duration, and fetch/assembly/gate/push/verify phases. Its `coverage` reports

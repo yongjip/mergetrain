@@ -21,6 +21,7 @@ from .store import (
     get_lock,
     list_history_events,
     list_history_jobs,
+    list_recovery_operation_events,
     list_run_events,
     list_train_jobs,
     utc_now,
@@ -515,12 +516,19 @@ def stats_payload(
     try:
         jobs = list_history_jobs(conn, since=since)
         events = list_history_events(conn, since=since)
+        recovery_events = list_recovery_operation_events(conn, since=since)
     finally:
         conn.close()
     items = _group_history(jobs, events)
     tagged_gate_runs = _gate_runs_with_tokens(events)
     gate_runs = [run for _, run in tagged_gate_runs]
-    evidence = product_evidence(jobs, events, gate_runs=tagged_gate_runs)
+    evidence = product_evidence(
+        jobs,
+        events,
+        gate_runs=tagged_gate_runs,
+        recovery_events=recovery_events,
+        since=since,
+    )
     landed = sum(item["status"] == "deployed" for item in items)
     blocked = sum(item["status"] == "blocked" for item in items)
     failed = sum(item["status"] == "failed" for item in items)
@@ -587,12 +595,14 @@ def stats_payload(
         "outcomes": evidence["outcomes"],
         "validation": evidence["validation"],
         "batching": evidence["batching"],
+        "recovery": evidence["recovery"],
         "evidence_gaps": evidence["evidence_gaps"],
         "recommendations": _stats_recommendations(config, per_gate, latency),
         "coverage": {
             "queue_history": "unbounded",
             "gate_events": f"latest_{RUN_EVENT_RETENTION}",
             "phase_events": f"latest_{RUN_EVENT_RETENTION}",
+            "recovery_operations": "unbounded_from_tracking_start",
         },
     }
 

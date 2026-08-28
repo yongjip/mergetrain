@@ -188,9 +188,34 @@ CREATE TABLE IF NOT EXISTS run_events (
 );
 ```
 
+### `recovery_operation_events`
+
+```sql
+CREATE TABLE IF NOT EXISTS recovery_operation_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  invocation_id TEXT NOT NULL DEFAULT '',
+  operation     TEXT NOT NULL,
+  state         TEXT NOT NULL,
+  applied       INTEGER NOT NULL DEFAULT 0,
+  detail        TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL
+);
+```
+
+Schema version 11 inserts one `tracking` baseline and then records a `started`
+event before each CLI `reconcile` or `recover` invocation. A separate terminal
+event records success, conflict, expected refusal, or error. If the process
+dies between them, the invocation remains visibly incomplete. This sparse
+local ledger is unbounded; it contains only command kind, apply mode, aggregate
+result detail, and timestamps—never task text, branches, paths, credentials, or
+telemetry. The baseline also distinguishes a new database, whose all-history
+window is complete, from an upgraded database with an honestly unknown
+pre-baseline interval.
+
 Lease tokens remain internal. `RunEvent.to_dict()` removes `claim_token`, as do
-the public job and lock models. The browser payload also omits local worktree
-and log paths and reduces the owner identity to `local:<pid>`.
+the public job and lock models. `RecoveryOperationEvent.to_dict()` likewise
+removes its internal correlation ID. The browser payload also omits local
+worktree and log paths and reduces the owner identity to `local:<pid>`.
 
 ### Connection policy
 
@@ -211,6 +236,7 @@ is no ORM or generic repository layer:
 | `leases.py` | process liveness, token-fenced runner locks, and marker-aware orphan splitting |
 | `claims.py` | cross-boundary atomic claims that acquire a lease, select jobs, and record the claim event in one transaction |
 | `events.py` | append-only run events, retention, resume, and job/train scoping |
+| `operations.py` | append-only recovery-command starts/terminals and windowed reads |
 | `recovery.py` | fsync-backed pending-push markers and deploy-reconcile guards |
 
 Dependencies flow from the small transaction/schema primitives toward jobs,

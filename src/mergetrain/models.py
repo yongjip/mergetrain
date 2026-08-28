@@ -170,3 +170,33 @@ class RunEvent:
         data = asdict(self)
         data.pop("claim_token", None)
         return data
+
+
+@dataclass(slots=True)
+class RecoveryOperationEvent:
+    """One append-only event in a recovery-command invocation ledger."""
+
+    id: int
+    invocation_id: str
+    operation: str
+    state: str
+    applied: bool
+    detail: str
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: Any) -> RecoveryOperationEvent:
+        return cls(
+            id=int(row["id"]),
+            invocation_id=str(row["invocation_id"] or ""),
+            operation=str(row["operation"]),
+            state=str(row["state"]),
+            applied=bool(row["applied"]),
+            detail=str(row["detail"] or ""),
+            created_at=str(row["created_at"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data.pop("invocation_id", None)
+        return data

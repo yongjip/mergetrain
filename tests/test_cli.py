@@ -70,6 +70,12 @@ class CliTests(unittest.TestCase):
             )
             conn = connect(db)
             try:
+                conn.execute(
+                    "UPDATE recovery_operation_events "
+                    "SET detail='schema_version=11;history_complete=0' "
+                    "WHERE operation='tracking'"
+                )
+                conn.commit()
                 enqueue_job(conn, task="a", branch="agent/a")
                 # Claim it rather than marking it terminal directly: started_at
                 # is written by the claim, and without it the train has no
@@ -119,7 +125,11 @@ class CliTests(unittest.TestCase):
             self.assertIn("validated trains:", text)
             self.assertIn("batching:", text)
             self.assertIn("batch savings estimate:", text)
-            self.assertIn("evidence gap recovery_reconcile_frequency:", text)
+            self.assertIn("recovery operations:", text)
+            self.assertIn(
+                "evidence gap recovery_reconcile_frequency_before_tracking_start:",
+                text,
+            )
             self.assertIn("duration:", text)
             self.assertIn("average queue=", text)
             # A KeyError-driven regression would print the literal repr of a

@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
-from mergetrain.errors import CommandFailed
+from mergetrain.errors import CommandFailed, QueueError
 from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
 from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
@@ -41,6 +41,7 @@ from mergetrain.store import (
     force_clear_lock_and_split,
     get_job,
     get_lock,
+    list_recovery_operation_events,
     mark_job,
     record_pending_push,
     release_runner_lock,
@@ -915,6 +916,17 @@ class CommandExitCodeTests(unittest.TestCase):
             code, payload = self._run(repo, "reconcile", "--json")
             self.assertEqual(code, 0)
             self.assertTrue(payload["ok"])
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                events = list_recovery_operation_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(
+                [(event.operation, event.state) for event in events[1:]],
+                [("reconcile", "started"), ("reconcile", "success")],
+            )
+            self.assertFalse(events[1].applied)
 
     def test_reconcile_live_lock_exits_three(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -929,6 +941,12 @@ class CommandExitCodeTests(unittest.TestCase):
             code, payload = self._run(repo, "reconcile", "--json")
             self.assertEqual(code, 3)
             self.assertTrue(payload["error"]["retryable"])
+            conn = connect(config.state.db)
+            try:
+                events = list_recovery_operation_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(events[-1].state, "lock_held")
 
     def test_reconcile_remote_unreachable_exits_seven(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -945,6 +963,73 @@ class CommandExitCodeTests(unittest.TestCase):
             code, payload = self._run(repo, "reconcile", "--apply", "--json")
             self.assertEqual(code, 7)
             self.assertEqual(payload["error"]["code"], "remote_unreachable")
+            conn = connect(config.state.db)
+            try:
+                events = list_recovery_operation_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(events[-1].state, "remote_unreachable")
+            self.assertTrue(events[-1].applied)
+
+    def test_recover_records_one_command_without_double_counting_reconcile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            code, payload = self._run(repo, "recover", "--json")
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                events = list_recovery_operation_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(
+                [(event.operation, event.state) for event in events[1:]],
+                [("recover", "started"), ("recover", "success")],
+            )
+
+    def test_unexpected_reconcile_error_is_durably_classified(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            with patch(
+                "mergetrain.commands.recovery.reconcile",
+                side_effect=CommandFailed(["git", "fetch"], 1),
+            ):
+                code, payload = self._run(repo, "reconcile", "--json")
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "command_failed")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                events = list_recovery_operation_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(events[-1].state, "error")
+            self.assertEqual(
+                json.loads(events[-1].detail),
+                {"error_type": "CommandFailed"},
+            )
+
+    def test_terminal_evidence_failure_does_not_replace_reconcile_result(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            with patch(
+                "mergetrain.commands.recovery.finish_recovery_operation",
+                side_effect=QueueError("ledger tail unavailable"),
+            ):
+                code, payload = self._run(repo, "reconcile", "--json")
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                events = list_recovery_operation_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(events[-1].state, "started")
 
     def test_unlock_no_lock_exits_five(self) -> None:
         with tempfile.TemporaryDirectory() as td:

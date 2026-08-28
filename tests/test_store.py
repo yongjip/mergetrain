@@ -33,8 +33,10 @@ from mergetrain.store import (
     deploy_reconcile_pending,
     dismiss_job,
     enqueue_job,
+    finish_recovery_operation,
     get_job,
     get_lock,
+    list_recovery_operation_events,
     list_run_events,
     list_train_jobs,
     live_worktree_path,
@@ -45,6 +47,7 @@ from mergetrain.store import (
     refresh_runner_lock,
     release_runner_lock,
     retry_job,
+    start_recovery_operation,
     supersede_validated_train,
     terminal_branch_candidates,
     unpack_push_refs,
@@ -628,6 +631,31 @@ class StoreTests(unittest.TestCase):
                 row[1] for row in migrated_db.execute("PRAGMA table_info(run_events)")
             }
             self.assertIn("phase", event_columns)
+            recovery_columns = {
+                row[1]
+                for row in migrated_db.execute(
+                    "PRAGMA table_info(recovery_operation_events)"
+                )
+            }
+            self.assertEqual(
+                recovery_columns,
+                {
+                    "id",
+                    "invocation_id",
+                    "operation",
+                    "state",
+                    "applied",
+                    "detail",
+                    "created_at",
+                },
+            )
+            baseline = migrated_db.execute(
+                "SELECT operation, state, detail FROM recovery_operation_events"
+            ).fetchall()
+            self.assertEqual(
+                baseline,
+                [("tracking", "started", "schema_version=11;history_complete=0")],
+            )
             self.assertIn("heartbeat_at", {
                 row[1] for row in migrated_db.execute("PRAGMA table_info(locks)")
             })
@@ -746,6 +774,61 @@ class StoreTests(unittest.TestCase):
         self.assertIn("Validation runner", events[-1].message)
         self.assertEqual(events[-1].claim_token, claimed[0].claim_token)
         self.assertNotIn("claim_token", events[-1].to_dict())
+
+    def test_recovery_operation_ledger_is_append_only_and_crash_visible(self) -> None:
+        conn = self.make_conn()
+        reconcile_event = start_recovery_operation(
+            conn,
+            operation="reconcile",
+            applied=False,
+        )
+        terminal = finish_recovery_operation(
+            conn,
+            reconcile_event.invocation_id,
+            state="success",
+            detail='{"summary": {}}',
+        )
+        incomplete = start_recovery_operation(
+            conn,
+            operation="recover",
+            applied=True,
+        )
+
+        events = list_recovery_operation_events(conn)
+        self.assertEqual(events[0].operation, "tracking")
+        self.assertEqual(
+            events[0].detail,
+            "schema_version=11;history_complete=1",
+        )
+        self.assertEqual(
+            [(event.operation, event.state) for event in events[1:]],
+            [
+                ("reconcile", "started"),
+                ("reconcile", "success"),
+                ("recover", "started"),
+            ],
+        )
+        self.assertEqual(terminal.invocation_id, reconcile_event.invocation_id)
+        self.assertNotEqual(incomplete.invocation_id, reconcile_event.invocation_id)
+        self.assertFalse(reconcile_event.applied)
+        self.assertTrue(incomplete.applied)
+        self.assertNotIn("invocation_id", terminal.to_dict())
+        with self.assertRaisesRegex(QueueError, "already finished"):
+            finish_recovery_operation(
+                conn,
+                reconcile_event.invocation_id,
+                state="conflict",
+            )
+        with self.assertRaisesRegex(QueueError, "invalid recovery operation"):
+            finish_recovery_operation(
+                conn,
+                incomplete.invocation_id,
+                state="started",
+            )
+        with self.assertRaisesRegex(QueueError, "is not started"):
+            finish_recovery_operation(conn, "missing", state="error")
+        with self.assertRaisesRegex(QueueError, "unsupported recovery operation"):
+            start_recovery_operation(conn, operation="unlock", applied=True)
 
     def test_deploy_claim_records_machine_mode_with_custom_terminology(
         self,

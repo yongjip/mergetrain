@@ -1078,7 +1078,8 @@
       "coverage": {
         "gate_events": null,
         "phase_events": null,
-        "queue_history": null
+        "queue_history": null,
+        "recovery_operations": null
       },
       "evidence_gaps": {
         "[]": {
@@ -1188,6 +1189,29 @@
       },
       "p95_duration_seconds": null,
       "recommendations": "[]?",
+      "recovery": {
+        "apply_mode_counts": {
+          "apply": null,
+          "dry_run": null
+        },
+        "history_complete": null,
+        "observed_invocations": null,
+        "operation_counts": {
+          "reconcile": null,
+          "recover": null
+        },
+        "source": null,
+        "state_counts": {
+          "conflict": null,
+          "error": null,
+          "incomplete": null,
+          "lock_held": null,
+          "remote_unreachable": null,
+          "success": null
+        },
+        "terminal_invocations": null,
+        "tracking_started_at": null
+      },
       "since": null,
       "trains": {
         "blocked": null,

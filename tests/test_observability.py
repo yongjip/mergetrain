@@ -18,7 +18,13 @@ from mergetrain.observability import (
     stream_terminal,
     train_outcome,
 )
-from mergetrain.store import connect, enqueue_job
+from mergetrain.store import (
+    connect,
+    enqueue_job,
+    finish_recovery_operation,
+    list_recovery_operation_events,
+    start_recovery_operation,
+)
 
 
 def job(**kwargs) -> Job:
@@ -271,6 +277,12 @@ class HistoryStatsTests(unittest.TestCase):
             config = load_config(repo=root, db_override=root / "queue.sqlite")
             conn = connect(config.state.db)
             try:
+                conn.execute(
+                    "UPDATE recovery_operation_events "
+                    "SET detail='schema_version=11;history_complete=0' "
+                    "WHERE operation='tracking'"
+                )
+                conn.commit()
                 landed_first = enqueue_job(conn, task="land-a", branch="agent/a")
                 landed_second = enqueue_job(conn, task="land-b", branch="agent/b")
                 superseded = enqueue_job(
@@ -509,12 +521,92 @@ class HistoryStatsTests(unittest.TestCase):
             self.assertEqual(savings["estimated_gate_seconds_avoided"], 30.0)
             self.assertEqual(
                 stats["evidence_gaps"][0]["metric"],
-                "recovery_reconcile_frequency",
+                "recovery_reconcile_frequency_before_tracking_start",
             )
 
             empty = stats_payload(config, since="2026-07-23T00:00:00Z")
             self.assertIsNone(empty["validation"]["runs"]["failure_rate"])
             self.assertEqual(empty["batching"]["jobs_per_run"]["samples"], 0)
+
+    def test_stats_counts_recovery_operations_from_an_explicit_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = load_config(repo=root, db_override=root / "queue.sqlite")
+            conn = connect(config.state.db)
+            try:
+                conn.execute(
+                    "UPDATE recovery_operation_events "
+                    "SET detail='schema_version=11;history_complete=0' "
+                    "WHERE operation='tracking'"
+                )
+                conn.commit()
+                reconcile_event = start_recovery_operation(
+                    conn,
+                    operation="reconcile",
+                    applied=False,
+                )
+                finish_recovery_operation(
+                    conn,
+                    reconcile_event.invocation_id,
+                    state="success",
+                )
+                recover_event = start_recovery_operation(
+                    conn,
+                    operation="recover",
+                    applied=True,
+                )
+                finish_recovery_operation(
+                    conn,
+                    recover_event.invocation_id,
+                    state="remote_unreachable",
+                )
+                start_recovery_operation(
+                    conn,
+                    operation="reconcile",
+                    applied=True,
+                )
+                baseline = list_recovery_operation_events(conn)[0].created_at
+            finally:
+                conn.close()
+
+            partial = stats_payload(config)
+            recovery = partial["recovery"]
+            self.assertFalse(recovery["history_complete"])
+            self.assertEqual(recovery["tracking_started_at"], baseline)
+            self.assertEqual(recovery["observed_invocations"], 3)
+            self.assertEqual(recovery["terminal_invocations"], 2)
+            self.assertEqual(
+                recovery["operation_counts"],
+                {"reconcile": 2, "recover": 1},
+            )
+            self.assertEqual(recovery["state_counts"]["success"], 1)
+            self.assertEqual(recovery["state_counts"]["remote_unreachable"], 1)
+            self.assertEqual(recovery["state_counts"]["incomplete"], 1)
+            self.assertEqual(
+                recovery["apply_mode_counts"],
+                {"apply": 2, "dry_run": 1},
+            )
+            self.assertEqual(
+                partial["evidence_gaps"][0]["metric"],
+                "recovery_reconcile_frequency_before_tracking_start",
+            )
+
+            complete = stats_payload(config, since=baseline)
+            self.assertTrue(complete["recovery"]["history_complete"])
+            self.assertEqual(complete["recovery"]["observed_invocations"], 3)
+            self.assertEqual(complete["evidence_gaps"], [])
+
+    def test_new_database_has_a_complete_all_history_recovery_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = load_config(repo=root, db_override=root / "queue.sqlite")
+            conn = connect(config.state.db)
+            conn.close()
+
+            stats = stats_payload(config)
+            self.assertTrue(stats["recovery"]["history_complete"])
+            self.assertEqual(stats["recovery"]["observed_invocations"], 0)
+            self.assertEqual(stats["evidence_gaps"], [])
 
     def test_stats_attributes_runner_phases_and_recommends_slow_gate(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -397,6 +397,16 @@ def cmd_stats(args: argparse.Namespace) -> int:
             f"gate executions={savings['estimated_gate_executions_avoided']} · "
             f"gate seconds={savings['estimated_gate_seconds_avoided']}"
         )
+        recovery = payload["recovery"]
+        operation_counts = recovery["operation_counts"]
+        print(
+            "recovery operations: "
+            f"observed={recovery['observed_invocations']} · "
+            f"reconcile={operation_counts['reconcile']} · "
+            f"recover={operation_counts['recover']} · "
+            f"incomplete={recovery['state_counts']['incomplete']} · "
+            f"tracking since={recovery['tracking_started_at']}"
+        )
         for gate in payload["gates"]:
             print(
                 f"gate {gate['name']}: runs={gate['runs']} "

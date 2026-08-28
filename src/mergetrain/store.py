@@ -54,6 +54,13 @@ from .persistence.leases import (
     refresh_runner_lock,
     release_runner_lock,
 )
+from .persistence.operations import (
+    RECOVERY_OPERATION_STATES,
+    RECOVERY_OPERATIONS,
+    finish_recovery_operation,
+    list_recovery_operation_events,
+    start_recovery_operation,
+)
 from .persistence.recovery import (
     clear_rejected_push,
     deploy_reconcile_pending,
@@ -69,6 +76,8 @@ __all__ = (
     "Liveness",
     "RUNNER_LOCK_NAME",
     "RUN_EVENT_RETENTION",
+    "RECOVERY_OPERATIONS",
+    "RECOVERY_OPERATION_STATES",
     "SCHEMA_VERSION",
     "SupersedeReplacement",
     "acquire_runner_lock",
@@ -86,6 +95,7 @@ __all__ = (
     "enqueue_job",
     "ensure_schema",
     "force_clear_lock_and_split",
+    "finish_recovery_operation",
     "get_job",
     "get_lock",
     "has_in_progress",
@@ -97,6 +107,7 @@ __all__ = (
     "list_jobs",
     "list_jobs_fifo",
     "list_run_events",
+    "list_recovery_operation_events",
     "list_train_jobs",
     "list_verify_unknown_jobs",
     "live_worktree_path",
@@ -111,6 +122,7 @@ __all__ = (
     "resolve_verify_status",
     "retry_job",
     "select_validated_train",
+    "start_recovery_operation",
     "supersede_validated_train",
     "terminal_branch_candidates",
     "unpack_push_refs",

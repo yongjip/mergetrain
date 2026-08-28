@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.4.0 - 2026-08-28
+
+- Persist a privacy-preserving append-only ledger for CLI `reconcile` and
+  `recover` invocations, expose operation/apply/outcome counts in `stats`, and
+  retain an explicit tracking baseline so pre-upgrade history is reported as
+  unknown instead of zero. SQLite schema version is now 11.
+
 ## 1.3.1 - 2026-08-28
 
 - Update the pinned PyPI publish action to v1.14.2 so Twine 7 accepts Core

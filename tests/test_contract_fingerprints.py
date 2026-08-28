@@ -167,6 +167,12 @@ def _cap_inspect(repo):
 
 def _seed_history(repo):
     conn = connect(_db(repo))
+    conn.execute(
+        "UPDATE recovery_operation_events "
+        "SET detail='schema_version=11;history_complete=0' "
+        "WHERE operation='tracking'"
+    )
+    conn.commit()
     job = enqueue_job(conn, task="a", branch="feature/a")
     conn.execute(
         "UPDATE deploy_queue SET status='deployed', train_id='train-1', train_size=1, "

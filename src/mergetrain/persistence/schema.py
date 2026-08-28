@@ -5,9 +5,9 @@ from __future__ import annotations
 import sqlite3
 
 from ..errors import QueueError
-from .transactions import immediate
+from .transactions import immediate, utc_now
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -32,6 +32,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             )
         if version == SCHEMA_VERSION:
             return
+
+        had_existing_history = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name IN ('deploy_queue', 'run_events')
+            LIMIT 1
+            """
+        ).fetchone() is not None
 
         conn.execute(
             """
@@ -166,6 +174,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     "TEXT NOT NULL DEFAULT ''",
                 ),
             ),
+            11: (),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:
@@ -207,4 +216,41 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     "CREATE INDEX IF NOT EXISTS deploy_queue_supersession_id_idx "
                     "ON deploy_queue(supersession_id, id)"
                 )
+            if next_version == 11:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recovery_operation_events (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      invocation_id TEXT NOT NULL DEFAULT '',
+                      operation TEXT NOT NULL,
+                      state TEXT NOT NULL,
+                      applied INTEGER NOT NULL DEFAULT 0,
+                      detail TEXT NOT NULL DEFAULT '',
+                      created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS recovery_operation_invocation_idx "
+                    "ON recovery_operation_events(invocation_id, id)"
+                )
+                baseline = conn.execute(
+                    """
+                    SELECT 1 FROM recovery_operation_events
+                    WHERE operation = 'tracking' LIMIT 1
+                    """
+                ).fetchone()
+                if baseline is None:
+                    detail = (
+                        "schema_version=11;history_complete="
+                        f"{int(not had_existing_history)}"
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO recovery_operation_events (
+                          invocation_id, operation, state, applied, detail, created_at
+                        ) VALUES ('', 'tracking', 'started', 0, ?, ?)
+                        """,
+                        (detail, utc_now()),
+                    )
             conn.execute(f"PRAGMA user_version = {next_version}")

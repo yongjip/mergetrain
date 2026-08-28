@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sqlite3
 import sys
 from typing import Any
 
@@ -23,11 +25,13 @@ from ..git_runner import GitRunner
 from ..recovery import force_unlock, reconcile, recover, sweep_pending_refs
 from ..store import (
     connect,
+    finish_recovery_operation,
     get_job,
     get_lock,
     list_verify_unknown_jobs,
     live_worktree_path,
     resolve_verify_status,
+    start_recovery_operation,
     terminal_branch_candidates,
 )
 
@@ -107,19 +111,73 @@ def _emit_recovery_error(
     return exit_code
 
 
+def _finish_recovery_evidence(
+    conn: sqlite3.Connection,
+    invocation_id: str,
+    *,
+    state: str,
+    detail: dict[str, Any],
+) -> None:
+    """Do not let an evidence-tail write replace the recovery command result."""
+
+    try:
+        finish_recovery_operation(
+            conn,
+            invocation_id,
+            state=state,
+            detail=json.dumps(detail, sort_keys=True),
+        )
+    except (QueueError, sqlite3.Error):
+        # The durable started event remains visible as incomplete. Recovery
+        # truth and exit semantics take precedence over analytical completeness.
+        pass
+
+
 def cmd_reconcile(args: argparse.Namespace) -> int:
     try:
         config = config_from_args(args)
     except ConfigError as exc:
         return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
     conn = connect(config.state.db)
+    operation = start_recovery_operation(
+        conn,
+        operation="reconcile",
+        applied=bool(args.apply),
+    )
     try:
         outcome = reconcile(config, conn, apply=args.apply)
         next_action = _recovery_next_action(conn, config)
     except LockHeld as exc:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="lock_held",
+            detail={"error_code": "lock_held"},
+        )
         return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
     except RemoteUnreachable as exc:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="remote_unreachable",
+            detail={"error_code": "remote_unreachable"},
+        )
         return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
+    except Exception as exc:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="error",
+            detail={"error_type": type(exc).__name__},
+        )
+        raise
+    else:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="conflict" if outcome.summary.get("conflicts") else "success",
+            detail={"summary": outcome.summary},
+        )
     finally:
         conn.close()
     payload = {
@@ -154,13 +212,57 @@ def cmd_recover(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
     conn = connect(config.state.db)
+    operation = start_recovery_operation(
+        conn,
+        operation="recover",
+        applied=True,
+    )
     try:
         outcome = recover(config, conn, gc=args.gc, apply=True)
         next_action = _recovery_next_action(conn, config)
     except LockHeld as exc:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="lock_held",
+            detail={"error_code": "lock_held", "gc_requested": bool(args.gc)},
+        )
         return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
     except RemoteUnreachable as exc:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="remote_unreachable",
+            detail={
+                "error_code": "remote_unreachable",
+                "gc_requested": bool(args.gc),
+            },
+        )
         return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
+    except Exception as exc:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state="error",
+            detail={
+                "error_type": type(exc).__name__,
+                "gc_requested": bool(args.gc),
+            },
+        )
+        raise
+    else:
+        _finish_recovery_evidence(
+            conn,
+            operation.invocation_id,
+            state=(
+                "conflict" if outcome.reconcile.summary.get("conflicts") else "success"
+            ),
+            detail={
+                "gc_applied": outcome.gc is not None,
+                "gc_requested": bool(args.gc),
+                "summary": outcome.reconcile.summary,
+            },
+        )
     finally:
         conn.close()
     reconciled = outcome.reconcile

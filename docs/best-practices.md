@@ -45,6 +45,7 @@ mergetrain stats --json
 | `trains.terminal_land_rate` | deployed trains over deployed + blocked + failed + canceled trains | compare with legacy `land_rate` to expose cancellation/supersession cost |
 | `batching.jobs_per_run` | claimed jobs per retained runner invocation | compare actual batches with the intended two-to-five-job starting heuristic |
 | `batching.estimated_savings` | conservative gate executions and seconds avoided by successful multi-job runs | weigh observed savings against validation failure and conflict rates |
+| `recovery.operation_counts` | operator `reconcile` and `recover` invocations since the selected evidence baseline | investigate repeated recovery before treating it as normal operating cost |
 
 Recommendations require at least three timed samples and include their evidence.
 Treat them as leads, not commands. Runner events retain the newest 5,000 rows,
@@ -59,10 +60,12 @@ This makes the estimate conservative and auditable, but it still cannot account
 for per-job cache effects or parallelism. Check it alongside validation failure
 and conflict rates, never by itself.
 
-`stats.evidence_gaps` is also operational evidence. For example, current queue
-history cannot truthfully reconstruct how often operators invoked `recover` or
-`reconcile`, so the command reports that gap instead of estimating from mutable
-job notes.
+`stats.evidence_gaps` is also operational evidence. Recovery-operation tracking
+starts at the durable `recovery.tracking_started_at` baseline. A database born
+on schema 11 has a complete all-history window. An upgraded database reports
+that earlier invocations are unknown; use `--since` at or after the baseline
+for a complete window. Mergetrain never backfills frequency from mutable job
+notes.
 
 `average_queue_seconds` remains available for compatibility, but it aggregates
 durable job history and can include long human pauses. Prefer the attributed

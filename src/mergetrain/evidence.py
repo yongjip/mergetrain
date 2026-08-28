@@ -15,7 +15,7 @@ from math import ceil
 from statistics import mean, median
 from typing import Any
 
-from .models import ALL_STATUSES, Job, RunEvent
+from .models import ALL_STATUSES, Job, RecoveryOperationEvent, RunEvent
 
 _CLAIMED_JOBS = re.compile(r"\bclaimed\s+(\d+)\s+job(?:\(s\)|s)?\b", re.IGNORECASE)
 _RUN_MODES = ("validate", "deploy")
@@ -51,6 +51,15 @@ _NOT_LANDED_REASONS = (
     "canceled",
     "unknown",
 )
+_RECOVERY_OPERATIONS = ("reconcile", "recover")
+_RECOVERY_OUTCOMES = (
+    "success",
+    "conflict",
+    "lock_held",
+    "remote_unreachable",
+    "error",
+    "incomplete",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +70,16 @@ class RunAttempt:
     mode: str
     outcome: str
     job_count: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryAttempt:
+    """One operator recovery invocation reconstructed from its append-only ledger."""
+
+    invocation_id: str
+    operation: str
+    applied: bool
+    outcome: str
 
 
 def history_groups(jobs: Sequence[Job]) -> dict[str, list[Job]]:
@@ -358,16 +377,109 @@ def _batching_summary(
     }
 
 
+def _recovery_operation_summary(
+    events: Sequence[RecoveryOperationEvent], *, since: str
+) -> dict[str, Any]:
+    baselines = [event for event in events if event.operation == "tracking"]
+    baseline = min(baselines, key=lambda event: event.created_at) if baselines else None
+    tracking_started_at = baseline.created_at if baseline is not None else None
+    baseline_covers_all_history = bool(
+        baseline is not None
+        and "history_complete=1" in baseline.detail.split(";")
+    )
+    grouped: dict[str, list[RecoveryOperationEvent]] = {}
+    for event in events:
+        if event.operation in _RECOVERY_OPERATIONS and event.invocation_id:
+            grouped.setdefault(event.invocation_id, []).append(event)
+
+    attempts: list[RecoveryAttempt] = []
+    for invocation_id, invocation_events in grouped.items():
+        ordered = sorted(invocation_events, key=lambda event: event.id)
+        started = next((event for event in ordered if event.state == "started"), None)
+        if started is None:
+            continue
+        terminal = next((event for event in ordered if event.state != "started"), None)
+        outcome = terminal.state if terminal is not None else "incomplete"
+        if outcome not in _RECOVERY_OUTCOMES:
+            outcome = "error"
+        attempts.append(
+            RecoveryAttempt(
+                invocation_id=invocation_id,
+                operation=started.operation,
+                applied=started.applied,
+                outcome=outcome,
+            )
+        )
+
+    operation_counts = Counter(attempt.operation for attempt in attempts)
+    state_counts = Counter(attempt.outcome for attempt in attempts)
+    apply_count = sum(attempt.applied for attempt in attempts)
+    history_complete = bool(
+        tracking_started_at is not None
+        and (
+            baseline_covers_all_history
+            or (since and since >= tracking_started_at)
+        )
+    )
+    return {
+        "source": "recovery_operation_events",
+        "tracking_started_at": tracking_started_at,
+        "history_complete": history_complete,
+        "observed_invocations": len(attempts),
+        "terminal_invocations": len(attempts) - state_counts["incomplete"],
+        "operation_counts": {
+            operation: operation_counts[operation]
+            for operation in _RECOVERY_OPERATIONS
+        },
+        "state_counts": {
+            outcome: state_counts[outcome] for outcome in _RECOVERY_OUTCOMES
+        },
+        "apply_mode_counts": {
+            "apply": apply_count,
+            "dry_run": len(attempts) - apply_count,
+        },
+    }
+
+
+def _recovery_evidence_gaps(recovery: dict[str, Any]) -> list[dict[str, str]]:
+    tracking_started_at = recovery["tracking_started_at"]
+    if tracking_started_at is None:
+        return [
+            {
+                "metric": "recovery_reconcile_frequency",
+                "reason": (
+                    "this database has no recovery-operation tracking baseline; "
+                    "run a writable mergetrain command with the current schema"
+                ),
+            }
+        ]
+    if not recovery["history_complete"]:
+        return [
+            {
+                "metric": "recovery_reconcile_frequency_before_tracking_start",
+                "reason": (
+                    "reconcile and recover invocations are durable from "
+                    f"{tracking_started_at}; earlier command history is unknown. "
+                    "Use --since at or after that timestamp for a complete window"
+                ),
+            }
+        ]
+    return []
+
+
 def product_evidence(
     jobs: Sequence[Job],
     events: Sequence[RunEvent],
     *,
     gate_runs: Sequence[tuple[str, dict[str, Any]]],
+    recovery_events: Sequence[RecoveryOperationEvent],
+    since: str,
 ) -> dict[str, Any]:
     """Build additive stats blocks from durable, privacy-preserving evidence."""
 
     attempts = run_attempts(events)
     train_additions, job_additions, outcomes = _outcome_summary(jobs)
+    recovery = _recovery_operation_summary(recovery_events, since=since)
     return {
         "train_additions": train_additions,
         "job_additions": job_additions,
@@ -377,14 +489,6 @@ def product_evidence(
             "trains": _validated_train_summary(jobs),
         },
         "batching": _batching_summary(attempts, gate_runs),
-        "evidence_gaps": [
-            {
-                "metric": "recovery_reconcile_frequency",
-                "reason": (
-                    "reconcile and recover command invocations are not yet stored "
-                    "as durable operation events; current job notes are not a "
-                    "complete frequency ledger"
-                ),
-            }
-        ],
+        "recovery": recovery,
+        "evidence_gaps": _recovery_evidence_gaps(recovery),
     }
