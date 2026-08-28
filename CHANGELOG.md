@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Restructure the README around the first-minute product decision: problem,
+  fit and non-fit, disposable demo, minimal first run, worktree/hosted-queue
+  comparisons, safety guarantees, operating evidence, and links to the full
+  technical documentation.
+
 - Replace the custom zero-dependency YAML subset parser with required PyYAML
   `safe_load`, preserving every existing `.mergetrain.yaml` and the stricter
   ambiguous-scalar policy while making full YAML syntax consistent across

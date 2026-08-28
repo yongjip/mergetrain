@@ -9,430 +9,206 @@
 
 **Parallel agents need a serial integration spine.**
 
-Let agents code in parallel. Let one train prove and ship the result.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/mergetrain-explainer.gif"
-       alt="What happens when 3 AI agents push to main at once. Without a queue they collide and break main. With a merge train they enqueue, one runner assembles main + A + B + C, gates run once on the combination, and one atomic push keeps main green."
-       width="720">
-</p>
-
-mergetrain is a local-first integration runtime for coding-agent worktrees.
-Worktrees give each agent an independent lane, but the repository still has one
-ordered history: without a coordinated landing boundary, parallel coding turns
-back into manual rebases, merge races, and repeated test runs. mergetrain keeps
-that missing integration spine on your machine. Coding agents commit and
-enqueue; one local runner serializes their branches, validates the exact train,
-and pushes only after explicit approval. No hosted merge-queue service or CI
-provider is required.
-
-![The mergetrain hub: every repo's queue, runner, and next safe action on one read-only board](https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/hub-overview.png)
-
-Four guarantees shape the design: an **exact validated train identity** (the
-train you approved is the train that ships, byte for byte), a **lease-fenced
-single runner** (two processes can never race a push), an **atomic multi-ref
-push**, and **crash-safe, exactly-once deploys** (after any crash, recovery
-reconciles the local queue against the *remote*, so a landed train is never
-re-pushed and a lost one is never mislabeled as shipped).
-
-> **Local-first, not local-only.** Queue state, locking, train assembly, and
-> gates stay local. Configured Git remotes and post-deploy verification may
-> still use external services.
-
-> Status: current release (`v1.2.0`). The machine contract is frozen —
-> additive-only within contract major 1 — and the real-repo soak gate is
-> complete. Built to scratch my own itch first — published in case it scratches
-> yours too.
-
----
+mergetrain is a local-first deploy train for coding-agent worktrees. Agents
+commit and enqueue their branches; one runner assembles them in order, tests the
+combined tree, and atomically updates your Git refs only after explicit approval.
 
 ## The problem
 
-One repo, three coding-agent sessions running at once — Codex, Claude, whatever
-— each in its own `git worktree` on its own branch: one adds a health check,
-one refactors config loading, one fixes a flaky test. All three finish within
-the same hour. Now what?
+Worktrees let several agents edit one repository without sharing a checkout.
+They do not decide landing order, test the combined result, prevent push races,
+or tell you what happened if a laptop dies mid-push.
 
-Without a queue, the ending is always one of these:
+Without an integration boundary, the human becomes that boundary: rebase every
+finished branch, rerun gates after each merge, resolve cross-branch failures,
+and decide which session may push. The parallel coding gain disappears at the
+last mile.
 
-- **You become the merge coordinator.** Deciding landing order, rebasing each
-  branch onto the last landing, rerunning the tests after every one — serially,
-  by hand. The time you saved by running three agents in parallel is spent
-  again integrating their results, and while you're integrating, you're not
-  reviewing or directing.
-- **Agents that push, race.** Two sessions push the same deploy branch within
-  seconds: non-fast-forward rejects, a retry with `--force` that quietly
-  clobbers the other session's landing, or an unreviewed merge combination
-  shipping because whoever pushed last "won".
-- **Green branches, red main.** Each branch passes its own tests, but two of
-  them touched the same config loader in incompatible ways. No per-branch
-  check can see that — only testing the *combined* result before it ships can.
-- **Judgment calls land on an LLM.** Stale lock or live runner? Duplicate
-  enqueue or a legitimate retry? Is unattended deploy actually approved for
-  this job? These are exactly the calls you don't want an agent guessing at
-  from fuzzy shell output.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/mergetrain-explainer.gif"
+       alt="Three coding agents enqueue branches. One runner assembles and tests their combined train before one atomic push."
+       width="720">
+</p>
 
-### What mergetrain does about each
+mergetrain makes that last mile a durable protocol:
 
-Each of those failure modes maps to a specific mechanism — this is the design,
-not a feature list:
-
-| Without a queue | With mergetrain |
-|---|---|
-| You order, rebase, and re-test every landing by hand | Agents **enqueue and stop**; one runner assembles the FIFO train in a throwaway worktree and lands it |
-| Sessions race `git push`; a retry with `--force` clobbers | Agents never touch deploy refs; a **lease-fenced single runner** pushes atomically, exactly once |
-| Green branches, red `main` | Gates run over the **exact combined train** before push; when a combination fails, the runner bisects it and names the conflicting pair (`conflict_with`) instead of shipping around the breakage |
-| Stale locks, duplicate enqueues, "may I deploy?" become LLM guesses | Every state is JSON with an explicit `next_action`; deploys require explicit intent (`--deploy`), and unattended runs touch only pre-approved `--auto` jobs |
-| The laptop dies mid-push | A write-ahead marker and pin ref let recovery ask the **remote** what landed — never re-pushed, never mislabeled |
-
-That mapping is also the honest origin story: mergetrain exists because I was
-running several coding-agent sessions on one repo and spending the hours they
-saved me re-serializing their branches by hand. The queue was built to get
-those hours back; the rest — validated train identity, crash recovery, the
-multi-repo hub — followed from operating it every day. The parallelism you
-paid for stays parallel.
-
-### When to reach for it
-
-- **Several agents, one project** — the core case, and the one it was built
-  for: parallel worktree sessions on a single repo, landing their results all
-  day without you serializing them by hand.
-- **Unattended batches** — pre-approved `--auto` jobs land via the daemon
-  while you're away; everything else waits for a human.
-- **Agents across several repos** — the hub registers each repo and runs the
-  same policy machine-wide, one repo's gates at a time.
-
-One agent, one branch at a time? You don't need this — `git push` is fine.
-And if your team is PR-first on a hosted forge with remote CI, use the
-forge's native queue (see [alternatives](#alternatives--and-whats-different-here)).
-
-### PR-first or mergetrain?
-
-A fully parallel coding-agent workflow needs two things: **parallel execution
-lanes** and a **serialized integration spine**. Worktrees provide the lanes;
-mergetrain provides the spine. That integration layer is what preserves the
-parallelism after several agents finish at nearly the same time.
-
-A pull request is primarily a **human review unit**. A mergetrain job is an
-**execution and integration unit** for a committed agent branch. Neither model
-is universally better; the useful question is whether every agent branch needs
-its own review conversation or whether several trusted branches should be
-validated and landed as one train.
-
-| Dimension | PR-first workflow | mergetrain |
-|---|---|---|
-| Strongest advantage | Human review, approvals, audit history, and distributed collaboration | Low-ceremony integration of many local agent branches |
-| Validation | Usually per PR; a forge-native merge queue can add merge-group CI | Gates run over the exact assembled train before one atomic push |
-| Latency and CI use | Each branch enters a remote PR/CI lifecycle | Local gates can validate a batch once; failures may trigger isolation runs |
-| Platform model | Forge, webhooks, branch rules, and hosted CI | Local SQLite, Git worktrees, shell gates, and any Git remote |
-| Main trade-off | Repeated PR ceremony and changing merge bases for small agent tasks | No code-review UI; you own the runner, credentials, and branch policy |
-
-The two can coexist: use mergetrain for direct integration where that is the
-policy, push a validated train to a review branch and open one PR, or reserve
-individual PRs for changes that need human discussion. See the
-[PR-first comparison and decision guide](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md) for the full
-pros, cons, and hybrid patterns.
-
-Hosted merge queues (GitHub Merge Queue, GitLab Merge Trains, Mergify, Aviator, bors) solve a related problem, but they are PR-first, remote-CI-first, and platform-first. mergetrain is for the other workflow: **local-agent, worktree-first, deploy-branch-first.**
-
-## How it works
-
-```
-  agent A ─┐
-  agent B ─┼─▶  mergetrain queue (SQLite)  ─▶  one runner (lock)
-  agent C ─┘                                      │
-                                                  ▼
-                          fresh integration worktree @ origin/main
-                                merge A → B → C  (the train)
-                                          │
-                            gates (diff-check, tests, scans…)
-                                          │
-                              git push --atomic  →  configured refs
-                                          │
-                                  post-push verify hooks
+```text
+agent branches → FIFO queue → isolated integration worktree → combined gates
+               → explicit approval → one atomic push → post-push verification
 ```
 
-Agents commit their work and **enqueue** a branch. They never push deploy refs themselves. A single **runner** (or unattended **daemon**) claims the queue, builds an isolated integration worktree on top of your integration branch, merges the queued branches in FIFO order, runs your gates once over the whole train, and only then pushes — atomically — to your deploy refs. Validation worktrees are disposable by default; path-sensitive build caches can opt into a runner-locked stable validation path while deploy worktrees remain disposable. Every important state is readable as JSON so an agent can follow the result instead of inferring it.
+## Who should use it?
 
-## Quickstart
+Use mergetrain when:
+
+- multiple coding agents finish branches in the same repository throughout the
+  day;
+- agents work in Git worktrees and should enqueue rather than push deploy refs;
+- the combined result must pass local tests before it lands;
+- you want unattended processing only for explicitly pre-approved jobs; or
+- one local hub should show queues and runners across several repositories.
+
+It is harness-agnostic: Codex, Claude Code, scripts, and humans all use the same
+CLI and JSON contract.
+
+## Who should not use it?
+
+You probably do not need mergetrain when:
+
+- one person or agent lands one branch at a time;
+- every change already goes through a PR and your forge-native merge queue;
+- you need a hosted review UI, organization-wide permission system, or remote
+  runner service; or
+- you are looking for a general job queue, CI provider, or deployment platform.
+
+For PR-first teams, use GitHub Merge Queue or GitLab Merge Trains. mergetrain is
+for local-agent, worktree-first integration, with or before a PR.
+
+## See it in 60 seconds
+
+```sh
+uvx mergetrain demo
+```
+
+The demo creates a disposable repository and local bare remote, then runs four
+real branches through FIFO merge, a combined-only gate failure, conflict
+attribution, and deployment of the compatible train. Use `--keep` to inspect the
+result afterward.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/demo.gif"
-       alt="A terminal recording of mergetrain creating four agent branches, attributing a semantic conflict between two of them, and atomically deploying the compatible survivor train."
+       alt="mergetrain's disposable one-minute workflow demonstration"
        width="900">
 </p>
 
-```bash
-# See the whole workflow in a disposable local sandbox (~1 minute)
-uvx mergetrain demo
+## Install and first run
 
-# Install the public alpha
-uv tool install mergetrain     # or: pipx install mergetrain
-brew install yongjip/tap/mergetrain   # macOS, no Python needed
-# No install at all? Try it first: uvx mergetrain --help
+```sh
+# Install the machine-level CLI
+uv tool install mergetrain          # or: pipx install mergetrain
+# macOS: brew install yongjip/tap/mergetrain
 
-# 1. Scaffold config + agent docs in your repo
+cd /path/to/your/repo
+
+# Write .mergetrain.yaml plus agent instructions
 mergetrain init --project my-app --write
 
-# 2. An agent finishes work, commits, and enqueues its branch
-mergetrain enqueue --task "add health check" --branch agent/health --capture-sha
+# After an agent commits its task branch
+mergetrain enqueue \
+  --task "add health check" \
+  --branch agent/health \
+  --capture-sha
 
-# 3. See the queue and lock state (machine-readable)
+# Inspect first, then validate or deploy explicitly
 mergetrain status --json
-
-# 4. Watch the queue and runner locally (read-only)
-mergetrain dashboard
-
-# 5. Validate the whole train without shipping
 mergetrain run-batch --validate-only
-
-# 6. Ship — explicit, never implicit
 mergetrain run-batch --deploy
 ```
 
-Here `deploy` is the backward-compatible name for the atomic Git ref update,
-not necessarily a provider release. Repositories that reserve “deploy” for
-TestFlight, Play, App Store, Kubernetes, or another downstream system can set
-`terminology.git_operation: integrate` and use `run-batch --integrate`. This
-changes human CLI, dashboard, wrapper, and generated-agent wording only;
-SQLite/JSON keep the stable `deployed` status and `deploy_sha` field.
+`deploy` means the configured atomic Git ref update; it does not imply an App
+Store, Kubernetes, or other provider release. Projects can select `integrate`
+or `push` terminology without changing the stable machine contract.
 
-For an unreleased source checkout, use `python -m pip install -e .` instead.
+`mergetrain init` also writes agent-facing instructions. The essential rule is
+simple: agents commit and enqueue; one runner owns merge → test → push → verify.
+Unattended daemons process only jobs that a human explicitly enqueued with
+`--auto`.
 
-`mergetrain demo` creates a throwaway repository and local bare remote, then
-drives four real agent branches through FIFO enqueue → ordered merge → a
-combined-train gate failure that no single branch causes → bisection to the
-minimal failing pair (`conflict_with`) → exact-train deploy of the two
-survivors. Two of the four branches touch no common file, so Git merges them
-cleanly and each is green alone: only the combined tree is red, which is the
-case a merge queue exists for and per-branch CI cannot see. It uses no network
-and isolates Git configuration from your account. Add `--keep` to inspect the
-final queue or open `mergetrain dashboard --preview`; add `--pause` for a
-narrated presentation.
+See the [quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md)
+for configuration, dashboard, daemon, and multi-repository Hub setup.
 
-The dashboard is served at `http://127.0.0.1:8765/`. It streams structured
-runner phases, heartbeat freshness, job order, blocked reasons, recent activity,
-the exact current gate and command template, history-derived ETA and gate
-timing, and the next safe action. On phone-sized screens it collapses to the
-three facts needed for a remote glance: state, next action, and attention.
-`CONNECTED` describes the browser's healthy data stream; `DEGRADED` keeps the
-last good snapshot visible behind an explicit retrying error banner, while
-`POLLING` and `DISCONNECTED` describe transport fallback or loss. `RUNNER ACTIVE`
-separately describes the process that owns the train. It has no mutation endpoints or
-deploy controls. The header can enable cross-platform browser notifications
-while the page is open; validation, deployment, and attention alerts focus the
-dashboard when clicked, and Hub alerts open the affected repository.
+## Why not just worktrees and `git merge`?
 
-Running agents across several repos? Register each one and serve every queue
-on a single board:
+Worktrees solve **parallel editing**. mergetrain solves **serialized
+integration**.
 
-```sh
-mergetrain hub add ~/projects/app     # once per repo
-mergetrain hub                        # one dashboard for the whole machine
-```
+| Integration concern | Worktrees + manual merge | mergetrain |
+|---|---|---|
+| Landing order | A person or agent decides repeatedly | Durable FIFO queue |
+| Combined validation | Rerun manually after each merge | Gates run over the exact assembled train |
+| Cross-branch failure | Diagnose by hand | Isolation runs identify the conflicting pair |
+| Push ownership | Every session can race the ref | One lease-fenced runner owns the push |
+| Approval | Shell convention | Explicit validate/deploy intent; `--auto` is opt-in |
+| Crash recovery | Infer from local logs | Reconcile SQLite evidence against remote refs |
 
-The hub is the same read-only UI in multi-repo mode — repo cards with queue
-counts, runner state, and the next safe action, each drilling down into the
-full single-repo view. It owns no queue state: every repo entry is read from
-that repo's own SQLite database, opened read-only, so observing a repo never
-creates or migrates anything inside it. `mergetrain hub daemon` runs your
-`--auto` work across those repos too, with a machine-wide concurrency cap
-(default: one repo's gates at a time — parallel agents, but never parallel
-engine builds). See [hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md).
+Plain worktrees remain the execution lanes. mergetrain is the spine that joins
+their results without turning the operator into a merge coordinator.
 
-Non-interactive callers can observe the same runner without starting a browser:
+## Why not GitHub or GitLab merge queues?
 
-```sh
-mergetrain inspect <job-id> --json
-mergetrain events --job <job-id> --after 0 --follow --jsonl
-mergetrain logs <job-id> --follow --tail 20
-```
+They solve a related problem for a different operating model.
 
-The event stream is resumable by persisted event ID and emits separate heartbeat
-and terminal frames. Raw command output stays in the explicit local `logs`
-command, not structured events.
+| | Forge-native queue | mergetrain |
+|---|---|---|
+| Primary unit | Pull/merge request | Committed local task branch |
+| Validation | Forge merge group + remote CI | Local assembled train + shell gates |
+| Review | Built-in conversation and approvals | No code-review UI |
+| Infrastructure | Forge integration and hosted services | Local SQLite, Git worktrees, any Git remote |
+| Best fit | PR-first teams and distributed review | High-throughput local agent integration |
 
-Validation records an exact train identity, including every task HEAD and the
-integration base used for the check. The later deploy reassembles that same
-train on the current integration ref, reruns all gates, and refuses changed
-task branches. Newly queued work is not silently added to the approved train.
-Expensive gates may be reused only through an explicit validated-reuse policy or
-`--reuse-validated`; a non-deploying `--preview --json` reports the exact reused
-SHA or why the full safe path will run, plus identity facts and a
-coverage-qualified savings estimate that never grants authorization. Independent
-gates can opt into resource-bounded parallel groups while the default remains
-strictly sequential.
+The models can coexist: push a validated train to a review branch and open one
+PR, or reserve individual PRs for changes that need discussion. The
+[PR workflow guide](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md)
+covers direct, one-PR, split-PR, and validation-only patterns.
 
-If the intended contents change after validation, `supersede` atomically retires
-the old train and captures clean replacement HEADs as a new queued train. The
-audit relationship is preserved, but validation, reuse identity, and deploy
-approval are never inherited.
+## Core safety guarantees
 
-Every agent-facing command is non-interactive and requires explicit intent: `--validate-only` or `--deploy`, never a bare `run-batch`.
+- **Exact train identity.** Approval names the task HEADs and integration base;
+  changed branches or a moved base cannot silently reuse that approval.
+- **Combined gates before push.** A green branch is not enough. The assembled
+  train passes the configured gates, or nothing lands.
+- **One fenced owner.** SQLite claims and lease tokens prevent concurrent or
+  stale runners from mutating the same train.
+- **Atomic remote update.** Payload refs and a permanent
+  `refs/mergetrain/deploys/<sha>` recovery ref update together.
+- **Remote-truth recovery.** Write-ahead markers and pinned commits let
+  `reconcile`/`recover` determine whether a killed push landed, without replaying
+  a successful deploy or calling a missing one shipped.
+- **Explicit automation.** A bare run never deploys. Daemons touch only
+  pre-approved `--auto` jobs, and MCP deploy still requires attributable human
+  confirmation.
+- **Observable state.** `doctor`, `status`, inspection, events, and statistics
+  expose structured state and the next safe action instead of asking an agent to
+  infer it from processes or prose.
 
-## Core concepts
+Queue state, locking, train assembly, and gates stay local. Your configured Git
+remote and post-push verification may still use external services. Gate and
+verify commands are trusted code; review the
+[security boundary](https://github.com/yongjip/mergetrain/blob/main/docs/security.md)
+before enabling unattended jobs.
 
-- **Job** — one task branch waiting in the queue, with the SHAs captured at enqueue time.
-- **Validated train** — an exact, deployable group of jobs that passed gates together and is waiting for explicit deploy approval.
-- **Runner lock** — gives every claim a unique lease token, heartbeats through long-running commands, and prevents a stale runner from overwriting a newer owner.
-- **Run event** — a persisted, secret-conscious phase transition with an integer resume cursor; follow mode adds ephemeral heartbeat and terminal frames.
-- **Integration worktree** — an isolated, detached Git worktree built on your integration ref. It is disposable by default; validation may opt into a stable path that preserves only declared ignored caches. Deploy worktrees remain disposable, so agents never checkout or push the deploy branch.
-- **Gate** — a verification command (diff-check, tests, secret-scan…) run once over the assembled train *before* push. A gate failure means nothing ships.
-- **Verify hook** — a command run *after* push to confirm the deploy is live.
-- **Auto job** — a job enqueued with `--auto`, the only kind the unattended daemon will touch. Manual jobs are left for a human-initiated runner.
+These guarantees are exercised on macOS and Linux across Python 3.10–3.14 and
+on Windows, including real-Git fault injection around `git push --atomic`. A
+dedicated soak repository completed 20 landed trains at a 100% land rate,
+including planned conflict recovery and a real killed-push reconciliation whose
+verdict matched the remote. See the
+[soak evidence](https://github.com/yongjip/mergetrain/blob/main/docs/soak.md),
+then use `mergetrain stats --json` to inspect evidence from your own queue.
 
-Full reference in [docs/design.md](https://github.com/yongjip/mergetrain/blob/main/docs/design.md) and the [CLI reference](https://github.com/yongjip/mergetrain/blob/main/docs/cli.md).
+## Go deeper
 
-## Alternatives — and what's different here
-
-Every established merge queue assumes a forge app, webhooks, and a hosted CI
-provider. mergetrain assumes a laptop, worktrees, and `git push`.
-
-| Category | Examples | They assume | mergetrain |
-|---|---|---|---|
-| Forge-native queues | [GitHub Merge Queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), [GitLab Merge Trains](https://docs.gitlab.com/ci/pipelines/merge_trains/) | PRs + the forge's CI; for private repos, Enterprise Cloud (GitHub) or Premium (GitLab) as of mid-2026 | No forge app, no plan gate — any Git remote |
-| Merge-queue SaaS | [Mergify](https://mergify.com), [Aviator](https://www.aviator.co/merge-queue), [Trunk](https://trunk.io/merge-queue), [Graphite](https://graphite.com) | A GitHub App + webhooks + your CI provider + per-seat pricing | Queue state never leaves your machine |
-| Self-hosted bots | bors lineage, [Zuul](https://zuul-ci.org/), Marge-bot | A server you operate + forge webhooks + CI | One `pip install`, no server or hosted service |
-| Local agent queues | [claude-code-merge-queue](https://github.com/funador/claude-code-merge-queue) | Also local-first: lands queued branches one at a time (rebase → check → push), built around Claude Code's worktree hooks | Batched **validated trains** with an exact approved identity, SQLite-durable state, remote-reconciled crash recovery, and harness-agnostic operation (Codex, Claude, anything that can run a CLI) |
-
-If your team is PR-first on a hosted forge with remote CI, use the native
-queue — that is exactly what it is for. mergetrain is for the other workflow:
-**local coding agents in worktrees, shipping to a deploy branch, with or
-before any PR.**
-
-### The crash story, specifically
-
-A hosted queue's crash recovery is its vendor's uptime page. A local queue
-runs on a laptop — which loses power, sleeps mid-push, and gets its terminal
-killed. mergetrain treats that as the normal case, not the exception: every
-push is preceded by a durable write-ahead marker and a
-`refs/mergetrain/pending/<id>` pin ref, so `mergetrain recover` can ask the
-**remote** what actually happened. A train is marked `deployed` only when a
-push ref carries its SHA, a landed train is never pushed twice, and deploys
-are refused while any job still needs reconciling. The same atomic push retains
-`refs/mergetrain/deploys/<sha>` on the remote; if a payload ref is later
-force-rewritten, that audit evidence makes recovery stop at `blocked` instead
-of replaying the old deploy over the rewrite. As far as we can tell, no
-other merge queue — hosted or local — documents an exactly-once push contract
-at all; the full failure catalogue is in
-[failure modes](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md).
-
-mergetrain is **not** a general-purpose job queue (it won't replace Celery/RQ/Sidekiq), a CI provider, or a deploy provider. The core is provider-neutral: your push targets, test commands, and deploy checks live in config, not in mergetrain.
-
-## Configuration
-
-A single `.mergetrain.yaml` at your repo root holds all policy. The core stays neutral; you bring the commands.
-
-```yaml
-project:
-  name: my-app
-
-git:
-  remote: origin
-  integration_branch: main
-  push_refs: [main]          # atomic push targets on deploy
-
-terminology:
-  git_operation: integrate  # deploy (default), integrate, or push
-
-queue:
-  lock_ttl_minutes: 30
-  heartbeat_interval_seconds: 10
-  command_timeout_seconds: 3600
-
-gates:
-  - name: diff-check
-    run: git diff --check ${integration_ref}..HEAD
-  - name: tests
-    run: python -m pytest
-    paths:
-      - src/**
-      - tests/**
-      - pyproject.toml
-
-deploy:
-  verify:
-    - name: live-health
-      run: curl -fsS https://example.invalid/health
-```
-
-See the [config reference](https://github.com/yongjip/mergetrain/blob/main/docs/config.md) for the full schema, placeholders, and environment variables.
-
-## For AI agents
-
-mergetrain is designed so an agent can operate it from a short contract and JSON output, without guessing:
-
-1. Work on a task-specific branch in its own worktree.
-2. Commit before enqueuing.
-3. Never push deploy refs directly.
-4. Read `mergetrain doctor --json` / `status --json` before acting.
-5. Use `--auto` only after explicit human approval for unattended deploys.
-6. Let one runner or daemon own merge → test → push → verify.
-7. Fix `blocked`/`failed` work on the owning branch and enqueue a fresh clean job.
-
-When `doctor --json` says `wait_for_runner`, use `inspect --json` or a scoped
-`events --follow --jsonl` stream instead of probing the OS process tree.
-
-`mergetrain init` writes `AGENTS.mergetrain.md` / `CLAUDE.mergetrain.md` so your agents pick this up automatically.
-
-Claude Code can install the same contract plus the human-gated MCP deploy tool
-as a plugin. Install the CLI with its MCP extra first, then add this repository
-as a marketplace:
-
-```text
-uv tool install 'mergetrain[mcp]'
-/plugin marketplace add yongjip/mergetrain
-/plugin install mergetrain@mergetrain
-```
-
-The plugin contributes `/mergetrain:mergetrain` for normal queue work and the
-manual-only `/mergetrain:deploy` flow. A deploy still requires the MCP client's
-attributable human confirmation; installing the plugin does not enable
-unattended deployment or validated-gate reuse.
-
-## Documentation
-
-- [Quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md) · [Efficient operation](https://github.com/yongjip/mergetrain/blob/main/docs/best-practices.md) · [Install](https://github.com/yongjip/mergetrain/blob/main/docs/install.md)
-- [CLI reference](https://github.com/yongjip/mergetrain/blob/main/docs/cli.md) — every command and flag
-- [Config reference](https://github.com/yongjip/mergetrain/blob/main/docs/config.md) — `.mergetrain.yaml` schema, placeholders, env vars
-- [Design & architecture](https://github.com/yongjip/mergetrain/blob/main/docs/design.md) — the model, data model, and safety guarantees
-- [PR-first comparison](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md) — pros, cons, decision rules, and hybrid workflows
-- [Daemon](https://github.com/yongjip/mergetrain/blob/main/docs/daemon.md) · [Failure modes](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md) — operating it day to day
-- [Hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md) — every repo on one read-only board
-- [Manage from your phone](https://github.com/yongjip/mergetrain/blob/main/docs/mobile.md) — drive mergetrain via Cowork Dispatch
-- [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) — the rules agents follow
-- [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) — `mergetrain mcp` for Claude Code, Codex CLI, and Gemini CLI, with a deploy a human has to accept
-- [Machine contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md) — the versioned JSON/config shape agents parse
-- [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) · [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) · [Development](https://github.com/yongjip/mergetrain/blob/main/docs/development.md) · [Release](https://github.com/yongjip/mergetrain/blob/main/docs/release.md)
+- Start: [Quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md) ·
+  [Install](https://github.com/yongjip/mergetrain/blob/main/docs/install.md) ·
+  [CLI](https://github.com/yongjip/mergetrain/blob/main/docs/cli.md) ·
+  [Config](https://github.com/yongjip/mergetrain/blob/main/docs/config.md)
+- Understand: [Design and architecture](https://github.com/yongjip/mergetrain/blob/main/docs/design.md) ·
+  [Machine contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md) ·
+  [PR workflow comparison](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md)
+- Operate: [Efficient operation](https://github.com/yongjip/mergetrain/blob/main/docs/best-practices.md) ·
+  [Failure modes and recovery](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md) ·
+  [Daemon](https://github.com/yongjip/mergetrain/blob/main/docs/daemon.md) ·
+  [Multi-repo Hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md)
+- Trust and extend: [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) ·
+  [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) ·
+  [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) ·
+  [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md)
 
 ## Status
 
-`v1.2.0` is the current release. The machine contract is additive-only within
-contract major 1: a key may be added, never removed or renamed, and a golden
-key-set fingerprint over 25 payload surfaces plus the JSONL frames fails CI on
-any un-versioned shape change (see
-[contract](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md)).
-
-The core — queue, runner lock, merge train, gates (with bisected joint-failure
-isolation and semantic-conflict reporting), atomic push, crash-safe
-reconciliation/recovery
-(`reconcile`/`recover`/`unlock`/`verify`/`dismiss`/`supersede`),
-remote rewrite-guard audit refs,
-auto-only daemon, resumable CLI events/inspection/log following, the local
-read-only dashboard, the multi-repo hub, and an
-[MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) whose
-deploy tool requires a human accept — is implemented and tested on macOS, Linux,
-and Windows, including a fault-injection matrix that SIGKILLs a real
-`git push --atomic` with the remote's refs applied and without, to prove the queue
-never lies about what shipped.
-
-The 1.0 evidence gate is now met: a dedicated GitHub repository completed 20
-landed trains at a 100% land rate, including planned gate and conflict recovery
-and one real `git push --atomic` SIGKILL whose recovered queue verdict matched
-the remote. Built for my own multi-agent workflow first; issues and ideas
-welcome. Review your config trust boundary, gate commands, and secret handling
-before enabling unattended deploys — see
-[security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md).
+The current release is `v1.2.0`. Machine-contract major 1 is additive-only:
+existing JSON keys are not removed or renamed without a contract-version change.
+Issues and operating reports are welcome on
+[GitHub](https://github.com/yongjip/mergetrain/issues).
 
 ## License
 
