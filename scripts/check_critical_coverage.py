@@ -11,10 +11,16 @@ from pathlib import Path
 from typing import Any
 
 CRITICAL_MINIMUMS = {
+    "src/mergetrain/atomic_push.py": 90.0,
+    "src/mergetrain/command_runner.py": 85.0,
+    "src/mergetrain/gate_runner.py": 94.0,
+    "src/mergetrain/git_ops.py": 85.0,
     "src/mergetrain/git_runner.py": 88.0,
     "src/mergetrain/recovery.py": 91.0,
     "src/mergetrain/reuse.py": 94.0,
     "src/mergetrain/store.py": 88.0,
+    "src/mergetrain/validation_reuse.py": 83.0,
+    "src/mergetrain/worktree_manager.py": 91.0,
 }
 
 

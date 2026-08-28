@@ -82,10 +82,16 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
+  "mergetrain.atomic_push",
+  "mergetrain.command_runner",
+  "mergetrain.gate_runner",
+  "mergetrain.git_ops",
   "mergetrain.git_runner",
   "mergetrain.recovery",
   "mergetrain.reuse",
   "mergetrain.store",
+  "mergetrain.validation_reuse",
+  "mergetrain.worktree_manager",
 ]
 check_untyped_defs = true
 disallow_untyped_defs = true

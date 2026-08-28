@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .command_runner import run_command
 from .config import MergetrainConfig
 from .errors import (
     CancellationRequested,
@@ -25,7 +26,7 @@ from .errors import (
     QueueError,
     RemoteUnreachable,
 )
-from .git_runner import (
+from .git_ops import (
     PENDING_REF_PREFIX,
     apply_gc,
     delete_pending_ref,
@@ -33,7 +34,6 @@ from .git_runner import (
     git_output_or_empty,
     git_ref_exists,
     resolve_pending_ref,
-    run_command,
 )
 from .models import Job
 from .store import (

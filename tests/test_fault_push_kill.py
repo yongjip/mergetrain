@@ -51,7 +51,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 from mergetrain.config import load_config
-from mergetrain.git_runner import GitRunner, is_push_rejection, pending_ref_name
+from mergetrain.git_ops import is_push_rejection, pending_ref_name
+from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import recover
 from mergetrain.store import claim_deploy_batch, connect, enqueue_job, get_job
 

@@ -15,7 +15,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import mergetrain.git_runner as git_runner_module
+import mergetrain.atomic_push as atomic_push_module
+import mergetrain.command_runner as command_runner_module
 
 SHELL_PYTHON = sys.executable.replace("\\", "/")
 
@@ -48,6 +49,13 @@ def rmtree(path: Path | str) -> None:
     shutil.rmtree(path, **kwargs)
 
 from mergetrain.cli import main
+from mergetrain.command_runner import (
+    _dashboard_command,
+    _shell_command,
+    command_env,
+    expand_command,
+    run_shell,
+)
 from mergetrain.config import load_config
 from mergetrain.errors import (
     AmbiguousPush,
@@ -56,15 +64,8 @@ from mergetrain.errors import (
     PushRejected,
     redact_secrets,
 )
-from mergetrain.git_runner import (
-    GitRunner,
-    _dashboard_command,
-    _shell_command,
-    command_env,
-    deploy_audit_ref_name,
-    expand_command,
-    run_shell,
-)
+from mergetrain.git_ops import deploy_audit_ref_name
+from mergetrain.git_runner import GitRunner
 from mergetrain.snapshot import next_action
 from mergetrain.store import (
     cancel_job,
@@ -413,7 +414,7 @@ deploy:
             )
             with (
                 patch.object(
-                    git_runner_module.sys,
+                    command_runner_module.sys,
                     "executable",
                     str(runner_python),
                 ),
@@ -629,7 +630,7 @@ deploy:
                 (str(root / "first"), str(root / "second"))
             )
             with (
-                patch.object(git_runner_module.sys, "executable", ""),
+                patch.object(command_runner_module.sys, "executable", ""),
                 patch.dict(os.environ, {"PATH": inherited_path}),
             ):
                 env = command_env(config=config, worktree=repo)
@@ -737,7 +738,7 @@ deploy:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 runner = GitRunner(config)
                 with patch(
-                    "mergetrain.git_runner.parse_name_status_z",
+                    "mergetrain.gate_runner.parse_name_status_z",
                     side_effect=ValueError("broken diff"),
                 ):
                     result = runner.process_batch(conn, [job], deploy=False)[0]
@@ -776,10 +777,10 @@ deploy:
         completed = subprocess.CompletedProcess([], 0)
 
         with (
-            patch("mergetrain.git_runner.os.name", "nt"),
-            patch("mergetrain.git_runner.subprocess.run", return_value=completed) as run,
+            patch("mergetrain.command_runner.os.name", "nt"),
+            patch("mergetrain.command_runner.subprocess.run", return_value=completed) as run,
         ):
-            stopped = git_runner_module._stop_process(process)
+            stopped = command_runner_module._stop_process(process)
 
         self.assertTrue(stopped)
         run.assert_called_once_with(
@@ -807,7 +808,7 @@ deploy:
                 "time.sleep(60)"
             )
 
-            completed = git_runner_module.run_command(
+            completed = command_runner_module.run_command(
                 [sys.executable, "-c", parent],
                 cwd=root,
                 check=False,
@@ -834,8 +835,8 @@ deploy:
 
     def test_shell_command_uses_git_for_windows_sh_without_cmd_fallback(self) -> None:
         with (
-            patch("mergetrain.git_runner.Path.exists", return_value=False),
-            patch("mergetrain.git_runner.shutil.which") as which,
+            patch("mergetrain.command_runner.Path.exists", return_value=False),
+            patch("mergetrain.command_runner.shutil.which") as which,
         ):
             which.side_effect = lambda name: (
                 "C:/Program Files/Git/bin/sh.exe" if name == "sh" else None
@@ -860,7 +861,7 @@ deploy:
         with tempfile.TemporaryDirectory() as td:
             repo, _ = make_demo_repo(Path(td))
             config = load_config(repo=repo)
-            with patch("mergetrain.git_runner.subprocess.Popen") as popen:
+            with patch("mergetrain.command_runner.subprocess.Popen") as popen:
                 popen.return_value.__enter__ = Mock(return_value=popen.return_value)
                 popen.return_value.stdout = io.StringIO("")
                 popen.return_value.stderr = io.StringIO("")
@@ -992,7 +993,7 @@ deploy:
                 runner = GitRunner(config)
                 validated = runner.process_batch(conn, [job], deploy=False)[0]
                 with patch(
-                    "mergetrain.git_runner.parse_name_status_z",
+                    "mergetrain.gate_runner.parse_name_status_z",
                     side_effect=ValueError("broken diff"),
                 ):
                     deployed = runner.process_batch(
@@ -1256,7 +1257,7 @@ deploy:
             )
 
             with patch(
-                "mergetrain.git_runner.git_worktree_clean",
+                "mergetrain.atomic_push.git_worktree_clean",
                 side_effect=status_error,
             ):
                 with self.assertRaisesRegex(MergeBlocked, "could not verify.*clean"):
@@ -1452,7 +1453,7 @@ deploy:
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 runner = GitRunner(config)
-                original_run_command = git_runner_module.run_command
+                original_run_command = atomic_push_module.run_command
 
                 def fail_pending_ref(command, **kwargs):
                     if list(command[:2]) == ["git", "update-ref"]:
@@ -1460,7 +1461,7 @@ deploy:
                     return original_run_command(command, **kwargs)
 
                 with patch.object(
-                    git_runner_module,
+                    atomic_push_module,
                     "run_command",
                     side_effect=fail_pending_ref,
                 ), patch.object(runner, "push_verified_head") as push:
@@ -1640,7 +1641,7 @@ deploy:
 
     def test_run_shell_defaults_to_managed_noninteractive_execution(self) -> None:
         expected = subprocess.CompletedProcess("true", 0, "", "")
-        with patch("mergetrain.git_runner._run_managed", return_value=expected) as run:
+        with patch("mergetrain.command_runner._run_managed", return_value=expected) as run:
             completed = run_shell(
                 "true", cwd=".", env={"PATH": os.environ.get("PATH", "")}
             )
@@ -2320,7 +2321,7 @@ class BisectIsolationTests(unittest.TestCase):
 
 class PushRejectionTests(unittest.TestCase):
     def test_classifier_distinguishes_permission_from_other_failures(self) -> None:
-        from mergetrain.git_runner import is_push_rejection
+        from mergetrain.git_ops import is_push_rejection
 
         self.assertTrue(is_push_rejection("remote: error: GH006 Protected branch update failed"))
         self.assertTrue(is_push_rejection("! [remote rejected] main -> main (protected branch hook declined)"))
@@ -2372,7 +2373,7 @@ class GcWorktreeGuardTests(unittest.TestCase):
     def test_gc_protects_configured_persistent_workspace_and_removes_it_when_disabled(
         self,
     ) -> None:
-        from mergetrain.git_runner import apply_gc, find_worktree_gc_candidates
+        from mergetrain.git_ops import apply_gc, find_worktree_gc_candidates
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -2420,7 +2421,7 @@ class GcWorktreeGuardTests(unittest.TestCase):
     def test_gc_never_removes_a_live_runners_worktree(self) -> None:
         # Blocker: gc --apply force-removed the worktree a running deploy was
         # merging/gating inside. A live runner's worktree must be protected.
-        from mergetrain.git_runner import apply_gc, find_worktree_gc_candidates
+        from mergetrain.git_ops import apply_gc, find_worktree_gc_candidates
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -2448,7 +2449,7 @@ class GcWorktreeGuardTests(unittest.TestCase):
         # runs. A runner that acquires the lock AFTER it is built is absent from
         # protect — but a per-deletion recheck of the live lock still spares its
         # worktree, while a genuine orphan is still swept.
-        from mergetrain.git_runner import apply_gc
+        from mergetrain.git_ops import apply_gc
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

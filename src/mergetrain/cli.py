@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .command_runner import run_command
 from .config import (
     CONFIG_VERSION,
     DEFAULT_CONFIG_NAME,
@@ -31,9 +32,8 @@ from .errors import (
     RemoteUnreachable,
     redact_secrets,
 )
-from .git_runner import (
+from .git_ops import (
     DEPLOY_AUDIT_REF_PREFIX,
-    GitRunner,
     apply_gc,
     branch_exists,
     find_worktree_gc_candidates,
@@ -45,8 +45,8 @@ from .git_runner import (
     git_repo_root,
     git_rev_parse,
     git_worktree_clean,
-    run_command,
 )
+from .git_runner import GitRunner
 from .models import Job
 from .observability import (
     _gate_runs,

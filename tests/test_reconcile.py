@@ -27,7 +27,8 @@ from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
 from mergetrain.errors import CommandFailed
-from mergetrain.git_runner import GitRunner, deploy_audit_ref_name, pending_ref_name
+from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
+from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
     acquire_runner_lock,
@@ -1160,7 +1161,7 @@ class ReviewHardeningTests(unittest.TestCase):
             self.assertTrue(any(s["job_id"] == deployed.id for s in swept))
 
     def test_recover_gc_removes_orphans_sweeps_pins_and_spares_new_runner(self) -> None:
-        from mergetrain.git_runner import apply_gc as real_apply_gc
+        from mergetrain.git_ops import apply_gc as real_apply_gc
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

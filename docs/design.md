@@ -19,6 +19,30 @@ This document describes the model and how the pieces fit together. For task-orie
 
 Agents never push deploy refs themselves; they enqueue and read JSON. One runner (or daemon) owns merge, test, push, and verify.
 
+## Runtime responsibility boundaries
+
+`GitRunner` is the queue-aware coordinator, not the implementation home for
+every Git, process, gate, worktree, and push primitive. Its collaborators have
+one-way responsibilities:
+
+| Module | Owns |
+| --- | --- |
+| `command_runner.py` | managed subprocess lifecycle, timeout/cancellation, the cross-platform POSIX-shell contract, and command environment construction |
+| `git_ops.py` | narrow Git/ref queries, pending/audit ref names, push-rejection classification, and worktree garbage collection |
+| `gate_runner.py` | deterministic gate scheduling, path selection, verify hooks, and gate/environment fingerprints |
+| `validation_reuse.py` | validation identity construction and the fail-closed validated-reuse decision table |
+| `worktree_manager.py` | ephemeral and persistent integration-worktree preparation, cleanup, and declared cache handling |
+| `atomic_push.py` | the clean-tree tripwire, durable pending marker, audit ref, atomic push classification, and post-push verification state |
+| `git_runner.py` | queue events and lease fencing plus single-job, batch assembly, failure isolation, and bisection orchestration |
+
+Dependencies point toward the narrow collaborators: `git_runner` composes
+them, while CLI and recovery code import only the primitives they use. The
+collaborators must not import `git_runner`; this avoids cycles and keeps queue
+state orchestration at the outer boundary. Batch assembly and failure isolation
+remain together because they share train state and fallback rules; splitting
+them again should wait for a smaller stable interface rather than moving a
+mutually recursive algorithm behind forwarding classes.
+
 ## Concepts
 
 **Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, separate `push_status` and `verify_status` outcomes, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.

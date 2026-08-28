@@ -14,7 +14,13 @@ mergetrain/
     daemon.py          # auto-only daemon loop
     evidence.py        # evidence-backed outcome, validation, and batching metrics
     errors.py          # MergetrainError hierarchy
-    git_runner.py      # worktree merge train, gates, atomic push, verify, gc
+    command_runner.py  # managed subprocesses, POSIX shell, environment
+    gate_runner.py     # gate scheduling, paths, fingerprints, verify hooks
+    git_ops.py         # narrow Git/ref queries and worktree garbage collection
+    git_runner.py      # queue-aware single/batch train orchestration
+    atomic_push.py     # durable marker, atomic push, post-push verification
+    validation_reuse.py # validated-train identity and reuse decisions
+    worktree_manager.py # ephemeral/persistent integration worktrees
     observability.py   # job/train outcomes and event/heartbeat read models
     dashboard.py       # stdlib read-only HTTP/SSE server
     snapshot.py        # privacy-conscious dashboard read model
@@ -99,23 +105,33 @@ correctness-critical modules:
 
 | Module | Minimum |
 | --- | ---: |
+| `atomic_push.py` | 90% |
+| `command_runner.py` | 85% |
+| `gate_runner.py` | 94% |
+| `git_ops.py` | 85% |
 | `git_runner.py` | 88% |
 | `store.py` | 88% |
 | `recovery.py` | 91% |
 | `reuse.py` | 94% |
+| `validation_reuse.py` | 83% |
+| `worktree_manager.py` | 91% |
 
-These floors were chosen from the same successful Linux, macOS, and Windows CI
-matrix, not from one workstation. Raise them when durable state-transition
-coverage improves. Lower them only with a documented explanation of which
-behavior moved or became unreachable. A missing critical module in coverage
-JSON fails closed rather than silently disappearing from the policy.
+The original floors were chosen from the same successful Linux, macOS, and
+Windows CI matrix. The collaborator floors preserve the exercised behavior
+after the GitRunner responsibility split, with conservative headroom for
+platform-specific branches; the blocking matrix confirms them before merge.
+Raise them when durable state-transition coverage improves. Lower them only
+with a documented explanation of which behavior moved or became unreachable.
+A missing critical module in coverage JSON fails closed rather than silently
+disappearing from the policy.
 
-Mypy remains incremental for peripheral adapters and CLI rendering. The same
-four correctness-critical modules additionally reject untyped definitions,
-check function bodies, reject implicit optionals, and warn on `Any` returns.
-This keeps the stricter boundary focused on lease fencing, recovery, validation
-identity/reuse, and atomic push state rather than forcing a repository-wide
-annotation rewrite.
+Mypy remains incremental for peripheral adapters and CLI rendering. The train
+coordinator, its six correctness-critical collaborators, and the existing
+storage/recovery/reuse modules additionally reject untyped definitions, check
+function bodies, reject implicit optionals, and warn on `Any` returns. This
+keeps the stricter boundary focused on lease fencing, process control,
+worktrees, recovery, validation identity/reuse, and atomic push state rather
+than forcing a repository-wide annotation rewrite.
 
 The current baseline still leaves several high-value state transitions without
 direct execution evidence. Prefer these over tests that merely increase the

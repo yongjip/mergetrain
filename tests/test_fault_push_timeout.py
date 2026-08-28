@@ -5,7 +5,7 @@ patching ``push_verified_head`` to raise a hand-written ``CommandFailed``
 (tests/test_git_runner.py::test_push_failure_is_not_reported_as_deployed,
 tests/test_reconcile.py::test_ambiguous_push_parks_needs_reconcile_*). Those pin
 the decision logic but not the *classification input*: they never let the real
-timeout path in ``git_runner._run_managed`` produce the stderr that
+timeout path in ``command_runner._run_managed`` produce the stderr that
 ``is_push_rejection`` is then asked to judge.
 
 A wedged push is the most common real ambiguous push there is (a hung forge, a
@@ -49,9 +49,11 @@ from unittest.mock import patch
 # the shared bare-remote fixture import below too.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import mergetrain.git_runner as git_runner_module
+import mergetrain.atomic_push as atomic_push_module
+import mergetrain.git_ops as git_ops_module
 from mergetrain.config import MergetrainConfig, load_config
-from mergetrain.git_runner import GitRunner, is_push_rejection, pending_ref_name
+from mergetrain.git_ops import is_push_rejection, pending_ref_name
+from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import reconcile
 from mergetrain.store import (
     claim_deploy_batch,
@@ -146,7 +148,7 @@ class PushTimeoutIsAmbiguousTests(unittest.TestCase):
         config = self._shrink_command_timeout(repo)
         _install_sleeping_hook(remote, hook)
 
-        real_is_push_rejection = git_runner_module.is_push_rejection
+        real_is_push_rejection = git_ops_module.is_push_rejection
         calls: list[tuple[str, bool]] = []
 
         def spy(stderr: str) -> bool:
@@ -163,7 +165,7 @@ class PushTimeoutIsAmbiguousTests(unittest.TestCase):
             ttl = config.queue.lock_ttl_minutes
             claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
             self.assertEqual([claim.id for claim in claimed], [job.id])
-            with patch.object(git_runner_module, "is_push_rejection", spy):
+            with patch.object(atomic_push_module, "is_push_rejection", spy):
                 GitRunner(config).process_batch(
                     conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
                 )
@@ -346,7 +348,7 @@ class PushTimeoutIsAmbiguousTests(unittest.TestCase):
 
     def test_timeout_stderr_is_not_a_definitive_rejection(self) -> None:
         # The unit-level companion to the two end-to-end variants: the literal
-        # line git_runner._run_managed appends on a timeout must never satisfy
+        # line command_runner._run_managed appends on a timeout must never satisfy
         # is_push_rejection. Cheap enough to keep as a canary that pins the
         # message and the classifier together, so a reworded timeout line or a
         # widened rejection regex is caught even if the slow-hook fixture is

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Split the monolithic Git/deploy runner into typed collaborators for managed
+  commands, Git/ref primitives, gates, validation reuse, worktrees, and atomic
+  push/verification. Keep queue/lease and train orchestration in `GitRunner`,
+  preserve CLI/JSON/SQLite behavior, and extend critical coverage floors so
+  moving code cannot silently weaken the quality gate.
+
 - Turn measured coverage into a blocking ratchet: require 87% overall across
   the test matrix, apply higher floors to Git/deploy, storage/locking, recovery,
   and validated-reuse modules, and run the same policy in the local deploy gate.

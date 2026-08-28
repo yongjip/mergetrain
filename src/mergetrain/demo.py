@@ -31,7 +31,7 @@ def _shell_argument(value: str) -> str:
     """Quote one argument for the shell that will run gates and verify hooks.
 
     Gate commands run through a POSIX ``sh`` on every platform (see
-    ``git_runner._posix_shell``), so one dialect is enough. Double quotes are
+    ``command_runner._posix_shell``), so one dialect is enough. Double quotes are
     used rather than ``shlex.quote``'s single quotes to keep the rendered
     command free of single quotes, which is what lets it stay representable as
     a YAML single-quoted scalar (see ``_yaml_scalar``).

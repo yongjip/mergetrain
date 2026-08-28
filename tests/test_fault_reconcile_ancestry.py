@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 from mergetrain.config import load_config
-from mergetrain.git_runner import (
+from mergetrain.git_ops import (
     deploy_audit_ref_name,
     git_ref_exists,
     pending_ref_name,

@@ -3,25 +3,19 @@
 from __future__ import annotations
 
 import io
-import json
-import os
-import re
-import shlex
-import shutil
-import signal
 import sqlite3
-import subprocess
-import sys
 import threading
-import time
 import uuid
-from collections import deque
 from collections.abc import Callable, Iterable, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
+from .atomic_push import (
+    AtomicPush,
+    PushVerifyState as _PushVerifyState,
+    post_push_verify_status as _post_push_verify_status,
+)
+from .command_runner import run_command
 from .config import GateConfig, MergetrainConfig
 from .errors import (
     AmbiguousPush,
@@ -30,651 +24,32 @@ from .errors import (
     LostLease,
     MergeBlocked,
     MergetrainError,
-    PushRejected,
     QueueBusy,
-    redact_secrets,
+)
+from .gate_runner import GateProgress, GateRunner
+from .git_ops import (
+    git_output,
+    git_rev_parse,
+    git_worktree_clean,
+    pending_ref_name,
 )
 from .models import Job
-from .path_gates import any_path_matches, parse_name_status_z
-from .reuse import (
-    ReuseCheck,
-    ReuseDecision,
-    environment_sha,
-    gate_policy_sha,
-    train_identity_sha,
-    validation_age_minutes,
-)
+from .reuse import ReuseCheck, ReuseDecision
 from .store import (
-    clear_rejected_push,
     get_job,
     mark_job,
-    record_pending_push,
     record_run_event,
     refresh_runner_lock,
     utc_now,
 )
+from .validation_reuse import ValidationReuse
+from .worktree_manager import WorktreeManager
 
 Pulse = Callable[[], None]
-GateProgress = Callable[[str, str, int, int, str], None]
-
-
-@dataclass(slots=True)
-class _PushVerifyState:
-    push_status: str = "not_run"
-    verify_status: str = "not_run"
-    warning: str = ""
-
-
-def _post_push_verify_status(state: _PushVerifyState) -> str:
-    """What to record for verification when the push landed but the run errored.
-
-    Never invent a failure: a repo configured with no verify hooks has nothing
-    that could fail, and a verification that already completed must not be
-    relabeled by a later error. Anything genuinely indeterminate becomes
-    ``unknown``, which is the value ``reconcile`` and ``mergetrain verify``
-    already exist to discharge -- and which makes doctor say
-    ``verify_reconciled_deploy`` instead of pointing at a hook that does not
-    exist.
-    """
-
-    if state.verify_status in {"not_configured", "succeeded", "failed"}:
-        return state.verify_status
-    return "unknown"
-
-
-def _render_command(command: Sequence[str] | str) -> str:
-    if isinstance(command, str):
-        return command
-    return " ".join(str(part) for part in command)
-
-
-def _dashboard_command(command: Sequence[str] | str) -> str:
-    """Render a bounded gate command while masking obvious inline secrets."""
-
-    rendered = redact_secrets(_render_command(command))
-    return rendered if len(rendered) <= 500 else f"{rendered[:497]}..."
-
-
-def _posix_shell() -> str:
-    """Return the POSIX shell used by gate and verify commands.
-
-    Git for Windows ships ``sh.exe`` even though Windows has no ``/bin/sh``.
-    Never fall back to ``cmd.exe``: command expansion and the documented gate
-    contract both use POSIX shell syntax.
-    """
-
-    if Path("/bin/sh").exists():
-        return "/bin/sh"
-    shell = shutil.which("sh")
-    if shell:
-        return shell
-    git = shutil.which("git")
-    if git:
-        git_root = Path(git).parent.parent
-        for candidate in (
-            git_root / "bin" / "sh.exe",
-            git_root / "usr" / "bin" / "sh.exe",
-        ):
-            if candidate.exists():
-                return str(candidate)
-    raise MergetrainError(
-        "A POSIX sh executable is required to run gate and verify commands"
-    )
-
-
-def _shell_command(command: str) -> list[str]:
-    return [_posix_shell(), "-c", command]
-
-
-def _stop_windows_process_tree(process: subprocess.Popen[str]) -> None:
-    """Terminate a Windows child and every descendant it spawned.
-
-    ``Popen.terminate`` only stops the direct shell process. Gates commonly
-    launch test servers, build daemons, or watchers, and those grandchildren
-    retain worktree handles and inherited output pipes unless the whole tree is
-    stopped. ``taskkill`` is part of Windows and gives us tree semantics without
-    adding a runtime dependency. Fall back to the direct process when it is
-    unavailable or cannot resolve the pid.
-    """
-
-    try:
-        completed = subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        completed = None
-    if (completed is None or completed.returncode != 0) and process.poll() is None:
-        process.terminate()
-
-
-def _stop_process(process: subprocess.Popen[str]) -> bool:
-    if process.poll() is not None:
-        return False
-    stopped = False
-    try:
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:  # pragma: no cover - Windows compatibility
-            _stop_windows_process_tree(process)
-        stopped = True
-        process.wait(timeout=5)
-    except ProcessLookupError:
-        process.wait()
-    except subprocess.TimeoutExpired:
-        if process.poll() is None:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGKILL)
-            else:  # pragma: no cover - Windows compatibility
-                _stop_windows_process_tree(process)
-                if process.poll() is None:
-                    process.kill()
-            stopped = True
-            process.wait()
-    return stopped
-
-
-def _run_managed(
-    command: Sequence[str],
-    *,
-    cwd: str | Path,
-    env: dict[str, str] | None,
-    log: IO[str] | None,
-    check: bool,
-    pulse: Pulse | None,
-    pulse_interval_seconds: float,
-    timeout_seconds: float | None,
-    cancel_event: threading.Event | None = None,
-) -> subprocess.CompletedProcess[str]:
-    # Always an argv list, never a platform shell. A gate string is turned into
-    # argv by `_shell_command`, which resolves a POSIX sh even on Windows, so
-    # `${repo}`/`${worktree}` escaping has one dialect to target. Reintroducing
-    # `shell=True` here would silently run gates under cmd.exe on Windows and
-    # break that contract, so the option is deliberately absent.
-    if cancel_event is not None and cancel_event.is_set():
-        raise CancellationRequested("command canceled before it started")
-    if pulse is not None:
-        pulse()
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd),
-        env=env,
-        shell=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        start_new_session=os.name == "posix",
-        creationflags=(
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            if os.name == "nt"
-            else 0
-        ),
-    )
-    stdout_tail: deque[str] = deque(maxlen=2000)
-    stderr_tail: deque[str] = deque(maxlen=2000)
-    log_lock = threading.Lock()
-
-    def drain(stream: IO[str] | None, tail: deque[str]) -> None:
-        if stream is None:
-            return
-        for line in iter(stream.readline, ""):
-            tail.append(line)
-            if log is not None:
-                with log_lock:
-                    log.write(line)
-                    log.flush()
-        stream.close()
-
-    readers = [
-        threading.Thread(target=drain, args=(process.stdout, stdout_tail), daemon=True),
-        threading.Thread(target=drain, args=(process.stderr, stderr_tail), daemon=True),
-    ]
-    for reader in readers:
-        reader.start()
-
-    started = time.monotonic()
-    next_pulse = started + max(0.1, pulse_interval_seconds)
-    timed_out = False
-    canceled = False
-    try:
-        while process.poll() is None:
-            now = time.monotonic()
-            if cancel_event is not None and cancel_event.is_set():
-                if _stop_process(process):
-                    canceled = True
-                    stderr_tail.append("command canceled by gate scheduler\n")
-                    break
-                continue
-            if timeout_seconds is not None and now - started >= timeout_seconds:
-                if _stop_process(process):
-                    timed_out = True
-                    stderr_tail.append(
-                        f"command timed out after {timeout_seconds:g} seconds\n"
-                    )
-                    break
-                continue
-            if pulse is not None and now >= next_pulse:
-                pulse()
-                next_pulse = now + max(0.1, pulse_interval_seconds)
-            try:
-                # Returns the instant the process exits; the timeout only
-                # bounds how long we go between pulse/timeout checks.
-                process.wait(timeout=0.1)
-            except subprocess.TimeoutExpired:
-                pass
-    except BaseException:
-        _stop_process(process)
-        raise
-    finally:
-        # A normally-exited process closes its pipe write ends, so the drain
-        # threads hit EOF and this join is instant. When we KILLED the process
-        # (timeout/cancel), the read ends can stay blocked in a pending OS read
-        # — on Windows TerminateProcess does not unblock the parent's ReadFile —
-        # so bound the total wait instead of blocking up to 5s per reader (which
-        # made a killed command take ~10s to return). The readers are daemon
-        # threads, reaped when their pipe is finalized.
-        _join_deadline = time.monotonic() + 2.0
-        for reader in readers:
-            reader.join(timeout=max(0.0, _join_deadline - time.monotonic()))
-
-    stdout = "".join(stdout_tail)
-    stderr = "".join(stderr_tail)
-    returncode = process.returncode if process.returncode is not None else 124
-    if timed_out:
-        returncode = 124
-    completed = subprocess.CompletedProcess(command, returncode, stdout, stderr)
-    if canceled:
-        raise CancellationRequested("command canceled by gate scheduler")
-    if check and completed.returncode != 0:
-        raise CommandFailed(command, completed.returncode, stdout, stderr, str(cwd))
-    return completed
-
-
-# Ceiling for commands whose callers did not pass an explicit timeout. These
-# are local git operations (reset, clean, worktree remove, merge --abort) that
-# finish in seconds; the ceiling only exists so a pathological hang can never
-# stall a runner — or a whole hub sweep — indefinitely.
-DEFAULT_COMMAND_TIMEOUT_SECONDS = 600.0
-
-
-def _git_safe_env(env: dict[str, str] | None) -> dict[str, str]:
-    # Never let a git subprocess block on an interactive credential or
-    # host-key prompt: a daemonized runner has no terminal to answer it.
-    base = dict(os.environ) if env is None else dict(env)
-    base.setdefault("GIT_TERMINAL_PROMPT", "0")
-    return base
-
-
-def run_command(
-    command: Sequence[str],
-    *,
-    cwd: str | Path,
-    env: dict[str, str] | None = None,
-    log: IO[str] | None = None,
-    check: bool = True,
-    pulse: Pulse | None = None,
-    pulse_interval_seconds: float = 10,
-    timeout_seconds: float | None = None,
-) -> subprocess.CompletedProcess[str]:
-    if log:
-        log.write(f"\n$ {_render_command(command)}\n")
-        log.flush()
-    env = _git_safe_env(env)
-    if timeout_seconds is None:
-        timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
-    if pulse is not None or timeout_seconds is not None:
-        return _run_managed(
-            list(command),
-            cwd=cwd,
-            env=env,
-            log=log,
-            check=check,
-            pulse=pulse,
-            pulse_interval_seconds=pulse_interval_seconds,
-            timeout_seconds=timeout_seconds,
-        )
-    completed = subprocess.run(
-        list(command), cwd=str(cwd), env=env, text=True,
-        encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
-        capture_output=True,
-    )
-    if log:
-        if completed.stdout:
-            log.write(completed.stdout)
-        if completed.stderr:
-            log.write(completed.stderr)
-        log.flush()
-    if check and completed.returncode != 0:
-        raise CommandFailed(command, completed.returncode, completed.stdout, completed.stderr, str(cwd))
-    return completed
-
-
-def run_shell(
-    command: str,
-    *,
-    cwd: str | Path,
-    env: dict[str, str],
-    log: IO[str] | None = None,
-    check: bool = True,
-    pulse: Pulse | None = None,
-    pulse_interval_seconds: float = 10,
-    timeout_seconds: float | None = None,
-    cancel_event: threading.Event | None = None,
-) -> subprocess.CompletedProcess[str]:
-    if log:
-        log.write(f"\n$ /bin/sh -c {redact_secrets(command)!r}\n")
-        log.flush()
-    env = _git_safe_env(env)
-    if timeout_seconds is None:
-        timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
-    if pulse is not None or timeout_seconds is not None:
-        return _run_managed(
-            _shell_command(command),
-            cwd=cwd,
-            env=env,
-            log=log,
-            check=check,
-            pulse=pulse,
-            pulse_interval_seconds=pulse_interval_seconds,
-            timeout_seconds=timeout_seconds,
-            cancel_event=cancel_event,
-        )
-    completed = subprocess.run(
-        _shell_command(command), cwd=str(cwd), env=env, shell=False,
-        text=True, encoding="utf-8", errors="replace",
-        stdin=subprocess.DEVNULL, capture_output=True,
-    )
-    if log:
-        if completed.stdout:
-            log.write(completed.stdout)
-        if completed.stderr:
-            log.write(completed.stderr)
-        log.flush()
-    if check and completed.returncode != 0:
-        raise CommandFailed(command, completed.returncode, completed.stdout, completed.stderr, str(cwd))
-    return completed
-
-
-def git_output(args: Sequence[str], *, cwd: str | Path) -> str:
-    completed = run_command(["git", *args], cwd=cwd, check=True)
-    return completed.stdout.strip()
-
-
-def git_output_or_empty(args: Sequence[str], *, cwd: str | Path) -> str:
-    completed = run_command(["git", *args], cwd=cwd, check=False)
-    if completed.returncode != 0:
-        return ""
-    return completed.stdout.strip()
-
-
-def git_repo_root(path: str | Path) -> str:
-    return git_output_or_empty(["rev-parse", "--show-toplevel"], cwd=path)
-
-
-def git_current_branch(path: str | Path) -> str:
-    return git_output_or_empty(["branch", "--show-current"], cwd=path)
-
-
-def git_worktree_clean(path: str | Path) -> bool:
-    # Cleanliness is a deploy safety control, not a best-effort diagnostic.
-    # A failed status command is unknown state and must propagate instead of
-    # collapsing to the same empty string as a clean worktree.
-    return git_output(["status", "--porcelain"], cwd=path) == ""
-
-
-# Git prints one of these structured status records only after the remote has
-# definitively refused a ref update. Match the record itself instead of scanning
-# arbitrary hook/advice prose, which may mention words such as "pull request"
-# even when the transport outcome is unknown.
-_REF_REJECTION = re.compile(
-    r"^\s*!\s+\[(?:remote\s+)?rejected\]\s+.+\s+\(.+\)\s*$",
-    re.IGNORECASE,
-)
-_FORGE_POLICY_REJECTION = re.compile(
-    r"^\s*remote:\s+(?:error:\s+)?GH(?:006|013)\b",
-    re.IGNORECASE,
-)
-_PERMISSION_REJECTION = re.compile(
-    r"^\s*(?:remote:\s+)?(?:error:\s+|fatal:\s+)?permission to .+ denied",
-    re.IGNORECASE,
-)
-
-
-def is_push_rejection(stderr: str) -> bool:
-    """True when stderr proves the remote refused the attempted ref update."""
-    return any(
-        _REF_REJECTION.match(line)
-        or _FORGE_POLICY_REJECTION.match(line)
-        or _PERMISSION_REJECTION.match(line)
-        for line in (stderr or "").splitlines()
-    )
-
-
-def git_dirty_paths(path: str | Path, *, limit: int = 5) -> list[str]:
-    """The paths making a worktree dirty (porcelain status), for error text."""
-    lines = git_output_or_empty(["status", "--porcelain"], cwd=path).splitlines()
-    paths = [line[3:].strip() for line in lines if len(line) > 3]
-    return paths[:limit]
-
-
-def git_remote_url(path: str | Path, remote: str) -> str:
-    return git_output_or_empty(["remote", "get-url", remote], cwd=path)
-
-
-def git_remote_exists(path: str | Path, remote: str) -> bool:
-    return bool(git_remote_url(path, remote))
-
-
-def git_remote_ref_sha(
-    path: str | Path,
-    remote: str,
-    ref: str,
-    *,
-    log: IO[str] | None = None,
-    pulse: Pulse | None = None,
-    pulse_interval_seconds: float = 10,
-    timeout_seconds: float | None = None,
-) -> tuple[bool, str]:
-    """Resolve one exact remote ref without accepting a suffix match.
-
-    ``git ls-remote <remote> main`` can also return ``refs/tags/main``. Deploy
-    audit checks must never attribute a sibling ref to the target, so
-    only the exact fully-qualified name counts. A reachable remote with no such
-    ref returns ``(True, "")``; transport failures return ``(False, "")``.
-    """
-    completed = run_command(
-        ["git", "ls-remote", "--refs", remote, ref],
-        cwd=path,
-        log=log,
-        check=False,
-        pulse=pulse,
-        pulse_interval_seconds=pulse_interval_seconds,
-        timeout_seconds=timeout_seconds,
-    )
-    if completed.returncode != 0:
-        return False, ""
-    target = ref if ref.startswith("refs/") else f"refs/heads/{ref}"
-    for line in completed.stdout.strip().splitlines():
-        parts = line.split("\t") if "\t" in line else line.split()
-        if len(parts) >= 2 and parts[1].strip() == target:
-            return True, parts[0].strip()
-    return True, ""
-
-
-def git_ref_exists(path: str | Path, ref: str) -> bool:
-    completed = run_command(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=path, check=False)
-    return completed.returncode == 0
-
-
-def git_rev_parse(path: str | Path, ref: str) -> str:
-    return git_output(["rev-parse", f"{ref}^{{commit}}"], cwd=path)
-
-
-def git_tree_sha(path: str | Path, ref: str) -> str:
-    return git_output(["rev-parse", f"{ref}^{{tree}}"], cwd=path)
-
-
-PENDING_REF_PREFIX = "refs/mergetrain/pending/"
-DEPLOY_AUDIT_REF_PREFIX = "refs/mergetrain/deploys/"
-
-
-def deploy_audit_ref_name(deploy_sha: str) -> str:
-    """The content-addressed remote ref proving a deploy once landed."""
-    normalized = deploy_sha.strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", normalized):
-        raise MergetrainError(
-            f"cannot build deploy audit ref from invalid commit id {deploy_sha!r}"
-        )
-    return f"{DEPLOY_AUDIT_REF_PREFIX}{normalized}"
-
-
-def pending_ref_name(job_id: int) -> str:
-    """The pin ref that keeps a job's pending deploy sha resolvable across a gc."""
-    return f"{PENDING_REF_PREFIX}{job_id}"
-
-
-def resolve_pending_ref(path: str | Path, job_id: int) -> str:
-    """Return the commit the pin ref points at, or '' if it is gone/pruned."""
-    return git_output_or_empty(
-        ["rev-parse", f"{pending_ref_name(job_id)}^{{commit}}"], cwd=path
-    )
-
-
-def delete_pending_ref(
-    path: str | Path, job_id: int, *, log: IO[str] | None = None
-) -> None:
-    run_command(
-        ["git", "update-ref", "-d", pending_ref_name(job_id)],
-        cwd=path,
-        log=log,
-        check=False,
-    )
-
-
-def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) -> str:
-    expanded = command
-
-    def replace_path(placeholder: str, value: str) -> None:
-        nonlocal expanded
-        rendered: list[str] = []
-        quote: str | None = None
-        escaped = False
-        index = 0
-        while index < len(expanded):
-            if not escaped and expanded.startswith(placeholder, index):
-                if quote == "'":
-                    replacement = value.replace("'", "'\"'\"'")
-                elif quote == '"':
-                    replacement = (
-                        value.replace("\\", "\\\\")
-                        .replace('"', '\\"')
-                        .replace("$", "\\$")
-                        .replace("`", "\\`")
-                    )
-                else:
-                    replacement = shlex.quote(value)
-                rendered.append(replacement)
-                index += len(placeholder)
-                continue
-
-            char = expanded[index]
-            rendered.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\" and quote != "'":
-                escaped = True
-            elif char in {"'", '"'}:
-                if quote is None:
-                    quote = char
-                elif quote == char:
-                    quote = None
-            index += 1
-        expanded = "".join(rendered)
-
-    replacements = {
-        "${integration_ref}": config.git.integration_ref,
-        "${project}": config.project.name,
-    }
-    for key, value in replacements.items():
-        expanded = expanded.replace(key, value)
-    replace_path("${repo}", str(config.repo))
-    replace_path("${worktree}", str(worktree))
-    return expanded
-
-
-def command_env(*, config: MergetrainConfig, worktree: Path) -> dict[str, str]:
-    env = os.environ.copy()
-    inherited_path = env.get("PATH", "")
-    runner_python = ""
-    command_path = inherited_path
-    if sys.executable:
-        runner_python = os.path.abspath(os.path.expanduser(sys.executable))
-        runner_bin = str(Path(runner_python).parent)
-        runner_bin_key = os.path.normcase(os.path.abspath(runner_bin))
-        path_entries = [
-            entry
-            for entry in inherited_path.split(os.pathsep)
-            if entry
-            and os.path.normcase(os.path.abspath(entry)) != runner_bin_key
-        ]
-        command_path = os.pathsep.join((runner_bin, *path_entries))
-    env.update(
-        {
-            "PATH": command_path,
-            "MERGETRAIN_PROJECT": config.project.name,
-            "MERGETRAIN_INTEGRATION_REF": config.git.integration_ref,
-            "MERGETRAIN_REPO": str(config.repo),
-            "MERGETRAIN_RUNNER_PYTHON": runner_python,
-            "MERGETRAIN_WORKTREE": str(worktree),
-        }
-    )
-    return env
 
 
 class _BisectAbort(Exception):
     """Bisect isolation cannot classify the failure from gate evidence."""
-
-
-@dataclass(slots=True)
-class _GateOutcome:
-    output: str
-    error: BaseException | None = None
-
-
-def _gate_dependencies(gates: Sequence[GateConfig]) -> dict[str, tuple[str, ...]]:
-    """Resolve omitted dependencies into deterministic sequential stages.
-
-    Contiguous gates with the same non-empty ``parallel_group`` form one stage.
-    Every member of a stage defaults to depending on every member of the prior
-    stage. Ungrouped gates are one-gate stages, preserving the legacy strictly
-    sequential order. Explicit ``needs`` replaces that default.
-    """
-
-    stages: list[list[GateConfig]] = []
-    for gate in gates:
-        if (
-            gate.parallel_group
-            and stages
-            and stages[-1][0].parallel_group == gate.parallel_group
-        ):
-            stages[-1].append(gate)
-        else:
-            stages.append([gate])
-
-    dependencies: dict[str, tuple[str, ...]] = {}
-    prior_names: tuple[str, ...] = ("diff-check",)
-    for stage in stages:
-        for gate in stage:
-            dependencies[gate.name] = gate.needs or prior_names
-        prior_names = tuple(gate.name for gate in stage)
-    return dependencies
 
 
 class GitRunner:
@@ -683,10 +58,13 @@ class GitRunner:
     def __init__(self, config: MergetrainConfig):
         self.config = config
         self.repo = config.repo
+        self._gates = GateRunner(config)
+        self._validation = ValidationReuse(config, self._gates)
+        self._worktrees = WorktreeManager(config, self._gates)
+        self._pushes = AtomicPush(config)
 
     def _ensure_state_dirs(self) -> None:
-        self.config.state.logs.mkdir(parents=True, exist_ok=True)
-        self.config.state.worktree_root.mkdir(parents=True, exist_ok=True)
+        self._worktrees.ensure_state_dirs()
 
     def _refresh_lease(
         self,
@@ -816,36 +194,22 @@ class GitRunner:
         return self.config.state.logs / f"{prefix}-{first_job_id}-{stamp}-{suffix}.log"
 
     def _worktree_path(self, first_job_id: int) -> Path:
-        suffix = uuid.uuid4().hex[:8]
-        name = f"{self.config.project.name}-mergetrain-{first_job_id}-{suffix}"
-        return self.config.state.worktree_root / name
+        return self._worktrees.worktree_path(first_job_id)
 
     def _primary_worktree_path(self, first_job_id: int, *, deploy: bool) -> tuple[Path, bool]:
-        persistent = (
-            not deploy
-            and self.config.state.validation_workspace.mode == "persistent"
-        )
-        if persistent:
-            return self.config.validation_worktree_path, True
-        return self._worktree_path(first_job_id), False
+        return self._worktrees.primary_path(first_job_id, deploy=deploy)
 
     def _persistent_workspace_marker(self) -> Path:
-        return (
-            self.config.state.worktree_root
-            / f".{self.config.project.name}-validation-workspace.json"
-        )
+        return self._worktrees.persistent_workspace_marker()
 
-    def _cleanup_worktree(self, worktree: Path, *, log: IO[str] | None, keep_worktree: bool) -> None:
-        if keep_worktree:
-            if log:
-                log.write(f"\nkeeping integration worktree: {worktree}\n")
-            return
-        if not worktree.exists():
-            return
-        try:
-            run_command(["git", "worktree", "remove", "--force", str(worktree)], cwd=self.repo, log=log, check=True)
-        except Exception:
-            shutil.rmtree(worktree, ignore_errors=True)
+    def _cleanup_worktree(
+        self, worktree: Path, *, log: IO[str] | None, keep_worktree: bool
+    ) -> None:
+        self._worktrees.cleanup(
+            worktree,
+            log=log,
+            keep_worktree=keep_worktree,
+        )
 
     def _run_gate(
         self,
@@ -856,22 +220,11 @@ class GitRunner:
         pulse: Pulse | None,
         cancel_event: threading.Event | None = None,
     ) -> None:
-        command = expand_command(gate.run, config=self.config, worktree=worktree)
-        env = command_env(config=self.config, worktree=worktree)
-        log.write(f"\n## gate: {gate.name}\n")
-        run_shell(
-            command,
-            cwd=worktree,
-            env=env,
+        self._gates.run_gate(
+            gate,
+            worktree=worktree,
             log=log,
-            check=True,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=(
-                gate.timeout_seconds
-                if gate.timeout_seconds is not None
-                else self.config.queue.command_timeout_seconds
-            ),
             cancel_event=cancel_event,
         )
 
@@ -884,226 +237,13 @@ class GitRunner:
         on_gate: GateProgress | None,
         initial_states: dict[str, tuple[str, str]],
     ) -> None:
-        """Run configured gates in deterministic, resource-bounded waves.
-
-        Only gates sharing an explicit ``parallel_group`` may overlap. Each
-        wave emits active and terminal events in declaration order and buffers
-        per-gate logs before appending them in that same order, so completion
-        races never leak into JSON or log ordering. Worker threads never touch
-        SQLite; the main scheduler alone invokes ``pulse`` and ``on_gate``.
-        """
-
-        gates = self.config.gates
-        if not gates:
-            return
-        total = 1 + len(gates)
-        indexes = {gate.name: index for index, gate in enumerate(gates, start=2)}
-        dependencies = _gate_dependencies(gates)
-        completed = {"diff-check"}
-        pending = [gate for gate in gates if gate.name not in initial_states]
-
-        for gate in gates:
-            initial_state = initial_states.get(gate.name)
-            if initial_state is None:
-                continue
-            event_state, detail = initial_state
-            if event_state == "skipped":
-                log.write(f"\n## gate skipped: {gate.name} ({detail})\n")
-            if on_gate:
-                on_gate(
-                    gate.name,
-                    event_state,
-                    indexes[gate.name],
-                    total,
-                    detail,
-                )
-            completed.add(gate.name)
-
-        plan_started = time.monotonic()
-        plan_timeout = self.config.gate_parallelism.timeout_seconds
-        pulse_interval = max(
-            0.1, float(self.config.queue.heartbeat_interval_seconds)
+        self._gates.run_configured_plan(
+            worktree=worktree,
+            log=log,
+            pulse=pulse,
+            on_gate=on_gate,
+            initial_states=initial_states,
         )
-        next_pulse = time.monotonic() + pulse_interval
-
-        while pending:
-            ready = [
-                gate
-                for gate in pending
-                if set(dependencies[gate.name]).issubset(completed)
-            ]
-            if not ready:
-                unresolved = ", ".join(gate.name for gate in pending)
-                raise MergetrainError(
-                    f"configured gate dependencies cannot make progress: {unresolved}"
-                )
-
-            first = ready[0]
-            candidates = (
-                [
-                    gate
-                    for gate in ready
-                    if gate.parallel_group == first.parallel_group
-                ]
-                if first.parallel_group
-                else [first]
-            )
-            selected: list[GateConfig] = []
-            used_workers = 0
-            for gate in candidates:
-                if (
-                    used_workers + gate.workers
-                    > self.config.gate_parallelism.max_workers
-                ):
-                    continue
-                selected.append(gate)
-                used_workers += gate.workers
-            if not selected:
-                # Config validation rejects an individual gate whose weight is
-                # over the ceiling, so this is defensive rather than reachable.
-                raise MergetrainError(
-                    f"gate {first.name!r} exceeds the configured worker ceiling"
-                )
-
-            for gate in selected:
-                if on_gate:
-                    on_gate(
-                        gate.name,
-                        "active",
-                        indexes[gate.name],
-                        total,
-                        _dashboard_command(gate.run),
-                    )
-
-            cancel_event = threading.Event()
-
-            def execute(
-                gate: GateConfig,
-                *,
-                batch_cancel: threading.Event = cancel_event,
-            ) -> _GateOutcome:
-                gate_log = io.StringIO()
-                try:
-                    self._run_gate(
-                        gate,
-                        worktree=worktree,
-                        log=gate_log,
-                        pulse=None,
-                        cancel_event=batch_cancel,
-                    )
-                except BaseException as exc:
-                    if not isinstance(exc, CancellationRequested):
-                        batch_cancel.set()
-                    return _GateOutcome(gate_log.getvalue(), exc)
-                return _GateOutcome(gate_log.getvalue())
-
-            futures: dict[str, Future[_GateOutcome]] = {}
-            monitor_error: BaseException | None = None
-            with ThreadPoolExecutor(
-                max_workers=len(selected),
-                thread_name_prefix="mergetrain-gate",
-            ) as executor:
-                for gate in selected:
-                    futures[gate.name] = executor.submit(execute, gate)
-                unfinished = set(futures.values())
-                while unfinished:
-                    _, unfinished = wait(unfinished, timeout=0.1)
-                    now = time.monotonic()
-                    if (
-                        plan_timeout is not None
-                        and now - plan_started >= plan_timeout
-                        and monitor_error is None
-                    ):
-                        monitor_error = CommandFailed(
-                            "configured gate plan",
-                            124,
-                            stderr=(
-                                "gate plan timed out after "
-                                f"{plan_timeout:g} seconds"
-                            ),
-                            cwd=str(worktree),
-                        )
-                        cancel_event.set()
-                    if pulse is not None and now >= next_pulse:
-                        try:
-                            pulse()
-                        except BaseException as exc:
-                            if monitor_error is None:
-                                monitor_error = exc
-                                cancel_event.set()
-                        next_pulse = now + pulse_interval
-
-            outcomes = {
-                gate.name: futures[gate.name].result() for gate in selected
-            }
-            for gate in selected:
-                output = outcomes[gate.name].output
-                if output:
-                    log.write(output)
-            log.flush()
-
-            for gate in selected:
-                error = outcomes[gate.name].error
-                if error is None and monitor_error is None:
-                    terminal_state = "success"
-                elif error is None:
-                    terminal_state = "canceled"
-                elif isinstance(error, CancellationRequested):
-                    terminal_state = "canceled"
-                else:
-                    terminal_state = "failure"
-                if on_gate:
-                    failure_detail = "canceled"
-                    if isinstance(error, CommandFailed):
-                        failure_detail = f"exit_code={error.returncode}"
-                    elif error is not None:
-                        failure_detail = type(error).__name__
-                    elif monitor_error is not None:
-                        failure_detail = type(monitor_error).__name__
-                    on_gate(
-                        gate.name,
-                        terminal_state,
-                        indexes[gate.name],
-                        total,
-                        (
-                            _dashboard_command(gate.run)
-                            if terminal_state == "success"
-                            else failure_detail
-                        ),
-                    )
-
-            if monitor_error is not None:
-                raise monitor_error
-            failure = next(
-                (
-                    outcome.error
-                    for gate in selected
-                    if (outcome := outcomes[gate.name]).error is not None
-                    and not isinstance(
-                        outcome.error, CancellationRequested
-                    )
-                ),
-                None,
-            )
-            if failure is not None:
-                raise failure
-            cancellation = next(
-                (
-                    outcome.error
-                    for gate in selected
-                    if isinstance(
-                        (outcome := outcomes[gate.name]).error,
-                        CancellationRequested,
-                    )
-                ),
-                None,
-            )
-            if cancellation is not None:
-                raise cancellation
-
-            for gate in selected:
-                completed.add(gate.name)
-                pending.remove(gate)
 
     def _changed_paths(
         self,
@@ -1114,36 +254,13 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
     ) -> tuple[str, ...] | None:
-        """Return exact changed paths, or ``None`` to make every gate run."""
-
-        if not base_ref or not head_ref:
-            log.write(
-                "\npath-aware gate selection unavailable; running all gates\n"
-            )
-            return None
-        try:
-            completed = run_command(
-                [
-                    "git",
-                    "diff",
-                    "--name-status",
-                    "-z",
-                    "--find-renames",
-                    f"{base_ref}..{head_ref}",
-                    "--",
-                ],
-                cwd=worktree,
-                log=None,
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-            )
-            return parse_name_status_z(completed.stdout)
-        except (CommandFailed, ValueError):
-            log.write(
-                "\npath-aware gate selection failed; running all gates\n"
-            )
-            return None
+        return self._gates.changed_paths(
+            worktree=worktree,
+            base_ref=base_ref,
+            head_ref=head_ref,
+            log=log,
+            pulse=pulse,
+        )
 
     def _run_gates(
         self,
@@ -1155,63 +272,17 @@ class GitRunner:
         base_ref: str = "",
         head_ref: str = "HEAD",
     ) -> None:
-        total = 1 + len(self.config.gates)
-        diff_command = ["git", "diff", "--check", f"{self.config.git.integration_ref}..HEAD"]
-        if on_gate:
-            on_gate("diff-check", "active", 1, total, _dashboard_command(diff_command))
-        run_command(
-            diff_command,
-            cwd=worktree,
-            log=log,
-            pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
-        )
-        if on_gate:
-            on_gate("diff-check", "success", 1, total, _dashboard_command(diff_command))
-        changed_paths = None
-        if any(gate.paths for gate in self.config.gates):
-            changed_paths = self._changed_paths(
-                worktree=worktree,
-                base_ref=base_ref,
-                head_ref=head_ref,
-                log=log,
-                pulse=pulse,
-            )
-        initial_states: dict[str, tuple[str, str]] = {}
-        for gate in self.config.gates:
-            if (
-                gate.paths
-                and changed_paths is not None
-                and not any_path_matches(gate.paths, changed_paths)
-            ):
-                reason = "no changed paths matched configured paths"
-                initial_states[gate.name] = ("skipped", reason)
-        self._run_configured_gate_plan(
+        self._gates.run_gates(
             worktree=worktree,
             log=log,
             pulse=pulse,
             on_gate=on_gate,
-            initial_states=initial_states,
+            base_ref=base_ref,
+            head_ref=head_ref,
         )
 
-    def _run_verify_hooks(
-        self, *, worktree: Path, log: IO[str], pulse: Pulse | None
-    ) -> None:
-        for hook in self.config.deploy.verify:
-            command = expand_command(hook.run, config=self.config, worktree=worktree)
-            env = command_env(config=self.config, worktree=worktree)
-            log.write(f"\n## verify: {hook.name}\n")
-            run_shell(
-                command,
-                cwd=worktree,
-                env=env,
-                log=log,
-                check=True,
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-            )
+    def _run_verify_hooks(self, *, worktree: Path, log: IO[str], pulse: Pulse | None) -> None:
+        self._gates.run_verify_hooks(worktree=worktree, log=log, pulse=pulse)
 
     def _environment_fingerprint(
         self,
@@ -1220,31 +291,11 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
     ) -> str:
-        values: list[tuple[str, str]] = []
-        for fingerprint in self.config.deploy.reuse.fingerprints:
-            command = expand_command(
-                fingerprint.run, config=self.config, worktree=worktree
-            )
-            log.write(
-                f"\n## reuse fingerprint: {fingerprint.name} (opaque output hashed)\n"
-            )
-            completed = run_shell(
-                command,
-                cwd=worktree,
-                env=command_env(config=self.config, worktree=worktree),
-                log=None,
-                check=True,
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-            )
-            value = completed.stdout.strip()
-            if not value or "\n" in value or len(value) > 512:
-                raise MergetrainError(
-                    f"reuse fingerprint {fingerprint.name!r} must emit one non-empty line of at most 512 characters"
-                )
-            values.append((fingerprint.name, value))
-        return environment_sha(values)
+        return self._gates.environment_fingerprint(
+            worktree=worktree,
+            log=log,
+            pulse=pulse,
+        )
 
     def _validation_identity_fields(
         self,
@@ -1257,19 +308,15 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
     ) -> dict[str, str]:
-        return {
-            "validation_tree_sha": git_tree_sha(worktree, validation_sha),
-            "validation_gate_policy_sha": gate_policy_sha(self.config),
-            "validation_environment_sha": self._environment_fingerprint(
-                worktree=worktree, log=log, pulse=pulse
-            ),
-            "validation_train_sha": train_identity_sha(
-                jobs,
-                train_id=train_id,
-                train_size=len(jobs),
-                validated_heads=validated_heads,
-            ),
-        }
+        return self._validation.identity_fields(
+            jobs=jobs,
+            train_id=train_id,
+            validated_heads=validated_heads,
+            validation_sha=validation_sha,
+            worktree=worktree,
+            log=log,
+            pulse=pulse,
+        )
 
     def _reuse_decision(
         self,
@@ -1281,380 +328,13 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
     ) -> ReuseDecision:
-        validation_shas = {job.validation_sha for job in jobs if job.validation_sha}
-        validation_sha = next(iter(validation_shas)) if len(validation_shas) == 1 else ""
-        if not authorized:
-            return ReuseDecision(
-                authorized=False,
-                eligible=False,
-                action="rerun",
-                validation_sha=validation_sha,
-                reasons=("validated gate reuse is not authorized",),
-                checks=(
-                    ReuseCheck(
-                        code="authorization",
-                        status="mismatch",
-                        expected=True,
-                        actual=False,
-                        detail="validated gate reuse is not authorized",
-                    ),
-                ),
-            )
-
-        reasons: list[str] = []
-        checks: list[ReuseCheck] = [
-            ReuseCheck(
-                code="authorization",
-                status="match",
-                expected=True,
-                actual=True,
-                detail="reuse was explicitly authorized",
-            )
-        ]
-
-        train_ids = sorted({job.train_id for job in jobs if job.train_id})
-        membership_matches = bool(jobs) and len(train_ids) == 1
-        checks.append(
-            ReuseCheck(
-                code="train_membership",
-                status="match" if membership_matches else "mismatch",
-                expected="one non-empty train id",
-                actual=train_ids,
-                detail=(
-                    "train membership is complete"
-                    if membership_matches
-                    else "train membership is incomplete or mixed"
-                ),
-            )
-        )
-        if not membership_matches:
-            reasons.append("train membership is incomplete or mixed")
-
-        train_sizes = sorted({job.train_size for job in jobs})
-        size_matches = bool(
-            jobs
-            and len(train_sizes) == 1
-            and jobs[0].train_size == len(jobs)
-        )
-        checks.append(
-            ReuseCheck(
-                code="train_size",
-                status="match" if size_matches else "mismatch",
-                expected=len(jobs),
-                actual=train_sizes,
-                detail=(
-                    "validated train size matches membership"
-                    if size_matches
-                    else "train size does not match its validated membership"
-                ),
-            )
-        )
-        if not size_matches:
-            reasons.append("train size does not match its validated membership")
-
-        validation_sha_matches = len(validation_shas) == 1
-        checks.append(
-            ReuseCheck(
-                code="validation_commit",
-                status="match" if validation_sha_matches else "mismatch",
-                expected="one shared validation SHA",
-                actual=sorted(validation_shas),
-                detail=(
-                    "validated jobs share one validation SHA"
-                    if validation_sha_matches
-                    else "validated jobs do not share one validation SHA"
-                ),
-            )
-        )
-        if not validation_sha_matches:
-            reasons.append("validated jobs do not share one validation SHA")
-
-        validation_bases = sorted(
-            {job.validation_base_sha for job in jobs if job.validation_base_sha}
-        )
-        base_matches = bool(
-            jobs
-            and len(validation_bases) == 1
-            and jobs[0].validation_base_sha == integration_base_sha
-        )
-        checks.append(
-            ReuseCheck(
-                code="integration_base",
-                status="match" if base_matches else "mismatch",
-                expected=integration_base_sha,
-                actual=validation_bases,
-                detail=(
-                    "integration ref still matches validation"
-                    if base_matches
-                    else "integration ref moved since validation"
-                ),
-            )
-        )
-        if not base_matches:
-            reasons.append("integration ref moved since validation")
-
-        current_train_identity = train_identity_sha(jobs) if jobs else ""
-        recorded_train_identity = jobs[0].validation_train_sha if jobs else ""
-        train_identity_matches = bool(
-            jobs
-            and recorded_train_identity
-            and current_train_identity == recorded_train_identity
-        )
-        checks.append(
-            ReuseCheck(
-                code="train_identity",
-                status="match" if train_identity_matches else "mismatch",
-                expected=recorded_train_identity,
-                actual=current_train_identity,
-                detail=(
-                    "train membership identity matches validation"
-                    if train_identity_matches
-                    else "train membership identity changed since validation"
-                ),
-            )
-        )
-        if jobs and current_train_identity != recorded_train_identity:
-            reasons.append("train membership identity changed since validation")
-
-        current_policy_sha = gate_policy_sha(self.config)
-        recorded_policy_sha = jobs[0].validation_gate_policy_sha if jobs else ""
-        policy_matches = bool(
-            jobs
-            and recorded_policy_sha
-            and current_policy_sha == recorded_policy_sha
-        )
-        checks.append(
-            ReuseCheck(
-                code="gate_policy",
-                status="match" if policy_matches else "mismatch",
-                expected=recorded_policy_sha,
-                actual=current_policy_sha,
-                detail=(
-                    "gate and fingerprint policy matches validation"
-                    if policy_matches
-                    else "gate or fingerprint policy changed since validation"
-                ),
-            )
-        )
-        if jobs and current_policy_sha != recorded_policy_sha:
-            reasons.append("gate or fingerprint policy changed since validation")
-
-        age_minutes = (
-            validation_age_minutes(jobs[0].validated_at)
-            if jobs
-            else float("inf")
-        )
-        age_matches = (
-            age_minutes <= self.config.deploy.reuse.max_age_minutes
-        )
-        checks.append(
-            ReuseCheck(
-                code="validation_age",
-                status="match" if age_matches else "mismatch",
-                expected={
-                    "maximum_minutes": self.config.deploy.reuse.max_age_minutes
-                },
-                actual={
-                    "age_minutes": (
-                        round(age_minutes, 3)
-                        if age_minutes != float("inf")
-                        else None
-                    )
-                },
-                detail=(
-                    "validation is within the configured reuse age"
-                    if age_matches
-                    else "validation is older than the configured reuse age"
-                ),
-            )
-        )
-        if jobs and not age_matches:
-            reasons.append("validation is older than the configured reuse age")
-
-        required_fields = (
-            "validation_tree_sha",
-            "validation_gate_policy_sha",
-            "validation_environment_sha",
-            "validation_train_sha",
-        )
-        for field in required_fields:
-            all_values = {getattr(job, field) for job in jobs}
-            values = {value for value in all_values if value}
-            shared = len(values) == 1 and len(values) == len(all_values)
-            detail = (
-                f"validated jobs share {field}"
-                if shared
-                else f"validated jobs lack one shared {field}"
-            )
-            checks.append(
-                ReuseCheck(
-                    code=f"shared_{field}",
-                    status="match" if shared else "mismatch",
-                    expected="one shared non-empty SHA",
-                    actual=sorted(values),
-                    detail=detail,
-                )
-            )
-            if not shared:
-                reasons.append(detail)
-
-        commit_exists = bool(
-            validation_sha and git_ref_exists(worktree, validation_sha)
-        )
-        checks.append(
-            ReuseCheck(
-                code="validation_commit_available",
-                status="match" if commit_exists else "mismatch",
-                expected=True,
-                actual=commit_exists,
-                detail=(
-                    "validation commit exists in the local repository"
-                    if commit_exists
-                    else "validation commit is missing from the local repository"
-                ),
-            )
-        )
-        if validation_sha and not commit_exists:
-            reasons.append("validation commit is missing from the local repository")
-        elif validation_sha and jobs:
-            current_tree_sha = git_tree_sha(worktree, validation_sha)
-            recorded_tree_sha = jobs[0].validation_tree_sha
-            tree_matches = current_tree_sha == recorded_tree_sha
-            checks.append(
-                ReuseCheck(
-                    code="validation_tree",
-                    status="match" if tree_matches else "mismatch",
-                    expected=recorded_tree_sha,
-                    actual=current_tree_sha,
-                    detail=(
-                        "validation commit tree matches recorded identity"
-                        if tree_matches
-                        else "validation commit tree does not match its recorded identity"
-                    ),
-                )
-            )
-            if not tree_matches:
-                reasons.append("validation commit tree does not match its recorded identity")
-
-        environment_check_recorded = False
-        if not reasons and jobs:
-            reset = run_command(
-                ["git", "reset", "--hard", validation_sha],
-                cwd=worktree,
-                log=log,
-                check=False,
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-            )
-            if reset.returncode != 0:
-                reasons.append("validation commit could not be restored for fingerprinting")
-            else:
-                try:
-                    current_environment_sha = self._environment_fingerprint(
-                        worktree=worktree, log=log, pulse=pulse
-                    )
-                except QueueBusy:
-                    # Queue contention says nothing about the toolchain. Absorbed
-                    # here it would report a fingerprint mismatch and silently
-                    # re-run gates that were legitimately reusable.
-                    raise
-                except (CommandFailed, MergetrainError):
-                    environment_check_recorded = True
-                    checks.append(
-                        ReuseCheck(
-                            code="environment",
-                            status="mismatch",
-                            expected=jobs[0].validation_environment_sha,
-                            actual="unavailable",
-                            detail=(
-                                "required environment fingerprint could not be reproduced"
-                            ),
-                        )
-                    )
-                    reasons.append(
-                        "required environment fingerprint could not be reproduced"
-                    )
-                else:
-                    environment_check_recorded = True
-                    environment_matches = (
-                        current_environment_sha
-                        == jobs[0].validation_environment_sha
-                    )
-                    checks.append(
-                        ReuseCheck(
-                            code="environment",
-                            status=(
-                                "match" if environment_matches else "mismatch"
-                            ),
-                            expected=jobs[0].validation_environment_sha,
-                            actual=current_environment_sha,
-                            detail=(
-                                "environment fingerprint matches validation"
-                                if environment_matches
-                                else "environment or toolchain fingerprint changed"
-                            ),
-                        )
-                    )
-                    if not environment_matches:
-                        reasons.append("environment or toolchain fingerprint changed")
-                finally:
-                    run_command(
-                        ["git", "reset", "--hard", integration_base_sha],
-                        cwd=worktree,
-                        log=log,
-                        pulse=pulse,
-                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                        timeout_seconds=self.config.queue.command_timeout_seconds,
-                    )
-                    # Fingerprint adapters are arbitrary shell commands. Keep
-                    # their untracked caches/artifacts from poisoning either
-                    # the exact-reuse restore or the reassembly fallback.
-                    run_command(
-                        ["git", "clean", "-fdx"],
-                        cwd=worktree,
-                        log=log,
-                        pulse=pulse,
-                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                        timeout_seconds=self.config.queue.command_timeout_seconds,
-                    )
-
-        if not environment_check_recorded:
-            checks.append(
-                ReuseCheck(
-                    code="environment",
-                    status="not_evaluated",
-                    expected=(
-                        jobs[0].validation_environment_sha if jobs else ""
-                    ),
-                    actual=None,
-                    detail=(
-                        "environment check was skipped because an earlier "
-                        "identity check did not match"
-                    ),
-                )
-            )
-
-        eligible = not reasons
-        action = "reuse" if eligible else self.config.deploy.reuse.on_mismatch
-        changed_paths: tuple[str, ...] | None = ()
-        if eligible and any(gate.paths for gate in self.config.gates):
-            changed_paths = self._changed_paths(
-                worktree=worktree,
-                base_ref=integration_base_sha,
-                head_ref=validation_sha,
-                log=log,
-                pulse=pulse,
-            )
-        return ReuseDecision(
-            authorized=True,
-            eligible=eligible,
-            action=action,
-            validation_sha=validation_sha,
-            reused_validation_sha=validation_sha if eligible else "",
-            reasons=tuple(reasons),
-            checks=tuple(checks),
-            changed_paths=changed_paths,
+        return self._validation.decide(
+            jobs,
+            worktree=worktree,
+            integration_base_sha=integration_base_sha,
+            authorized=authorized,
+            log=log,
+            pulse=pulse,
         )
 
     def preview_validated_reuse(
@@ -1730,38 +410,13 @@ class GitRunner:
         pulse: Pulse | None,
         on_gate: GateProgress | None = None,
     ) -> None:
-        total = 1 + len(self.config.gates)
-        if on_gate:
-            on_gate("diff-check", "reused", 1, total, validation_sha)
-        changed_paths = None
-        if any(gate.paths for gate in self.config.gates):
-            changed_paths = self._changed_paths(
-                worktree=worktree,
-                base_ref=base_ref,
-                head_ref=validation_sha,
-                log=log,
-                pulse=pulse,
-            )
-        initial_states: dict[str, tuple[str, str]] = {}
-        for gate in self.config.gates:
-            if (
-                gate.paths
-                and changed_paths is not None
-                and not any_path_matches(gate.paths, changed_paths)
-            ):
-                reason = "no changed paths matched configured paths"
-                initial_states[gate.name] = ("skipped", reason)
-                continue
-            if not gate.always_rerun_on_deploy and not (
-                gate.paths and changed_paths is None
-            ):
-                initial_states[gate.name] = ("reused", validation_sha)
-        self._run_configured_gate_plan(
+        self._gates.run_reused_gates(
             worktree=worktree,
+            validation_sha=validation_sha,
+            base_ref=base_ref,
             log=log,
             pulse=pulse,
             on_gate=on_gate,
-            initial_states=initial_states,
         )
 
     def reverify_deploy(self, *, deploy_sha: str, log: IO[str]) -> bool:
@@ -1779,12 +434,15 @@ class GitRunner:
         self._ensure_state_dirs()
         worktree = self._worktree_path(0)
         run_command(
-            ["git", "fetch", self.config.git.remote], cwd=self.repo, log=log,
+            ["git", "fetch", self.config.git.remote],
+            cwd=self.repo,
+            log=log,
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         run_command(
             ["git", "worktree", "add", "--detach", str(worktree), deploy_sha],
-            cwd=self.repo, log=log,
+            cwd=self.repo,
+            log=log,
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         try:
@@ -1796,24 +454,7 @@ class GitRunner:
             self._cleanup_worktree(worktree, log=log, keep_worktree=False)
 
     def _assert_tree_unchanged_by_gates(self, worktree: Path, deploy_sha: str) -> None:
-        """Fail closed if a gate moved HEAD or dirtied the tree after the deploy
-        sha was recorded. Gates are verification, not mutation — the exact sha
-        that passed gates must be the sha that is pushed and recorded (#1)."""
-        head = git_rev_parse(worktree, "HEAD")
-        try:
-            clean = git_worktree_clean(worktree)
-        except CommandFailed as exc:
-            raise MergeBlocked(
-                "could not verify that the gated worktree is clean; blocking "
-                "because unknown worktree state must never be pushed"
-            ) from exc
-        if head != deploy_sha or not clean:
-            detail = "left the worktree dirty" if not clean else f"moved HEAD to {head[:12]}"
-            raise MergeBlocked(
-                f"a gate {detail} after gating began; gates must not change the "
-                f"integration tree — blocking so a commit differing from the "
-                f"tested {deploy_sha[:12]} tree is never shipped"
-            )
+        self._pushes.assert_tree_unchanged(worktree, deploy_sha)
 
     def push_verified_head(
         self,
@@ -1825,44 +466,14 @@ class GitRunner:
         audit_ref: str = "",
         audit_expected_sha: str | None = None,
     ) -> None:
-        if not self.config.git.push_refs:
-            raise MergetrainError(
-                "git.push_refs must not be empty for "
-                f"{self.config.terminology.action} mode"
-            )
-        # Push the exact recorded sha, not HEAD: if anything moved HEAD after the
-        # deploy sha was captured, the recorded and pinned sha is still what ships
-        # (guarantee #1). Falls back to HEAD only when no sha is threaded.
-        target = deploy_sha or git_rev_parse(worktree, "HEAD")
-        audit_ref = audit_ref or deploy_audit_ref_name(target)
-        if audit_expected_sha is None:
-            audit_ref, audit_expected_sha = self._audit_ref_expectation(
-                worktree=worktree,
-                deploy_sha=target,
-                log=log,
-                pulse=pulse,
-            )
-        # The lease makes the content-addressed audit ref immutable from this
-        # client: create it only when absent, or accept the exact same value on
-        # an idempotent/no-op deploy. A concurrent delete or rewrite rejects the
-        # whole atomic push, including every configured payload ref.
-        push_args = [
-            "git",
-            "push",
-            "--atomic",
-            f"--force-with-lease={audit_ref}:{audit_expected_sha}",
-            self.config.git.remote,
-        ]
-        push_args.extend(f"{target}:{ref}" for ref in self.config.git.push_refs)
-        if audit_ref not in self.config.git.push_refs:
-            push_args.append(f"{target}:{audit_ref}")
-        run_command(
-            push_args,
-            cwd=worktree,
+        self._pushes.push_verified_head(
+            worktree=worktree,
+            deploy_sha=deploy_sha,
             log=log,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            audit_ref=audit_ref,
+            audit_expected_sha=audit_expected_sha,
+            audit_expectation=self._audit_ref_expectation,
         )
 
     def _audit_ref_expectation(
@@ -1873,32 +484,12 @@ class GitRunner:
         log: IO[str] | None,
         pulse: Pulse | None = None,
     ) -> tuple[str, str]:
-        """Read and validate the content-addressed remote audit ref.
-
-        The returned SHA becomes a ``--force-with-lease`` expectation on the
-        atomic push. A mismatched value is evidence of external corruption or a
-        hash/ref collision, so fail before writing the durable pending marker.
-        """
-        audit_ref = deploy_audit_ref_name(deploy_sha)
-        reachable, current = git_remote_ref_sha(
-            worktree,
-            self.config.git.remote,
-            audit_ref,
+        return self._pushes.audit_ref_expectation(
+            worktree=worktree,
+            deploy_sha=deploy_sha,
             log=log,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
         )
-        if not reachable:
-            raise MergetrainError(
-                f"could not inspect deploy audit ref {audit_ref}; push was not attempted"
-            )
-        if current and current != deploy_sha:
-            raise PushRejected(
-                f"deploy audit ref {audit_ref} points to {current}, expected "
-                f"{deploy_sha}; refusing to rewrite immutable audit evidence"
-            )
-        return audit_ref, current
 
     def _pending_ref(self, job_id: int) -> str:
         return pending_ref_name(job_id)
@@ -1916,55 +507,21 @@ class GitRunner:
         audit_ref: str,
         audit_expected_sha: str,
     ) -> None:
-        """Write-ahead the pending marker + pin, then push payload and audit refs.
-
-        The marker commit is fsync-durable (synchronous=FULL) before the remote
-        is mutated, and the pin ref keeps deploy_sha resolvable for a later
-        reconcile even if git gc prunes a crashed worktree's objects. Both the
-        batch and the one-by-one isolation push go through here, so neither can
-        touch the remote without first recording intent (0.3.0 Phase 1).
-        """
-        record_pending_push(
+        self._pushes.push_with_marker(
             conn,
             job_ids=job_ids,
             deploy_sha=deploy_sha,
-            claim_token=lease_token,
-            remote=self.config.git.remote,
-            push_refs=self.config.git.push_refs,
-        )
-        for job_id in job_ids:
-            pending_ref = self._pending_ref(job_id)
-            try:
-                run_command(
-                    ["git", "update-ref", pending_ref, deploy_sha],
-                    cwd=self.repo,
-                    log=log,
-                    check=True,
-                )
-            except CommandFailed as exc:
-                raise MergetrainError(
-                    f"could not create recovery pin {pending_ref}; push was not attempted"
-                ) from exc
-            pinned_sha = resolve_pending_ref(self.repo, job_id)
-            if pinned_sha != deploy_sha:
-                raise MergetrainError(
-                    f"recovery pin {pending_ref} resolved to {pinned_sha or 'nothing'}, "
-                    f"expected {deploy_sha}; push was not attempted"
-                )
-        self.push_verified_head(
+            lease_token=lease_token,
             worktree=worktree,
-            deploy_sha=deploy_sha,
             log=log,
             pulse=pulse,
             audit_ref=audit_ref,
             audit_expected_sha=audit_expected_sha,
+            push_verified=self.push_verified_head,
         )
 
-    def _clear_pending_refs(
-        self, job_ids: list[int], *, log: IO[str] | None = None
-    ) -> None:
-        for job_id in job_ids:
-            delete_pending_ref(self.repo, job_id, log=log)
+    def _clear_pending_refs(self, job_ids: list[int], *, log: IO[str] | None = None) -> None:
+        self._pushes.clear_pending_refs(job_ids, log=log)
 
     def _clear_rejected_push(
         self,
@@ -1974,10 +531,12 @@ class GitRunner:
         lease_token: str,
         log: IO[str] | None = None,
     ) -> None:
-        """Drop DB and pin markers after a push rejection proves no ref landed."""
-
-        clear_rejected_push(conn, job_ids=job_ids, claim_token=lease_token)
-        self._clear_pending_refs(job_ids, log=log)
+        self._pushes.clear_rejected_push(
+            conn,
+            job_ids=job_ids,
+            lease_token=lease_token,
+            log=log,
+        )
 
     def _gate_progress_callback(
         self,
@@ -1986,9 +545,7 @@ class GitRunner:
         lease_token: str,
         job_id: int | None = None,
     ) -> GateProgress:
-        def report(
-            name: str, state: str, index: int, total: int, command: str
-        ) -> None:
+        def report(name: str, state: str, index: int, total: int, command: str) -> None:
             verb = {
                 "active": "Running",
                 "reused": "Reused",
@@ -2022,200 +579,30 @@ class GitRunner:
         state: _PushVerifyState,
         event_job_id: int | None = None,
     ) -> None:
-        """Run the shared marker, push classification, and verify sequence."""
-
-        before_push()
-        self._event(
+        self._pushes.deploy_and_verify(
             conn,
+            job_ids=job_ids,
+            deploy_sha=deploy_sha,
             lease_token=lease_token,
-            job_id=event_job_id,
-            phase="pushing",
-            state="active",
-            message="Pushing verified HEAD atomically",
+            worktree=worktree,
+            log=log,
+            before_push=before_push,
+            ownership_pulse=ownership_pulse,
+            state=state,
+            event=self._event,
+            event_job_id=event_job_id,
+            audit_expectation=self._audit_ref_expectation,
+            push_with_marker=self._push_with_marker,
+            clear_rejected=self._clear_rejected_push,
+            run_verify_hooks=self._run_verify_hooks,
         )
-        # Probe before the durable marker is written. The later atomic push
-        # carries a force-with-lease expectation derived from this exact read,
-        # so any race changes nothing and rejects every ref update together.
-        try:
-            audit_ref, audit_expected_sha = self._audit_ref_expectation(
-                worktree=worktree,
-                deploy_sha=deploy_sha,
-                log=log,
-                pulse=ownership_pulse,
-            )
-        except CancellationRequested:
-            raise
-        except MergetrainError as exc:
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="pushing",
-                state="error",
-                message="Deploy audit preflight failed",
-                detail=type(exc).__name__,
-            )
-            raise
-        # Mirror what the durable marker records (store.record_pending_push
-        # writes push_status='pending'), so an in-memory state that outlives an
-        # ambiguous push carries the same truth the DB already holds instead of
-        # overwriting it with not_run.
-        state.push_status = "pending"
-        try:
-            self._push_with_marker(
-                conn,
-                job_ids=job_ids,
-                deploy_sha=deploy_sha,
-                lease_token=lease_token,
-                worktree=worktree,
-                log=log,
-                pulse=ownership_pulse,
-                audit_ref=audit_ref,
-                audit_expected_sha=audit_expected_sha,
-            )
-        except CommandFailed as exc:
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="pushing",
-                state="error",
-                message="Atomic push failed",
-                detail=f"exit_code={exc.returncode}",
-            )
-            if is_push_rejection(exc.stderr):
-                # Definitively refused: nothing landed, so `failed` is the truth.
-                state.push_status = "failed"
-                self._clear_rejected_push(
-                    conn,
-                    job_ids=job_ids,
-                    lease_token=lease_token,
-                    log=log,
-                )
-                raise PushRejected(
-                    "remote definitively rejected the push (policy, permission, "
-                    "or non-fast-forward); no ref update landed: "
-                    f"{exc.stderr.strip() or exc}"
-                ) from exc
-            # The marker is durable but the remote outcome is unknown. Leave
-            # push_status at the `pending` the marker write recorded: the job
-            # parks needs_reconcile precisely because the refs may have landed,
-            # and calling that `failed` is the one thing this tool promises not
-            # to do. Reconcile replaces it with the remote's answer.
-            raise AmbiguousPush(
-                "atomic push failed after the write-ahead marker was "
-                f"recorded (exit {exc.returncode}); outcome ambiguous — "
-                f"parked for reconcile: {exc.stderr.strip() or exc}"
-            ) from exc
-
-        state.push_status = "succeeded"
-        self._event(
-            conn,
-            lease_token=lease_token,
-            job_id=event_job_id,
-            phase="pushing",
-            state="success",
-            message="Atomic push completed",
-        )
-        if not self.config.deploy.verify:
-            state.verify_status = "not_configured"
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="verifying",
-                state="success",
-                message="No post-push verification configured",
-            )
-            return
-
-        try:
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="verifying",
-                state="active",
-                message="Running post-push verification",
-            )
-            self._run_verify_hooks(
-                worktree=worktree, log=log, pulse=ownership_pulse
-            )
-            state.verify_status = "succeeded"
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="verifying",
-                state="success",
-                message="Post-push verification passed",
-            )
-        except CommandFailed as exc:
-            state.verify_status = "failed"
-            state.warning = f"post-push verify warning: {exc}"
-            log.write(f"\nWARNING: {state.warning}\n")
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="verifying",
-                state="warning",
-                message="Post-push verification needs attention",
-                detail=f"exit_code={exc.returncode}",
-            )
 
     @staticmethod
     def _git_common_dir(path: Path) -> Path | None:
-        completed = run_command(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=path,
-            check=False,
-        )
-        if completed.returncode != 0:
-            return None
-        common = Path(completed.stdout.strip())
-        if not common.is_absolute():
-            common = path / common
-        return common.resolve()
+        return WorktreeManager.git_common_dir(path)
 
-    def _persistent_cache_directories(
-        self, worktree: Path
-    ) -> list[tuple[str, Path]]:
-        directories: list[tuple[str, Path]] = []
-        root = worktree.resolve()
-        for relative in self.config.state.validation_workspace.cache_paths:
-            path = worktree.joinpath(*relative.split("/"))
-            if path.is_symlink():
-                raise MergetrainError(
-                    f"persistent validation cache path is a symlink: {relative}"
-                )
-            try:
-                path.resolve().relative_to(root)
-            except ValueError as exc:
-                raise MergetrainError(
-                    f"persistent validation cache escapes the worktree: {relative}"
-                ) from exc
-            tracked = run_command(
-                ["git", "ls-files", "--", relative],
-                cwd=worktree,
-                check=True,
-            )
-            if tracked.stdout.strip():
-                raise MergetrainError(
-                    f"persistent validation cache path contains tracked files: {relative}"
-                )
-            path.mkdir(parents=True, exist_ok=True)
-            ignored = run_command(
-                ["git", "check-ignore", "--no-index", "--quiet", "--", relative],
-                cwd=worktree,
-                check=False,
-            )
-            if ignored.returncode != 0:
-                raise MergetrainError(
-                    f"persistent validation cache path must be ignored by Git: {relative}"
-                )
-            directories.append((relative, path))
-        return directories
+    def _persistent_cache_directories(self, worktree: Path) -> list[tuple[str, Path]]:
+        return self._worktrees.persistent_cache_directories(worktree)
 
     def _clean_untracked_except_validation_cache(
         self,
@@ -2223,12 +610,10 @@ class GitRunner:
         worktree: Path,
         log: IO[str],
     ) -> list[tuple[str, Path]]:
-        directories = self._persistent_cache_directories(worktree)
-        command = ["git", "clean", "-ffdx"]
-        for relative, _ in directories:
-            command.append(f"--exclude=/{relative}/")
-        run_command(command, cwd=worktree, log=log, check=True)
-        return directories
+        return self._worktrees.clean_untracked_except_validation_cache(
+            worktree=worktree,
+            log=log,
+        )
 
     def _prepare_persistent_worktree(
         self,
@@ -2237,59 +622,11 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
     ) -> bool:
-        reused = worktree.exists()
-        if reused:
-            repo_common = self._git_common_dir(self.repo)
-            worktree_common = self._git_common_dir(worktree)
-            if repo_common is None or worktree_common != repo_common:
-                raise MergetrainError(
-                    "persistent validation workspace exists but is not a worktree "
-                    "owned by this repository; move it aside or run gc after "
-                    "switching validation_workspace.mode to ephemeral"
-                )
-            run_command(
-                ["git", "reset", "--hard", self.config.git.integration_ref],
-                cwd=worktree,
-                log=log,
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-            )
-        else:
-            # Missing paths can leave stale worktree administration records after
-            # a crash or manual cleanup. Prune only those records, then recreate
-            # the deterministic path.
-            self._persistent_workspace_marker().unlink(missing_ok=True)
-            run_command(
-                ["git", "worktree", "prune"],
-                cwd=self.repo,
-                log=log,
-                check=True,
-            )
-            run_command(
-                [
-                    "git",
-                    "worktree",
-                    "add",
-                    "--detach",
-                    str(worktree),
-                    self.config.git.integration_ref,
-                ],
-                cwd=self.repo,
-                log=log,
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-            )
-        self._clean_untracked_except_validation_cache(
+        return self._worktrees.prepare_persistent(
             worktree=worktree,
             log=log,
+            pulse=pulse,
         )
-        if not git_worktree_clean(worktree):
-            raise MergetrainError(
-                "persistent validation workspace could not be restored cleanly"
-            )
-        return reused
 
     def _activate_persistent_validation_cache(
         self,
@@ -2298,47 +635,11 @@ class GitRunner:
         log: IO[str],
         pulse: Pulse | None,
     ) -> bool:
-        workspace = self.config.state.validation_workspace
-        identity = {
-            "version": 1,
-            "cache_key": workspace.cache_key,
-            "gate_policy_sha": gate_policy_sha(self.config),
-            "environment_sha": self._environment_fingerprint(
-                worktree=worktree,
-                log=log,
-                pulse=pulse,
-            ),
-        }
-        marker = self._persistent_workspace_marker()
-        previous: object = None
-        try:
-            previous = json.loads(marker.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pass
-        retained = previous == identity
-        directories = self._persistent_cache_directories(worktree)
-        if not retained:
-            for _, directory in directories:
-                if directory.is_symlink():
-                    raise MergetrainError(
-                        f"persistent validation cache path became a symlink: {directory}"
-                    )
-                shutil.rmtree(directory)
-                directory.mkdir(parents=True)
-        # Fingerprint commands are allowed to create scratch files. Remove every
-        # ignored/untracked path except the declared cache before gates run.
-        self._clean_untracked_except_validation_cache(
+        return self._worktrees.activate_persistent_cache(
             worktree=worktree,
             log=log,
+            pulse=pulse,
         )
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        temporary = marker.with_name(f"{marker.name}.{uuid.uuid4().hex}.tmp")
-        temporary.write_text(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, marker)
-        return retained
 
     def _prepare_worktree(
         self,
@@ -2348,29 +649,12 @@ class GitRunner:
         pulse: Pulse | None,
         persistent: bool = False,
     ) -> bool:
-        run_command(
-            ["git", "fetch", self.config.git.remote],
-            cwd=self.repo,
+        return self._worktrees.prepare(
+            worktree=worktree,
             log=log,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            persistent=persistent,
         )
-        if persistent:
-            return self._prepare_persistent_worktree(
-                worktree=worktree,
-                log=log,
-                pulse=pulse,
-            )
-        run_command(
-            ["git", "worktree", "add", "--detach", str(worktree), self.config.git.integration_ref],
-            cwd=self.repo,
-            log=log,
-            pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
-        )
-        return False
 
     def _merge_sha_for_job(self, job: Job, *, deploying_validated: bool) -> str:
         """Resolve and verify the exact task commit that may be merged."""
@@ -2386,7 +670,9 @@ class GitRunner:
             expected_sha = git_rev_parse(self.repo, expected_ref)
         except CommandFailed as exc:
             checkpoint = "validation" if deploying_validated else "enqueue"
-            raise MergeBlocked(f"recorded {checkpoint} HEAD cannot be resolved for {job.branch}") from exc
+            raise MergeBlocked(
+                f"recorded {checkpoint} HEAD cannot be resolved for {job.branch}"
+            ) from exc
         if current_sha != expected_sha:
             checkpoint = "validation" if deploying_validated else "enqueue"
             raise MergeBlocked(
@@ -2407,9 +693,7 @@ class GitRunner:
     ) -> Job:
         self._ensure_state_dirs()
         log_path = self._log_path("job", job.id)
-        worktree, persistent_workspace = self._primary_worktree_path(
-            job.id, deploy=deploy
-        )
+        worktree, persistent_workspace = self._primary_worktree_path(job.id, deploy=deploy)
         lease_token = job.claim_token
         deploy_sha = ""
         integration_base_sha = ""
@@ -2434,9 +718,7 @@ class GitRunner:
         def ownership_pulse() -> None:
             pulse(check_cancel=False)
 
-        gate_progress = self._gate_progress_callback(
-            conn, lease_token=lease_token, job_id=job.id
-        )
+        gate_progress = self._gate_progress_callback(conn, lease_token=lease_token, job_id=job.id)
 
         def finish_after_error(*, status: str, note: str) -> Job:
             if deploy_state.push_status == "succeeded":
@@ -2529,7 +811,11 @@ class GitRunner:
                     timeout_seconds=self.config.queue.command_timeout_seconds,
                 )
                 if merge.returncode != 0:
-                    raise MergeBlocked(merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}")
+                    raise MergeBlocked(
+                        merge.stderr.strip()
+                        or merge.stdout.strip()
+                        or f"merge failed for {job.branch}"
+                    )
                 if not git_worktree_clean(worktree):
                     raise MergeBlocked("integration worktree is dirty after merge")
                 self._event(
@@ -2806,9 +1092,7 @@ class GitRunner:
                 cwd=probe_worktree,
                 log=log,
             )
-            run_command(
-                ["git", "clean", "-fdx"], cwd=probe_worktree, log=log, check=False
-            )
+            run_command(["git", "clean", "-fdx"], cwd=probe_worktree, log=log, check=False)
             for job in members:
                 merge = run_command(
                     ["git", "merge", "--no-edit", merge_shas[job.id]],
@@ -3029,9 +1313,7 @@ class GitRunner:
         deploying_validated = deploy and bool(validated_train_ids)
         self._ensure_state_dirs()
         log_path = self._log_path("batch", jobs[0].id)
-        worktree, persistent_workspace = self._primary_worktree_path(
-            jobs[0].id, deploy=deploy
-        )
+        worktree, persistent_workspace = self._primary_worktree_path(jobs[0].id, deploy=deploy)
         merged_jobs: list[Job] = []
         results: list[Job] = []
         merge_shas: dict[int, str] = {}
@@ -3059,14 +1341,10 @@ class GitRunner:
         def ownership_pulse() -> None:
             pulse(check_cancel=False)
 
-        gate_progress = self._gate_progress_callback(
-            conn, lease_token=lease_token
-        )
+        gate_progress = self._gate_progress_callback(conn, lease_token=lease_token)
 
         def finish(item: Job, **values: Any) -> Job:
-            return self._finish_job(
-                conn, item.id, lease_token=lease_token, **values
-            )
+            return self._finish_job(conn, item.id, lease_token=lease_token, **values)
 
         def cancel_active_jobs() -> list[Job]:
             canceled: list[Job] = []
@@ -3209,7 +1487,9 @@ class GitRunner:
                                 timeout_seconds=self.config.queue.command_timeout_seconds,
                             )
                             deploy_sha = git_rev_parse(worktree, "HEAD")
-                            if deploy_sha != reused_validation_sha or not git_worktree_clean(worktree):
+                            if deploy_sha != reused_validation_sha or not git_worktree_clean(
+                                worktree
+                            ):
                                 raise MergeBlocked(
                                     "exact validation commit could not be restored cleanly"
                                 )
@@ -3224,10 +1504,7 @@ class GitRunner:
                             )
                         else:
                             reuse_fallback_reason = "; ".join(reuse_decision.reasons)
-                            log.write(
-                                "\nvalidated gate reuse declined: "
-                                f"{reuse_fallback_reason}\n"
-                            )
+                            log.write(f"\nvalidated gate reuse declined: {reuse_fallback_reason}\n")
                             if reuse_decision.action == "fail":
                                 raise MergeBlocked(
                                     "validated gate reuse policy failed closed: "
@@ -3260,10 +1537,14 @@ class GitRunner:
                         )
                         if not deploying_validated:
                             try:
-                                merge_shas[job.id] = self._merge_sha_for_job(job, deploying_validated=False)
+                                merge_shas[job.id] = self._merge_sha_for_job(
+                                    job, deploying_validated=False
+                                )
                             except MergeBlocked as exc:
                                 results.append(
-                                    finish(job, status="blocked", log_path=str(log_path), note=str(exc))
+                                    finish(
+                                        job, status="blocked", log_path=str(log_path), note=str(exc)
+                                    )
                                 )
                                 continue
                         pre_merge_head = git_output(["rev-parse", "HEAD"], cwd=worktree)
@@ -3277,22 +1558,36 @@ class GitRunner:
                             timeout_seconds=self.config.queue.command_timeout_seconds,
                         )
                         if merge.returncode != 0:
-                            note = merge.stderr.strip() or merge.stdout.strip() or f"merge failed for {job.branch}"
+                            note = (
+                                merge.stderr.strip()
+                                or merge.stdout.strip()
+                                or f"merge failed for {job.branch}"
+                            )
                             if deploying_validated:
-                                run_command(["git", "merge", "--abort"], cwd=worktree, log=log, check=False)
+                                run_command(
+                                    ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
+                                )
                                 note = f"validated train could not be reassembled: {note}"
                                 return [
-                                    finish(item, status="blocked", log_path=str(log_path), note=note)
+                                    finish(
+                                        item, status="blocked", log_path=str(log_path), note=note
+                                    )
                                     for item in jobs
                                 ]
-                            results.append(finish(job, status="blocked", log_path=str(log_path), note=note))
-                            run_command(["git", "merge", "--abort"], cwd=worktree, log=log, check=False)
+                            results.append(
+                                finish(job, status="blocked", log_path=str(log_path), note=note)
+                            )
+                            run_command(
+                                ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
+                            )
                             continue
                         if not git_worktree_clean(worktree):
                             if deploying_validated:
                                 note = "validated train produced a dirty integration worktree after reassembly"
                                 return [
-                                    finish(item, status="blocked", log_path=str(log_path), note=note)
+                                    finish(
+                                        item, status="blocked", log_path=str(log_path), note=note
+                                    )
                                     for item in jobs
                                 ]
                             results.append(
@@ -3310,7 +1605,9 @@ class GitRunner:
                             # so a blocked job can never ride the train.
                             run_command(
                                 ["git", "reset", "--hard", pre_merge_head],
-                                cwd=worktree, log=log, check=True,
+                                cwd=worktree,
+                                log=log,
+                                check=True,
                             )
                             continue
                         merged_jobs.append(job)
@@ -3441,9 +1738,7 @@ class GitRunner:
                             )
                         )
                         return results
-                    log.write(
-                        f"\ntrain gate failed; bisecting {len(merged_jobs)} merged jobs\n"
-                    )
+                    log.write(f"\ntrain gate failed; bisecting {len(merged_jobs)} merged jobs\n")
                     self._event(
                         conn,
                         lease_token=lease_token,
@@ -3527,9 +1822,7 @@ class GitRunner:
                         )
                     )
                 if deploy:
-                    self._clear_pending_refs(
-                        [job.id for job in merged_jobs], log=log
-                    )
+                    self._clear_pending_refs([job.id for job in merged_jobs], log=log)
                 return results
             except LostLease:
                 raise
@@ -3555,122 +1848,10 @@ class GitRunner:
             except MergetrainError as exc:
                 return finish_active_after_error(status="blocked", note=str(exc))
             except Exception as exc:  # pragma: no cover - defensive boundary
-                return finish_active_after_error(
-                    status="failed", note=f"unexpected error: {exc}"
-                )
+                return finish_active_after_error(status="failed", note=f"unexpected error: {exc}")
             finally:
                 self._cleanup_worktree(
                     worktree,
                     log=log,
                     keep_worktree=keep_worktree or persistent_workspace,
                 )
-
-
-def find_worktree_gc_candidates(
-    config: MergetrainConfig, *, protect: Iterable[str] = ()
-) -> list[dict[str, Any]]:
-    root = config.state.worktree_root
-    prefix = f"{config.project.name}-mergetrain-"
-    if not root.exists():
-        return []
-    # A live runner's integration worktree must never be a gc candidate —
-    # removing it mid-run kills the deploy. Callers pass the live lock's
-    # worktree_path; it is reported (skipped), not silently dropped.
-    protected = {str(Path(p)) for p in protect if p}
-    candidates = []
-    for path in sorted(root.iterdir()):
-        if not path.is_dir():
-            continue
-        if path == config.validation_worktree_path:
-            if str(path) in protected:
-                candidates.append(
-                    {
-                        "path": str(path),
-                        "reason": "active runner worktree, skipped",
-                        "protected": True,
-                    }
-                )
-            elif config.state.validation_workspace.mode == "persistent":
-                candidates.append(
-                    {
-                        "path": str(path),
-                        "reason": "configured persistent validation workspace, skipped",
-                        "protected": True,
-                    }
-                )
-            else:
-                candidates.append(
-                    {
-                        "path": str(path),
-                        "reason": "disabled persistent validation workspace",
-                    }
-                )
-            continue
-        if not path.name.startswith(prefix):
-            continue
-        if str(path) in protected:
-            candidates.append(
-                {"path": str(path), "reason": "active runner worktree, skipped", "protected": True}
-            )
-            continue
-        candidates.append({"path": str(path), "reason": "temporary mergetrain worktree"})
-    return candidates
-
-
-def branch_exists(repo: Path, branch: str) -> bool:
-    return run_command(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=repo, check=False).returncode == 0
-
-
-def current_branch(repo: Path) -> str:
-    return git_current_branch(repo)
-
-
-def apply_gc(
-    config: MergetrainConfig,
-    *,
-    delete_branches: Iterable[str] = (),
-    protect: Iterable[str] = (),
-    live_worktree_now: Callable[[], str | None] | None = None,
-) -> dict[str, list[dict[str, str]]]:
-    removed_worktrees: list[dict[str, str]] = []
-    deleted_branches: list[dict[str, str]] = []
-    failed: list[dict[str, str]] = []
-    for candidate in find_worktree_gc_candidates(config, protect=protect):
-        if candidate.get("protected"):
-            continue  # a live runner is merging/gating here — never remove it
-        path = Path(candidate["path"])
-        # The protect list is a snapshot taken before this loop. A runner that
-        # acquired the lock since then holds a worktree absent from it. Re-read
-        # the live lock immediately before each removal and never delete a tree a
-        # running deploy is now inside (#84, defect 5).
-        if live_worktree_now is not None:
-            active = live_worktree_now()
-            if active and Path(active) == path:
-                continue
-        try:
-            run_command(["git", "worktree", "remove", "--force", str(path)], cwd=config.repo, check=True)
-        except Exception:
-            shutil.rmtree(path, ignore_errors=True)
-        if not path.exists():
-            removed_worktrees.append(candidate)
-            if path == config.validation_worktree_path:
-                config_marker = (
-                    config.state.worktree_root
-                    / f".{config.project.name}-validation-workspace.json"
-                )
-                config_marker.unlink(missing_ok=True)
-        else:
-            failed.append({"path": str(path), "reason": "could not remove worktree"})
-    active_branch = current_branch(config.repo)
-    for branch in delete_branches:
-        if branch == active_branch:
-            failed.append({"branch": branch, "reason": "currently checked out"})
-            continue
-        if not branch_exists(config.repo, branch):
-            continue
-        completed = run_command(["git", "branch", "-D", branch], cwd=config.repo, check=False)
-        if completed.returncode == 0:
-            deleted_branches.append({"branch": branch, "reason": "terminal queue branch"})
-        else:
-            failed.append({"branch": branch, "reason": completed.stderr.strip() or "delete failed"})
-    return {"removed_worktrees": removed_worktrees, "deleted_branches": deleted_branches, "failed": failed}

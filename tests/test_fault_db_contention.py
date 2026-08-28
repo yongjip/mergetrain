@@ -61,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_git_runner import git, make_demo_repo
 
+import mergetrain.atomic_push as atomic_push_module
 import mergetrain.cli as cli_module
 import mergetrain.git_runner as git_runner_module
 from mergetrain.cli import main
@@ -331,11 +332,11 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
         # queue would claim the code did not ship while main already carries it —
         # and a re-enqueue would re-push over an advanced ref, breaking
         # exactly-once (guarantee #4). The push_status == 'succeeded' guard in
-        # finish_active_after_error (git_runner.py:1964) is what holds the line;
+        # finish_active_after_error is what holds the line;
         # deleting that guard makes this test fail on the assertion below
         # (verified by mutation).
         #
-        # Distinct from tests/test_git_runner.py:583, which crashes a verify hook
+        # Distinct from the verify-hook crash regression in test_git_runner,
         # after the push: here the failing operation is the terminal DB write
         # itself, so this also pins that the boundary can re-do the write it was
         # handed a lock error on.
@@ -391,13 +392,14 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                 self.assertTrue(final.pending_deploy_sha)
 
     # WAS AN OPEN DEFECT, fixed: the post-push guard overwrote verify_status
-    # with 'failed' unconditionally — src/mergetrain/git_runner.py:1967 (and the
-    # identical line in process_one, git_runner.py:1389) set
+    # with 'failed' unconditionally — the exception boundaries in both the
+    # batch and single-job orchestration paths set
     # post_push_verify_status = 'failed' without regard for what the push path
     # already established. make_demo_repo configures `verify: []`, so
-    # _push_and_verify had set state.verify_status = 'not_configured'
-    # (git_runner.py:1255); an uncontended deploy on this same fixture finishes
-    # with verify_status='not_configured'. After the contention it reads 'failed'.
+    # AtomicPush.deploy_and_verify had set state.verify_status to
+    # 'not_configured' after the landed push; an uncontended deploy on this same
+    # fixture finishes with verify_status='not_configured'. After the contention
+    # it reads 'failed'.
     #
     # Why it matters: verify_status is a contract field surfaced by
     # `status --json` and the dashboard, so this reports a *failed verification*
@@ -528,7 +530,7 @@ class ContentionNeverDestroysEvidenceTests(unittest.TestCase):
             job = enqueue_job(conn, task="a", branch="feature/a")
             claimed = claim_deploy_batch(conn, owner=f"runner:{os.getpid()}")
             holder = _WriteLockHolder(config.state.db)
-            real_record = git_runner_module.record_pending_push
+            real_record = atomic_push_module.record_pending_push
 
             def wrapper(*args, **kwargs):
                 holder.start_holding()
@@ -537,7 +539,7 @@ class ContentionNeverDestroysEvidenceTests(unittest.TestCase):
                 finally:
                     holder.stop_holding()
 
-            with patch("mergetrain.git_runner.record_pending_push", wrapper):
+            with patch("mergetrain.atomic_push.record_pending_push", wrapper):
                 try:
                     GitRunner(config).process_batch(
                         conn, claimed, deploy=True, owner=f"runner:{os.getpid()}"

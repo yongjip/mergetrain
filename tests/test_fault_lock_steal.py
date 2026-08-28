@@ -54,7 +54,8 @@ from mergetrain import recovery as recovery_module
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.errors import LostLease
-from mergetrain.git_runner import GitRunner, pending_ref_name
+from mergetrain.git_ops import pending_ref_name
+from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import force_unlock, reconcile
 from mergetrain.store import (
     claim_deploy_batch,
