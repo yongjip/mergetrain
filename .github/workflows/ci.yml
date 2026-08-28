@@ -60,6 +60,11 @@ jobs:
     # pinned Node in dashboard/.nvmrc make the build reproducible, so a drifted
     # dist shows up as a dirty tree.
     runs-on: ubuntu-latest
+    # Post-push verification waits 15 minutes for this workflow. Bound a stuck
+    # browser/tool process early enough that the run reaches a truthful terminal
+    # result inside that evidence window instead of lingering for GitHub's
+    # multi-hour default.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: dashboard
