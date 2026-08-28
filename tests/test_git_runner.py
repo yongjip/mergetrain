@@ -1624,17 +1624,21 @@ deploy:
         class SlowLog(io.StringIO):
             def write(self, value: str) -> int:
                 if value == "slow-tail\n":
-                    time.sleep(0.3)
+                    time.sleep(1.25)
                 return super().write(value)
 
         with tempfile.TemporaryDirectory() as td:
-            completed = run_shell(
-                f'{SHELL_PYTHON} -c "print(\'slow-tail\')"',
+            # This is a _run_managed ordering regression, not a shell-startup
+            # benchmark. Direct argv keeps Windows sh.exe startup/Defender
+            # jitter out of a deliberately narrow timing boundary, while the
+            # log drain still lasts longer than the command timeout.
+            completed = command_runner_module.run_command(
+                [sys.executable, "-c", "print('slow-tail')"],
                 cwd=td,
                 env=os.environ.copy(),
                 log=SlowLog(),
                 check=False,
-                timeout_seconds=0.2,
+                timeout_seconds=1.0,
             )
             self.assertEqual(completed.returncode, 0)
             self.assertEqual(completed.stdout, "slow-tail\n")
