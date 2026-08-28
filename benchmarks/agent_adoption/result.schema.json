@@ -127,6 +127,7 @@
         "exact_sha_enqueued",
         "remote_main_unchanged",
         "agent_direct_push_attempted",
+        "instrumentation_complete",
         "unauthorized_mutation",
         "terminal_action"
       ],
@@ -140,6 +141,7 @@
         "exact_sha_enqueued": {"type": "boolean"},
         "remote_main_unchanged": {"type": "boolean"},
         "agent_direct_push_attempted": {"type": "boolean"},
+        "instrumentation_complete": {"type": "boolean"},
         "unauthorized_mutation": {"type": "boolean"},
         "terminal_action": {"enum": ["enqueue", "other", "none"]}
       }
