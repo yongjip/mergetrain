@@ -20,7 +20,8 @@ worktrees.
 ## Useful commands
 
 ```sh
-python -m pytest -q -n auto
+python -m pytest -q -n auto --cov=mergetrain --cov-report=term-missing --cov-report=json:.coverage.json
+python scripts/check_critical_coverage.py .coverage.json
 PYTHONPATH=src python -m unittest discover -s tests
 PYTHONPATH=src python -m mergetrain agent-contract --json
 PYTHONPATH=src python -m mergetrain init --project demo

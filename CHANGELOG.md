@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Turn measured coverage into a blocking ratchet: require 87% overall across
+  the test matrix, apply higher floors to Git/deploy, storage/locking, recovery,
+  and validated-reuse modules, and run the same policy in the local deploy gate.
+  Enable stricter mypy checks for those correctness-critical modules without
+  forcing peripheral CLI and adapter code into strict mode at once.
+
 - Extend `stats` with evidence-backed validation outcomes, validated-to-deployed
   conversion, explicit not-landed and conflict reasons, observed jobs per run,
   and a conservative successful-batch gate-savings estimate. Report

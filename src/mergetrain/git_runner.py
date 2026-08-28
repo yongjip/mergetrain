@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -689,7 +690,7 @@ class GitRunner:
 
     def _refresh_lease(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         owner: str | None,
         lease_token: str,
@@ -716,7 +717,14 @@ class GitRunner:
             check_cancel=check_cancel,
         )
 
-    def _mark_job(self, conn, job_id: int, *, lease_token: str, **values) -> Job:
+    def _mark_job(
+        self,
+        conn: sqlite3.Connection,
+        job_id: int,
+        *,
+        lease_token: str,
+        **values: Any,
+    ) -> Job:
         return mark_job(
             conn,
             job_id,
@@ -726,7 +734,7 @@ class GitRunner:
 
     def _event(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         lease_token: str,
         phase: str,
@@ -745,7 +753,14 @@ class GitRunner:
             detail=detail,
         )
 
-    def _finish_job(self, conn, job_id: int, *, lease_token: str, **values) -> Job:
+    def _finish_job(
+        self,
+        conn: sqlite3.Connection,
+        job_id: int,
+        *,
+        lease_token: str,
+        **values: Any,
+    ) -> Job:
         try:
             result = self._mark_job(conn, job_id, lease_token=lease_token, **values)
         except CancellationRequested:
@@ -1890,7 +1905,7 @@ class GitRunner:
 
     def _push_with_marker(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         job_ids: list[int],
         deploy_sha: str,
@@ -1953,7 +1968,7 @@ class GitRunner:
 
     def _clear_rejected_push(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         job_ids: list[int],
         lease_token: str,
@@ -1966,7 +1981,7 @@ class GitRunner:
 
     def _gate_progress_callback(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         lease_token: str,
         job_id: int | None = None,
@@ -1995,7 +2010,7 @@ class GitRunner:
 
     def _push_and_verify(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         job_ids: list[int],
         deploy_sha: str,
@@ -2382,7 +2397,7 @@ class GitRunner:
 
     def process_one(
         self,
-        conn,
+        conn: sqlite3.Connection,
         job: Job,
         *,
         deploy: bool,
@@ -2671,7 +2686,7 @@ class GitRunner:
 
     def _process_isolated_jobs(
         self,
-        conn,
+        conn: sqlite3.Connection,
         jobs: Sequence[Job],
         *,
         deploy: bool,
@@ -2733,7 +2748,7 @@ class GitRunner:
 
     def _bisect_failed_train(
         self,
-        conn,
+        conn: sqlite3.Connection,
         merged_jobs: list[Job],
         *,
         merge_shas: dict[int, str],
@@ -2994,7 +3009,7 @@ class GitRunner:
 
     def process_batch(
         self,
-        conn,
+        conn: sqlite3.Connection,
         jobs: Iterable[Job],
         *,
         deploy: bool,
@@ -3048,7 +3063,7 @@ class GitRunner:
             conn, lease_token=lease_token
         )
 
-        def finish(item: Job, **values) -> Job:
+        def finish(item: Job, **values: Any) -> Job:
             return self._finish_job(
                 conn, item.id, lease_token=lease_token, **values
             )

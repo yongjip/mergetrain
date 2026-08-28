@@ -66,7 +66,8 @@ it supplies pytest-xdist, Ruff, and mypy:
 
 ```sh
 python -m pip install -e ".[dev]"
-python -m pytest -q -n auto
+python -m pytest -q -n auto --cov=mergetrain --cov-report=term-missing --cov-report=json:.coverage.json
+python scripts/check_critical_coverage.py .coverage.json
 ```
 
 Some tests intentionally bind localhost sockets or inspect child processes. If
@@ -87,6 +88,47 @@ The suite covers the behaviors that make the queue safe:
 - **config** — built-in YAML parsing, fail-closed deploy refs, positive queue timing, unique gate names, defaults, and path resolution.
 
 When adding behavior, add or extend the matching `tests/test_*.py` module.
+
+### Coverage and typing ratchets
+
+Coverage is a regression guard, not a target to inflate with trivial tests.
+The blocking pytest command enforces the measured cross-platform baseline of
+87% overall coverage through `pyproject.toml`. It also writes `.coverage.json`
+and runs `scripts/check_critical_coverage.py`, which applies higher floors to
+correctness-critical modules:
+
+| Module | Minimum |
+| --- | ---: |
+| `git_runner.py` | 88% |
+| `store.py` | 88% |
+| `recovery.py` | 91% |
+| `reuse.py` | 94% |
+
+These floors were chosen from the same successful Linux, macOS, and Windows CI
+matrix, not from one workstation. Raise them when durable state-transition
+coverage improves. Lower them only with a documented explanation of which
+behavior moved or became unreachable. A missing critical module in coverage
+JSON fails closed rather than silently disappearing from the policy.
+
+Mypy remains incremental for peripheral adapters and CLI rendering. The same
+four correctness-critical modules additionally reject untyped definitions,
+check function bodies, reject implicit optionals, and warn on `Any` returns.
+This keeps the stricter boundary focused on lease fencing, recovery, validation
+identity/reuse, and atomic push state rather than forcing a repository-wide
+annotation rewrite.
+
+The current baseline still leaves several high-value state transitions without
+direct execution evidence. Prefer these over tests that merely increase the
+percentage:
+
+- successful automatic clearing and audit of a dead-owner lock, including the
+  race where that lock is replaced during the check;
+- cancellation or failure of the deploy audit-ref preflight before the durable
+  pending-push marker exists;
+- validated-train reassembly that encounters a merge conflict or unexpectedly
+  leaves the integration worktree dirty; and
+- the row-count race where an active train changes while cancellation is being
+  recorded.
 
 ### The fault matrix
 

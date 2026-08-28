@@ -20,6 +20,7 @@ env/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.json
 htmlcov/
 
 # Dashboard authoring dependencies and cache

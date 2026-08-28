@@ -53,10 +53,11 @@ gates:
     run: mypy
     parallel_group: quality
     workers: 1
-  # Match CI's parallel pytest invocation. The repo already requires the dev
-  # extra for ruff and mypy, so a missing pytest/xdist fails closed too.
+  # Match CI's parallel coverage invocation and critical-module ratchet. The
+  # command runs through /bin/sh, so the second check executes only after
+  # pytest and the overall coverage floor pass.
   - name: tests
-    run: python3.12 -m pytest -q -n auto
+    run: python3.12 -m pytest -q -n auto --cov=mergetrain --cov-report=term-missing --cov-report=json:.coverage.json && python3.12 scripts/check_critical_coverage.py .coverage.json
     needs:
       - ruff
       - mypy
