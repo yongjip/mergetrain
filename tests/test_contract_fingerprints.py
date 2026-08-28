@@ -682,11 +682,15 @@ class ErrorTaxonomyTests(unittest.TestCase):
             and issubclass(obj, Exception)
             and obj.__module__ == errors_module.__name__
         }
-        cli_source = (
-            Path(__file__).resolve().parents[1] / "src" / "mergetrain" / "cli.py"
-        ).read_text(encoding="utf-8")
-        implemented |= set(re.findall(r'error_code="([a-z_]+)"', cli_source))
-        implemented |= set(re.findall(r'_error_payload\(\s*\n?\s*"([a-z_]+)"', cli_source))
+        source_root = Path(__file__).resolve().parents[1] / "src" / "mergetrain"
+        cli_sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(source_root.rglob("*.py"))
+        )
+        implemented |= set(re.findall(r'error_code="([a-z_]+)"', cli_sources))
+        implemented |= set(
+            re.findall(r'_error_payload\(\s*\n?\s*"([a-z_]+)"', cli_sources)
+        )
 
         self.assertEqual(
             implemented - set(documented),
@@ -706,7 +710,10 @@ class ErrorTaxonomyTests(unittest.TestCase):
 
     def test_interrupted_envelope_has_the_full_shape(self) -> None:
         repo = self._repo()
-        with mock.patch("mergetrain.cli.config_from_args", side_effect=KeyboardInterrupt):
+        with mock.patch(
+            "mergetrain.commands.inspection.config_from_args",
+            side_effect=KeyboardInterrupt,
+        ):
             payload = _run_json(["--repo", str(repo), "doctor"])
         self.assertEqual(payload["error"]["code"], "interrupted")
         self.assertEqual(payload["error"]["message"], "interrupted")

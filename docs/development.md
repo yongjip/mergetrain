@@ -9,7 +9,16 @@ mergetrain/
   src/mergetrain/
     __init__.py        # version
     __main__.py        # python -m mergetrain
-    cli.py             # argument parsing and command handlers
+    cli.py             # argument parsing and top-level dispatch
+    cli_support.py     # shared JSON/config/rendering helpers
+    commands/          # command-domain execution modules
+      setup.py         # init, contract, version, demo, MCP
+      queue.py         # enqueue, retry, supersede, dismiss, cancel
+      inspection.py    # status, events, history, stats, logs, doctor
+      deploy.py        # validation/deploy execution
+      daemon.py        # single-repository auto-only daemon command
+      recovery.py      # reconcile, recover, unlock, verify, cleanup
+      hub.py           # dashboard and multi-repository hub commands
     config.py          # .mergetrain.yaml loading (+ built-in YAML subset parser)
     daemon.py          # auto-only daemon loop
     evidence.py        # evidence-backed outcome, validation, and batching metrics
@@ -48,6 +57,12 @@ mergetrain/
 ```
 
 mergetrain uses a `src/` layout and has **zero required runtime dependencies**. PyYAML is optional; when it is absent, `config.py` falls back to a small YAML-subset parser that understands the generated config shape.
+
+`cli.py` owns only parsing, handler selection, and the top-level error envelope.
+Command modules own presentation and command orchestration for one domain; they
+call runner, persistence, recovery, and observability APIs rather than carrying
+business rules of their own. Shared CLI helpers stay narrow so command modules
+do not import each other.
 
 ## Running tests
 

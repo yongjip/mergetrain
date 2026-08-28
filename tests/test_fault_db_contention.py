@@ -62,7 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 import mergetrain.atomic_push as atomic_push_module
-import mergetrain.cli as cli_module
+import mergetrain.commands.deploy as deploy_commands
 import mergetrain.git_runner as git_runner_module
 from mergetrain.cli import main
 from mergetrain.config import load_config
@@ -767,7 +767,7 @@ class ContentionContractTests(unittest.TestCase):
                         holder.stop_holding()
                 return real_mark_job(conn_arg, job_id, **kwargs)
 
-            real_connect = cli_module.connect
+            real_connect = deploy_commands.connect
 
             def fast_connect(*args, **kwargs):
                 # Only shortens the wait; the defect is how the resulting error is
@@ -779,7 +779,7 @@ class ContentionContractTests(unittest.TestCase):
             out = io.StringIO()
             with (
                 patch("mergetrain.git_runner.mark_job", wrapper),
-                patch.object(cli_module, "connect", fast_connect),
+                patch.object(deploy_commands, "connect", fast_connect),
                 redirect_stdout(out),
             ):
                 code = main(["--repo", str(repo), "run-batch", "--deploy", "--json"])

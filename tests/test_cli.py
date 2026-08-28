@@ -134,7 +134,7 @@ class CliTests(unittest.TestCase):
                 "project:\n  name: demo\nnotify:\n  webhook_url: https://example.invalid/hook\n",
                 encoding="utf-8",
             )
-            with patch("mergetrain.cli.daemon_loop") as loop:
+            with patch("mergetrain.commands.daemon.daemon_loop") as loop:
                 code = main(
                     ["--repo", str(repo), "daemon", "--once", "--notify"]
                 )
@@ -155,7 +155,7 @@ class CliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             err = io.StringIO()
-            with patch("mergetrain.cli.daemon_loop") as loop, redirect_stderr(err):
+            with patch("mergetrain.commands.daemon.daemon_loop") as loop, redirect_stderr(err):
                 code = main(
                     ["--repo", str(repo), "daemon", "--once", "--notify"]
                 )
@@ -1044,7 +1044,7 @@ class CliTests(unittest.TestCase):
                 str(repo),
             )
             out = io.StringIO()
-            with patch("mergetrain.cli.run_command", side_effect=failure), redirect_stdout(out):
+            with patch("mergetrain.commands.queue.run_command", side_effect=failure), redirect_stdout(out):
                 code = main(
                     [
                         "--repo",
@@ -1312,7 +1312,7 @@ terminology:
             )
             out = io.StringIO()
             with patch(
-                "mergetrain.cli.GitRunner.preview_validated_reuse",
+                "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
                 return_value=decision,
             ), redirect_stdout(out):
                 code = main(
@@ -1627,7 +1627,10 @@ terminology:
             )
 
             interrupted = io.StringIO()
-            with patch("mergetrain.cli.time.sleep", side_effect=KeyboardInterrupt), redirect_stdout(interrupted):
+            with patch(
+                "mergetrain.commands.inspection.time.sleep",
+                side_effect=KeyboardInterrupt,
+            ), redirect_stdout(interrupted):
                 interrupted_code = main(
                     [
                         "--repo",
@@ -1670,8 +1673,10 @@ terminology:
                     writer.close()
 
             out = io.StringIO()
-            with patch("mergetrain.cli.connect", wraps=connect) as observer_connect, patch(
-                "mergetrain.cli.time.sleep", side_effect=advance
+            with patch(
+                "mergetrain.commands.inspection.connect", wraps=connect
+            ) as observer_connect, patch(
+                "mergetrain.commands.inspection.time.sleep", side_effect=advance
             ), redirect_stdout(out):
                 code = main(
                     [
@@ -1716,8 +1721,10 @@ terminology:
                 conn.close()
 
             out = io.StringIO()
-            with patch("mergetrain.cli.connect", wraps=connect) as observer_connect, patch(
-                "mergetrain.cli.time.sleep",
+            with patch(
+                "mergetrain.commands.inspection.connect", wraps=connect
+            ) as observer_connect, patch(
+                "mergetrain.commands.inspection.time.sleep",
                 side_effect=[None, KeyboardInterrupt],
             ), redirect_stdout(out):
                 code = main(

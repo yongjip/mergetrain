@@ -43,6 +43,16 @@ remain together because they share train state and fallback rules; splitting
 them again should wait for a smaller stable interface rather than moving a
 mutually recursive algorithm behind forwarding classes.
 
+The CLI follows the same outer-boundary rule. `cli.py` owns `argparse`, handler
+selection, and the process-level error envelope. Execution lives under
+`commands/`, grouped into setup, queue, inspection, deploy, daemon, recovery,
+and hub domains. `cli_support.py` contains only genuinely shared serialization,
+configuration preflight, recovery-next-action, and human rendering helpers.
+Command modules can call core services, but core services never import the CLI;
+command modules also do not call each other. This keeps command names, flags,
+exit codes, and contract-1 JSON shapes stable while making each execution path
+have one obvious implementation home.
+
 ## Concepts
 
 **Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, separate `push_status` and `verify_status` outcomes, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
