@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.3.1 - 2026-08-28
+
+- Update the pinned PyPI publish action to v1.14.2 so Twine 7 accepts Core
+  Metadata 2.5. The v1.3.0 GitHub release built successfully but stopped before
+  any PyPI upload; v1.3.1 is the published-package recovery.
+
 ## 1.3.0 - 2026-08-28
 
 - Establish a zero-growth-by-default product-surface budget, inventory the
