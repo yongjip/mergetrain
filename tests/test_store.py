@@ -9,7 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-import mergetrain.store as store_module
+import mergetrain.persistence.jobs as job_store_module
+import mergetrain.persistence.schema as schema_store_module
 from mergetrain.errors import (
     CancellationRequested,
     DuplicateActiveBranch,
@@ -171,7 +172,7 @@ class StoreTests(unittest.TestCase):
     def test_cancel_queued_job_does_not_overwrite_concurrent_claim(self) -> None:
         conn = self.make_conn()
         job = enqueue_job(conn, task="a", branch="a")
-        real_get_job = store_module.get_job
+        real_get_job = job_store_module.get_job
         raced = False
 
         def get_then_claim(current_conn, job_id):  # type: ignore[no-untyped-def]
@@ -186,7 +187,7 @@ class StoreTests(unittest.TestCase):
                 current_conn.commit()
             return snapshot
 
-        with patch("mergetrain.store.get_job", side_effect=get_then_claim):
+        with patch("mergetrain.persistence.jobs.get_job", side_effect=get_then_claim):
             with self.assertRaisesRegex(QueueError, "raced by a concurrent transition"):
                 cancel_job(conn, job.id)
 
@@ -203,7 +204,7 @@ class StoreTests(unittest.TestCase):
             (job.id,),
         )
         conn.commit()
-        real_get_job = store_module.get_job
+        real_get_job = job_store_module.get_job
         raced = False
 
         def get_then_finish(current_conn, job_id):  # type: ignore[no-untyped-def]
@@ -219,7 +220,7 @@ class StoreTests(unittest.TestCase):
                 current_conn.commit()
             return snapshot
 
-        with patch("mergetrain.store.get_job", side_effect=get_then_finish):
+        with patch("mergetrain.persistence.jobs.get_job", side_effect=get_then_finish):
             with self.assertRaisesRegex(QueueError, "left 'in_progress'"):
                 cancel_job(conn, job.id)
 
@@ -331,7 +332,7 @@ class StoreTests(unittest.TestCase):
         conn = self.make_conn()
         job = enqueue_job(conn, task="a", branch="feature/a")
         mark_job(conn, job.id, status="blocked", note="gate failed")
-        real_get_job = store_module.get_job
+        real_get_job = job_store_module.get_job
         raced = False
 
         def get_then_claim(current_conn, job_id):  # type: ignore[no-untyped-def]
@@ -347,7 +348,7 @@ class StoreTests(unittest.TestCase):
                 current_conn.commit()
             return snapshot
 
-        with patch("mergetrain.store.get_job", side_effect=get_then_claim):
+        with patch("mergetrain.persistence.jobs.get_job", side_effect=get_then_claim):
             with self.assertRaisesRegex(QueueError, "raced by a concurrent transition"):
                 dismiss_job(conn, job.id)
 
@@ -702,7 +703,7 @@ class StoreTests(unittest.TestCase):
     def test_schema_version_is_rechecked_after_acquiring_migration_lock(self) -> None:
         conn = sqlite3.connect(":memory:")
         self.addCleanup(conn.close)
-        original_immediate = store_module.immediate
+        original_immediate = schema_store_module.immediate
 
         @contextmanager
         def newer_binary_wins_before_lock(connection):
@@ -711,9 +712,11 @@ class StoreTests(unittest.TestCase):
             with original_immediate(connection):
                 yield
 
-        with patch.object(store_module, "immediate", newer_binary_wins_before_lock):
+        with patch.object(
+            schema_store_module, "immediate", newer_binary_wins_before_lock
+        ):
             with self.assertRaisesRegex(QueueError, "newer than supported"):
-                store_module.ensure_schema(conn)
+                schema_store_module.ensure_schema(conn)
 
         self.assertEqual(
             conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION + 1
@@ -865,7 +868,7 @@ class StoreTests(unittest.TestCase):
         )
 
         with patch.object(
-            store_module,
+            job_store_module,
             "_record_run_event",
             side_effect=RuntimeError("audit failed"),
         ), self.assertRaisesRegex(RuntimeError, "audit failed"):

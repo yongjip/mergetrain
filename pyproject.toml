@@ -87,6 +87,7 @@ module = [
   "mergetrain.gate_runner",
   "mergetrain.git_ops",
   "mergetrain.git_runner",
+  "mergetrain.persistence.*",
   "mergetrain.recovery",
   "mergetrain.reuse",
   "mergetrain.store",

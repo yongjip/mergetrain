@@ -164,6 +164,29 @@ and log paths and reduces the owner identity to `local:<pid>`.
 
 `connect()` creates the parent directory, sets the row factory to `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE` transactions to take an early lock and reduce queue-state conflicts under concurrent writers. Schema upgrades run once per `PRAGMA user_version` in the same transaction; databases newer than the running binary fail closed.
 
+### Persistence responsibility boundaries
+
+`store.py` remains the stable import surface for callers, while implementation
+lives under `persistence/`. The modules expose SQLite semantics directly—there
+is no ORM or generic repository layer:
+
+| Module | Owns |
+| --- | --- |
+| `transactions.py` | `BEGIN IMMEDIATE`, rollback/commit handling, and `QueueBusy` translation |
+| `connection.py` | writable versus observer-only connections, WAL/FULL pragmas, and state-directory safety |
+| `schema.py` | current schema, ordered migrations, and forward-version refusal |
+| `jobs.py` | queue/job reads and compare-and-swap mutations plus validated-train identity |
+| `leases.py` | process liveness, token-fenced runner locks, and marker-aware orphan splitting |
+| `claims.py` | cross-boundary atomic claims that acquire a lease, select jobs, and record the claim event in one transaction |
+| `events.py` | append-only run events, retention, resume, and job/train scoping |
+| `recovery.py` | fsync-backed pending-push markers and deploy-reconcile guards |
+
+Dependencies flow from the small transaction/schema primitives toward jobs,
+leases, events, and recovery, then into `claims.py` where an operation genuinely
+needs several boundaries atomically. Persistence modules do not depend on CLI,
+dashboard, Git, or runner orchestration concerns. The compatibility façade does
+not add policy or hide transactions.
+
 ## Job lifecycle
 
 **Active states:** `queued`, `in_progress`, `blocked`, `failed`, `validated`,

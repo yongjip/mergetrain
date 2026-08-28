@@ -75,7 +75,7 @@ class CriticalCoverageTests(unittest.TestCase):
             assess_critical_coverage(data)
 
     def test_cli_returns_one_for_a_policy_failure(self) -> None:
-        target = "src/mergetrain/store.py"
+        target = "src/mergetrain/persistence/jobs.py"
         data = payload(overrides={target: 50.0})
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "coverage.json"

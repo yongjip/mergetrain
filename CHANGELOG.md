@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Split SQLite persistence behind the stable `store.py` API into explicit
+  transaction, connection, schema, job, lease, claim, event, and recovery
+  boundaries. Preserve `BEGIN IMMEDIATE`, WAL/`synchronous=FULL`, migrations,
+  token fencing, atomic claims, observer reads, and every schema/JSON contract;
+  extend strict typing and coverage floors to the new modules.
+
 - Split the monolithic Git/deploy runner into typed collaborators for managed
   commands, Git/ref primitives, gates, validation reuse, worktrees, and atomic
   push/verification. Keep queue/lease and train orchestration in `GitRunner`,

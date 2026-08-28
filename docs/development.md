@@ -27,7 +27,16 @@ mergetrain/
     dashboard_dist/    # packaged production dashboard assets
     models.py          # Job, RunnerLock, and RunEvent dataclasses
     path_gates.py      # POSIX glob matching and NUL-safe Git diff parsing
-    store.py           # SQLite schema, queue ops, runner lock, events
+    store.py           # stable compatibility façade for persistence APIs
+    persistence/
+      transactions.py  # BEGIN IMMEDIATE and time helpers
+      connection.py    # writable/read-only SQLite connection policy
+      schema.py        # schema definition and ordered migrations
+      jobs.py          # queue/job reads, mutations, validated trains
+      leases.py        # liveness, token-fenced locks, orphan recovery
+      claims.py        # atomic job+lease+event claim transactions
+      events.py        # append-only event storage and scoped reads
+      recovery.py      # durable push markers and reconcile guards
   dashboard/           # React/Vite dashboard source
   docs/                # this documentation set
   examples/            # example .mergetrain.yaml and agent metadata
@@ -86,7 +95,7 @@ single full run.
 
 The suite covers the behaviors that make the queue safe:
 
-- **store** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; resumable/scoped events; orphan recovery; and versioned legacy-DB migrations.
+- **persistence** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; resumable/scoped events; orphan recovery; and versioned legacy-DB migrations.
 - **daemon** — `--once` processes only auto jobs and leaves manual jobs queued; repeated DB connections do not leak file descriptors; a tick exception releases the lock and leaves the job queued.
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
 - **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, resumable JSONL events, inspect/log follow termination, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
@@ -110,7 +119,14 @@ correctness-critical modules:
 | `gate_runner.py` | 94% |
 | `git_ops.py` | 85% |
 | `git_runner.py` | 88% |
-| `store.py` | 88% |
+| `persistence/claims.py` | 90% |
+| `persistence/connection.py` | 87% |
+| `persistence/events.py` | 94% |
+| `persistence/jobs.py` | 88% |
+| `persistence/leases.py` | 82% |
+| `persistence/recovery.py` | 86% |
+| `persistence/schema.py` | 95% |
+| `persistence/transactions.py` | 90% |
 | `recovery.py` | 91% |
 | `reuse.py` | 94% |
 | `validation_reuse.py` | 83% |
@@ -118,17 +134,19 @@ correctness-critical modules:
 
 The original floors were chosen from the same successful Linux, macOS, and
 Windows CI matrix. The collaborator floors preserve the exercised behavior
-after the GitRunner responsibility split, with conservative headroom for
-platform-specific branches; the blocking matrix confirms them before merge.
+after the GitRunner and persistence responsibility splits, with conservative
+headroom for platform-specific branches; the blocking matrix confirms them
+before merge.
 Raise them when durable state-transition coverage improves. Lower them only
 with a documented explanation of which behavior moved or became unreachable.
 A missing critical module in coverage JSON fails closed rather than silently
 disappearing from the policy.
 
 Mypy remains incremental for peripheral adapters and CLI rendering. The train
-coordinator, its six correctness-critical collaborators, and the existing
-storage/recovery/reuse modules additionally reject untyped definitions, check
-function bodies, reject implicit optionals, and warn on `Any` returns. This
+coordinator, its six correctness-critical collaborators, the persistence
+package, and the existing recovery/reuse modules additionally reject untyped
+definitions, check function bodies, reject implicit optionals, and warn on
+`Any` returns. This
 keeps the stricter boundary focused on lease fencing, process control,
 worktrees, recovery, validation identity/reuse, and atomic push state rather
 than forcing a repository-wide annotation rewrite.
