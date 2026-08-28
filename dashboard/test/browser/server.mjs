@@ -73,8 +73,14 @@ const vite = await createViteServer({
   root: root.pathname,
   appType: "spa",
   logLevel: "error",
+  // Playwright treats an open HTTP port as a ready server. Vite's configured
+  // warmup runs in the background, so a cold CI worker could start the first
+  // assertion while the application graph was still being transformed.
+  optimizeDeps: { noDiscovery: true },
   server: { hmr: false, middlewareMode: true },
 });
+await vite.warmupRequest("/src/main.jsx");
+await vite.environments.client.waitForRequestsIdle();
 
 const server = createHttpServer((request, response) => {
   const url = new URL(request.url || "/", "http://127.0.0.1");
