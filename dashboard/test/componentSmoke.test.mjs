@@ -19,6 +19,10 @@ test("single-repo components render shared running and validated snapshots", asy
     root: dashboardRoot.pathname,
     appType: "custom",
     logLevel: "silent",
+    // This test loads one SSR module directly; it never needs the client-side
+    // dependency scanner. Leaving discovery enabled races vite.close() against
+    // a background esbuild scan and can strand the child process in CI.
+    optimizeDeps: { noDiscovery: true },
     server: { middlewareMode: true },
   });
   try {
