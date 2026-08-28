@@ -1,0 +1,146 @@
+.secondary-drawer > summary {
+  min-height: 54px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 650;
+}
+.secondary-drawer > summary::-webkit-details-marker { display: none; }
+.secondary-drawer > summary small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.secondary-drawer[open] > summary svg { transform: rotate(180deg); }
+
+.secondary-drawer {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.secondary-grid {
+  padding: 0 20px 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 28px;
+}
+.secondary-grid .activity { margin-top: 0; }
+.secondary-grid .rail-section { padding-inline: 0; }
+.secondary-drawer .deployment-history { margin: 0 20px 20px; }
+
+@media (max-width: 1220px) {
+  .topbar .divider { display: none; }
+  .notification-toggle span { display: none; }
+  .notification-toggle { width: 34px; padding-inline: 0; justify-content: center; }
+  .train-workspace-grid.with-inspector { grid-template-columns: minmax(0, 1fr) 300px; }
+  .batch-status-banner {
+    grid-template-columns: minmax(280px, 1.2fr) minmax(250px, 0.9fr) minmax(260px, 1fr);
+    gap: 18px;
+  }
+  .train-table-head,
+  .train-job-row {
+    grid-template-columns:
+      52px
+      minmax(210px, 1.5fr)
+      minmax(155px, 1fr)
+      minmax(95px, 0.7fr)
+      minmax(105px, 0.78fr)
+      minmax(125px, 0.88fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .workspace-shell { padding-inline: 20px; }
+  .batch-status-banner {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  }
+  .batch-status-facts {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    border: 0;
+  }
+  .batch-next-action { grid-column: 2; grid-row: 1; }
+  .train-workspace-grid.with-inspector { grid-template-columns: 1fr; }
+  .current-train-card { min-height: 0; }
+  .train-inspector { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .train-inspector .inspector-section { border-right: 1px solid var(--line); }
+  .train-inspector .inspector-section:nth-child(even) { border-right: 0; }
+  .secondary-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .workspace-shell { padding: 18px 14px 0; }
+  .batch-status-banner {
+    padding: 17px;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .batch-status-primary,
+  .batch-status-facts,
+  .batch-next-action {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .batch-status-facts {
+    padding-block: 12px;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .batch-status-facts > div:first-child { padding-left: 0; }
+  .batch-status-facts > div:last-child { padding-right: 0; }
+  .mobile-glance {
+    display: grid;
+    gap: 10px;
+  }
+  .mobile-glance article {
+    padding: 16px;
+    display: grid;
+    gap: 6px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 2px 10px var(--shadow);
+  }
+  .mobile-glance.ready article:first-child { border-left-color: var(--amber); }
+  .mobile-glance.attention article:first-child,
+  .mobile-glance article.attention { border-left-color: var(--red); }
+  .mobile-glance article.clear { border-left-color: var(--green); }
+  .mobile-glance span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 720;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .mobile-glance strong { font-size: 15px; line-height: 1.35; }
+  .mobile-glance small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+  .batch-status-banner,
+  .train-workspace-grid,
+  .next-batch-card,
+  .secondary-drawer { display: none; }
+  .workspace-phase-rail { padding-inline: 2px; }
+  .workspace-phase-rail li span { min-height: 43px; font-size: 10px; }
+  .train-table { overflow-x: auto; }
+  .train-table-head,
+  .train-job-row { min-width: 900px; }
+  .validated-train-summary {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+  .validated-train-summary > svg:last-of-type,
+  .validated-train-summary > code { display: none; }
+  .train-inspector { display: block; }
+  .train-inspector .inspector-section { border-right: 0; }
+  .next-batch-card > header { flex-direction: column; }
+  .next-batch-list { grid-template-columns: 1fr; }
+  .secondary-grid { padding-inline: 14px; }
+}

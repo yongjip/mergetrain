@@ -1,0 +1,104 @@
+.next-batch-card {
+  margin-top: 18px;
+  padding: 17px 18px 14px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 2px 12px var(--shadow);
+}
+.next-batch-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.next-batch-card h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  letter-spacing: -0.025em;
+}
+.next-batch-card header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.next-batch-status {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line));
+  border-radius: 6px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+.next-batch-list {
+  margin-top: 13px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.next-batch-list article {
+  min-width: 0;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 35px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+.next-batch-list article > strong {
+  color: var(--blue);
+  font: 720 13px "JetBrains Mono Variable", monospace;
+}
+.next-batch-list article > div { min-width: 0; }
+.next-batch-list article span,
+.next-batch-list article code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.next-batch-list article span {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+.next-batch-list article code {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.next-batch-list article small {
+  color: var(--blue);
+  font: 680 9px "JetBrains Mono Variable", monospace;
+  text-transform: uppercase;
+}
+.next-batch-more {
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.next-batch-card > footer {
+  margin-top: 11px;
+  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 10px;
+}
+.next-batch-card > footer code {
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

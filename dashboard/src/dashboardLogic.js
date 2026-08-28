@@ -170,3 +170,162 @@ export function stateFavicon(indicator) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="${indicator.color}"/><circle cx="32" cy="32" r="13" fill="#ffffff" fill-opacity=".92"/>${badge}</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
+
+export function splitJobIds(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function jobLabel(job) {
+  if (job.task) return job.task;
+  return String(job.branch || "pending job")
+    .split("/")
+    .at(-1)
+    .replaceAll("-", " ");
+}
+
+export function sameBatch(job, selectedJobs) {
+  const selectedIds = new Set(selectedJobs.map((item) => String(item.id)));
+  if (selectedIds.has(String(job.id))) return true;
+  const claimTokens = new Set(selectedJobs.map((item) => item.claim_token).filter(Boolean));
+  const trainIds = new Set(selectedJobs.map((item) => item.train_id).filter(Boolean));
+  const startedTimes = new Set(selectedJobs.map((item) => item.started_at).filter(Boolean));
+  return (job.claim_token && claimTokens.has(job.claim_token))
+    || (job.train_id && trainIds.has(job.train_id))
+    || (job.started_at && startedTimes.has(job.started_at));
+}
+
+export function currentTrainModel(snapshot) {
+  const jobMap = new Map();
+  [...(snapshot.jobs || []), ...(snapshot.train.jobs || [])].forEach((job) => {
+    jobMap.set(String(job.id), job);
+  });
+  const selection = snapshot.train.selection;
+  const selectedJobs = [...(snapshot.train.jobs || [])]
+    .sort((a, b) => Number(a.id) - Number(b.id));
+
+  const validatedTrain = (snapshot.validated_trains || []).find((train) => train.deploy_eligible)
+    || snapshot.validated_trains?.[0]
+    || null;
+  (validatedTrain?.branches || []).forEach((branch) => {
+    const key = String(branch.job_id);
+    if (!jobMap.has(key)) {
+      jobMap.set(key, {
+        id: branch.job_id,
+        branch: branch.branch,
+        validated_head_sha: branch.validated_head_sha,
+        status: "validated",
+      });
+    }
+  });
+
+  const validatedIds = new Set([
+    ...(validatedTrain?.job_ids || []),
+    ...(validatedTrain?.branches || []).map((branch) => branch.job_id),
+  ].map(String));
+  const readyJobs = [...validatedIds]
+    .map((id) => jobMap.get(id))
+    .filter(Boolean)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+
+  const attentionJobs = [...jobMap.values()]
+    .filter((job) => ["blocked", "failed", "needs_reconcile"].includes(job.status))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const batchAttentionJobs = selectedJobs.length
+    ? attentionJobs.filter((job) => sameBatch(job, selectedJobs))
+    : attentionJobs;
+  const blockedJobs = ["running", "validated"].includes(selection)
+    ? batchAttentionJobs
+    : selection === "idle"
+      ? attentionJobs
+      : [];
+  const safeJobs = selection === "validated"
+    ? selectedJobs.filter((job) => job.status === "validated")
+    : [];
+  const currentJobs = [...new Map(
+    [...selectedJobs, ...blockedJobs].map((job) => [String(job.id), job]),
+  ).values()].sort((a, b) => Number(a.id) - Number(b.id));
+  const nextBatchJobs = queuedAfterCurrentBatch(snapshot, currentJobs);
+
+  return {
+    attentionJobs,
+    blockedJobs,
+    safeJobs,
+    readyJobs,
+    currentJobs,
+    nextBatchJobs,
+    selection,
+    validatedTrain,
+  };
+}
+
+export function isGitConflict(job) {
+  return splitJobIds(job.conflict_with).length === 0
+    && String(job.note || "").toLowerCase().includes("conflict");
+}
+
+export function blockedReason(job) {
+  if (isGitConflict(job)) return "Git conflict";
+  if (splitJobIds(job.conflict_with).length) return "Semantic conflict";
+  if (job.status === "needs_reconcile") return "Needs reconcile";
+  return "Blocked";
+}
+
+export function contextualInspectorState(snapshot, demoStep, model = currentTrainModel(snapshot)) {
+  const { attentionJobs } = model;
+  const step = demoStep ?? workspaceStepForSnapshot(snapshot);
+  return {
+    blockedJobs: step >= 2 ? attentionJobs : [],
+  };
+}
+
+export function conflictFiles(job) {
+  return [...String(job.note || "").matchAll(/Merge conflict in ([^\n]+)/gi)]
+    .map((match) => match[1].trim())
+    .filter((path, index, paths) => path && paths.indexOf(path) === index)
+    .slice(0, 3);
+}
+
+export function historyState(status) {
+  if (["failed", "blocked", "needs_reconcile", "deployed_verify_unknown"].includes(status)) return "failed";
+  if (["in_progress", "running"].includes(status)) return "active";
+  if (["queued", "canceled"].includes(status)) return "queued";
+  return "success";
+}
+
+export function repoOperationalCopy(entry, snapshot, state, words) {
+  if (!entry.ok) {
+    return { title: "Configuration error", detail: entry.error };
+  }
+  if (entry.empty) {
+    return {
+      title: "Queue not initialized",
+      detail: "Enqueue the first committed task branch in this repository.",
+    };
+  }
+  if (state === "approval") {
+    return { title: "Awaiting deploy approval", detail: "Tests passed · not on main yet" };
+  }
+  if (state === "active") {
+    const gate = snapshot.progress?.current_gate;
+    return {
+      title: snapshot.progress?.phase === "gating" ? "Running tests" : "Batch in progress",
+      detail: gate
+        ? `Gate ${gate.index}/${gate.total} · ${gate.name}`
+        : snapshot.progress?.message || "The runner is processing the current batch.",
+    };
+  }
+  if (state === "warning") {
+    return { title: "Needs attention", detail: actionCopy(snapshot.next_action, words)[0] };
+  }
+  if (state === "queued") {
+    const count = snapshot.counts?.queued || 0;
+    return {
+      title: "Queued for validation",
+      detail: `${count} request${count === 1 ? "" : "s"} waiting to start`,
+    };
+  }
+  return { title: "Queue clear", detail: "No requests waiting" };
+}

@@ -6,6 +6,9 @@ import {
   SSE_RECONNECT_GRACE_MS,
   actionCopy,
   browserIndicator,
+  conflictFiles,
+  contextualInspectorState,
+  currentTrainModel,
   etaRemainingSeconds,
   gateWaterfallModel,
   jobActivityAt,
@@ -13,6 +16,7 @@ import {
   newestFirstFifoRows,
   queuedAfterCurrentBatch,
   reconnectDelay,
+  repoOperationalCopy,
   repoStateForEntry,
   stateFavicon,
   workspaceStepForSnapshot,
@@ -80,6 +84,58 @@ test("requests arriving after a batch starts wait for the next batch", () => {
       jobs,
     ),
     [],
+  );
+});
+
+test("current train derivation keeps the selected FIFO batch separate from later requests", () => {
+  const selected = { id: 41, status: "in_progress", claim_token: "claim-a" };
+  const blocked = {
+    id: 42,
+    status: "blocked",
+    claim_token: "claim-a",
+    conflict_with: "41",
+    note: "semantic overlap",
+  };
+  const queued = { id: 43, status: "queued" };
+  const model = currentTrainModel({
+    jobs: [selected, blocked, queued],
+    train: { jobs: [selected], selection: "running" },
+    validated_trains: [],
+  });
+
+  assert.deepEqual(model.currentJobs.map((job) => job.id), [41, 42]);
+  assert.deepEqual(model.blockedJobs.map((job) => job.id), [42]);
+  assert.deepEqual(model.nextBatchJobs.map((job) => job.id), [43]);
+});
+
+test("inspector and repository copy stay pure and presentation-ready", () => {
+  const blocked = {
+    id: 42,
+    status: "blocked",
+    note: "Merge conflict in src/a.py\nMerge conflict in src/b.py",
+  };
+  const snapshot = {
+    counts: { blocked: 1 },
+    jobs: [blocked],
+    next_action: "fix_blocked_job",
+    progress: {},
+    train: { jobs: [], selection: "idle" },
+    validated_trains: [],
+  };
+  const inspector = contextualInspectorState(snapshot, 2, currentTrainModel(snapshot));
+  assert.deepEqual(inspector.blockedJobs.map((job) => job.id), [42]);
+  assert.deepEqual(conflictFiles(blocked), ["src/a.py", "src/b.py"]);
+  assert.deepEqual(
+    repoOperationalCopy(
+      { ok: true, empty: false },
+      snapshot,
+      "warning",
+      { action: "deploy", noun: "deployment" },
+    ),
+    {
+      title: "Needs attention",
+      detail: "Fix the blocked branch and enqueue again.",
+    },
   );
 });
 
