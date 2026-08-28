@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.4.1 - 2026-08-28
+
+- Restore `stats`, history, and Hub observation of an idle WAL queue after its
+  last writer removes the `-wal`/`-shm` sidecars. A short `query_only`
+  bootstrap initializes SQLite's WAL bookkeeping while the connection returned
+  to observers remains strict `mode=ro`.
+
 ## 1.4.0 - 2026-08-28
 
 - Persist a privacy-preserving append-only ledger for CLI `reconcile` and

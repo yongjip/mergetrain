@@ -9,6 +9,7 @@ import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from mergetrain.config import load_config
 from mergetrain.dashboard import create_hub_server
@@ -100,6 +101,77 @@ class HubSnapshotTests(unittest.TestCase):
                     conn.execute("DELETE FROM deploy_queue")
             finally:
                 conn.close()
+
+    def test_read_only_connect_bootstraps_missing_idle_wal_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            writer = connect(db)
+            try:
+                enqueue_job(writer, task="seed", branch="agent/seed")
+                writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                writer.close()
+
+            # Model an idle WAL queue after its last connection cleaned up.
+            # The checkpoint makes removing these test-only sidecars safe.
+            for suffix in ("-wal", "-shm"):
+                Path(f"{db}{suffix}").unlink(missing_ok=True)
+
+            observer = connect(db, read_only=True)
+            try:
+                row = observer.execute(
+                    "SELECT COUNT(*) AS n FROM deploy_queue"
+                ).fetchone()
+                self.assertEqual(int(row["n"]), 1)
+                with self.assertRaises(sqlite3.OperationalError):
+                    observer.execute("DELETE FROM deploy_queue")
+            finally:
+                observer.close()
+
+    def test_read_only_connect_does_not_mask_unrelated_sqlite_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            db.touch()
+            observer = MagicMock()
+            observer.execute.side_effect = sqlite3.OperationalError("disk I/O error")
+
+            with patch(
+                "mergetrain.persistence.connection.sqlite3.connect",
+                return_value=observer,
+            ):
+                with self.assertRaisesRegex(sqlite3.OperationalError, "disk I/O"):
+                    connect(db, read_only=True)
+
+            observer.close.assert_called_once_with()
+
+    def test_read_only_connect_reports_bootstrap_failure_and_closes_handles(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            db.touch()
+            first_observer = MagicMock()
+            first_observer.execute.side_effect = [
+                None,
+                sqlite3.OperationalError("unable to open database file"),
+            ]
+            bootstrap = MagicMock()
+            final_observer = MagicMock()
+            final_observer.execute.side_effect = [
+                None,
+                sqlite3.OperationalError("unable to open database file"),
+            ]
+
+            with patch(
+                "mergetrain.persistence.connection.sqlite3.connect",
+                side_effect=[first_observer, bootstrap, final_observer],
+            ):
+                with self.assertRaisesRegex(QueueError, "idle WAL database"):
+                    connect(db, read_only=True)
+
+            first_observer.close.assert_called_once_with()
+            final_observer.close.assert_called_once_with()
+            bootstrap.close.assert_called_once_with()
 
 
 class HubSnapshotCacheTests(unittest.TestCase):

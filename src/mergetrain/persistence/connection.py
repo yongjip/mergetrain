@@ -10,6 +10,58 @@ from ..errors import QueueError
 from .schema import SCHEMA_VERSION, ensure_schema
 
 
+def _open_read_only(path: Path) -> sqlite3.Connection:
+    """Open a strict read-only connection, bootstrapping idle WAL sidecars.
+
+    SQLite cannot open a WAL-mode database with ``mode=ro`` when the last
+    writer removed ``-wal``/``-shm`` and the read-only open cannot create them.
+    This is common for an idle queue.  Briefly keep a ``mode=rw`` connection in
+    ``query_only`` mode while opening the real ``mode=ro`` observer.  The
+    bootstrap may create WAL bookkeeping files, but it cannot mutate queue
+    rows; the connection returned to callers remains OS-level read-only.
+    """
+
+    uri = f"file:{quote(str(path))}"
+    observer: sqlite3.Connection | None = None
+    try:
+        observer = sqlite3.connect(f"{uri}?mode=ro", uri=True)
+        observer.execute("PRAGMA busy_timeout = 5000")
+        # sqlite3_open() is lazy: an idle WAL failure can surface only when
+        # the first database page is read, not while the handle is created.
+        observer.execute("PRAGMA user_version").fetchone()
+        return observer
+    except sqlite3.OperationalError as initial_exc:
+        if observer is not None:
+            observer.close()
+        if "unable to open database file" not in str(initial_exc).lower():
+            raise
+
+    bootstrap: sqlite3.Connection | None = None
+    observer = None
+    try:
+        bootstrap = sqlite3.connect(f"{uri}?mode=rw", uri=True)
+        bootstrap.execute("PRAGMA query_only = ON")
+        bootstrap.execute("PRAGMA busy_timeout = 5000")
+        # Force SQLite to initialize the WAL index before the strict observer
+        # opens.  Keep bootstrap alive until that observer owns the sidecars.
+        bootstrap.execute("PRAGMA user_version").fetchone()
+        observer = sqlite3.connect(f"{uri}?mode=ro", uri=True)
+        observer.execute("PRAGMA busy_timeout = 5000")
+        observer.execute("PRAGMA user_version").fetchone()
+        return observer
+    except sqlite3.OperationalError as exc:
+        if observer is not None:
+            observer.close()
+        raise QueueError(
+            f"cannot observe {path}: an idle WAL database needs writable "
+            "directory access to initialize its -wal/-shm sidecars, or "
+            f"existing readable sidecars ({exc})"
+        ) from exc
+    finally:
+        if bootstrap is not None:
+            bootstrap.close()
+
+
 def _self_ignore(state_dir: Path, *, db_name: str, dedicated: bool) -> None:
     """Keep mergetrain's own state out of Git's view without ever hiding the repo.
 
@@ -71,7 +123,7 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
         # truncate the URI filename AND silently drop mode=ro (falling back
         # to a writable connection), and a literal '%XX' would be decoded
         # into a different path.
-        conn = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
+        conn = _open_read_only(path)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
