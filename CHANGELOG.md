@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.3.0 - 2026-08-28
+
 - Establish a zero-growth-by-default product-surface budget, inventory the
   current CLI, config, dashboard, daemon/Hub, MCP, recovery, notification, and
   validated-reuse surfaces, and classify the core, justified advanced features,

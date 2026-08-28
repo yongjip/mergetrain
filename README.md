@@ -206,7 +206,7 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
 
 ## Status
 
-The current release is `v1.2.0`. Machine-contract major 1 is additive-only:
+The current release is `v1.3.0`. Machine-contract major 1 is additive-only:
 existing JSON keys are not removed or renamed without a contract-version change.
 Issues and operating reports are welcome on
 [GitHub](https://github.com/yongjip/mergetrain/issues).
