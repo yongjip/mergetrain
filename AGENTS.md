@@ -16,6 +16,10 @@ worktrees.
    enqueue a new job.
 8. Do not delete or rewrite remote `refs/mergetrain/deploys/*`; they are
    permanent recovery evidence.
+9. Treat public product surface as a zero-growth budget by default. Before
+   adding a CLI command or flag, config field, dashboard control, daemon/Hub
+   behavior, MCP tool, recovery action, notification path, or reuse control,
+   apply the admission test in `docs/product-scope.md` and record the evidence.
 
 ## Useful commands
 
@@ -38,6 +42,11 @@ that environment.
 When changing production imports, keep the one-way boundaries documented in
 `docs/design.md`; `scripts/check_architecture.py` is a blocking CI check. Do not
 silence it with broad exceptions—document and encode any legitimate new edge.
+
+When changing public product surface, update the baseline and classification in
+`docs/product-scope.md` in the same change. Prefer consolidating an existing
+surface; do not turn an implementation possibility into a feature without a
+measured cost, concrete incorrect state, or repeated workflow need.
 
 ## GitHub CLI authentication
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Establish a zero-growth-by-default product-surface budget, inventory the
+  current CLI, config, dashboard, daemon/Hub, MCP, recovery, notification, and
+  validated-reuse surfaces, and classify the core, justified advanced features,
+  consolidation candidates, and features that should wait for operating
+  evidence. No existing feature is removed.
+
 - Restructure the README around the first-minute product decision: problem,
   fit and non-fit, disposable demo, minimal first run, worktree/hosted-queue
   comparisons, safety guarantees, operating evidence, and links to the full

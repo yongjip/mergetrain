@@ -201,7 +201,8 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
 - Trust and extend: [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) ·
   [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) ·
   [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) ·
-  [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md)
+  [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) ·
+  [Product scope](https://github.com/yongjip/mergetrain/blob/main/docs/product-scope.md)
 
 ## Status
 

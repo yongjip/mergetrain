@@ -66,6 +66,22 @@ call runner, persistence, recovery, and observability APIs rather than carrying
 business rules of their own. Shared CLI helpers stay narrow so command modules
 do not import each other.
 
+## Product-surface budget
+
+Public product surface has a default zero-growth budget. Before adding a CLI
+command or flag, YAML field, dashboard control or view, daemon/Hub behavior,
+MCP tool, recovery action, notification path, or validated-reuse control, read
+the [product scope and complexity budget](product-scope.md). A qualifying change
+must name the manual step, incorrect state, measured latency/cost, enforceable
+safety guarantee, or repeated user workflow that justifies it. Prefer improving
+or consolidating an existing surface and update the baseline in the same
+change.
+
+This review budget complements the blocking structural checks below. It is
+deliberately semantic rather than a gameable line or flag counter: a new mode
+inside an old command still consumes product-surface budget, while a private
+refactor that preserves behavior does not.
+
 ## Running tests
 
 mergetrain requires **Python 3.10+** (it uses `dataclass(slots=True)` and other

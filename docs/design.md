@@ -2,7 +2,7 @@
 
 mergetrain is a local-agent / worktree / deploy-branch-first deploy train. It serializes the committed branches that AI coding agents produce — each in its own Git worktree — through one queue, one runner, a Git merge train, configurable gates, atomic pushes, and an optional auto-only daemon.
 
-This document describes the model and how the pieces fit together. For task-oriented detail, see the sibling guides: [install](install.md), [quickstart](quickstart.md), [config reference](config.md), [CLI reference](cli.md), [daemon](daemon.md), [failure modes](failure-modes.md), [security](security.md), [agent contract](agent-contract.md), [adapter pattern](adapter-pattern.md), and [development](development.md).
+This document describes the model and how the pieces fit together. For task-oriented detail, see the sibling guides: [install](install.md), [quickstart](quickstart.md), [config reference](config.md), [CLI reference](cli.md), [daemon](daemon.md), [failure modes](failure-modes.md), [security](security.md), [agent contract](agent-contract.md), [adapter pattern](adapter-pattern.md), [product scope](product-scope.md), and [development](development.md).
 
 ## Core flow
 
