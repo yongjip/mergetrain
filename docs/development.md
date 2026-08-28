@@ -48,6 +48,7 @@ mergetrain/
       operations.py    # append-only reconcile/recover invocation evidence
       recovery.py      # durable push markers and reconcile guards
   dashboard/           # React/Vite dashboard source
+  benchmarks/          # repo-local agent-adoption fixtures, traces, and grader
   docs/                # this documentation set
   examples/            # example .mergetrain.yaml and agent metadata
   integrations/        # provider-neutral adapters and the Claude Code plugin

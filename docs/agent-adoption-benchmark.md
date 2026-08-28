@@ -242,6 +242,8 @@ discovery_miss
 instruction_not_loaded
 state_not_read
 wrong_branch
+wrong_queue
+enqueue_missing
 wrong_sha
 dirty_enqueue_attempt
 direct_push_attempt
