@@ -84,11 +84,19 @@ def _replace_local_path_root(text: str, root: str, replacement: str) -> str:
 
     if not root:
         return text
-    pattern = re.compile(
-        rf"(^|[\s'\"(=]){re.escape(root)}(?=/|$|[\s'\"),:])",
-        re.MULTILINE,
-    )
-    return pattern.sub(lambda match: f"{match.group(1)}{replacement}", text)
+    # Contract-external diagnostics can mix path styles: for example a Python
+    # traceback may contain a POSIX-looking configured path even when the MCP
+    # server itself is running on Windows. Match both separator spellings while
+    # retaining the leading-boundary check that keeps URL path segments intact.
+    variants = {root, root.replace("\\", "/"), root.replace("/", "\\")}
+    flags = re.MULTILINE | (re.IGNORECASE if os.name == "nt" else 0)
+    for variant in sorted(variants, key=len, reverse=True):
+        pattern = re.compile(
+            rf"(^|[\s'\"(=]){re.escape(variant)}(?=[\\/]|$|[\s'\"),:])",
+            flags,
+        )
+        text = pattern.sub(lambda match: f"{match.group(1)}{replacement}", text)
+    return text
 
 
 async def _stop_windows_process_tree(process: asyncio.subprocess.Process) -> None:

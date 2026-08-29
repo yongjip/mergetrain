@@ -20,6 +20,7 @@ from mergetrain.cli import main
 from mergetrain.mcp_server import (
     MergetrainTools,
     _elicit_deploy_accept,
+    _replace_local_path_root,
     _stop_cli_process,
 )
 
@@ -224,6 +225,16 @@ class PayloadTests(unittest.TestCase):
         self.assertNotIn("ghp-secret", payload["error"]["message"])
         self.assertIn("GITHUB_PAT=[redacted]", payload["error"]["message"])
 
+    def test_local_path_minimization_accepts_both_separator_styles(self) -> None:
+        self.assertEqual(
+            _replace_local_path_root("at /repo/src/main.py", r"\repo", "[repo]"),
+            "at [repo]/src/main.py",
+        )
+        self.assertEqual(
+            _replace_local_path_root(r"at \repo\src\main.py", "/repo", "[repo]"),
+            r"at [repo]\src\main.py",
+        )
+
     def test_valid_cli_json_is_returned_verbatim_even_if_it_looks_sensitive(self) -> None:
         envelope = {
             "ok": False,
@@ -307,8 +318,8 @@ class ProcessLifecycleTests(unittest.TestCase):
             result = asyncio.run(self.tools._run(["doctor"]))
         self.assertEqual(result.args, argv)
         self.assertEqual(result.returncode, 7)
-        self.assertEqual(result.stdout, "out\n")
-        self.assertEqual(result.stderr, "err\n")
+        self.assertEqual(result.stdout, f"out{os.linesep}")
+        self.assertEqual(result.stderr, f"err{os.linesep}")
 
     def test_windows_break_failure_falls_back_to_tree_termination(self) -> None:
         process = MagicMock()
