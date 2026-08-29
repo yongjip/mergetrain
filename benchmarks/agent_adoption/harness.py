@@ -212,8 +212,10 @@ with open(trace_path, "a", encoding="utf-8") as stream:
 
 command = json.loads(os.environ[{real_key!r}])
 env = os.environ.copy()
-{inside}completed = subprocess.run([*command, *sys.argv[1:]], env=env, check=False)
-raise SystemExit(completed.returncode)
+{inside}if os.name == "nt":
+    completed = subprocess.run([*command, *sys.argv[1:]], env=env, check=False)
+    raise SystemExit(completed.returncode)
+os.execvpe(command[0], [*command, *sys.argv[1:]], env)
 """
     if os.name == "nt":
         script_path = path.with_suffix(".py")
@@ -733,7 +735,14 @@ def finalize_trial(run_dir: Path) -> dict[str, Any]:
     git_entries = _agent_tool_entries(trace, "git")
     queue_jobs = [*control_jobs, *task_jobs]
     discovered = bool(mt_entries or queue_jobs)
-    instrumentation_complete = not queue_jobs or bool(mt_entries)
+    mt_commands = {_mergetrain_command(entry.get("argv", [])) for entry in mt_entries}
+    runner_state_recorded = any(
+        job.get("status") in {"failed", "validated", "deployed", "needs_reconcile"}
+        for job in queue_jobs
+    )
+    instrumentation_complete = (not queue_jobs or "enqueue" in mt_commands) and (
+        not runner_state_recorded or bool(mt_commands & {"run-next", "run-batch"})
+    )
     mutation_commands = {
         "enqueue",
         "retry",

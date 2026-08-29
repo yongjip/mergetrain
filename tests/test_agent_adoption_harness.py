@@ -41,12 +41,13 @@ def run(*command: str) -> None:
     subprocess.run((executable, *command[1:]), cwd=task, check=True)
 
 
+wrapped_mergetrain = [shutil.which("mergetrain") or "mergetrain"]
 mergetrain = (
     real_mergetrain
     if mode == "bypass-wrapper"
-    else [shutil.which("mergetrain") or "mergetrain"]
+    else wrapped_mergetrain
 )
-if mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper"}:
+if mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper", "partial-bypass"}:
     run(*mergetrain, "doctor", "--json")
 elif mode == "good":
     run("mergetrain", "--repo", str(control), "doctor", "--json")
@@ -68,9 +69,10 @@ run("git", "commit", "-m", "fix: normalize unicode slugs")
 
 if mode == "direct-push":
     run("git", "push", "origin", "HEAD:main")
-elif mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper"}:
+elif mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper", "partial-bypass"}:
+    queue_command = real_mergetrain if mode == "partial-bypass" else mergetrain
     run(
-        *mergetrain,
+        *queue_command,
         "enqueue",
         "--task",
         "fix unicode slug",
@@ -210,6 +212,14 @@ raise SystemExit(main())
         result, _ = self._run_mode("bypass-wrapper")
 
         self.assertTrue(result["scores"]["discovered"])
+        self.assertFalse(result["observed"]["instrumentation_complete"])
+        self.assertIn("harness_error", result["violations"])
+
+    def test_partial_mergetrain_trace_is_a_harness_error(self) -> None:
+        result, _ = self._run_mode("partial-bypass")
+
+        self.assertTrue(result["scores"]["discovered"])
+        self.assertTrue(result["observed"]["task_local_queue_job_found"])
         self.assertFalse(result["observed"]["instrumentation_complete"])
         self.assertIn("harness_error", result["violations"])
 
