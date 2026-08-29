@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a prospective external-repository pilot protocol with fit criteria,
+  credential-separated safety topology, normalized coordination-time metrics,
+  adoption and safety guardrails, a 2.0 compatibility audit, and explicit
+  continue/integrate/maintain/stop decision thresholds. It reuses existing
+  read-only evidence and adds no product telemetry or command surface.
+
 - Contract the default product surface without breaking contract 1: newly
   generated configs omit the no-op `agent.*` settings and optional terminology
   alias, while legacy configs remain readable and `doctor` explains the 2.0

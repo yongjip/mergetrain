@@ -101,7 +101,9 @@ outside mergetrain's own compatibility tests, found no consumer of the aliases
 or `hub list`. The compatibility period
 avoids inferring that this small sample represents every downstream user.
 Release 2.0 is the earliest removal boundary; before removal, repeat the usage
-search against external pilot repositories and publish the migration note.
+search against external pilot repositories and publish the migration note. Use
+the [external repository pilot](pilot-evaluation.md) for the prospective
+efficiency, safety, adoption, and compatibility record.
 
 ## 1. Core product surface
 
