@@ -358,6 +358,13 @@ class ProcessLifecycleTests(unittest.TestCase):
                 await asyncio.sleep(0.01)
             self.fail(f"timed out waiting for {path.name}")
 
+        async def wait_for_change(path: Path, previous: str) -> None:
+            for _ in range(500):
+                if path.read_text(encoding="utf-8") != previous:
+                    return
+                await asyncio.sleep(0.01)
+            self.fail(f"timed out waiting for {path.name} to change")
+
         async def scenario(root: Path) -> None:
             pid_path = root / "pids.txt"
             heartbeat_path = root / "heartbeat.txt"
@@ -378,12 +385,7 @@ class ProcessLifecycleTests(unittest.TestCase):
                     await wait_for_file(heartbeat_path)
                     parent_pid = int(pid_path.read_text(encoding="utf-8").split()[0])
                     before = heartbeat_path.read_text(encoding="utf-8")
-                    await asyncio.sleep(0.08)
-                    self.assertNotEqual(
-                        heartbeat_path.read_text(encoding="utf-8"),
-                        before,
-                        "the grandchild control must be alive before cancellation",
-                    )
+                    await wait_for_change(heartbeat_path, before)
                     task.cancel()
                     with self.assertRaises(asyncio.CancelledError):
                         await task
