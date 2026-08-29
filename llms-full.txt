@@ -48,7 +48,6 @@ mergetrain events --job JOB_ID --after EVENT_ID --follow --jsonl
 mergetrain logs JOB_ID --tail 200
 mergetrain gc --json
 mergetrain reconcile
-mergetrain hub list --json
 mergetrain hub status --json
 ```
 
@@ -97,10 +96,10 @@ excluded from every sweep as policy; do not re-enable it without explicit
 operator instruction. Recovery applies (`reconcile --apply`, `recover`,
 `unlock --force`) mutate queue state or steal a lock; run the dry-run first.
 
-Repositories may configure `terminology.git_operation: integrate` or `push`.
-Human output and the preferred `--integrate`/`--push` alias follow that setting,
-but the JSON/SQLite contract remains `status=deployed`, `deploy_sha`, and
-`deploy.*`. Completion proves the configured Git refs were atomically updated;
+Use canonical `deploy` vocabulary. Contract 1 still accepts explicit
+`terminology.git_operation`, `--integrate`, and `--push` as deprecated aliases
+through 1.x, but the JSON/SQLite contract remains `status=deployed`,
+`deploy_sha`, and `deploy.*`. Completion proves the configured Git refs were atomically updated;
 `deploy.verify` reports an independent post-push outcome, and a provider release
 remains a separately labeled and authorized action.
 

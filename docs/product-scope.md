@@ -77,6 +77,32 @@ Flags and nested configuration fields remain part of the budget even though the
 table uses coarse counts. Moving a proposed feature from a command into a flag
 does not make it free.
 
+### 2026-08-29 contraction decision
+
+The compatibility surface above remains the contract-1 baseline, but the
+generated and documented default is now smaller:
+
+- `init` generates 9 top-level keys, omitting the no-op `agent` block and the
+  vocabulary-only `terminology` block;
+- explicit `agent.*` keys remain parseable in 1.x, but their values are ignored
+  and `doctor` recommends removal;
+- explicit `terminology.git_operation`, `--integrate`, and `--push` remain
+  functional in 1.x, with diagnostics or stderr warnings directing new use to
+  canonical `deploy`;
+- `hub list` preserves its existing stdout/JSON contract in 1.x but warns and
+  directs new consumers to the richer `hub status`; and
+- MCP continues to register all 12 contract-1 tools, while agent-facing docs
+  foreground a six-tool default path. Physical tool removal waits for 2.0.
+
+The admission evidence was local operating data, not a market claim: two
+actively used repositories retained the default agent/deploy behavior across
+609 deployed jobs, and searches of their application configuration and scripts,
+outside mergetrain's own compatibility tests, found no consumer of the aliases
+or `hub list`. The compatibility period
+avoids inferring that this small sample represents every downstream user.
+Release 2.0 is the earliest removal boundary; before removal, repeat the usage
+search against external pilot repositories and publish the migration note.
+
 ## 1. Core product surface
 
 The core is the smallest complete answer to parallel coding-agent integration:
@@ -120,10 +146,10 @@ evidence-dependent. No deletion is authorized by this list.
 
 | Candidate | Why it is a candidate | Evidence required before change |
 | --- | --- | --- |
-| `agent.require_clean_worktree_before_enqueue`, `agent.require_explicit_auto_approval`, `agent.prefer_json_status` | They are parsed and exposed but explicitly have no runtime effect; enforcement lives in commands and the agent contract. | Config usage search, schema-version/migration plan, generated-contract update, and a compatibility warning period. |
-| `terminology.git_operation` plus `--integrate` and `--push` aliases | Three vocabularies describe the same atomic Git operation and expand docs, tests, and rendering paths. | Confirm which vocabulary users actually choose and preserve machine-contract compatibility during deprecation. |
+| `agent.require_clean_worktree_before_enqueue`, `agent.require_explicit_auto_approval`, `agent.prefer_json_status` | They are parsed and exposed but explicitly have no runtime effect; enforcement lives in commands and the agent contract. | **Deprecating:** omitted from generated config, ignored safely, diagnosed by doctor; repeat external usage search before 2.0 removal. |
+| `terminology.git_operation` plus `--integrate` and `--push` aliases | Three vocabularies describe the same atomic Git operation and expand docs, tests, and rendering paths. | **Deprecating:** canonical default is `deploy`; preserve contract-1 behavior and repeat external usage search before 2.0 removal. |
 | `run-next` beside `run-batch` | A one-job runner overlaps the batch engine and its safety rules. | Prove equivalent exit codes, JSON, isolation, cancellation, and recovery behavior; measure direct use before making it an alias or removing it. |
-| `hub list` beside `hub status` | Both read the registry; status already returns the richer aggregate. | Check scripts that depend on the smaller output and define a stable filtered replacement. |
+| `hub list` beside `hub status` | Both read the registry; status already returns the richer aggregate. | **Deprecating:** preserve the smaller JSON/stdout through 1.x; repeat external script search before 2.0 removal. |
 | `recover` beside orphan repair, `reconcile --apply`, and optional `gc` | The convenience command composes existing recovery stages but adds another verb and decision path. | Preserve restart safety and dry-run clarity; compare operator error rates with a doctor-guided composition. |
 | `demo` and `dashboard --preview` | They support onboarding and release media rather than normal operation. | Keep the 60-second evaluation path measurable; move them only if docs or isolated tooling provides the same reliable demo. |
 | Parallel observation surfaces (`events`, `inspect`, `logs`, `history`, `stats`) across CLI, MCP, and dashboard | The same evidence is rendered through several bounded views. | Analyze agent traces and operator workflows first; consolidation must not force large payloads or log parsing onto routine status checks. |

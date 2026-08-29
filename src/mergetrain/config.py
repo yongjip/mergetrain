@@ -193,6 +193,9 @@ class MergetrainConfig:
     config_exists: bool
     notify: NotifyConfig = NotifyConfig()
     config_version: int = CONFIG_VERSION
+    # Internal migration evidence for doctor. This is deliberately omitted
+    # from ``to_dict`` so contract 1 observation payloads do not gain a key.
+    deprecations: tuple[str, ...] = ()
 
     @property
     def validation_worktree_path(self) -> Path:
@@ -203,6 +206,7 @@ class MergetrainConfig:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data.pop("deprecations")
         workspace = data["state"].pop("validation_workspace")
         data["state"] = {
             key: str(value) for key, value in data["state"].items()
@@ -340,17 +344,11 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "heartbeat_interval_seconds": 10,
             "command_timeout_seconds": 3600,
         },
-        "agent": {
-            "require_clean_worktree_before_enqueue": True,
-            "require_explicit_auto_approval": True,
-            "prefer_json_status": True,
-        },
         "notify": {
             "webhook_url": "",
             "transitions": list(NOTIFY_TRANSITIONS),
             "timeout_seconds": 10,
         },
-        "terminology": {"git_operation": "deploy"},
         "gate_parallelism": {"max_workers": 1},
         "gates": [{"name": "diff-check", "run": "git diff --check ${integration_ref}..HEAD"}],
         "deploy": {"verify": []},
@@ -384,11 +382,6 @@ queue:
   heartbeat_interval_seconds: 10
   command_timeout_seconds: 3600
 
-agent:
-  require_clean_worktree_before_enqueue: true
-  require_explicit_auto_approval: true
-  prefer_json_status: true
-
 notify:
   # Optional provider-neutral JSON webhook; this URL may contain a secret.
   webhook_url: ""
@@ -398,10 +391,6 @@ notify:
     - needs_reconcile
     - daemon_paused
   timeout_seconds: 10
-
-terminology:
-  # Human-facing label only. Machine status remains `deployed`.
-  git_operation: deploy
 
 gate_parallelism:
   # Sequential by default. Increase only for gates explicitly grouped below.
@@ -796,12 +785,19 @@ def load_config(
         ),
     )
 
+    deprecations: list[str] = []
     agent_data = _as_mapping(data, "agent")
-    agent = AgentConfig(
-        require_clean_worktree_before_enqueue=bool(agent_data.get("require_clean_worktree_before_enqueue", True)),
-        require_explicit_auto_approval=bool(agent_data.get("require_explicit_auto_approval", True)),
-        prefer_json_status=bool(agent_data.get("prefer_json_status", True)),
-    )
+    deprecated_agent_keys = {
+        "require_clean_worktree_before_enqueue",
+        "require_explicit_auto_approval",
+        "prefer_json_status",
+    }
+    if deprecated_agent_keys.intersection(agent_data):
+        deprecations.append("agent_behavior_keys")
+    # These settings never changed enforcement; keeping configurable-looking
+    # booleans made the safety boundary less clear. Contract 1 still accepts
+    # the keys, but runtime behavior is now explicitly fixed at safe defaults.
+    agent = AgentConfig()
 
     notify_data = _as_mapping(data, "notify")
     webhook_value = notify_data.get("webhook_url", "")
@@ -838,6 +834,8 @@ def load_config(
     )
 
     terminology_data = _as_mapping(data, "terminology")
+    if "git_operation" in terminology_data:
+        deprecations.append("git_operation_terminology")
     git_operation = _nonempty_string(
         terminology_data.get("git_operation", "deploy"),
         key="terminology.git_operation",
@@ -948,6 +946,7 @@ def load_config(
         config_path=path,
         config_exists=exists,
         config_version=config_version,
+        deprecations=tuple(deprecations),
     )
 
 

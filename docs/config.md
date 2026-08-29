@@ -174,17 +174,23 @@ deploy targets never fail open to `main`.
 
 ## `terminology`
 
+Deprecated in 1.x; planned for removal in 2.0. New generated configurations do
+not include this block. Use the canonical `deploy` vocabulary instead.
+
 ```yaml
 terminology:
   git_operation: integrate
 ```
 
-`git_operation` controls human-facing vocabulary for the atomic Git push. Its
+For existing configurations, `git_operation` still controls human-facing
+vocabulary for the atomic Git push. Its
 allowed values are `deploy` (default), `integrate`, and `push`. For example,
 `integrate` makes the CLI, dashboard, guarded wrapper, runner events, and
 generated agent contract say `integrate` / `integrating` / `integrated`.
 `push` similarly selects `push` / `pushing` / `pushed`. The `--integrate` and
-`--push` aliases are always accepted; this setting selects the preferred words.
+`--push` aliases remain accepted during the 1.x compatibility period; this
+setting selects the preferred words. `doctor --json` recommends removing an
+explicit legacy block.
 
 This setting does not rename machine contracts. Existing `--deploy` commands,
 `status=deployed`, `deploy_sha`, SQLite databases, `deploy.*` config keys, and
@@ -209,6 +215,9 @@ marks the affected job failed. All queue timing values must be positive.
 
 ## `agent`
 
+Deprecated in 1.x; planned for removal in 2.0. New generated configurations do
+not include this block.
+
 ```yaml
 agent:
   require_clean_worktree_before_enqueue: true
@@ -216,9 +225,10 @@ agent:
   prefer_json_status: true
 ```
 
-These fields document expected agent behavior only — they are parsed but have no
-runtime effect, so toggling them (e.g. `require_explicit_auto_approval: false`)
-changes nothing. Actual readiness gating is enforced by `enqueue` options
+These fields documented expected agent behavior only and never had runtime
+effect. During the 1.x compatibility period they are accepted but their values
+are ignored; the safe defaults shown above are always reported. `doctor --json`
+recommends removing an explicit block. Actual readiness gating is enforced by `enqueue` options
 (`--allow-dirty`, `--allow-branch-mismatch`, `--no-ready-check`, `--auto`), not by
 these keys.
 

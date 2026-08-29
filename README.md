@@ -105,9 +105,10 @@ mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
 ```
 
-`deploy` means the configured atomic Git ref update; it does not imply an App
-Store, Kubernetes, or other provider release. Projects can select `integrate`
-or `push` terminology without changing the stable machine contract.
+`deploy` is the canonical name for the configured atomic Git ref update; it
+does not imply an App Store, Kubernetes, or other provider release. The legacy
+`integrate` and `push` vocabulary remains compatible through 1.x but is
+deprecated for removal in 2.0.
 
 `mergetrain init` also writes agent-facing instructions. The essential rule is
 simple: agents commit and enqueue; one runner owns merge → test → push → verify.

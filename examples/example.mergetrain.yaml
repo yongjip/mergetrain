@@ -18,15 +18,6 @@ queue:
   heartbeat_interval_seconds: 10
   command_timeout_seconds: 3600
 
-agent:
-  require_clean_worktree_before_enqueue: true
-  require_explicit_auto_approval: true
-  prefer_json_status: true
-
-terminology:
-  # Use `integrate` when downstream systems reserve "deploy" for provider releases.
-  git_operation: deploy
-
 gates:
   - name: diff-check
     run: git diff --check ${integration_ref}..HEAD

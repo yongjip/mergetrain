@@ -444,7 +444,7 @@ repo on one read-only board with a per-repo drill-down:
 ```sh
 mergetrain hub add ~/projects/app   # register (requires .mergetrain.yaml)
 mergetrain hub add ~/projects/app --no-daemon   # keep on the board, never sweep
-mergetrain hub list [--json]
+mergetrain hub status [--json]
 mergetrain hub                      # serve http://127.0.0.1:8765/
 mergetrain hub remove ~/projects/app
 ```
@@ -477,6 +477,10 @@ Human mode prints one line per repo (nonzero counts, runner liveness, and the
 advisory next action); `--json` emits the same aggregate payload the hub
 dashboard serves, per-repo errors isolated.
 
+`hub list` remains a deprecated 1.x compatibility view for scripts that need
+only registry entries. It warns on stderr and is planned for removal in 2.0;
+new automation should consume `hub status --json`.
+
 ### `hub daemon`
 
 Run the auto-only daemon across every registered repo:
@@ -500,13 +504,13 @@ single sweep; with `--json` it prints one outcome per repo
 
 ## `run-next`
 
-Process exactly one queued job. Requires `--validate-only` or one Git push mode:
-`--deploy`, `--integrate`, or `--push`.
+Process exactly one queued job. Requires `--validate-only` or `--deploy`.
+`--integrate` and `--push` are deprecated 1.x aliases planned for removal in
+2.0.
 
 ```sh
 mergetrain run-next --validate-only
 mergetrain run-next --deploy
-mergetrain run-next --integrate
 ```
 
 `--keep-worktree` leaves the temporary integration worktree in place for inspection. See [Design → Runner behavior](design.md#runner-behavior).
@@ -524,12 +528,12 @@ the train, or dismiss it first if you mean to ship something else.
 
 Validate all currently queued jobs as one merge train, or deploy an exact
 validated train. Requires `--validate-only` or `--deploy`; `--integrate` and
-`--push` are aliases for the identical atomic Git operation.
+`--push` remain deprecated 1.x aliases for the identical atomic Git operation
+and are planned for removal in 2.0.
 
 ```sh
 mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
-mergetrain run-batch --integrate
 mergetrain run-batch --deploy --train-id <id>
 mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
 mergetrain run-batch --deploy --train-id <id> --reuse-validated
@@ -558,8 +562,9 @@ reuse.
 Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
 `reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
 Preview JSON includes `push_plan.remote` and each exact `HEAD:<ref>` refspec.
-`terminology.git_operation` changes only human wording and the preferred alias;
-machine JSON continues to report `mode=deploy` and `status=deployed`.
+The deprecated `terminology.git_operation` changes only human wording during
+the 1.x compatibility period; machine JSON continues to report `mode=deploy`
+and `status=deployed`.
 
 ## `supersede`
 

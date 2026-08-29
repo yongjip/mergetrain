@@ -11,11 +11,14 @@ with a per-repo drill-down into the full single-repo view.
 ```bash
 mergetrain hub add ~/projects/app        # register a repo (requires .mergetrain.yaml)
 mergetrain hub add .                     # register the current repo
-mergetrain hub list                      # show the roster
 mergetrain hub                           # serve http://127.0.0.1:8765/
 mergetrain hub status [--json]           # same aggregate, for terminals and agents
 mergetrain hub remove ~/projects/app     # deregister (repo state untouched)
 ```
+
+`hub list` remains a deprecated registry-only compatibility view through 1.x.
+It warns on stderr and is planned for removal in 2.0; use `hub status --json`
+for new scripts.
 
 `hub add`/`hub remove` edit the roster only; they never touch the repo itself.
 The registry lives at `$XDG_CONFIG_HOME/mergetrain/repos.json` (default

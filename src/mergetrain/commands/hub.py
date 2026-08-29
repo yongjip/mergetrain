@@ -167,6 +167,11 @@ def cmd_hub_remove(args: argparse.Namespace) -> int:
 def cmd_hub_list(args: argparse.Namespace) -> int:
     from ..registry import load_registry, registry_path
 
+    print(
+        "mergetrain warning: `hub list` is deprecated; use `hub status` "
+        "(planned removal in 2.0)",
+        file=sys.stderr,
+    )
     entries = load_registry(args.registry)
     if args.json:
         dump_json(

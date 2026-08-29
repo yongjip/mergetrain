@@ -353,11 +353,13 @@ push.
 An explicitly empty `push_refs` value is rejected while loading config; only an
 omitted field defaults to the integration branch.
 
-`terminology.git_operation` may present this operation as `deploy`, `integrate`,
-or `push` in human-facing surfaces. The aliases converge on this exact code
-path. Machine state deliberately remains `deployed`/`deploy_sha`, so existing
-databases and JSON consumers do not need migration. Completion proves the Git
-ref update only; it does not by itself prove or authorize a provider release.
+Contract 1 still accepts the deprecated `terminology.git_operation` setting and
+may present this operation as `integrate` or `push` in human-facing surfaces.
+Those aliases converge on this exact code path; new configurations use the
+canonical `deploy`. Machine state deliberately remains
+`deployed`/`deploy_sha`, so existing databases and JSON consumers do not need
+migration. Completion proves the Git ref update only; it does not by itself
+prove or authorize a provider release.
 
 ### Post-push verify policy
 

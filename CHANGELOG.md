@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Contract the default product surface without breaking contract 1: newly
+  generated configs omit the no-op `agent.*` settings and optional terminology
+  alias, while legacy configs remain readable and `doctor` explains the 2.0
+  migration. The no-op agent values are now explicitly ignored in favor of the
+  enforced safe defaults.
+
+- Deprecate `--integrate`, `--push`, and `hub list` with stderr warnings while
+  preserving their existing stdout/JSON behavior through 1.x. Documentation
+  now foregrounds canonical `deploy`, `hub status`, and a six-tool MCP path;
+  physical removals wait for the 2.0 contract boundary.
+
 - Make cancellation of an in-flight MCP tool coroutine terminate the CLI
   process group instead of leaving validate or an accepted deploy running in a
   detached worker thread. Preserve the existing timeout envelope and

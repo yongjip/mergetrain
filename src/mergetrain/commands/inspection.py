@@ -589,11 +589,11 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
 
 def _doctor_recommendations(
     config_drift: dict[str, Any],
+    deprecations: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
-    if config_drift["state"] != "drifted":
-        return []
-    return [
-        {
+    recommendations: list[dict[str, Any]] = []
+    if config_drift["state"] == "drifted":
+        recommendations.append({
             "code": "operator_config_drift",
             "severity": "warning",
             "summary": (
@@ -609,8 +609,46 @@ def _doctor_recommendations(
                 "review the configuration diff before queue-advancing commands",
                 "synchronize a clean operator checkout without discarding local work",
             ],
-        }
-    ]
+        })
+    if "agent_behavior_keys" in deprecations:
+        recommendations.append(
+            {
+                "code": "deprecated_agent_config",
+                "severity": "warning",
+                "summary": (
+                    "The agent behavior settings are deprecated and their values "
+                    "are ignored; mergetrain enforces the safe behavior directly."
+                ),
+                "evidence": {
+                    "keys": [
+                        "agent.require_clean_worktree_before_enqueue",
+                        "agent.require_explicit_auto_approval",
+                        "agent.prefer_json_status",
+                    ]
+                },
+                "actions": [
+                    "remove the deprecated agent block from .mergetrain.yaml",
+                    "use repository instructions and capability separation for agent policy",
+                ],
+            }
+        )
+    if "git_operation_terminology" in deprecations:
+        recommendations.append(
+            {
+                "code": "deprecated_git_operation_terminology",
+                "severity": "warning",
+                "summary": (
+                    "terminology.git_operation is deprecated; deploy is the canonical "
+                    "human-facing operation."
+                ),
+                "evidence": {"configured_field": "terminology.git_operation"},
+                "actions": [
+                    "remove the terminology block from .mergetrain.yaml",
+                    "use --deploy in commands and documentation",
+                ],
+            }
+        )
+    return recommendations
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -663,7 +701,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if repo_root else False,
         },
         "config_drift": config_drift,
-        "recommendations": _doctor_recommendations(config_drift),
+        "recommendations": _doctor_recommendations(
+            config_drift, config.deprecations
+        ),
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
         "validated_trains": validated_trains,

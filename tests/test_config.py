@@ -62,8 +62,29 @@ notify:
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")
         self.assertEqual(data["git"]["push_refs"], ["main"])
-        self.assertEqual(data["terminology"]["git_operation"], "deploy")
+        self.assertNotIn("agent", data)
+        self.assertNotIn("terminology", data)
         self.assertEqual(data["gates"][0]["name"], "diff-check")
+
+    def test_deprecated_agent_settings_are_accepted_but_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """agent:
+  require_clean_worktree_before_enqueue: false
+  require_explicit_auto_approval: false
+  prefer_json_status: false
+""",
+                encoding="utf-8",
+            )
+
+            config = load_config(repo=repo)
+
+            self.assertTrue(config.agent.require_clean_worktree_before_enqueue)
+            self.assertTrue(config.agent.require_explicit_auto_approval)
+            self.assertTrue(config.agent.prefer_json_status)
+            self.assertEqual(config.deprecations, ("agent_behavior_keys",))
+            self.assertNotIn("deprecations", config.to_dict())
 
     def test_yaml_loader_handles_comments_and_full_yaml_syntax(self) -> None:
         doc = (
@@ -213,6 +234,9 @@ notify:
                 },
             )
             self.assertEqual(config.to_dict()["terminology"]["completed"], "integrated")
+            self.assertEqual(
+                config.deprecations, ("git_operation_terminology",)
+            )
 
     def test_invalid_git_operation_terminology_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:

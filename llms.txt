@@ -40,8 +40,9 @@ Agent integrations:
   confirmation dialog.
 
 Vocabulary compatibility:
-- `terminology.git_operation: integrate` makes human output prefer `--integrate`;
-  `push` similarly prefers `--push`. Both are aliases of `--deploy`.
+- Use canonical `deploy` vocabulary. Explicit `terminology.git_operation`,
+  `--integrate`, and `--push` remain deprecated aliases through 1.x and are
+  planned for removal in 2.0.
 - Machine state stays `status=deployed` with `deploy_sha` for compatibility.
 - Completion means configured Git refs were atomically pushed, not that a
   downstream provider release completed or was authorized.
