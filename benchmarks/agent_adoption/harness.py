@@ -195,6 +195,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 
@@ -211,7 +212,8 @@ with open(trace_path, "a", encoding="utf-8") as stream:
 
 command = json.loads(os.environ[{real_key!r}])
 env = os.environ.copy()
-{inside}os.execvpe(command[0], [*command, *sys.argv[1:]], env)
+{inside}completed = subprocess.run([*command, *sys.argv[1:]], env=env, check=False)
+raise SystemExit(completed.returncode)
 """
     if os.name == "nt":
         script_path = path.with_suffix(".py")
