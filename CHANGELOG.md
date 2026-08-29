@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Clarify that lease fencing serializes mergetrain runners but cannot stop a
+  shell-capable task agent from pushing with its own credential. Document the
+  enforceable topology: task agents without integration credentials, a separate
+  runner identity, and remote branch protection or a reviewed PR path.
+
 - Add a prospective external-repository pilot protocol with fit criteria,
   credential-separated safety topology, normalized coordination-time metrics,
   adoption and safety guardrails, a 2.0 compatibility audit, and explicit

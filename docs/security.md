@@ -1,5 +1,31 @@
 # Security notes
 
+## Runner and task-agent credentials
+
+Mergetrain's SQLite lock and lease token guarantee that one current mergetrain
+runner owns a train. They are not an operating-system or remote authorization
+boundary. A coding agent with general shell access and a credential accepted by
+the integration branch can run `git push` directly and bypass the queue.
+
+Use capability separation when the one-runner property must be enforced:
+
+- task agents may read and write their worktrees, commit, and enqueue exact
+  SHAs, but receive no credential that can update the integration branch;
+- the runner uses a separate SSH key or token allowed to update the configured
+  integration branch and create `refs/mergetrain/deploys/*`;
+- the remote protects `main` and the integration branch, allowing only the
+  runner identity or a reviewed PR workflow; and
+- start with an `agent-integration` branch and one reviewed PR to `main` when a
+  repository is adopting the model for the first time.
+
+MCP can narrow the actions available through that server, but it does not revoke
+capabilities exposed by a separate general shell. Repository instructions are a
+behavioral protocol, not a substitute for credential or branch protection.
+
+Give the runner the minimum remote permission needed for configured payload
+refs and permanent audit refs. Keep provider-specific credential setup outside
+core configuration and examples.
+
 ## Config trust boundary
 
 `.mergetrain.yaml` is trusted code. Gate and verify commands run through a

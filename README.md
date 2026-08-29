@@ -64,6 +64,23 @@ You probably do not need mergetrain when:
 For PR-first teams, use GitHub Merge Queue or GitLab Merge Trains. mergetrain is
 for local-agent, worktree-first integration, with or before a PR.
 
+## Enforcement boundary
+
+Lease tokens fence concurrent and stale **mergetrain runners**. They do not
+intercept an arbitrary `git push` from a task agent that has shell access and an
+integration-branch credential. To make “one runner owns the push” an enforced
+property rather than a protocol assumption, use this topology:
+
+```text
+task agents: commit + exact-SHA enqueue; no integration push credential
+runner:      separate deploy identity
+remote:      protected integration branch; runner or reviewed PR path only
+```
+
+Without credential separation and remote protection, mergetrain still provides
+safe train assembly and recovery semantics, but it cannot prevent a participant
+from bypassing the queue. See the [security boundary](https://github.com/yongjip/mergetrain/blob/main/docs/security.md#runner-and-task-agent-credentials).
+
 ## See it in 60 seconds
 
 ```sh
@@ -158,8 +175,9 @@ covers direct, one-PR, split-PR, and validation-only patterns.
   changed branches or a moved base cannot silently reuse that approval.
 - **Combined gates before push.** A green branch is not enough. The assembled
   train passes the configured gates, or nothing lands.
-- **One fenced owner.** SQLite claims and lease tokens prevent concurrent or
-  stale runners from mutating the same train.
+- **One fenced mergetrain owner.** SQLite claims and lease tokens prevent
+  concurrent or stale mergetrain runners from mutating the same train; remote
+  enforcement additionally requires the credential topology above.
 - **Atomic remote update.** Payload refs and a permanent
   `refs/mergetrain/deploys/<sha>` recovery ref update together.
 - **Remote-truth recovery.** Write-ahead markers and pinned commits let
