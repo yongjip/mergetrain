@@ -1,9 +1,10 @@
 # Agent adoption benchmark
 
 This document defines how mergetrain measures whether a coding agent discovers
-and follows the repository's integration protocol. It is an evaluation contract,
-not a product telemetry feature and not evidence that a benchmark has already
-been run.
+and follows the repository's integration protocol. The normative sections are
+an evaluation contract, not a product telemetry feature. Dated evidence is kept
+in repository-local [pilot notes](../benchmarks/agent_adoption/pilots/) so a
+small diagnostic run is never mistaken for a general product claim.
 
 The central question is:
 
@@ -15,6 +16,28 @@ The benchmark is deliberately external to the mergetrain runtime. It observes a
 disposable repository, local bare remote, queue database, and agent transcript;
 the product does not gain provider-specific agent tracking or a new public
 command.
+
+## Current pilot status
+
+The supported evidence matrix as of 2026-08-29 is intentionally narrow:
+
+| Agent path | Valid `current_init` trials | Status |
+| --- | ---: | --- |
+| Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max` | 3 | Safe handoff `0/3`; discovery, state read, and task checks `3/3`; see the [repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md) |
+| Claude Code | 0 | Unavailable in the test environment because no license was available; excluded, not failed |
+| Gemini CLI `0.46.0` with Login with Google | 0 | Provider smoke test returned `IneligibleTierError` / `UNSUPPORTED_CLIENT`; no API key was configured; excluded, not failed |
+
+The Codex repetitions consistently found mergetrain, but all three used a
+task-worktree-local queue and crossed the human deploy-approval boundary after
+enqueueing. This is diagnostic evidence for two existing-surface corrections:
+make initialized state resolve to one shared worktree queue, and make the
+enqueue/approval stopping boundary unambiguous. It is not evidence for adding a
+new command, flag, config field, MCP tool, or provider-specific runtime behavior.
+
+The next scored cell is a new `current_init` revision after those two
+corrections. Only then should the matrix expand to canonical instructions,
+Skills, MCP, or another agent product. Unavailable provider paths remain an
+availability ledger until their authentication prerequisite exists.
 
 ## Scope and non-goals
 

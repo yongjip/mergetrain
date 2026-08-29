@@ -5,7 +5,9 @@ This repository-local harness implements the first reproducible slice of the
 installed with the `mergetrain` wheel and adds no product CLI or telemetry.
 
 Diagnostic pilot notes live under [`pilots/`](pilots/) and explicitly separate
-scored trials from launcher or instrumentation failures.
+scored trials from launcher or instrumentation failures. The current repeated
+Codex result is recorded in the
+[`2026-08-29` note](pilots/2026-08-29-codex-current-init-repetitions.md).
 
 The current milestone supports the `current_init` condition and one Tier-1 task.
 It creates a disposable Git repository, local bare remote, task worktree, hidden
@@ -58,6 +60,31 @@ If queue state proves that mergetrain ran but the command boundary has no
 matching trace, the grader records `harness_error` and excludes the run from
 behavioral interpretation instead of guessing.
 
+On macOS, Codex invokes login `zsh`, whose system profile can reorder `PATH`.
+Use the repository's controlled benchmark adapter so traced `git` and
+`mergetrain` remain first after login-shell initialization:
+
+```sh
+python -m benchmarks.agent_adoption.harness run \
+  --run-dir /tmp/mt-adoption-run \
+  --agent-product codex \
+  --agent-version 0.150.1 \
+  --model gpt-5.6-sol \
+  --reasoning-setting max \
+  --permission-profile 'approve-for-me(workspace-write); add-dir=control; shell-env=core+explicit-trace+controlled-zprofile; shell-network=disabled; ignore-user-config; ephemeral' \
+  -- python benchmarks/agent_adoption/codex_launcher.py \
+    /tmp/mt-adoption-run/prompt.txt \
+    /tmp/mt-adoption-run/control
+```
+
+The adapter changes only the observation boundary: it uses an ephemeral
+`ZDOTDIR`, restores the harness wrapper directory at the front of `PATH`, passes
+the required trace variables explicitly, disables shell-command network access,
+and starts a fresh ephemeral Codex session with user config ignored. Use
+`--codex`, `--model`, or `--reasoning` only when the corresponding provenance
+fields are changed too. Other agent products need their own equally explicit
+benchmark adapters; they do not belong in mergetrain core.
+
 The `current_init` condition intentionally preserves the released `init --write`
 output. If an agent enqueues into task-worktree-local state instead of the
 control repository's shared queue, the grader records `wrong_queue`; the harness
@@ -74,6 +101,7 @@ RUN/
   remote.git/              # local-only origin
   grader/check_task.py     # hidden deterministic task check
   bin/                     # platform-native tracing wrappers used only by `run`
+  codex-zdotdir/           # adapter-owned login-shell profile, when Codex is used
   artifacts/
     trace.jsonl
     remote-updates.jsonl
