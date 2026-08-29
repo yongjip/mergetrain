@@ -89,8 +89,7 @@ mergetrain run-batch --deploy
 ```
 
 Here `deploy` names the atomic Git ref update. A provider release after this
-push is a separate action. Legacy `integrate`/`push` terminology remains
-compatible through 1.x but is deprecated; new projects should use `--deploy`.
+push is a separate action.
 
 Deploy mode runs gates first, then performs an atomic push to configured
 `git.push_refs` plus the retained `refs/mergetrain/deploys/<sha>` recovery audit

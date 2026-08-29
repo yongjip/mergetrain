@@ -1,7 +1,7 @@
 import { CaretDown } from "@phosphor-icons/react";
 
 import { contextualInspectorState, currentTrainModel, workspaceStepForSnapshot } from "../../dashboardLogic.js";
-import { terminology } from "../../dashboardFormatters.js";
+import { DEPLOY_WORDS } from "../../dashboardFormatters.js";
 import { Activity, AttentionPanel, DeploymentHistory, RunnerPanel } from "../OperationalDetails.jsx";
 import { BatchStatusBanner, MobileGlance } from "./BatchStatus.jsx";
 import { CurrentTrainWorkspace } from "./CurrentTrainWorkspace.jsx";
@@ -10,7 +10,7 @@ import { TrainInspector } from "./TrainInspector.jsx";
 
 export function SingleRepoBody({ snapshot, now, demoStep }) {
   const recentJobs = snapshot.jobs || [];
-  const words = terminology(snapshot);
+  const words = DEPLOY_WORDS;
   const model = currentTrainModel(snapshot);
   const inspector = contextualInspectorState(snapshot, demoStep, model);
   const showInspector = inspector.blockedJobs.length > 0;

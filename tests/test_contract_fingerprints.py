@@ -442,13 +442,6 @@ def _cap_hub_add(repo):
     )
 
 
-def _cap_hub_list(repo):
-    from mergetrain.registry import add_repo
-
-    add_repo(repo, _hub_registry(repo))
-    return _run_json(["hub", "list", "--registry", str(_hub_registry(repo))])
-
-
 def _cap_hub_remove(repo):
     from mergetrain.registry import add_repo
 
@@ -476,7 +469,6 @@ SURFACES = {
     "hub_status": _cap_hub_status,
     "gc_applied": _cap_gc_applied,
     "hub_add": _cap_hub_add,
-    "hub_list": _cap_hub_list,
     "hub_remove": _cap_hub_remove,
     "init": _cap_init,
     "run_batch_preview": _cap_run_preview,

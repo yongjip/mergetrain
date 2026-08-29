@@ -575,9 +575,8 @@ def stats_payload(
             "landed": landed,
             "blocked": blocked,
             "failed": failed,
-            # `finished`, not `completed`: `completed` is configured human
-            # vocabulary for the SUCCESS end state (terminology.completed), while
-            # this counts deployed + blocked + failed. It is land_rate's
+            # `finished`, not `deployed`: this counts deployed + blocked + failed.
+            # It is land_rate's
             # denominator, so reading it as "shipped" inverts the metric.
             "finished": finished,
             "land_rate": round(landed / finished, 4) if finished else None,
@@ -774,14 +773,14 @@ def inspect_job_payload(
         phase, state, message, updated_at = (
             "ready",
             "success",
-            f"Waiting for {config.terminology.noun} approval",
+            "Waiting for deployment approval",
             job.validated_at,
         )
     elif job.status == "deployed":
         phase, state, message, updated_at = (
             "complete",
             "success",
-            f"Git {config.terminology.noun} complete",
+            "Git deployment complete",
             job.finished_at,
         )
     else:
@@ -823,7 +822,6 @@ def inspect_job_payload(
         }
     return {
         "ok": True,
-        "terminology": config.terminology.to_dict(),
         "job": job.to_dict(),
         "outcome": job_outcome(job),
         "progress": progress,

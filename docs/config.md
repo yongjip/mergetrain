@@ -27,11 +27,15 @@ introducing dual-format discovery, precedence, or migration rules.
 ## `version`
 
 ```yaml
-version: 1
+version: 2
 ```
 
-The config schema version. `mergetrain init` writes the current version (`1`);
-an omitted `version:` is treated as `1`. A file whose `version:` is **newer**
+The config schema version. `mergetrain init` writes the current version (`2`);
+an omitted `version:` is treated as version 1 and migrated in memory. Version-1
+files may still contain the removed no-op `agent` block or presentation-only
+`terminology` block; both are ignored during migration. A version-2 file that
+declares either removed key is rejected so stale policy cannot appear active.
+A file whose `version:` is **newer**
 than this binary understands is recorded — not rejected — at load, so recovery
 still works on an older binary. Command-scoped enforcement surfaces the mismatch
 instead: `doctor` reports `config_version_supported` (the highest version this
@@ -172,32 +176,6 @@ If `push_refs` is omitted it defaults to `integration_branch`. An explicitly
 empty list, null value, blank ref, or duplicate ref is a configuration error;
 deploy targets never fail open to `main`.
 
-## `terminology`
-
-Deprecated in 1.x; planned for removal in 2.0. New generated configurations do
-not include this block. Use the canonical `deploy` vocabulary instead.
-
-```yaml
-terminology:
-  git_operation: integrate
-```
-
-For existing configurations, `git_operation` still controls human-facing
-vocabulary for the atomic Git push. Its
-allowed values are `deploy` (default), `integrate`, and `push`. For example,
-`integrate` makes the CLI, dashboard, guarded wrapper, runner events, and
-generated agent contract say `integrate` / `integrating` / `integrated`.
-`push` similarly selects `push` / `pushing` / `pushed`. The `--integrate` and
-`--push` aliases remain accepted during the 1.x compatibility period; this
-setting selects the preferred words. `doctor --json` recommends removing an
-explicit legacy block.
-
-This setting does not rename machine contracts. Existing `--deploy` commands,
-`status=deployed`, `deploy_sha`, SQLite databases, `deploy.*` config keys, and
-JSON `next_action` values remain stable. The configured word names the atomic
-Git ref update. `deploy.verify` records an independent post-push outcome, while
-a provider release is a separate action that Git completion does not imply.
-
 ## `queue`
 
 ```yaml
@@ -212,25 +190,6 @@ queue:
 commands renew the lease every `heartbeat_interval_seconds`; the heartbeat must
 be shorter than the TTL. `command_timeout_seconds` terminates a command and
 marks the affected job failed. All queue timing values must be positive.
-
-## `agent`
-
-Deprecated in 1.x; planned for removal in 2.0. New generated configurations do
-not include this block.
-
-```yaml
-agent:
-  require_clean_worktree_before_enqueue: true
-  require_explicit_auto_approval: true
-  prefer_json_status: true
-```
-
-These fields documented expected agent behavior only and never had runtime
-effect. During the 1.x compatibility period they are accepted but their values
-are ignored; the safe defaults shown above are always reported. `doctor --json`
-recommends removing an explicit block. Actual readiness gating is enforced by `enqueue` options
-(`--allow-dirty`, `--allow-branch-mismatch`, `--no-ready-check`, `--auto`), not by
-these keys.
 
 ## `notify`
 

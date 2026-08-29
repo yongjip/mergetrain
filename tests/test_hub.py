@@ -403,34 +403,6 @@ class HubRegistryDegradationTests(unittest.TestCase):
 
 
 class HubStatusCliTests(unittest.TestCase):
-    def test_hub_list_preserves_json_and_warns_on_stderr(self) -> None:
-        import contextlib
-        import io
-
-        from mergetrain.cli import main
-
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            registry = root / "repos.json"
-            repo = make_repo(root, "live")
-            add_repo(repo, registry)
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(
-                stderr
-            ):
-                code = main(
-                    ["hub", "list", "--registry", str(registry), "--json"]
-                )
-
-            self.assertEqual(code, 0)
-            self.assertEqual(
-                json.loads(stdout.getvalue())["repos"][0]["path"],
-                str(repo.resolve()),
-            )
-            self.assertIn("hub list` is deprecated", stderr.getvalue())
-
     def test_hub_status_json_reports_every_registered_repo(self) -> None:
         import contextlib
         import io
@@ -513,9 +485,9 @@ class HubServerTests(unittest.TestCase):
                 self.assertTrue(payload["hub"])
                 self.assertEqual(payload["repo_count"], 1)
                 self.assertEqual(payload["repos"][0]["name"], "live")
-                # Contract 1: the outer hub frame is stamped at the HTTP
+                # The outer hub frame is stamped at the HTTP
                 # boundary; embedded per-repo snapshots stay bare.
-                self.assertEqual(payload["contract_version"], 1)
+                self.assertEqual(payload["contract_version"], 2)
                 self.assertNotIn("contract_version", payload["repos"][0]["snapshot"])
 
                 # Registry edits show up without a server restart.

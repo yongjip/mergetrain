@@ -6,12 +6,12 @@ import {
   etaRemainingSeconds,
   jobLabel,
 } from "../../dashboardLogic.js";
-import { duration, relative, terminology } from "../../dashboardFormatters.js";
+import { DEPLOY_WORDS, duration, relative } from "../../dashboardFormatters.js";
 
 export function BatchStatusBanner({ snapshot, model, now }) {
   const { currentJobs, selection } = model;
   const count = currentJobs.length;
-  const words = terminology(snapshot);
+  const words = DEPLOY_WORDS;
   const target = snapshot.project.integration_ref;
   const progress = snapshot.progress || {};
   const currentGate = progress.current_gate
@@ -95,7 +95,7 @@ export function BatchStatusBanner({ snapshot, model, now }) {
 
 export function MobileGlance({ snapshot, model, now }) {
   const indicator = browserIndicator(snapshot);
-  const [nextTitle] = actionCopy(snapshot.next_action, terminology(snapshot));
+  const [nextTitle] = actionCopy(snapshot.next_action, DEPLOY_WORDS);
   const etaSeconds = etaRemainingSeconds(snapshot.eta, now.getTime());
   const attention = model.attentionJobs || [];
   const stateTitle = model.selection === "validated"

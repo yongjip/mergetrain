@@ -66,7 +66,7 @@ notify:
         self.assertNotIn("terminology", data)
         self.assertEqual(data["gates"][0]["name"], "diff-check")
 
-    def test_deprecated_agent_settings_are_accepted_but_ignored(self) -> None:
+    def test_version_one_removed_settings_are_migrated_in_memory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             (repo / ".mergetrain.yaml").write_text(
@@ -74,17 +74,29 @@ notify:
   require_clean_worktree_before_enqueue: false
   require_explicit_auto_approval: false
   prefer_json_status: false
+terminology:
+  git_operation: integrate
 """,
                 encoding="utf-8",
             )
 
             config = load_config(repo=repo)
 
-            self.assertTrue(config.agent.require_clean_worktree_before_enqueue)
-            self.assertTrue(config.agent.require_explicit_auto_approval)
-            self.assertTrue(config.agent.prefer_json_status)
-            self.assertEqual(config.deprecations, ("agent_behavior_keys",))
-            self.assertNotIn("deprecations", config.to_dict())
+            self.assertEqual(config.config_version, 1)
+            self.assertNotIn("agent", config.to_dict())
+            self.assertNotIn("terminology", config.to_dict())
+
+    def test_version_two_rejects_removed_top_level_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            config_path = repo / ".mergetrain.yaml"
+            for removed in ("agent", "terminology"):
+                with self.subTest(removed=removed):
+                    config_path.write_text(
+                        f"version: 2\n{removed}: {{}}\n", encoding="utf-8"
+                    )
+                    with self.assertRaisesRegex(ConfigError, "removed top-level key"):
+                        load_config(repo=repo)
 
     def test_yaml_loader_handles_comments_and_full_yaml_syntax(self) -> None:
         doc = (
@@ -150,7 +162,6 @@ notify:
             self.assertEqual(config.project.name, "demo")
             self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
             self.assertEqual(config.git.integration_ref, "origin/main")
-            self.assertEqual(config.terminology.completed, "deployed")
 
     def test_linked_worktrees_share_relative_runtime_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -214,40 +225,6 @@ notify:
             config = load_config(repo=repo)
 
             self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
-
-    def test_integration_terminology_has_derived_human_words(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            (repo / ".mergetrain.yaml").write_text(
-                "terminology:\n  git_operation: integrate\n",
-                encoding="utf-8",
-            )
-            config = load_config(repo=repo)
-            self.assertEqual(
-                config.terminology.to_dict(),
-                {
-                    "git_operation": "integrate",
-                    "action": "integrate",
-                    "in_progress": "integrating",
-                    "completed": "integrated",
-                    "noun": "integration",
-                },
-            )
-            self.assertEqual(config.to_dict()["terminology"]["completed"], "integrated")
-            self.assertEqual(
-                config.deprecations, ("git_operation_terminology",)
-            )
-
-    def test_invalid_git_operation_terminology_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            (repo / ".mergetrain.yaml").write_text(
-                "terminology:\n  git_operation: release\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ConfigError, "deploy.*integrate.*push"):
-                load_config(repo=repo)
-
 
     def test_malformed_yaml_raises_config_error(self) -> None:
         # Parser failures must surface as ConfigError so the CLI exits cleanly

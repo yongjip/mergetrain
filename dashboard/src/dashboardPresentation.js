@@ -1,4 +1,4 @@
-import { DEFAULT_TERMINOLOGY } from "./dashboardFormatters.js";
+import { DEPLOY_WORDS } from "./dashboardFormatters.js";
 
 const PHASES = [
   ["queue", "Queue"],
@@ -28,7 +28,7 @@ export const STATE_LABELS = {
 
 export const PHASE_LABELS = Object.fromEntries(PHASES.map(([key, label]) => [key, label.toUpperCase()]));
 
-export function gateDescription(name = "", words = DEFAULT_TERMINOLOGY) {
+export function gateDescription(name = "", words = DEPLOY_WORDS) {
   const normalized = name.toLowerCase();
   if (normalized === "diff-check") return "Checks the assembled Git diff for whitespace errors and conflict markers.";
   if (normalized.includes("e2e") || normalized.includes("integration")) return `Exercises the installed CLI across real validation, merge, Git ${words.noun}, and recovery workflows.`;
@@ -39,7 +39,7 @@ export function gateDescription(name = "", words = DEFAULT_TERMINOLOGY) {
   return "Runs a project-defined safety check against the entire assembled train.";
 }
 
-export function eventDescription(event, jobCount, words = DEFAULT_TERMINOLOGY) {
+export function eventDescription(event, jobCount, words = DEPLOY_WORDS) {
   if (event.phase === "claiming") return `Reserved ${jobCount || "the selected"} job${jobCount === 1 ? "" : "s"} for one runner so no second process can ${words.action} the same work.`;
   if (event.phase === "fetching") return "Refreshed the integration baseline and prepared an isolated worktree for this run.";
   if (event.phase === "assembling") return event.state === "success"

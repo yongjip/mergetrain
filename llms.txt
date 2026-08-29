@@ -15,7 +15,7 @@ Rules:
 - Do not delete or rewrite remote `refs/mergetrain/deploys/*`; reconcile uses these permanent audit refs to block replay when a payload ref landed and was later force-rewritten.
 - Across several repos, read the whole machine with `mergetrain hub status --json`; the hub is read-only and owns no queue state.
 - A job `blocked` with a non-empty `conflict_with` is a semantic conflict: it passes gates alone but fails combined with the listed job IDs. Rebase onto the integration branch with the partner's change merged, fix the joint breakage, and enqueue a fresh job.
-- Every `--json` payload and the `stream_start` JSONL frame carry `contract_version` (currently 1; separate from the product version). `ok` means only "the command ran without an error envelope" — branch outcomes on `result`, repo health on `health`, failures on `error.code`. Ignore unknown keys; dispatch JSONL on `type`. See `docs/contract.md`.
+- Every `--json` payload and the `stream_start` JSONL frame carry `contract_version` (currently 2; separate from the product version). `ok` means only "the command ran without an error envelope" — branch outcomes on `result`, repo health on `health`, failures on `error.code`. Ignore unknown keys; dispatch JSONL on `type`. See `docs/contract.md`.
 
 Core commands:
 - `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`
@@ -39,10 +39,8 @@ Agent integrations:
 - `/mergetrain:deploy` is manual-only and still requires the MCP client's human
   confirmation dialog.
 
-Vocabulary compatibility:
-- Use canonical `deploy` vocabulary. Explicit `terminology.git_operation`,
-  `--integrate`, and `--push` remain deprecated aliases through 1.x and are
-  planned for removal in 2.0.
-- Machine state stays `status=deployed` with `deploy_sha` for compatibility.
+Vocabulary:
+- Use canonical `deploy` vocabulary and machine state `status=deployed` with
+  `deploy_sha`.
 - Completion means configured Git refs were atomically pushed, not that a
   downstream provider release completed or was authorized.

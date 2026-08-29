@@ -30,19 +30,10 @@ Agents interacting with mergetrain must follow this contract.
 mergetrain agent-contract --json
 ```
 
-The JSON payload includes `name`, `purpose`, `rules`, `boundary`, and
-`human_vocabulary`. New configurations use the canonical deploy vocabulary.
-For contract-1 compatibility, the latter still reflects an explicitly
-configured, deprecated `terminology.git_operation` while documenting the
-stable `deployed`/`deploy_sha` machine contract.
-
-During the 1.x compatibility period, `terminology.git_operation: integrate`
-makes generated
-`AGENTS.mergetrain.md`/`CLAUDE.mergetrain.md`, the dashboard, and human CLI
-output call the atomic Git ref update “integration.” That approval does not
-authorize a downstream provider release; provider verification/release remains
-a separate action. The setting and its CLI aliases are deprecated for removal
-in 2.0; use `deploy` in new instructions and automation.
+The JSON payload includes `name`, `purpose`, `rules`, and `boundary`. Contract 2
+uses one canonical `deploy` vocabulary and keeps the stable
+`deployed`/`deploy_sha` machine state. Deploy completion names the atomic Git ref
+update; it does not authorize or prove a downstream provider release.
 
 ## Next-action guidance
 

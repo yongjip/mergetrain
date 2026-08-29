@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mergetrain.config import (
-    AgentConfig,
     DeployConfig,
     GateConfig,
     GateParallelismConfig,
@@ -17,7 +16,6 @@ from mergetrain.config import (
     QueueConfig,
     ReuseConfig,
     StateConfig,
-    TerminologyConfig,
 )
 from mergetrain.models import Job
 from mergetrain.reuse import (
@@ -45,8 +43,6 @@ def _config(
         state=StateConfig(db=Path("/x/db"), logs=Path("/x/logs"), worktree_root=Path("/x/wt")),
         git=GitConfig(remote="origin", integration_branch="main", push_refs=("main",)),
         queue=QueueConfig(),
-        agent=AgentConfig(),
-        terminology=TerminologyConfig(),
         gates=(
             (
                 GateConfig(

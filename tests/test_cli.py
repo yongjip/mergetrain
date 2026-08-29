@@ -576,36 +576,6 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(payload["config_drift"]["matches"])
         self.assertEqual(payload["recommendations"], [])
 
-    def test_doctor_recommends_removing_deprecated_config(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / ".mergetrain.yaml").write_text(
-                """agent:
-  require_explicit_auto_approval: false
-terminology:
-  git_operation: integrate
-""",
-                encoding="utf-8",
-            )
-
-            out = io.StringIO()
-            with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
-            payload = json.loads(out.getvalue())
-
-        self.assertEqual(code, 0)
-        self.assertEqual(
-            [item["code"] for item in payload["recommendations"]],
-            [
-                "deprecated_agent_config",
-                "deprecated_git_operation_terminology",
-            ],
-        )
-        self.assertTrue(
-            payload["config"]["agent"]["require_explicit_auto_approval"]
-        )
-
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
         # ok stays true (the run executed); the outcome is graded in `result`.
         failed = _results_payload([Job(id=1, task="a", branch="a", status="failed")])
@@ -1138,7 +1108,7 @@ terminology:
             code, payload = run(["doctor"])
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["next_action"], "upgrade_mergetrain")
-            self.assertEqual(payload["config_version_supported"], 1)
+            self.assertEqual(payload["config_version_supported"], 2)
 
             # status is the other mandated agent read and must give the same
             # fail-closed direction as doctor.
@@ -1262,62 +1232,9 @@ terminology:
         )
         self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
         self.assertIn("read-only", payload["boundary"]["progress_observation"])
+        self.assertNotIn("human_vocabulary", payload)
 
-    def test_configured_agent_contract_uses_integration_vocabulary(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            (repo / ".mergetrain.yaml").write_text(
-                "terminology:\n  git_operation: integrate\n",
-                encoding="utf-8",
-            )
-            out = io.StringIO()
-            with redirect_stdout(out):
-                code = main(["--repo", str(repo), "agent-contract", "--json"])
-            payload = json.loads(out.getvalue())
-            self.assertEqual(code, 0)
-            self.assertEqual(payload["human_vocabulary"]["completed"], "integrated")
-            self.assertEqual(payload["human_vocabulary"]["cli_flag"], "--integrate")
-            self.assertEqual(payload["human_vocabulary"]["machine_status"], "deployed")
-            self.assertEqual(
-                payload["boundary"]["deploy_requires"],
-                "explicit user/operator approval for the displayed exact validated "
-                "train, then run-batch --deploy; run-next --deploy only when no "
-                "validated train is pending",
-            )
-
-    def test_integration_human_status_preserves_json_machine_status(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            db = repo / "queue.sqlite"
-            (repo / ".mergetrain.yaml").write_text(
-                "terminology:\n  git_operation: integrate\n",
-                encoding="utf-8",
-            )
-            conn = connect(db)
-            try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
-                mark_job(conn, job.id, status="deployed", push_status="succeeded")
-            finally:
-                conn.close()
-
-            human = io.StringIO()
-            with redirect_stdout(human):
-                self.assertEqual(
-                    main(["--repo", str(repo), "--db", str(db), "status"]),
-                    0,
-                )
-            self.assertIn("integrated", human.getvalue())
-            self.assertNotIn(" deployed", human.getvalue())
-
-            machine = io.StringIO()
-            with redirect_stdout(machine):
-                self.assertEqual(
-                    main(["--repo", str(repo), "--db", str(db), "status", "--json"]),
-                    0,
-                )
-            self.assertEqual(json.loads(machine.getvalue())["jobs"][0]["status"], "deployed")
-
-    def test_integrate_preview_lists_exact_atomic_push_refspecs(self) -> None:
+    def test_deploy_preview_lists_exact_atomic_push_refspecs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             db = repo / "queue.sqlite"
@@ -1328,8 +1245,6 @@ terminology:
   push_refs:
     - main
     - release
-terminology:
-  git_operation: integrate
 """,
                 encoding="utf-8",
             )
@@ -1357,11 +1272,10 @@ terminology:
                 reasons=("reuse not authorized",),
             )
             out = io.StringIO()
-            err = io.StringIO()
             with patch(
                 "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
                 return_value=decision,
-            ), redirect_stdout(out), redirect_stderr(err):
+            ), redirect_stdout(out):
                 code = main(
                     [
                         "--repo",
@@ -1369,16 +1283,15 @@ terminology:
                         "--db",
                         str(db),
                         "run-batch",
-                        "--integrate",
+                        "--deploy",
                         "--preview",
                         "--json",
                     ]
                 )
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 0)
-            self.assertIn("--integrate is deprecated", err.getvalue())
             self.assertEqual(payload["mode"], "deploy")
-            self.assertEqual(payload["terminology"]["completed"], "integrated")
+            self.assertNotIn("terminology", payload)
             self.assertEqual(payload["push_plan"]["remote"], "upstream")
             self.assertEqual(
                 [item["spec"] for item in payload["push_plan"]["refs"]],
@@ -1401,17 +1314,18 @@ terminology:
                 payload["reuse"]["estimated_savings"]["authorizes_reuse"]
             )
 
-    def test_push_alias_warns_without_polluting_json_stdout(self) -> None:
-        out = io.StringIO()
-        err = io.StringIO()
-        with patch("mergetrain.cli.cmd_run_batch", return_value=0), redirect_stdout(
-            out
-        ), redirect_stderr(err):
-            code = main(["run-batch", "--push", "--json"])
+    def test_removed_deploy_aliases_are_rejected(self) -> None:
+        for alias in ("--integrate", "--push"):
+            with self.subTest(alias=alias), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["run-batch", alias, "--json"])
+                self.assertEqual(raised.exception.code, 2)
 
-        self.assertEqual(code, 0)
-        self.assertEqual(out.getvalue(), "")
-        self.assertIn("--push is deprecated", err.getvalue())
+    def test_removed_hub_list_command_is_rejected(self) -> None:
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                main(["hub", "list", "--json"])
+        self.assertEqual(raised.exception.code, 2)
 
     def test_init_write_creates_generic_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:

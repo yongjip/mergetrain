@@ -1,13 +1,9 @@
-export const DEFAULT_TERMINOLOGY = {
+export const DEPLOY_WORDS = {
   action: "deploy",
   in_progress: "deploying",
   completed: "deployed",
   noun: "deployment",
 };
-
-export function terminology(snapshot) {
-  return snapshot.project.terminology || DEFAULT_TERMINOLOGY;
-}
 
 export function parseTime(value) {
   const time = value ? Date.parse(value) : Number.NaN;

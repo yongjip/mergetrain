@@ -6,12 +6,6 @@
     "integration_ref": "main",
     "remote": "origin",
     "push_specs": ["HEAD:main"],
-    "terminology": {
-      "action": "deploy",
-      "in_progress": "deploying",
-      "completed": "deployed",
-      "noun": "deployment"
-    },
     "preview": false,
     "gate_count": 2
   },

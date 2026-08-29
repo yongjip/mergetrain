@@ -9,8 +9,8 @@ A wrapper may:
 - Translate legacy command names to mergetrain commands.
 - Set service-specific environment variables.
 - Provide service-specific gate and verify scripts.
-- Read `config.terminology` from `doctor --json` and present the configured Git
-  action consistently.
+- Present the canonical `deploy` action consistently while preserving
+  `status=deployed` and `deploy_sha` in machine-facing integrations.
 
 A wrapper should not:
 

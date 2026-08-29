@@ -17,7 +17,7 @@ without a deliberate version decision.
 | config `version:` | `.mergetrain.yaml` | the schema of the config file |
 | `__version__` | `version` / `doctor` payloads | the product release |
 
-`contract_version` (currently **1**) and the config `version` (currently **1**)
+`contract_version` (currently **2**) and the config `version` (currently **2**)
 are deliberately distinct from the product `__version__`. A patch release that
 changes no output shape never reads as a contract change, and vice versa. Each
 is a single forward-only integer, matching the SQLite `SCHEMA_VERSION` and the
@@ -37,14 +37,14 @@ hub `REGISTRY_VERSION`.
   different binary). The `event`, `heartbeat`, and `stream_end` frames do not
   carry it. **Dispatch JSONL on `type`.**
 
-## The envelope (contract 1)
+## The envelope (contract 2)
 
 - **`ok` means exactly one thing:** the command executed without raising an
   error envelope. It is *not* a health verdict and *not* an outcome grade.
   - For `run-next` and `run-batch`, read `result`
     (`success`/`warning`/`partial`/`failed`) for the run outcome — a completed
     deploy with a post-push verify warning is `ok:true, result:"warning"`.
-  - Other contract-1 `result` fields are command-specific legacy surfaces:
+  - Other `result` fields are command-specific legacy surfaces:
     `verify` uses `success`/`failed`, `reconcile` and `recover` use
     `success`/`conflict`, and `gc` carries `null` for a dry run or the applied
     cleanup detail object. Consumers must dispatch by command before reading
@@ -140,6 +140,11 @@ For the config file: adding an optional key does not bump the config `version`
 or a key becomes required — i.e. when an older binary would misread a newer
 file. Both versions are forward-only; there is no down-migration.
 
+Contract 2 removes presentation-only `human_vocabulary` and `terminology`
+objects, the no-op `agent` config object, deploy spelling aliases, and the
+redundant `hub list` surface. Version-1 config files migrate in memory; version-2
+files reject the removed top-level keys.
+
 ### How a too-new config is handled
 
 If a `.mergetrain.yaml` declares a `version:` newer than the running binary
@@ -160,11 +165,11 @@ changelog); removed or renamed keys are breaking and require bumping
 `contract_version` first. It cannot detect a same-keys value-meaning change;
 that residual rests on review.
 
-Coverage is **every payload a command can emit**, currently 25 surfaces plus the
+Coverage is **every payload a command can emit**, currently 24 surfaces plus the
 JSONL frames: `doctor`, `status`, `version`, `agent_contract`, `init`, `enqueue`,
 `retry`, `inspect`, `history`, `stats`, `gc`, `run_batch_validate`,
 `run_batch_preview`, `reconcile`, `recover`, `unlock`, `verify`, `dismiss`,
-`cancel`, `gc_applied`, `hub_status`, `hub_add`, `hub_list`, `hub_remove`,
+`cancel`, `gc_applied`, `hub_status`, `hub_add`, `hub_remove`,
 `failure_envelope`,
 and `_jsonl_frames`. A new `--json` payload must be added to `SURFACES` in the
 same change that introduces it, or the gate silently does not cover it. Run

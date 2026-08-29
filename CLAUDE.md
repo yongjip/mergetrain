@@ -23,7 +23,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 
 ### Safety boundary
 
-- Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending. `--deploy` remains the canonical compatibility flag.
+- Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending.
 - A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only` or `run-batch --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
@@ -37,8 +37,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 
 ### Stable machine contract
 
-- Human output says `deploy`, `deploying`, and `deployed`.
-- JSON/SQLite continue to use `status=deployed`, `deploy_sha`, `push_status`, and `verify_status`.
+- Human output and JSON/SQLite use `deploy`, `deploying`, `status=deployed`, `deploy_sha`, `push_status`, and `verify_status`.
 - This operation is an atomic Git ref push. Configured `deploy.verify` hooks report an independent post-push outcome; a provider release is separate and requires its own authorization.
 <!-- END GENERATED: mergetrain-agent-protocol -->
 

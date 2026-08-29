@@ -162,30 +162,3 @@ def cmd_hub_remove(args: argparse.Namespace) -> int:
     else:
         print("deregistered" if removed else "not registered; nothing removed")
     return 0 if removed else 1
-
-
-def cmd_hub_list(args: argparse.Namespace) -> int:
-    from ..registry import load_registry, registry_path
-
-    print(
-        "mergetrain warning: `hub list` is deprecated; use `hub status` "
-        "(planned removal in 2.0)",
-        file=sys.stderr,
-    )
-    entries = load_registry(args.registry)
-    if args.json:
-        dump_json(
-            {
-                "ok": True,
-                "registry": str(args.registry or registry_path()),
-                "repos": entries,
-            }
-        )
-        return 0
-    if not entries:
-        print("no repos registered; run `mergetrain hub add <repo>`")
-        return 0
-    for entry in entries:
-        suffix = "" if entry.get("daemon", True) else "  [no-daemon]"
-        print(f"{entry['path']}{suffix}")
-    return 0

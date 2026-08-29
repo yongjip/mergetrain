@@ -7,15 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
-from ..cli_support import config_from_args, dump_json
-from ..config import TerminologyConfig, render_default_config
+from ..cli_support import dump_json
+from ..config import render_default_config
 from ..errors import ConfigError
 
 
-def agent_contract_payload(
-    terminology: TerminologyConfig | None = None,
-) -> dict[str, Any]:
-    words = terminology or TerminologyConfig()
+def agent_contract_payload() -> dict[str, Any]:
     return {
         "name": "mergetrain agent contract",
         "purpose": "Serialize committed local task branches through one merge/test/push/verify runner.",
@@ -24,7 +21,7 @@ def agent_contract_payload(
             "Commit all changes before enqueueing.",
             "Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.",
             "Read doctor --json or status --json before deciding the next action.",
-            f"Use --auto only after explicit unattended-{words.noun} approval from the user/operator.",
+            "Use --auto only after explicit unattended-deployment approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.",
             "Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.",
@@ -46,20 +43,11 @@ def agent_contract_payload(
             "recovery_after_crash": "reconcile / recover / unlock resolve crash state against the remote; run-batch --deploy is refused while any job is needs_reconcile",
             "machine_contract": "every --json payload and the stream_start JSONL frame carry contract_version; branch outcome on result, health on health, failures on error.code; ignore unknown keys and dispatch JSONL on type (see docs/contract.md)",
         },
-        "human_vocabulary": {
-            **words.to_dict(),
-            "cli_flag": f"--{words.action}",
-            "canonical_cli_flag": "--deploy",
-            "machine_status": "deployed",
-            "machine_fields": ["deploy_sha", "push_status", "verify_status"],
-            "scope": "atomic Git ref push only; provider release is a separate post-push action",
-        },
     }
 
 
-def render_agent_contract(terminology: TerminologyConfig | None = None) -> str:
-    words = terminology or TerminologyConfig()
-    payload = agent_contract_payload(words)
+def render_agent_contract() -> str:
+    payload = agent_contract_payload()
     rules = "\n".join(f"{i}. {rule}" for i, rule in enumerate(payload["rules"], start=1))
     return f"""# mergetrain agent contract
 
@@ -71,9 +59,9 @@ Purpose: {payload['purpose']}
 
 ## Safety boundary
 
-- Git {words.noun} requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --{words.action}`; `run-next --{words.action}` is allowed only when no validated train is pending. `--deploy` remains the canonical compatibility flag.
+- Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending.
 - A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only` or `run-batch --validate-only`.
-- A validated train is {words.completed} as one exact identity by `run-batch --{words.action}`.
+- A validated train is deployed as one exact identity by `run-batch --deploy`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
@@ -81,12 +69,11 @@ Purpose: {payload['purpose']}
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
 - The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.
-- After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the remote; `run-batch --{words.action}` is refused while any job is `needs_reconcile`. `unlock --force` clears a wedged lock (remote-reachable first).
+- After a crash, `reconcile`/`recover` resolve `needs_reconcile` jobs against the remote; `run-batch --deploy` is refused while any job is `needs_reconcile`. `unlock --force` clears a wedged lock (remote-reachable first).
 
 ## Stable machine contract
 
-- Human output says `{words.action}`, `{words.in_progress}`, and `{words.completed}`.
-- JSON/SQLite continue to use `status=deployed`, `deploy_sha`, `push_status`, and `verify_status`.
+- Human output and JSON/SQLite use `deploy`, `deploying`, `status=deployed`, `deploy_sha`, `push_status`, and `verify_status`.
 - This operation is an atomic Git ref push. Configured `deploy.verify` hooks report an independent post-push outcome; a provider release is separate and requires its own authorization.
 """
 
@@ -125,11 +112,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_agent_contract(args: argparse.Namespace) -> int:
-    terminology = config_from_args(args).terminology
     if args.json:
-        dump_json({"ok": True, **agent_contract_payload(terminology)})
+        dump_json({"ok": True, **agent_contract_payload()})
     else:
-        print(render_agent_contract(terminology), end="")
+        print(render_agent_contract(), end="")
     return 0
 
 

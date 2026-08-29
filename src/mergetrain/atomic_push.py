@@ -90,7 +90,7 @@ class AtomicPush:
     ) -> None:
         if not self.config.git.push_refs:
             raise MergetrainError(
-                f"git.push_refs must not be empty for {self.config.terminology.action} mode"
+                "git.push_refs must not be empty for deploy mode"
             )
         target = deploy_sha or git_rev_parse(worktree, "HEAD")
         audit_ref = audit_ref or deploy_audit_ref_name(target)

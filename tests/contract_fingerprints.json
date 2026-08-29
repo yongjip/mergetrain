@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "surfaces": {
     "_jsonl_frames": {
       "event": {
@@ -82,18 +82,6 @@
         "validated_train_supersede": null
       },
       "contract_version": null,
-      "human_vocabulary": {
-        "action": null,
-        "canonical_cli_flag": null,
-        "cli_flag": null,
-        "completed": null,
-        "git_operation": null,
-        "in_progress": null,
-        "machine_fields": "[]",
-        "machine_status": null,
-        "noun": null,
-        "scope": null
-      },
       "name": null,
       "ok": null,
       "purpose": null,
@@ -180,11 +168,6 @@
     },
     "doctor": {
       "config": {
-        "agent": {
-          "prefer_json_status": null,
-          "require_clean_worktree_before_enqueue": null,
-          "require_explicit_auto_approval": null
-        },
         "config_exists": null,
         "config_path": null,
         "config_version": null,
@@ -239,13 +222,6 @@
             "path": null
           },
           "worktree_root": null
-        },
-        "terminology": {
-          "action": null,
-          "completed": null,
-          "git_operation": null,
-          "in_progress": null,
-          "noun": null
         }
       },
       "config_drift": {
@@ -483,18 +459,6 @@
       "ok": null,
       "registry": null
     },
-    "hub_list": {
-      "contract_version": null,
-      "ok": null,
-      "registry": null,
-      "repos": {
-        "[]": {
-          "added_at": null,
-          "daemon": null,
-          "path": null
-        }
-      }
-    },
     "hub_remove": {
       "contract_version": null,
       "ok": null,
@@ -642,13 +606,6 @@
                 "fingerprint_count": null,
                 "max_age_minutes": null,
                 "on_mismatch": null
-              },
-              "terminology": {
-                "action": null,
-                "completed": null,
-                "git_operation": null,
-                "in_progress": null,
-                "noun": null
               },
               "verify_count": null
             },
@@ -807,13 +764,6 @@
         "started_at": null,
         "state": null,
         "updated_at": null
-      },
-      "terminology": {
-        "action": null,
-        "completed": null,
-        "git_operation": null,
-        "in_progress": null,
-        "noun": null
       },
       "train": null
     },
@@ -1026,13 +976,6 @@
         "reasons": "[]",
         "reused_validation_sha": null,
         "validation_sha": null
-      },
-      "terminology": {
-        "action": null,
-        "completed": null,
-        "git_operation": null,
-        "in_progress": null,
-        "noun": null
       },
       "train_id": null
     },

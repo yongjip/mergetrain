@@ -198,7 +198,6 @@ def _repo_entry(raw_path: str, cache: HubSnapshotCache | None) -> dict[str, Any]
                         "integration_ref": config.git.integration_ref,
                         "remote": config.git.remote,
                         "push_refs": list(config.git.push_refs),
-                        "terminology": config.terminology.to_dict(),
                     },
                 }
             )

@@ -185,7 +185,7 @@ def make_handler(
         # Stamp contract_version at the HTTP boundary, not inside
         # build_dashboard_snapshot — so a hub payload's embedded per-repo
         # snapshots stay bare and only the outer served frame carries the
-        # number (contract 1).
+        # number (machine contract).
         payload = raw_snapshot_fn()
         if isinstance(payload, dict) and "contract_version" not in payload:
             return {"contract_version": CONTRACT_VERSION, **payload}

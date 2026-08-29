@@ -27,7 +27,7 @@ DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 # (the deploy/enqueue path fails closed; recovery and read-only commands stay
 # permissive) — not done inside load_config, so a version mismatch after a
 # rollback can never lock an operator out of crash recovery.
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 NOTIFY_TRANSITIONS = ("landed", "blocked", "needs_reconcile", "daemon_paused")
 
 
@@ -71,13 +71,6 @@ class QueueConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentConfig:
-    require_clean_worktree_before_enqueue: bool = True
-    require_explicit_auto_approval: bool = True
-    prefer_json_status: bool = True
-
-
-@dataclass(frozen=True, slots=True)
 class NotifyConfig:
     webhook_url: str = ""
     transitions: tuple[str, ...] = NOTIFY_TRANSITIONS
@@ -90,50 +83,6 @@ class NotifyConfig:
             "webhook_configured": bool(self.webhook_url),
             "transitions": list(self.transitions),
             "timeout_seconds": self.timeout_seconds,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class TerminologyConfig:
-    """Human-facing words for the provider-neutral Git push operation."""
-
-    git_operation: str = "deploy"
-
-    @property
-    def action(self) -> str:
-        return self.git_operation
-
-    @property
-    def in_progress(self) -> str:
-        return {
-            "deploy": "deploying",
-            "integrate": "integrating",
-            "push": "pushing",
-        }[self.git_operation]
-
-    @property
-    def completed(self) -> str:
-        return {
-            "deploy": "deployed",
-            "integrate": "integrated",
-            "push": "pushed",
-        }[self.git_operation]
-
-    @property
-    def noun(self) -> str:
-        return {
-            "deploy": "deployment",
-            "integrate": "integration",
-            "push": "push",
-        }[self.git_operation]
-
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "git_operation": self.git_operation,
-            "action": self.action,
-            "in_progress": self.in_progress,
-            "completed": self.completed,
-            "noun": self.noun,
         }
 
 
@@ -183,8 +132,6 @@ class MergetrainConfig:
     state: StateConfig
     git: GitConfig
     queue: QueueConfig
-    agent: AgentConfig
-    terminology: TerminologyConfig
     gates: tuple[GateConfig, ...]
     gate_parallelism: GateParallelismConfig
     deploy: DeployConfig
@@ -193,9 +140,6 @@ class MergetrainConfig:
     config_exists: bool
     notify: NotifyConfig = NotifyConfig()
     config_version: int = CONFIG_VERSION
-    # Internal migration evidence for doctor. This is deliberately omitted
-    # from ``to_dict`` so contract 1 observation payloads do not gain a key.
-    deprecations: tuple[str, ...] = ()
 
     @property
     def validation_worktree_path(self) -> Path:
@@ -206,7 +150,6 @@ class MergetrainConfig:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data.pop("deprecations")
         workspace = data["state"].pop("validation_workspace")
         data["state"] = {
             key: str(value) for key, value in data["state"].items()
@@ -217,7 +160,6 @@ class MergetrainConfig:
         data["repo"] = str(self.repo)
         data["config_path"] = str(self.config_path)
         data["git"]["integration_ref"] = self.git.integration_ref
-        data["terminology"] = self.terminology.to_dict()
         data["notify"] = self.notify.to_dict()
         for gate in data["gates"]:
             paths = gate.get("paths", ())
@@ -785,20 +727,6 @@ def load_config(
         ),
     )
 
-    deprecations: list[str] = []
-    agent_data = _as_mapping(data, "agent")
-    deprecated_agent_keys = {
-        "require_clean_worktree_before_enqueue",
-        "require_explicit_auto_approval",
-        "prefer_json_status",
-    }
-    if deprecated_agent_keys.intersection(agent_data):
-        deprecations.append("agent_behavior_keys")
-    # These settings never changed enforcement; keeping configurable-looking
-    # booleans made the safety boundary less clear. Contract 1 still accepts
-    # the keys, but runtime behavior is now explicitly fixed at safe defaults.
-    agent = AgentConfig()
-
     notify_data = _as_mapping(data, "notify")
     webhook_value = notify_data.get("webhook_url", "")
     if webhook_value is None:
@@ -832,19 +760,6 @@ def load_config(
             key="notify.timeout_seconds",
         ),
     )
-
-    terminology_data = _as_mapping(data, "terminology")
-    if "git_operation" in terminology_data:
-        deprecations.append("git_operation_terminology")
-    git_operation = _nonempty_string(
-        terminology_data.get("git_operation", "deploy"),
-        key="terminology.git_operation",
-    )
-    if git_operation not in {"deploy", "integrate", "push"}:
-        raise ConfigError(
-            "terminology.git_operation must be 'deploy', 'integrate', or 'push'"
-        )
-    terminology = TerminologyConfig(git_operation=git_operation)
 
     gate_parallelism_data = _as_mapping(data, "gate_parallelism")
     raw_gate_plan_timeout = gate_parallelism_data.get("timeout_seconds")
@@ -936,9 +851,7 @@ def load_config(
         state=state,
         git=git,
         queue=queue,
-        agent=agent,
         notify=notify,
-        terminology=terminology,
         gates=gates,
         gate_parallelism=gate_parallelism,
         deploy=deploy,
@@ -946,7 +859,6 @@ def load_config(
         config_path=path,
         config_exists=exists,
         config_version=config_version,
-        deprecations=tuple(deprecations),
     )
 
 
@@ -957,11 +869,11 @@ def _read_config_version(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     versioning existed rides forward unchanged. A newer version is *recorded*,
     not rejected here: refusal is command-scoped (the deploy path fails closed;
     recovery stays permissive), so load_config never blocks. Older versions are
-    migrated forward in memory only; there is no persist path at v1 because
-    re-serializing hand-edited YAML would lose comments and unknown keys.
+    migrated forward in memory only because re-serializing hand-edited YAML
+    would lose comments and unknown keys.
     """
 
-    raw = data.get("version", CONFIG_VERSION)
+    raw = data.get("version", 1)
     if isinstance(raw, bool) or not isinstance(raw, int):
         raise ConfigError(
             f"config 'version' must be an integer, got {raw!r}"
@@ -971,11 +883,21 @@ def _read_config_version(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     data = {key: value for key, value in data.items() if key != "version"}
     if raw < CONFIG_VERSION:
         data = _migrate_config(data, from_version=raw)
+    elif raw == CONFIG_VERSION:
+        removed = sorted({"agent", "terminology"}.intersection(data))
+        if removed:
+            raise ConfigError(
+                "config version 2 removed top-level key(s): "
+                + ", ".join(removed)
+            )
     return raw, data
 
 
 def _migrate_config(data: dict[str, Any], *, from_version: int) -> dict[str, Any]:
-    """Forward-migrate parsed config data in memory. Identity at v1 — the hook
-    exists so a future v2 has a home without reshaping load_config."""
+    """Forward-migrate parsed config data without rewriting hand-edited YAML."""
 
-    return data
+    migrated = dict(data)
+    if from_version < 2:
+        migrated.pop("agent", None)
+        migrated.pop("terminology", None)
+    return migrated

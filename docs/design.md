@@ -59,7 +59,7 @@ and hub domains. `cli_support.py` contains only genuinely shared serialization,
 configuration preflight, recovery-next-action, and human rendering helpers.
 Command modules can call core services, but core services never import the CLI;
 command modules also do not call each other. This keeps command names, flags,
-exit codes, and contract-1 JSON shapes stable while making each execution path
+exit codes, and versioned JSON shapes stable while making each execution path
 have one obvious implementation home.
 
 ### Enforced dependency guardrails
@@ -353,13 +353,9 @@ push.
 An explicitly empty `push_refs` value is rejected while loading config; only an
 omitted field defaults to the integration branch.
 
-Contract 1 still accepts the deprecated `terminology.git_operation` setting and
-may present this operation as `integrate` or `push` in human-facing surfaces.
-Those aliases converge on this exact code path; new configurations use the
-canonical `deploy`. Machine state deliberately remains
-`deployed`/`deploy_sha`, so existing databases and JSON consumers do not need
-migration. Completion proves the Git ref update only; it does not by itself
-prove or authorize a provider release.
+Contract 2 uses the canonical `deploy` vocabulary throughout. Machine state
+remains `deployed`/`deploy_sha`. Completion proves the Git ref update only; it
+does not by itself prove or authorize a provider release.
 
 ### Post-push verify policy
 

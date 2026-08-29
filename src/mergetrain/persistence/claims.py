@@ -120,7 +120,6 @@ def claim_deploy_batch(
     owner: str | None = None,
     ttl_minutes: int = 30,
     train_id: str = "",
-    operation_label: str = "deploy",
 ) -> list[Job]:
     """Claim one exact validated train, or queued jobs when none is pending."""
 
@@ -155,7 +154,7 @@ def claim_deploy_batch(
             """,
             (
                 utc_now(),
-                f"claimed by mergetrain {operation_label} runner",
+                "claimed by mergetrain deploy runner",
                 lock.token,
                 *job_ids,
                 expected_status,
@@ -168,7 +167,7 @@ def claim_deploy_batch(
             claim_token=lock.token,
             phase="claiming",
             state="active",
-            message=f"{operation_label.capitalize()} runner claimed {len(job_ids)} job(s)",
+            message=f"Deploy runner claimed {len(job_ids)} job(s)",
             detail="mode=deploy",
         )
     return [get_job(conn, job_id) for job_id in job_ids]

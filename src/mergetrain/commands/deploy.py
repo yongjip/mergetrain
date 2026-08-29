@@ -14,7 +14,6 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
-from ..config import TerminologyConfig
 from ..errors import QueueError
 from ..git_ops import DEPLOY_AUDIT_REF_PREFIX
 from ..git_runner import GitRunner
@@ -37,7 +36,7 @@ from ..store import (
 
 def _mode_from_args(args: argparse.Namespace) -> bool:
     if args.deploy == args.validate_only:
-        raise QueueError("choose exactly one: --validate-only, --deploy, --integrate, or --push")
+        raise QueueError("choose exactly one: --validate-only or --deploy")
     return bool(args.deploy)
 
 
@@ -61,7 +60,7 @@ def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
 
 
 def _emit_validated_train_block(
-    args: argparse.Namespace, trains: list[dict[str, Any]], terminology: TerminologyConfig
+    args: argparse.Namespace, trains: list[dict[str, Any]]
 ) -> int:
     """Refuse a one-job push while an approved train is still pending.
 
@@ -76,10 +75,10 @@ def _emit_validated_train_block(
     ids = [str(train.get("train_id")) for train in trains]
     listed = ", ".join(ids)
     note = (
-        f"{terminology.action} refused: {len(ids)} validated train(s) pending "
+        f"deploy refused: {len(ids)} validated train(s) pending "
         f"({listed}). run-next claims a queued job instead, which would move the "
         f"integration ref and invalidate that validation — "
-        f"'mergetrain run-batch --{terminology.action} --train-id {ids[0]}' "
+        f"'mergetrain run-batch --deploy --train-id {ids[0]}' "
         "ships the approved train, or dismiss it first to ship something else"
     )
     if args.json:
@@ -137,13 +136,10 @@ def _run_exit_code(payload: dict[str, Any]) -> int:
     return 0 if payload["result"] in ("success", "warning") else 1
 
 
-def _print_run_payload(
-    payload: dict[str, Any],
-    terminology: TerminologyConfig | None = None,
-) -> None:
+def _print_run_payload(payload: dict[str, Any]) -> None:
     if payload.get("jobs"):
         for job_data in payload["jobs"]:
-            print(_job_result_line(job_data, terminology))
+            print(_job_result_line(job_data))
         if payload.get("result") != "success":
             print(f"result: {payload['result']}")
     else:
@@ -168,7 +164,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
                 if train.get("deploy_eligible")
             ]
             if eligible:
-                return _emit_validated_train_block(args, eligible, config.terminology)
+                return _emit_validated_train_block(args, eligible)
         job = claim_next_job(
             conn,
             owner=owner,
@@ -199,18 +195,18 @@ def cmd_run_next(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
-        _print_run_payload(payload, config.terminology)
+        _print_run_payload(payload)
     return _run_exit_code(payload)
 
 
 def cmd_run_batch(args: argparse.Namespace) -> int:
     deploy = _mode_from_args(args)
     if args.train_id and not deploy:
-        raise QueueError("--train-id requires --deploy, --integrate, or --push")
+        raise QueueError("--train-id requires --deploy")
     if args.reuse_validated and not deploy:
-        raise QueueError("--reuse-validated requires --deploy, --integrate, or --push")
+        raise QueueError("--reuse-validated requires --deploy")
     if args.preview and not deploy:
-        raise QueueError("--preview requires --deploy, --integrate, or --push")
+        raise QueueError("--preview requires --deploy")
     config = config_from_args(args)
     _preflight_config(config)
     if args.preview:
@@ -232,7 +228,6 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             "ok": True,
             "preview": True,
             "mode": "deploy",
-            "terminology": config.terminology.to_dict(),
             "push_plan": {
                 "atomic": True,
                 "remote": config.git.remote,
@@ -264,14 +259,14 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             )
             if decision.eligible:
                 print(
-                    f"preview: {config.terminology.action} validated commit "
+                    "preview: deploy validated commit "
                     f"{decision.reused_validation_sha} by atomic push to "
                     f"{config.git.remote}: {targets}"
                 )
             else:
                 print(
                     f"preview: {decision.action} full gates, then "
-                    f"{config.terminology.action} by atomic push to "
+                    "deploy by atomic push to "
                     f"{config.git.remote}: {targets} - {'; '.join(decision.reasons)}"
                 )
         return 0
@@ -288,7 +283,6 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
                 train_id=args.train_id or "",
-                operation_label=config.terminology.action,
             )
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
@@ -313,5 +307,5 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
-        _print_run_payload(payload, config.terminology)
+        _print_run_payload(payload)
     return _run_exit_code(payload)

@@ -370,7 +370,7 @@ class DemoWalkthrough:
             f"git --git-dir={_shell_argument(str(self.remote))} "
             "log -1 --format=%H main"
         )
-        config = f"""version: 1
+        config = f"""version: 2
 
 project:
   name: demo
@@ -391,11 +391,6 @@ queue:
   daemon_interval_seconds: 1
   heartbeat_interval_seconds: 1
   command_timeout_seconds: 60
-
-agent:
-  require_clean_worktree_before_enqueue: true
-  require_explicit_auto_approval: true
-  prefer_json_status: true
 
 gates:
   - name: tests

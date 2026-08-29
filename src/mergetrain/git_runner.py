@@ -161,7 +161,6 @@ class GitRunner:
             "canceled": ("canceled", "warning", f"Job #{job_id} canceled"),
         }
         if result.status == "deployed":
-            completed = self.config.terminology.completed
             # 'unknown' needs the same attention as 'failed': the refs landed but
             # verification was never established, so a completion event that reads
             # plain success would hide the one thing the operator has to discharge
@@ -170,13 +169,13 @@ class GitRunner:
                 event_map["deployed"] = (
                     "complete",
                     "warning",
-                    f"Job #{job_id} {completed}; verification needs attention",
+                    f"Job #{job_id} deployed; verification needs attention",
                 )
             else:
                 event_map["deployed"] = (
                     "complete",
                     "success",
-                    f"Job #{job_id} {completed}",
+                    f"Job #{job_id} deployed",
                 )
         event = event_map.get(result.status)
         if event:
@@ -748,7 +747,7 @@ class GitRunner:
 
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain job {job.id}: {job.task}\n")
-            mode = self.config.terminology.action if deploy else "validate"
+            mode = "deploy" if deploy else "validate"
             log.write(f"branch: {job.branch}\nmode: {mode}\n")
             log.flush()
             try:
@@ -1398,7 +1397,7 @@ class GitRunner:
 
         with log_path.open("w", encoding="utf-8") as log:
             log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
-            mode = self.config.terminology.action if deploy else "validate"
+            mode = "deploy" if deploy else "validate"
             log.write(f"jobs: {[job.id for job in jobs]}\nmode: {mode}\n")
             log.flush()
             try:

@@ -830,18 +830,12 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(QueueError, "unsupported recovery operation"):
             start_recovery_operation(conn, operation="unlock", applied=True)
 
-    def test_deploy_claim_records_machine_mode_with_custom_terminology(
-        self,
-    ) -> None:
+    def test_deploy_claim_records_machine_mode(self) -> None:
         conn = self.make_conn()
         enqueue_job(conn, task="a", branch="feature/a")
-        claimed = claim_deploy_batch(
-            conn,
-            owner=f"owner:{os.getpid()}",
-            operation_label="integrate",
-        )
+        claimed = claim_deploy_batch(conn, owner=f"owner:{os.getpid()}")
         event = list_run_events(conn)[-1]
-        self.assertEqual(event.message, "Integrate runner claimed 1 job(s)")
+        self.assertEqual(event.message, "Deploy runner claimed 1 job(s)")
         self.assertEqual(event.detail, "mode=deploy")
         self.assertEqual(event.claim_token, claimed[0].claim_token)
 

@@ -12,6 +12,8 @@
 mergetrain is a local-first deploy train for coding-agent worktrees. Agents
 commit and enqueue their branches; one runner assembles them in order, tests the
 combined tree, and atomically updates your Git refs only after explicit approval.
+It is intentionally optimized as an owner-operated local utility, not a hosted
+team platform.
 
 ## The problem
 
@@ -122,10 +124,8 @@ mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
 ```
 
-`deploy` is the canonical name for the configured atomic Git ref update; it
-does not imply an App Store, Kubernetes, or other provider release. The legacy
-`integrate` and `push` vocabulary remains compatible through 1.x but is
-deprecated for removal in 2.0.
+`deploy` names the configured atomic Git ref update; it does not imply an App
+Store, Kubernetes, or other provider release.
 
 `mergetrain init` also writes agent-facing instructions. The essential rule is
 simple: agents commit and enqueue; one runner owns merge → test → push → verify.
@@ -220,15 +220,15 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
 - Trust and extend: [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) ·
   [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) ·
   [Agent adoption benchmark](https://github.com/yongjip/mergetrain/blob/main/docs/agent-adoption-benchmark.md) ·
-  [External repository pilot](https://github.com/yongjip/mergetrain/blob/main/docs/pilot-evaluation.md) ·
   [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) ·
   [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) ·
   [Product scope](https://github.com/yongjip/mergetrain/blob/main/docs/product-scope.md)
 
 ## Status
 
-The current release is `v1.4.2`. Machine-contract major 1 is additive-only:
-existing JSON keys are not removed or renamed without a contract-version change.
+The package version is `v2.0.0`. Machine-contract major 2 is additive-only:
+existing JSON keys are not removed or renamed without another contract-version
+change.
 Issues and operating reports are welcome on
 [GitHub](https://github.com/yongjip/mergetrain/issues).
 

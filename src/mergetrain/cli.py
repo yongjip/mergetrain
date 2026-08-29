@@ -27,7 +27,6 @@ from .commands.hub import (
     cmd_dashboard,
     cmd_hub_add,
     cmd_hub_daemon,
-    cmd_hub_list,
     cmd_hub_remove,
     cmd_hub_serve,
     cmd_hub_status,
@@ -232,18 +231,6 @@ def build_parser() -> argparse.ArgumentParser:
         mode = p_run.add_mutually_exclusive_group(required=True)
         mode.add_argument("--validate-only", action="store_true")
         mode.add_argument("--deploy", action="store_true")
-        mode.add_argument(
-            "--integrate",
-            dest="deploy",
-            action="store_true",
-            help="Deprecated alias for --deploy; planned removal in 2.0",
-        )
-        mode.add_argument(
-            "--push",
-            dest="deploy",
-            action="store_true",
-            help="Deprecated alias for --deploy; planned removal in 2.0",
-        )
         p_run.add_argument("--keep-worktree", action="store_true")
         p_run.add_argument("--json", action="store_true")
         if name == "run-batch":
@@ -384,12 +371,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_hub_remove.add_argument("--registry", help="Override the hub registry file path")
     p_hub_remove.add_argument("--json", action="store_true")
     p_hub_remove.set_defaults(func=cmd_hub_remove)
-    p_hub_list = hub_sub.add_parser(
-        "list", help="Deprecated registry-only view; use `hub status`"
-    )
-    p_hub_list.add_argument("--registry", help="Override the hub registry file path")
-    p_hub_list.add_argument("--json", action="store_true")
-    p_hub_list.set_defaults(func=cmd_hub_list)
     p_hub_status = hub_sub.add_parser(
         "status",
         help="One machine-wide read of every registered repo's queue",
@@ -428,15 +409,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not hasattr(args, "func"):
         parser.print_help(sys.stderr)
         return 2
-    command_args = raw[: raw.index("--")] if "--" in raw else raw
-    for alias in ("--integrate", "--push"):
-        if alias in command_args:
-            print(
-                f"mergetrain warning: {alias} is deprecated; use --deploy "
-                "(planned removal in 2.0)",
-                file=sys.stderr,
-            )
-            break
     try:
         return int(args.func(args))
     except KeyboardInterrupt:

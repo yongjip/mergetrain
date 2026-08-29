@@ -1,4 +1,4 @@
-version: 1
+version: 2
 
 # mergetrain deploys mergetrain. The gates below are the checks CI runs that a
 # single machine can reproduce; the post-push verify hook covers the ones it
@@ -23,15 +23,6 @@ queue:
   daemon_interval_seconds: 15
   heartbeat_interval_seconds: 10
   command_timeout_seconds: 3600
-
-agent:
-  require_clean_worktree_before_enqueue: true
-  require_explicit_auto_approval: true
-  prefer_json_status: true
-
-terminology:
-  # Human-facing label only. Machine status remains `deployed`.
-  git_operation: deploy
 
 gate_parallelism:
   # ruff and mypy are independent; the pytest-xdist gate consumes the full

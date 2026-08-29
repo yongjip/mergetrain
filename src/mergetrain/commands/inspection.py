@@ -12,8 +12,6 @@ from typing import Any
 from .. import __version__
 from ..cli_support import (
     _dump_jsonl,
-    _human_category,
-    _human_next_action,
     _job_result_line,
     config_from_args,
     dump_json,
@@ -90,9 +88,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         lock_text = payload["lock"]["owner"] if payload["lock"] else "none"
         print(f"db: {payload['db']}")
         print(f"lock: {lock_text}")
-        print(f"next action: {_human_next_action(payload['next_action'], config.terminology)}")
+        print(f"next action: {payload['next_action']}")
         for job in payload["jobs"]:
-            print(f"{_job_result_line(job, config.terminology)} - {job['task']}")
+            print(f"{_job_result_line(job)} - {job['task']}")
     return 0
 
 
@@ -261,7 +259,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         gate_text = (
             f" · gate {gate['index']}/{gate['total']} {gate['name']}" if gate else ""
         )
-        print(_job_result_line(payload["job"], config.terminology))
+        print(_job_result_line(payload["job"]))
         print(
             f"phase: {progress['phase']} · {progress['state']}{gate_text} · "
             f"elapsed {progress['elapsed_seconds']}s"
@@ -272,7 +270,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         )
         print(
             f"outcome: {payload['outcome']['severity']} / "
-            f"{_human_category(payload['outcome']['category'], config.terminology)}"
+            f"{payload['outcome']['category']}"
         )
     return 0
 
@@ -589,7 +587,6 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
 
 def _doctor_recommendations(
     config_drift: dict[str, Any],
-    deprecations: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     recommendations: list[dict[str, Any]] = []
     if config_drift["state"] == "drifted":
@@ -610,44 +607,6 @@ def _doctor_recommendations(
                 "synchronize a clean operator checkout without discarding local work",
             ],
         })
-    if "agent_behavior_keys" in deprecations:
-        recommendations.append(
-            {
-                "code": "deprecated_agent_config",
-                "severity": "warning",
-                "summary": (
-                    "The agent behavior settings are deprecated and their values "
-                    "are ignored; mergetrain enforces the safe behavior directly."
-                ),
-                "evidence": {
-                    "keys": [
-                        "agent.require_clean_worktree_before_enqueue",
-                        "agent.require_explicit_auto_approval",
-                        "agent.prefer_json_status",
-                    ]
-                },
-                "actions": [
-                    "remove the deprecated agent block from .mergetrain.yaml",
-                    "use repository instructions and capability separation for agent policy",
-                ],
-            }
-        )
-    if "git_operation_terminology" in deprecations:
-        recommendations.append(
-            {
-                "code": "deprecated_git_operation_terminology",
-                "severity": "warning",
-                "summary": (
-                    "terminology.git_operation is deprecated; deploy is the canonical "
-                    "human-facing operation."
-                ),
-                "evidence": {"configured_field": "terminology.git_operation"},
-                "actions": [
-                    "remove the terminology block from .mergetrain.yaml",
-                    "use --deploy in commands and documentation",
-                ],
-            }
-        )
     return recommendations
 
 
@@ -701,9 +660,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if repo_root else False,
         },
         "config_drift": config_drift,
-        "recommendations": _doctor_recommendations(
-            config_drift, config.deprecations
-        ),
+        "recommendations": _doctor_recommendations(config_drift),
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
         "validated_trains": validated_trains,
@@ -718,7 +675,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             )
         },
     }
-    # `ok` means only "the command ran without an error envelope" (contract 1);
+    # `ok` means only "the command ran without an error envelope";
     # the repo-health verdict moves to its own field so a healthy-but-unconfigured
     # repo no longer reads as ok:false.
     payload["health"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
@@ -744,7 +701,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         )
         print(
             "next action: "
-            f"{_human_next_action(payload['next_action'], config.terminology)}"
+            f"{payload['next_action']}"
         )
         for recommendation in payload["recommendations"]:
             print(

@@ -5,9 +5,10 @@ general CI platform. This document is the decision budget for public product
 surface. It records what is essential, what is intentionally advanced, what may
 later be consolidated, and what should wait for evidence.
 
-This is an inventory and acceptance policy, not a deletion plan. Nothing listed
-as a candidate should be removed without usage evidence, a compatibility plan,
-and the usual contract and recovery review.
+This is an inventory and acceptance policy. A candidate is removed only with
+owner-usage evidence, a deliberate contract boundary, and the usual recovery
+review. mergetrain is currently an owner-operated utility, so its product
+decisions optimize that workflow rather than simulate an external market.
 
 ## Feature admission rule
 
@@ -53,8 +54,8 @@ quota.
 
 | Surface | Current baseline | Default expansion budget |
 | --- | --- | --- |
-| CLI | 27 top-level commands; `hub` has 5 subcommands | 0 new commands, aliases, or behavioral flags |
-| Configuration | 11 top-level YAML keys: `version`, `project`, `state`, `git`, `queue`, `agent`, `notify`, `terminology`, `gate_parallelism`, `gates`, `deploy` | 0 new fields or modes |
+| CLI | 27 top-level commands; `hub` has 4 subcommands | 0 new commands, aliases, or behavioral flags |
+| Configuration | 9 top-level YAML keys: `version`, `project`, `state`, `git`, `queue`, `notify`, `gate_parallelism`, `gates`, `deploy` | 0 new fields or modes |
 | Dashboard | 2 read-only modes: one repository and multi-repository Hub | 0 mutation controls; 0 new views without a repeated decision need |
 | Daemon and Hub | single-repo `daemon`; Hub roster/serve plus auto-only `hub daemon` | 0 new execution or scheduling semantics |
 | MCP | 12 tools: 9 read-only, 2 non-shipping mutations, 1 human-gated deploy | 0 new tools; no MCP-only capability |
@@ -70,7 +71,7 @@ The CLI baseline includes these commands:
   `inspect`, `history`, `stats`, `logs`, `dashboard`, and `mcp`;
 - advanced execution and repair: `retry`, `supersede`, `run-next`, `daemon`,
   `gc`, `recover`, `unlock`, `cancel`, `dismiss`, and `verify`; and
-- `hub`, with `add`, `remove`, `list`, `status`, and `daemon` subcommands in
+- `hub`, with `add`, `remove`, `status`, and `daemon` subcommands in
   addition to its default read-only server mode.
 
 Flags and nested configuration fields remain part of the budget even though the
@@ -79,31 +80,21 @@ does not make it free.
 
 ### 2026-08-29 contraction decision
 
-The compatibility surface above remains the contract-1 baseline, but the
-generated and documented default is now smaller:
+Version 2 removes four redundant surfaces:
 
-- `init` generates 9 top-level keys, omitting the no-op `agent` block and the
-  vocabulary-only `terminology` block;
-- explicit `agent.*` keys remain parseable in 1.x, but their values are ignored
-  and `doctor` recommends removal;
-- explicit `terminology.git_operation`, `--integrate`, and `--push` remain
-  functional in 1.x, with diagnostics or stderr warnings directing new use to
-  canonical `deploy`;
-- `hub list` preserves its existing stdout/JSON contract in 1.x but warns and
-  directs new consumers to the richer `hub status`; and
-- MCP continues to register all 12 contract-1 tools, while agent-facing docs
-  foreground a six-tool default path. Physical tool removal waits for 2.0.
+- the no-op `agent.*` block;
+- presentation-only `terminology.git_operation`;
+- the equivalent `--integrate` and `--push` deploy aliases; and
+- registry-only `hub list`, superseded by `hub status`.
 
-The admission evidence was local operating data, not a market claim: two
-actively used repositories retained the default agent/deploy behavior across
-609 deployed jobs, and searches of their application configuration and scripts,
-outside mergetrain's own compatibility tests, found no consumer of the aliases
-or `hub list`. The compatibility period
-avoids inferring that this small sample represents every downstream user.
-Release 2.0 is the earliest removal boundary; before removal, repeat the usage
-search against external pilot repositories and publish the migration note. Use
-the [external repository pilot](pilot-evaluation.md) for the prospective
-efficiency, safety, adoption, and compatibility record.
+The evidence is owner operating data, not a market claim: two actively used
+repositories retained canonical agent/deploy behavior across 609 deployed jobs,
+and searches outside mergetrain's own compatibility tests found no consumer of
+the removed aliases or command. Config and machine-contract versions moved to
+2. Version-1 configs migrate in memory so existing owner checkouts keep running;
+version-2 configs reject removed keys so they cannot imply nonexistent policy.
+The 12 MCP tools remain registered, while agent-facing docs foreground the six
+normal-path tools.
 
 ## 1. Core product surface
 
@@ -148,10 +139,7 @@ evidence-dependent. No deletion is authorized by this list.
 
 | Candidate | Why it is a candidate | Evidence required before change |
 | --- | --- | --- |
-| `agent.require_clean_worktree_before_enqueue`, `agent.require_explicit_auto_approval`, `agent.prefer_json_status` | They are parsed and exposed but explicitly have no runtime effect; enforcement lives in commands and the agent contract. | **Deprecating:** omitted from generated config, ignored safely, diagnosed by doctor; repeat external usage search before 2.0 removal. |
-| `terminology.git_operation` plus `--integrate` and `--push` aliases | Three vocabularies describe the same atomic Git operation and expand docs, tests, and rendering paths. | **Deprecating:** canonical default is `deploy`; preserve contract-1 behavior and repeat external usage search before 2.0 removal. |
 | `run-next` beside `run-batch` | A one-job runner overlaps the batch engine and its safety rules. | Prove equivalent exit codes, JSON, isolation, cancellation, and recovery behavior; measure direct use before making it an alias or removing it. |
-| `hub list` beside `hub status` | Both read the registry; status already returns the richer aggregate. | **Deprecating:** preserve the smaller JSON/stdout through 1.x; repeat external script search before 2.0 removal. |
 | `recover` beside orphan repair, `reconcile --apply`, and optional `gc` | The convenience command composes existing recovery stages but adds another verb and decision path. | Preserve restart safety and dry-run clarity; compare operator error rates with a doctor-guided composition. |
 | `demo` and `dashboard --preview` | They support onboarding and release media rather than normal operation. | Keep the 60-second evaluation path measurable; move them only if docs or isolated tooling provides the same reliable demo. |
 | Parallel observation surfaces (`events`, `inspect`, `logs`, `history`, `stats`) across CLI, MCP, and dashboard | The same evidence is rendered through several bounded views. | Analyze agent traces and operator workflows first; consolidation must not force large payloads or log parsing onto routine status checks. |

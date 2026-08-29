@@ -10,7 +10,7 @@ import {
   repoOperationalCopy,
   repoStateForEntry,
 } from "../../dashboardLogic.js";
-import { DEFAULT_TERMINOLOGY, relative, terminology } from "../../dashboardFormatters.js";
+import { DEPLOY_WORDS, relative } from "../../dashboardFormatters.js";
 
 export function RepoHistory({ jobs = [] }) {
   const recent = [...jobs]
@@ -37,7 +37,7 @@ export function RepoTableRow({ entry, onSelect, now }) {
   const name = entry.name || entry.path;
   const snapshot = entry.ok && !entry.empty ? entry.snapshot : null;
   const batch = snapshot ? currentTrainModel(snapshot) : null;
-  const words = snapshot ? terminology(snapshot) : DEFAULT_TERMINOLOGY;
+  const words = DEPLOY_WORDS;
   const status = repoOperationalCopy(entry, snapshot, state, words);
   const currentJob = batch?.currentJobs.length ? latestRepoJob(batch.currentJobs) : null;
   const latestDeployed = snapshot

@@ -70,9 +70,8 @@ failure envelope unchanged — a non-zero exit is an answer, not an exception.
 The default operating path deliberately foregrounds six tools:
 `mergetrain_doctor`, `mergetrain_status`, `mergetrain_enqueue`,
 `mergetrain_validate`, `mergetrain_deploy`, and `mergetrain_inspect`. The other
-six registered tools remain contract-1 compatibility and advanced operator
-views; use them only when the default state and inspection payloads do not
-answer the decision. Tool removal waits for the 2.0 contract boundary.
+six registered tools are advanced operator views; use them only when the
+default state and inspection payloads do not answer the decision.
 
 `mergetrain_validate` is free to run under the operating contract, but it is
 **not** annotated `readOnlyHint`: it creates a worktree, runs the configured gate

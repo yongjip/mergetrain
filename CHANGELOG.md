@@ -2,27 +2,17 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-08-29
+
 - Clarify that lease fencing serializes mergetrain runners but cannot stop a
   shell-capable task agent from pushing with its own credential. Document the
   enforceable topology: task agents without integration credentials, a separate
   runner identity, and remote branch protection or a reviewed PR path.
 
-- Add a prospective external-repository pilot protocol with fit criteria,
-  credential-separated safety topology, normalized coordination-time metrics,
-  adoption and safety guardrails, a 2.0 compatibility audit, and explicit
-  continue/integrate/maintain/stop decision thresholds. It reuses existing
-  read-only evidence and adds no product telemetry or command surface.
-
-- Contract the default product surface without breaking contract 1: newly
-  generated configs omit the no-op `agent.*` settings and optional terminology
-  alias, while legacy configs remain readable and `doctor` explains the 2.0
-  migration. The no-op agent values are now explicitly ignored in favor of the
-  enforced safe defaults.
-
-- Deprecate `--integrate`, `--push`, and `hub list` with stderr warnings while
-  preserving their existing stdout/JSON behavior through 1.x. Documentation
-  now foregrounds canonical `deploy`, `hub status`, and a six-tool MCP path;
-  physical removals wait for the 2.0 contract boundary.
+- Remove the no-op `agent.*` settings, presentation-only
+  `terminology.git_operation`, `--integrate`/`--push` aliases, and redundant
+  `hub list` command. Config and machine-contract versions are now 2; version-1
+  configs migrate in memory, while version-2 configs reject removed keys.
 
 - Make cancellation of an in-flight MCP tool coroutine terminate the CLI
   process group instead of leaving validate or an accepted deploy running in a

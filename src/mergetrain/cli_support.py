@@ -11,7 +11,6 @@ from .config import (
     CONFIG_VERSION,
     DEFAULT_CONFIG_NAME,
     MergetrainConfig,
-    TerminologyConfig,
     load_config,
 )
 from .contract import CONTRACT_VERSION
@@ -60,7 +59,7 @@ def normalize_global_options(argv: Sequence[str]) -> list[str]:
 
 def dump_json(payload: Any) -> None:
     # Stamp the contract version on every one-shot JSON payload at the single
-    # serializer (contract 1). sort_keys places it deterministically. Payloads
+    # serializer (machine contract). sort_keys places it deterministically. Payloads
     # that already carry the field (or aren't dicts) pass through untouched;
     # nested sub-objects (job dicts, embedded snapshots) are deliberately NOT
     # stamped — the outer frame owns the number.
@@ -120,7 +119,7 @@ def _error_payload(
     next_action: str | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
-    """The one failure envelope (contract 1): ``{ok:false, error{code,message,
+    """The one failure envelope: ``{ok:false, error{code,message,
     retryable}, next_action?}``. Every failing --json command emits exactly
     this, so a consumer parses one shape and branches on ``error.code``."""
 
@@ -134,26 +133,7 @@ def _error_payload(
     return payload
 
 
-def _human_next_action(action: str, terminology: TerminologyConfig) -> str:
-    return {
-        "deploy_validated_train_when_approved": (
-            f"{terminology.action}_validated_train_when_approved"
-        ),
-        "run_daemon_or_run_batch_deploy_when_approved": (
-            f"run_daemon_or_run_batch_{terminology.action}_when_approved"
-        ),
-    }.get(action, action)
-
-
-def _human_category(category: str, terminology: TerminologyConfig) -> str:
-    return terminology.completed if category == "deployed" else category
-
-
-def _job_result_line(
-    job: dict[str, Any],
-    terminology: TerminologyConfig | None = None,
-) -> str:
-    words = terminology or TerminologyConfig()
+def _job_result_line(job: dict[str, Any]) -> str:
     outcomes: list[str] = []
     if job.get("push_status", "not_run") != "not_run":
         outcomes.append(f"push={job['push_status']}")
@@ -162,8 +142,7 @@ def _job_result_line(
     if job.get("reused_validation_sha"):
         outcomes.append(f"reused={job['reused_validation_sha']}")
     outcome_text = f" ({', '.join(outcomes)})" if outcomes else ""
-    status = words.completed if job["status"] == "deployed" else job["status"]
-    return f"#{job['id']} {status}{outcome_text}: {job['branch']}"
+    return f"#{job['id']} {job['status']}{outcome_text}: {job['branch']}"
 
 
 def _recovery_next_action(conn, config: MergetrainConfig) -> str:

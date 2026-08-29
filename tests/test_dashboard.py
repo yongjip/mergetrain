@@ -160,7 +160,7 @@ class DashboardTests(unittest.TestCase):
             self.assertNotIn("log_path", payload["jobs"][0])
             self.assertNotIn("claim_token", payload["events"][0])
             self.assertNotIn("runtime", payload)
-            self.assertEqual(payload["project"]["terminology"]["completed"], "deployed")
+            self.assertNotIn("terminology", payload["project"])
             self.assertEqual(payload["project"]["push_specs"], ["HEAD:main"])
 
             cleanup = connect(config.state.db)
@@ -374,7 +374,7 @@ class DashboardTests(unittest.TestCase):
             finally:
                 cleanup.close()
 
-    def test_snapshot_exposes_configured_integration_vocabulary(self) -> None:
+    def test_snapshot_exposes_push_targets_without_terminology_surface(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / ".mergetrain.yaml").write_text(
@@ -384,13 +384,11 @@ class DashboardTests(unittest.TestCase):
   push_refs:
     - main
     - release
-terminology:
-  git_operation: integrate
 """,
                 encoding="utf-8",
             )
             payload = build_dashboard_snapshot(self.make_config(root))
-            self.assertEqual(payload["project"]["terminology"]["in_progress"], "integrating")
+            self.assertNotIn("terminology", payload["project"])
             self.assertEqual(payload["project"]["remote"], "upstream")
             self.assertEqual(payload["project"]["push_specs"], ["HEAD:main", "HEAD:release"])
 
@@ -460,8 +458,8 @@ terminology:
                 payload = json.loads(response.read())
                 self.assertEqual(response.status, 200)
                 self.assertTrue(payload["ok"])
-                # Contract 1: the served snapshot is stamped at the HTTP boundary.
-                self.assertEqual(payload["contract_version"], 1)
+                # The served snapshot is stamped at the HTTP boundary.
+                self.assertEqual(payload["contract_version"], 2)
                 self.assertTrue(payload["project"]["preview"])
                 self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
                 self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
