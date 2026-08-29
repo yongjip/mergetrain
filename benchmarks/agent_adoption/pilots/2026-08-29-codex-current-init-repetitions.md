@@ -87,19 +87,19 @@ MCP is not justified by these results.
 ## Provider availability ledger
 
 Claude Code was not run because the test environment had no license. The
-installed Gemini CLI `0.46.0` was smoke-tested with its documented Login with
-Google path and a non-mutating prompt. It exited before an agent turn with
-`IneligibleTierError` / `UNSUPPORTED_CLIENT`, reporting that the OAuth client no
-longer supported the free tier and directing migration to Antigravity. Neither
-`GEMINI_API_KEY` nor `GOOGLE_API_KEY` was configured. Homebrew also marked that
-formula deprecated in favor of `antigravity-cli`.
+installed Gemini CLI `0.46.0` was smoke-tested with an individual Google account
+and a non-mutating prompt. It exited before an agent turn with
+`IneligibleTierError` / `UNSUPPORTED_CLIENT` and directed migration to
+Antigravity. Neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` was configured.
 
-The official Gemini CLI [authentication guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx)
-and [repository](https://github.com/google-gemini/gemini-cli) still describe
-free authentication paths. The local incompatibility is therefore recorded as
-an availability failure for this exact installed client, not as agent behavior
-and not in any handoff denominator. A future Gemini-family trial requires an
-explicitly installed supported client or an operator-provided API key.
+This is the expected provider transition, not a stale local package: Gemini CLI
+[stopped serving individual free, Pro, and Ultra accounts on
+2026-06-18](https://github.com/google-gemini/gemini-cli/discussions/28017).
+Homebrew therefore deprecates `gemini-cli` in favor of `antigravity-cli`.
+Legacy Gemini CLI remains relevant only for the enterprise and paid API-key
+paths named in the provider announcement. A future no-cost Google-agent trial
+must use the supported Antigravity CLI and record it as a distinct agent product;
+this availability result is excluded from every behavioral denominator.
 
 ## Excluded attempts
 

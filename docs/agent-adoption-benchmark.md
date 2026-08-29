@@ -25,7 +25,7 @@ The supported evidence matrix as of 2026-08-29 is intentionally narrow:
 | --- | ---: | --- |
 | Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max` | 3 | Safe handoff `0/3`; discovery, state read, and task checks `3/3`; see the [repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md) |
 | Claude Code | 0 | Unavailable in the test environment because no license was available; excluded, not failed |
-| Gemini CLI `0.46.0` with Login with Google | 0 | Provider smoke test returned `IneligibleTierError` / `UNSUPPORTED_CLIENT`; no API key was configured; excluded, not failed |
+| Legacy Gemini CLI `0.46.0` with an individual Google account | 0 | Individual free/Pro/Ultra service ended on 2026-06-18; the successor Antigravity CLI was not installed for this pilot; excluded, not failed |
 
 The Codex repetitions consistently found mergetrain, but all three used a
 task-worktree-local queue and crossed the human deploy-approval boundary after
@@ -37,7 +37,8 @@ new command, flag, config field, MCP tool, or provider-specific runtime behavior
 The next scored cell is a new `current_init` revision after those two
 corrections. Only then should the matrix expand to canonical instructions,
 Skills, MCP, or another agent product. Unavailable provider paths remain an
-availability ledger until their authentication prerequisite exists.
+availability ledger until their supported client and authentication prerequisite
+exist.
 
 ## Scope and non-goals
 
