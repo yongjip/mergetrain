@@ -11,11 +11,11 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
-3. Do not push configured Git refs directly; enqueue the branch instead.
+3. Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.
 4. Read doctor --json or status --json before deciding the next action.
 5. Use --auto only after explicit unattended-deployment approval from the user/operator.
 6. Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.
-7. Let one runner or daemon own merge, test, push, and verify.
+7. Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.
 8. Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.
 9. Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation and deploy approval.
 10. After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.
@@ -23,8 +23,8 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 
 ### Safety boundary
 
-- Git deployment requires `run-next --deploy` or `run-batch --deploy`; `--deploy` remains the canonical compatibility flag.
-- Validation requires `run-next --validate-only` or `run-batch --validate-only`.
+- Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending. `--deploy` remains the canonical compatibility flag.
+- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only` or `run-batch --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.

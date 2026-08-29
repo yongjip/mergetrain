@@ -176,7 +176,7 @@ PYEOF
 )"
 [ "$("$MT" --version)" = "mergetrain $SRC_VERSION" ] && ok "version" || no "version=$("$MT" --version) expected=$SRC_VERSION"
 "$MT" --help >/dev/null 2>&1 && ok "--help exit 0" || no "--help nonzero"
-[ "$("$MT" agent-contract --json | jget boundary.deploy_requires)" = "run-batch --deploy for a validated train; run-next --deploy only when none is pending" ] && ok "agent-contract well-formed (nested leaf)" || no "agent-contract"
+[ "$("$MT" agent-contract --json | jget boundary.deploy_requires)" = "explicit user/operator approval for the displayed exact validated train, then run-batch --deploy; run-next --deploy only when no validated train is pending" ] && ok "agent-contract well-formed (nested leaf)" || no "agent-contract"
 "$VPY" -c "import mergetrain, mergetrain.cli, mergetrain.store, mergetrain.git_runner, mergetrain.daemon, mergetrain.dashboard, mergetrain.snapshot" 2>/dev/null && ok "imports" || no "imports"
 "$VPY" -c "from pathlib import Path; import mergetrain; assert Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()" 2>/dev/null && ok "dashboard assets packaged" || no "dashboard assets missing"
 "$MT" dashboard --help >/dev/null 2>&1 && ok "dashboard help" || no "dashboard help failed"
