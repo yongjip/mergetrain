@@ -20,8 +20,10 @@ interpreter can satisfy bare gate commands such as `ruff`, `mypy`, or `pytest`.
 
 Structured surfaces apply one best-effort redaction policy to expected error
 messages, persisted job notes, status JSON, `doctor` remote URLs, and dashboard
-snapshots. It masks sensitive `NAME=value` assignments, sensitive command
-options such as `--token`, and passwords in URL userinfo
+snapshots. MCP diagnostics synthesized when a CLI child does not return its JSON
+contract use the same policy; valid CLI JSON remains contract-owned and is not
+rewritten by the adapter. It masks sensitive `NAME=value` assignments,
+sensitive command options such as `--token`, and passwords in URL userinfo
 (`https://user:password@host`); the username is retained for diagnostics. This
 is defense in depth, not a general secret scanner. Raw command logs can still
 contain anything the subprocess printed, so the rules above remain mandatory.

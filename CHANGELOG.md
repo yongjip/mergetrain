@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Make cancellation of an in-flight MCP tool coroutine terminate the CLI
+  process group instead of leaving validate or an accepted deploy running in a
+  detached worker thread. Preserve the existing timeout envelope and
+  ambiguous-push reconcile semantics.
+
+- Apply the shared best-effort secret redaction and local-path minimization to
+  MCP errors synthesized from malformed child stdout/stderr, while continuing
+  to return valid CLI JSON and successful raw log output unchanged.
+
 ## 1.4.2 - 2026-08-29
 
 - Resolve relative queue, log, and runner-worktree state to the shared control

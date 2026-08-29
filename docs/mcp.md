@@ -119,3 +119,12 @@ something that silently degrades to trust.
 - The MCP layer adds no capability the CLI lacks. An agent with shell access can
   already drive mergetrain; what this adds is a smaller surface, truthful side
   effect annotations, and a deploy that a human has to accept.
+- When the MCP SDK cancels an in-flight tool coroutine, mergetrain terminates
+  the CLI process group and its descendants before that cancellation returns.
+  If a deploy had already written its durable pending marker, normal
+  `reconcile` recovery remains the source of truth; cancellation never guesses
+  whether the push landed.
+- Valid CLI JSON is returned verbatim. When a child fails outside that contract,
+  the MCP-synthesized diagnostic is bounded, applies the shared best-effort
+  secret redaction policy, and shortens the repository/home path. Successful
+  `mergetrain_logs` output remains the explicit raw-log path.

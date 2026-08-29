@@ -41,6 +41,7 @@ GIT_RUNNER_COLLABORATORS = {
 ADAPTER_ALLOWED = {
     "mergetrain.mcp_server": (
         "mergetrain.contract",
+        "mergetrain.errors",
     ),
     "mergetrain.dashboard": (
         "mergetrain.config",

@@ -5,15 +5,23 @@ import importlib.util
 import inspect
 import io
 import json
+import os
+import signal
 import subprocess
+import sys
+import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, suppress
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from mergetrain.cli import main
-from mergetrain.mcp_server import MergetrainTools, _elicit_deploy_accept
+from mergetrain.mcp_server import (
+    MergetrainTools,
+    _elicit_deploy_accept,
+    _stop_cli_process,
+)
 
 HAS_MCP = importlib.util.find_spec("mcp") is not None
 
@@ -186,6 +194,51 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "cli_output_unreadable")
         self.assertIn("boom", payload["error"]["message"])
 
+    def test_unreadable_output_redacts_stderr_and_minimizes_local_paths(self) -> None:
+        stderr = (
+            "API_TOKEN=super-secret --password hunter2 "
+            "https://agent:credential@example.test/repo "
+            "/repo/src/startup.py"
+        )
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            return_value=completed("not json", returncode=1, stderr=stderr),
+        ):
+            payload = asyncio.run(self.tools.doctor())
+        message = payload["error"]["message"]
+        for secret in ("super-secret", "hunter2", "credential"):
+            self.assertNotIn(secret, message)
+        self.assertIn("API_TOKEN=[redacted]", message)
+        self.assertIn("--password [redacted]", message)
+        self.assertIn("https://agent:[redacted]@example.test/repo", message)
+        self.assertIn("[repo]/src/startup.py", message)
+
+    def test_unreadable_output_redacts_stdout_fallback(self) -> None:
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            return_value=completed("GITHUB_PAT=ghp-secret", returncode=1),
+        ):
+            payload = asyncio.run(self.tools.doctor())
+        self.assertNotIn("ghp-secret", payload["error"]["message"])
+        self.assertIn("GITHUB_PAT=[redacted]", payload["error"]["message"])
+
+    def test_valid_cli_json_is_returned_verbatim_even_if_it_looks_sensitive(self) -> None:
+        envelope = {
+            "ok": False,
+            "error": {
+                "code": "upstream_contract",
+                "message": "API_TOKEN=contract-owned",
+                "retryable": False,
+            },
+        }
+        with patch.object(
+            MergetrainTools, "_run", return_value=completed(json.dumps(envelope))
+        ):
+            payload = asyncio.run(self.tools.doctor())
+        self.assertEqual(payload, envelope)
+
     def test_timeout_is_reported_not_raised(self) -> None:
         with patch.object(
             MergetrainTools,
@@ -210,6 +263,157 @@ class PayloadTests(unittest.TestCase):
                 {"type": "event", "id": 4, "phase": "validating"},
             ],
         )
+
+    def test_events_failure_redacts_synthesized_stderr(self) -> None:
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            return_value=completed("", returncode=1, stderr="ACCESS_TOKEN=event-secret"),
+        ):
+            payload = asyncio.run(self.tools.events())
+        self.assertNotIn("event-secret", payload["error"]["message"])
+        self.assertIn("ACCESS_TOKEN=[redacted]", payload["error"]["message"])
+
+    def test_logs_failure_redacts_synthesized_detail(self) -> None:
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            return_value=completed("", returncode=1, stderr="--api-key log-secret"),
+        ):
+            payload = asyncio.run(self.tools.logs(job_id=4))
+        self.assertNotIn("log-secret", payload["error"]["message"])
+        self.assertIn("--api-key [redacted]", payload["error"]["message"])
+
+    def test_successful_raw_log_output_remains_unchanged(self) -> None:
+        raw = "API_TOKEN=intentionally-raw\n"
+        with patch.object(
+            MergetrainTools, "_run", return_value=completed(raw)
+        ):
+            payload = asyncio.run(self.tools.logs(job_id=4))
+        self.assertEqual(payload["log"], raw)
+
+
+class ProcessLifecycleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tools = MergetrainTools(repo=Path("/repo"))
+
+    def test_successful_async_child_preserves_completed_process_contract(self) -> None:
+        argv = [
+            sys.executable,
+            "-c",
+            "import sys; print('out'); print('err', file=sys.stderr); raise SystemExit(7)",
+        ]
+        with patch.object(MergetrainTools, "_argv", return_value=argv):
+            result = asyncio.run(self.tools._run(["doctor"]))
+        self.assertEqual(result.args, argv)
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.stdout, "out\n")
+        self.assertEqual(result.stderr, "err\n")
+
+    def test_windows_break_failure_falls_back_to_tree_termination(self) -> None:
+        process = MagicMock()
+        process.pid = 123
+        process.returncode = None
+        process.send_signal.side_effect = OSError("no console")
+        process.wait = AsyncMock(return_value=0)
+        stop_tree = AsyncMock()
+        with (
+            patch("mergetrain.mcp_server.os.name", "nt"),
+            patch("mergetrain.mcp_server._stop_windows_process_tree", stop_tree),
+        ):
+            self.assertTrue(asyncio.run(_stop_cli_process(process)))
+        stop_tree.assert_awaited_once_with(process)
+        process.wait.assert_awaited_once()
+
+    def test_cancelling_run_stops_the_cli_process_group(self) -> None:
+        heartbeat_program = (
+            "from pathlib import Path\n"
+            "import sys, time\n"
+            "heartbeat = Path(sys.argv[1])\n"
+            "counter = 0\n"
+            "while True:\n"
+            "    heartbeat.write_text(str(counter), encoding='utf-8')\n"
+            "    counter += 1\n"
+            "    time.sleep(0.02)\n"
+        )
+        parent_program = (
+            "from pathlib import Path\n"
+            "import os, signal, subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', sys.argv[3], sys.argv[2]], "
+            "start_new_session=(os.name == 'posix'))\n"
+            "if os.name == 'posix':\n"
+            "    def interrupt(_signum, _frame):\n"
+            "        os.killpg(child.pid, signal.SIGTERM)\n"
+            "        child.wait(timeout=5)\n"
+            "        raise KeyboardInterrupt\n"
+            "    signal.signal(signal.SIGINT, interrupt)\n"
+            "Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}', encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+
+        async def wait_for_file(path: Path) -> None:
+            for _ in range(500):
+                if path.exists() and path.stat().st_size:
+                    return
+                await asyncio.sleep(0.01)
+            self.fail(f"timed out waiting for {path.name}")
+
+        async def scenario(root: Path) -> None:
+            pid_path = root / "pids.txt"
+            heartbeat_path = root / "heartbeat.txt"
+            argv = [
+                sys.executable,
+                "-c",
+                parent_program,
+                str(pid_path),
+                str(heartbeat_path),
+                heartbeat_program,
+            ]
+            task: asyncio.Task[subprocess.CompletedProcess[str]] | None = None
+            parent_pid = 0
+            try:
+                with patch.object(MergetrainTools, "_argv", return_value=argv):
+                    task = asyncio.create_task(self.tools._run(["doctor"]))
+                    await wait_for_file(pid_path)
+                    await wait_for_file(heartbeat_path)
+                    parent_pid = int(pid_path.read_text(encoding="utf-8").split()[0])
+                    before = heartbeat_path.read_text(encoding="utf-8")
+                    await asyncio.sleep(0.08)
+                    self.assertNotEqual(
+                        heartbeat_path.read_text(encoding="utf-8"),
+                        before,
+                        "the grandchild control must be alive before cancellation",
+                    )
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                await asyncio.sleep(0.1)
+                stopped = heartbeat_path.read_text(encoding="utf-8")
+                await asyncio.sleep(0.15)
+                self.assertEqual(
+                    heartbeat_path.read_text(encoding="utf-8"),
+                    stopped,
+                    "the grandchild kept running after the MCP task was cancelled",
+                )
+            finally:
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+                if parent_pid:
+                    if os.name == "posix":
+                        with suppress(ProcessLookupError):
+                            os.killpg(parent_pid, signal.SIGKILL)
+                    else:  # pragma: no cover - Windows cleanup belt
+                        subprocess.run(
+                            ["taskkill", "/PID", str(parent_pid), "/T", "/F"],
+                            check=False,
+                            capture_output=True,
+                            timeout=10,
+                        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(scenario(Path(tmp)))
 
 
 class DeployGateTests(unittest.TestCase):

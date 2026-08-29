@@ -73,8 +73,9 @@ blocking CI check. It enforces the dependency direction described above:
   while `store.py` remains a compatibility façade over that package;
 - Git/process/gate/worktree collaborators do not import the `GitRunner`
   coordinator;
-- MCP stays independent of core implementation modules, and dashboard/Hub
-  backends use only their documented read-model and contract dependencies;
+- MCP stays independent of core business logic and uses only the machine
+  contract plus the shared error-redaction primitive; dashboard/Hub backends
+  use only their documented read-model and contract dependencies;
 - production modules have no internal import cycles.
 
 The same check has deliberately coarse monolith backstops: Python production

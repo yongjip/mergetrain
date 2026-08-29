@@ -19,11 +19,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
+import signal
 import subprocess
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .errors import redact_secrets
 
 try:
     # A real name in module globals, because FastMCP resolves the deploy tool's
@@ -54,6 +60,7 @@ INSTALL_HINT = (
 # Long enough for a validate that runs a real gate suite, bounded so a wedged
 # child cannot hold the server's event loop forever.
 _CLI_TIMEOUT_SECONDS = 3600
+_CLI_TERMINATE_GRACE_SECONDS = 5.0
 _LOG_TAIL_MAX_LINES = 500
 
 
@@ -62,10 +69,108 @@ def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
 
     payload: dict[str, Any] = {
         "ok": False,
-        "error": {"code": code, "message": message, "retryable": False},
+        "error": {
+            "code": code,
+            "message": redact_secrets(message),
+            "retryable": False,
+        },
     }
     payload.update(extra)
     return payload
+
+
+def _replace_local_path_root(text: str, root: str, replacement: str) -> str:
+    """Shorten a filesystem path root without rewriting matching URL paths."""
+
+    if not root:
+        return text
+    pattern = re.compile(
+        rf"(^|[\s'\"(=]){re.escape(root)}(?=/|$|[\s'\"),:])",
+        re.MULTILINE,
+    )
+    return pattern.sub(lambda match: f"{match.group(1)}{replacement}", text)
+
+
+async def _stop_windows_process_tree(process: asyncio.subprocess.Process) -> None:
+    """Terminate a Windows child and its descendants without blocking the loop."""
+
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill",
+            "/PID",
+            str(process.pid),
+            "/T",
+            "/F",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(killer.wait(), timeout=10)
+        except asyncio.TimeoutError:  # pragma: no cover - defensive Windows fallback
+            killer.kill()
+            await killer.wait()
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover - Windows only
+        pass
+    if process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.terminate()
+
+
+async def _stop_cli_process(process: asyncio.subprocess.Process) -> bool:
+    """Stop the CLI process group, escalating when graceful shutdown wedges."""
+
+    if process.returncode is not None:
+        return False
+    stopped = False
+    try:
+        if os.name == "posix":
+            # SIGINT lets the Python CLI unwind its own managed command
+            # runners, which may lead separate process groups for gates/Git.
+            # Their BaseException cleanup stops those descendants before the
+            # outer CLI releases its runner lock.
+            os.killpg(process.pid, signal.SIGINT)
+        else:  # pragma: no cover - exercised by Windows CI
+            ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+            if ctrl_break is None:
+                await _stop_windows_process_tree(process)
+            else:
+                try:
+                    process.send_signal(ctrl_break)
+                except OSError:
+                    # GUI/stdio hosts may not own a console that can receive a
+                    # CTRL_BREAK event. taskkill remains the tree-safe fallback.
+                    await _stop_windows_process_tree(process)
+        stopped = True
+        await asyncio.wait_for(
+            process.wait(), timeout=_CLI_TERMINATE_GRACE_SECONDS
+        )
+    except ProcessLookupError:
+        await process.wait()
+    except asyncio.TimeoutError:
+        if process.returncode is None:
+            if os.name == "posix":
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+            else:  # pragma: no cover - exercised by Windows CI
+                await _stop_windows_process_tree(process)
+                if process.returncode is None:
+                    process.kill()
+            stopped = True
+            await process.wait()
+    return stopped
+
+
+async def _stop_and_drain(
+    process: asyncio.subprocess.Process,
+    communicate_task: asyncio.Task[tuple[bytes, bytes]],
+) -> tuple[bytes, bytes]:
+    """Complete process-tree cleanup even when the caller is being cancelled."""
+
+    await _stop_cli_process(process)
+    with suppress(BaseException):
+        return await communicate_task
+    return b"", b""
 
 
 @dataclass(slots=True)
@@ -84,16 +189,56 @@ class MergetrainTools:
         return [sys.executable, "-m", "mergetrain", "--repo", str(self.repo), *args]
 
     async def _run(self, args: list[str]) -> subprocess.CompletedProcess[str]:
-        # Off the event loop: a gate suite can run for minutes, and a blocking
-        # call here would stall the whole stdio session, including cancellation.
-        return await asyncio.to_thread(
-            subprocess.run,
-            self._argv(args),
-            capture_output=True,
-            text=True,
-            timeout=_CLI_TIMEOUT_SECONDS,
-            check=False,
+        # Use an async child handle rather than a worker-thread subprocess.run:
+        # MCP request cancellation and server shutdown must terminate the CLI
+        # process tree instead of returning while validate/deploy keeps running.
+        argv = self._argv(args)
+        popen_options: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if os.name == "posix":
+            popen_options["start_new_session"] = True
+        else:  # pragma: no cover - exercised by Windows CI
+            popen_options["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        process = await asyncio.create_subprocess_exec(*argv, **popen_options)
+        communicate_task = asyncio.create_task(process.communicate())
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.shield(communicate_task), timeout=_CLI_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            await _stop_and_drain(process, communicate_task)
+            raise subprocess.TimeoutExpired(
+                cmd=argv, timeout=_CLI_TIMEOUT_SECONDS
+            ) from exc
+        except BaseException:
+            # Shield cleanup so the cancellation already delivered to this task
+            # cannot strand the child. Re-raise the original CancelledError (or
+            # transport failure) so the MCP SDK keeps its existing semantics.
+            cleanup = asyncio.create_task(_stop_and_drain(process, communicate_task))
+            await asyncio.shield(cleanup)
+            raise
+        return subprocess.CompletedProcess(
+            argv,
+            process.returncode if process.returncode is not None else 1,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
         )
+
+    def _safe_detail(self, *candidates: str) -> str:
+        """Bound and mask contract-external CLI diagnostics for MCP output."""
+
+        raw = next((item for item in candidates if item), "").strip()
+        detail = redact_secrets(raw)
+        repo = str(self.repo)
+        detail = _replace_local_path_root(detail, repo, "[repo]")
+        home = str(Path.home())
+        detail = _replace_local_path_root(detail, home, "~")
+        return detail[:2000]
 
     async def _json(self, args: list[str]) -> dict[str, Any]:
         """Run a --json command and return its payload untouched.
@@ -113,7 +258,7 @@ class MergetrainTools:
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError:
-            detail = (completed.stderr or completed.stdout).strip()[:2000]
+            detail = self._safe_detail(completed.stderr, completed.stdout)
             return _error(
                 "cli_output_unreadable",
                 f"'mergetrain {' '.join(args)}' did not return JSON: {detail}",
@@ -200,7 +345,7 @@ class MergetrainTools:
             if isinstance(frame, dict):
                 frames.append(frame)
         if not frames and completed.returncode != 0:
-            detail = (completed.stderr or "").strip()[:2000]
+            detail = self._safe_detail(completed.stderr)
             return _error("cli_output_unreadable", f"events failed: {detail}")
         return {"frames": frames}
 
@@ -218,7 +363,7 @@ class MergetrainTools:
         except subprocess.TimeoutExpired:
             return _error("cli_timeout", f"'mergetrain {' '.join(args)}' timed out")
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()[:2000]
+            detail = self._safe_detail(completed.stderr, completed.stdout)
             return _error(
                 "log_unavailable",
                 f"could not read the log for job {job_id}: {detail}",
