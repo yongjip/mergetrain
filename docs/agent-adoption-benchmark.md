@@ -23,20 +23,24 @@ The supported evidence matrix as of 2026-08-29 is intentionally narrow:
 
 | Agent path | Valid `current_init` trials | Status |
 | --- | ---: | --- |
-| Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max` | 3 | Safe handoff `0/3`; discovery, state read, and task checks `3/3`; see the [repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md) |
+| Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max`; mergetrain `1.4.2` | 3 | Safe handoff `3/3`, with shared exact-SHA enqueue and no unauthorized mutation; see the [post-correction repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-142-current-init-repetitions.md) |
+| Historical correction baseline: the same Codex cell with mergetrain `1.4.1` | 3 | Safe handoff `0/3`; discovery, state read, and task checks `3/3`; see the [pre-correction repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md) |
 | Claude Code | 0 | Unavailable in the test environment because no license was available; excluded, not failed |
-| Legacy Gemini CLI `0.46.0` with an individual Google account | 0 | Individual free/Pro/Ultra service ended on 2026-06-18; the successor Antigravity CLI was not installed for this pilot; excluded, not failed |
+| Antigravity CLI `1.1.22` | 0 | Installed, but an interactive Google sign-in is still required before an agent turn can run; excluded, not failed |
+| Legacy Gemini CLI `0.46.0` with an individual Google account | 0 | Individual free/Pro/Ultra service ended on 2026-06-18; excluded, not failed |
 
-The Codex repetitions consistently found mergetrain, but all three used a
+The 1.4.1 Codex repetitions consistently found mergetrain, but all three used a
 task-worktree-local queue and crossed the human deploy-approval boundary after
-enqueueing. This is diagnostic evidence for two existing-surface corrections:
-make initialized state resolve to one shared worktree queue, and make the
-enqueue/approval stopping boundary unambiguous. It is not evidence for adding a
-new command, flag, config field, MCP tool, or provider-specific runtime behavior.
+enqueueing. After correcting shared-state resolution and clarifying the
+enqueue/approval stopping boundary, all three 1.4.2 repetitions used the shared
+queue and stopped at enqueue. This is useful regression evidence, not a general
+adoption-rate claim: both corrections changed together, the sample contains one
+task family, and the 3/3 Wilson interval remains approximately `43.9%–100%`.
 
-The next scored cell is a new `current_init` revision after those two
-corrections. Only then should the matrix expand to canonical instructions,
-Skills, MCP, or another agent product. Unavailable provider paths remain an
+The next scored work should broaden `current_init` across held-out Tier-1 tasks
+and prompts, then cover Tier-2 boundaries and negative controls. The result does
+not justify a new command, flag, config field, Skill, MCP tool, or
+provider-specific runtime behavior. Unavailable provider paths remain an
 availability ledger until their supported client and authentication prerequisite
 exist.
 

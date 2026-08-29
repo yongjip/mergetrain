@@ -6,8 +6,8 @@ installed with the `mergetrain` wheel and adds no product CLI or telemetry.
 
 Diagnostic pilot notes live under [`pilots/`](pilots/) and explicitly separate
 scored trials from launcher or instrumentation failures. The current repeated
-Codex result is recorded in the
-[`2026-08-29` note](pilots/2026-08-29-codex-current-init-repetitions.md).
+Codex result after the 1.4.2 corrections is recorded in the
+[`2026-08-29` note](pilots/2026-08-29-codex-142-current-init-repetitions.md).
 
 The current milestone supports the `current_init` condition and one Tier-1 task.
 It creates a disposable Git repository, local bare remote, task worktree, hidden
