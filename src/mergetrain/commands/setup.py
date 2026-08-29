@@ -22,20 +22,20 @@ def agent_contract_payload(
         "rules": [
             "Work on a task-specific branch and worktree.",
             "Commit all changes before enqueueing.",
-            "Do not push configured Git refs directly; enqueue the branch instead.",
+            "Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.",
             "Read doctor --json or status --json before deciding the next action.",
             f"Use --auto only after explicit unattended-{words.noun} approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
-            "Let one runner or daemon own merge, test, push, and verify.",
+            "Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.",
             "Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.",
             "Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation and deploy approval.",
             "After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.",
             "Do not delete or rewrite refs/mergetrain/deploys/*; they are permanent remote recovery evidence.",
         ],
         "boundary": {
-            "deploy_requires": "run-batch --deploy for a validated train; run-next --deploy only when none is pending",
+            "deploy_requires": "explicit user/operator approval for the displayed exact validated train, then run-batch --deploy; run-next --deploy only when no validated train is pending",
             "validate_requires": "run-next --validate-only or run-batch --validate-only",
-            "validated_train_deploy": "run-batch --deploy claims one exact validated train",
+            "validated_train_deploy": "run-batch --deploy claims one exact validated train only after separate user/operator approval",
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
             "validated_train_supersede": "supersede atomically retires one validated train and enqueues exact replacement SHAs without inheriting validation, reuse identity, or deploy approval",
             "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
@@ -71,8 +71,8 @@ Purpose: {payload['purpose']}
 
 ## Safety boundary
 
-- Git {words.noun} requires `run-next --{words.action}` or `run-batch --{words.action}`; `--deploy` remains the canonical compatibility flag.
-- Validation requires `run-next --validate-only` or `run-batch --validate-only`.
+- Git {words.noun} requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --{words.action}`; `run-next --{words.action}` is allowed only when no validated train is pending. `--deploy` remains the canonical compatibility flag.
+- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only` or `run-batch --validate-only`.
 - A validated train is {words.completed} as one exact identity by `run-batch --{words.action}`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.

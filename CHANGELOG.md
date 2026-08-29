@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 1.4.2 - 2026-08-29
+
+- Resolve relative queue, log, and runner-worktree state to the shared control
+  checkout across standard Git linked worktrees. Task worktrees retain their
+  own branch/readiness identity while observing one queue and runner lock;
+  absolute state paths and relative `--db` overrides keep their existing
+  behavior.
+
+- Tighten the generated agent contract around the existing safety boundary:
+  task agents enqueue the exact committed HEAD and stop, a task or integration
+  request is not deploy approval, and a separately authorized runner may deploy
+  only after approval names the displayed exact validated train. No command,
+  flag, config field, JSON key, or mutation path is added.
+
+- Add fail-closed, repeatable Codex agent-adoption evidence and a controlled
+  launcher, document the supported Google-agent transition from legacy Gemini
+  CLI to Antigravity CLI, and make the launcher-path assertion portable to
+  Windows shell quoting.
+
 ## 1.4.1 - 2026-08-28
 
 - Restore `stats`, history, and Hub observation of an idle WAL queue after its

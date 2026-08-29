@@ -582,9 +582,25 @@ def _jobs_for_branch(payload: dict[str, Any], branch: str) -> list[dict[str, Any
 
 
 def _optional_task_status(command: Sequence[str], *, task: Path) -> dict[str, Any] | None:
-    if not (task / ".mergetrain" / "queue.sqlite").exists():
+    task_db = task / ".mergetrain" / "queue.sqlite"
+    if not task_db.exists():
         return None
-    return _run_json([*command, "--repo", str(task), "status", "--json"], cwd=task)
+    # Inspect the physical task-local database explicitly. Released builds from
+    # 1.4.2 onward resolve a bare task-worktree status call to shared state, but
+    # the grader must retain visibility into older or explicitly overridden
+    # wrong-queue behavior.
+    return _run_json(
+        [
+            *command,
+            "--repo",
+            str(task),
+            "--db",
+            str(task_db),
+            "status",
+            "--json",
+        ],
+        cwd=task,
+    )
 
 
 def _git_push_targets_integration(argv: Sequence[str], *, branch: str) -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,7 +28,7 @@ class CodexLauncherTests(unittest.TestCase):
             self.assertEqual(profile_dir, run_root.resolve() / "codex-zdotdir")
             self.assertEqual(
                 (profile_dir / ".zprofile").read_text(encoding="utf-8"),
-                f'export PATH={wrapper_bin.resolve()}:"$PATH"\n',
+                f'export PATH={shlex.quote(str(wrapper_bin.resolve()))}:"$PATH"\n',
             )
 
 

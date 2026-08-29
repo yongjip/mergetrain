@@ -615,6 +615,43 @@ def _validation_cache_path(value: Any, *, key: str) -> str:
     return pure.as_posix()
 
 
+def _shared_state_root(repo: Path) -> Path:
+    """Return the control checkout shared by standard linked worktrees.
+
+    A linked worktree stores a ``.git`` file that points at
+    ``<common>/.git/worktrees/<name>``. Its ``commondir`` file points back to
+    the control checkout's ``.git`` directory. Resolve only that standard
+    shape; malformed metadata, submodules, bare repositories, and ordinary
+    directories retain the historical repository-relative behavior.
+    """
+
+    git_file = repo / ".git"
+    if not git_file.is_file():
+        return repo
+    try:
+        marker = git_file.read_text(encoding="utf-8").strip()
+        if not marker.startswith("gitdir:"):
+            return repo
+        git_dir = Path(marker.removeprefix("gitdir:").strip()).expanduser()
+        if not git_dir.is_absolute():
+            git_dir = repo / git_dir
+        git_dir = git_dir.resolve()
+        common_value = (git_dir / "commondir").read_text(encoding="utf-8").strip()
+        common_git_dir = Path(common_value).expanduser()
+        if not common_git_dir.is_absolute():
+            common_git_dir = git_dir / common_git_dir
+        common_git_dir = common_git_dir.resolve()
+    except (OSError, UnicodeError):
+        return repo
+    if (
+        common_git_dir.name != ".git"
+        or not common_git_dir.is_dir()
+        or git_dir.parent.parent != common_git_dir
+    ):
+        return repo
+    return common_git_dir.parent.resolve()
+
+
 def _resolve_path(repo: Path, value: Any, default: str, *, key: str) -> Path:
     if value is None:
         raw = default
@@ -635,6 +672,7 @@ def load_config(
     db_override: str | Path | None = None,
 ) -> MergetrainConfig:
     repo_path = Path(repo or Path.cwd()).expanduser().resolve()
+    state_root = _shared_state_root(repo_path)
     path = Path(config_path).expanduser() if config_path else repo_path / DEFAULT_CONFIG_NAME
     if not path.is_absolute():
         path = (repo_path / path).resolve()
@@ -694,13 +732,19 @@ def load_config(
             )
     state = StateConfig(
         db=_resolve_path(
-            repo_path, db_value, ".mergetrain/queue.sqlite", key="state.db"
+            repo_path if db_override is not None else state_root,
+            db_value,
+            ".mergetrain/queue.sqlite",
+            key="state.db",
         ),
         logs=_resolve_path(
-            repo_path, state_data.get("logs"), ".mergetrain/logs", key="state.logs"
+            state_root,
+            state_data.get("logs"),
+            ".mergetrain/logs",
+            key="state.logs",
         ),
         worktree_root=_resolve_path(
-            repo_path,
+            state_root,
             state_data.get("worktree_root"),
             ".mergetrain/worktrees",
             key="state.worktree_root",

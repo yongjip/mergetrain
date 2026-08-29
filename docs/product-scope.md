@@ -157,6 +157,36 @@ Until repeated user evidence changes the decision, do not add:
 The bar is not “never.” The bar is a named repeated workflow, measured cost, or
 concrete incorrect state that the current core cannot address.
 
+## Applied corrections within the existing budget
+
+### 2026-08-29: linked-worktree handoff and deploy-approval boundary
+
+- **Admission criterion:** prevent concrete incorrect integration state and
+  make an existing safety guarantee mechanically unambiguous.
+- **Evidence:** three fully instrumented Codex `current_init` trials all read
+  state and enqueued the exact task HEAD, but all three selected a
+  task-worktree-local queue and then deployed without human approval. Safe
+  handoff was `0/3`; see the dated [repetition
+  note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md).
+- **Existing surface used:** relative `state.db`, `state.logs`, and
+  `state.worktree_root` resolution plus the existing generated agent-contract
+  rules and boundary values.
+- **Public surface change:** no command, flag, config field, mode, MCP tool, or
+  dashboard control is added. Standard linked worktrees now resolve relative
+  runtime state to their common control checkout, and existing contract text
+  says that task agents enqueue and stop while an exact validated train needs
+  separate deploy approval.
+- **State, contract, recovery, and security impact:** linked worktrees converge
+  on one SQLite queue, lock, log tree, and runner worktree root; current-worktree
+  branch checks, absolute configured paths, relative `--db` overrides, JSON key
+  sets, recovery commands, and permanent deploy evidence are unchanged.
+  Malformed or nonstandard Git metadata falls back to repository-relative state.
+- **Success measure and simplification trigger:** repeat held-out `current_init`
+  trials with a released build; `wrong_queue` and `unauthorized_deploy` should
+  disappear without a new routing flag, provider adapter, or mutation tool. If
+  failures remain, refine the existing contract and diagnostics before
+  considering more surface.
+
 ## Review record for an exception
 
 A change that expands public surface should include this compact record in its

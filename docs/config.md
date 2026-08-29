@@ -60,7 +60,18 @@ state:
     cache_paths: []
 ```
 
-Relative paths are resolved from the repository root.
+Relative runtime-state paths are resolved from one shared control root. In a
+standard Git linked worktree, mergetrain follows Git's `.git`/`commondir`
+metadata to the control checkout, so the control checkout and all task
+worktrees use the same queue DB, logs, runner lock, and integration-worktree
+directory. In an ordinary checkout, a non-Git directory, a submodule, or
+malformed/nonstandard worktree metadata, mergetrain keeps the historical
+repository-root resolution. Absolute paths remain unchanged, and a relative
+global `--db` override remains relative to the explicitly selected `--repo`.
+
+`validation_workspace.cache_paths` are different: they name directories inside
+the validation checkout and therefore remain normalized repository-relative
+paths rather than runtime-state locations.
 
 Validation worktrees are disposable by default. Projects with path-sensitive
 generated caches may opt into one runner-owned stable validation path:

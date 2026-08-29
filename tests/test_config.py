@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -129,6 +130,69 @@ notify:
             self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
             self.assertEqual(config.git.integration_ref, "origin/main")
             self.assertEqual(config.terminology.completed, "deployed")
+
+    def test_linked_worktrees_share_relative_runtime_state(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            control = root / "control"
+            task = root / "task"
+            subprocess.run(
+                ["git", "init", "--initial-branch=main", str(control)],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Config Test"],
+                cwd=control,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "config@example.invalid"],
+                cwd=control,
+                check=True,
+            )
+            (control / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "add", ".mergetrain.yaml"], cwd=control, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "initialize"],
+                cwd=control,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "worktree", "add", "-b", "agent/task", str(task)],
+                cwd=control,
+                check=True,
+                capture_output=True,
+            )
+
+            control_config = load_config(repo=control)
+            task_config = load_config(repo=task)
+
+            self.assertEqual(task_config.state, control_config.state)
+            self.assertEqual(task_config.repo, task)
+            self.assertEqual(task_config.config_path, task / ".mergetrain.yaml")
+            self.assertEqual(
+                task_config.state.db, control / ".mergetrain" / "queue.sqlite"
+            )
+            overridden = load_config(repo=task, db_override="override.sqlite")
+            self.assertEqual(overridden.state.db, task / "override.sqlite")
+
+    def test_malformed_linked_worktree_metadata_keeps_repo_relative_state(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td).resolve()
+            (repo / ".git").write_text("gitdir: missing\n", encoding="utf-8")
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+
+            config = load_config(repo=repo)
+
+            self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
 
     def test_integration_terminology_has_derived_human_words(self) -> None:
         with tempfile.TemporaryDirectory() as td:

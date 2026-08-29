@@ -1225,6 +1225,11 @@ class CliTests(unittest.TestCase):
         self.assertIn("rules", payload)
         self.assertEqual(payload["boundary"]["daemon_processes_only"], "jobs enqueued with --auto")
         self.assertIn("exact validated train", payload["boundary"]["validated_train_deploy"])
+        self.assertIn("then stop", " ".join(payload["rules"]))
+        self.assertIn(
+            "explicit user/operator approval",
+            payload["boundary"]["deploy_requires"],
+        )
         self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
         self.assertIn("read-only", payload["boundary"]["progress_observation"])
 
@@ -1245,8 +1250,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["human_vocabulary"]["machine_status"], "deployed")
             self.assertEqual(
                 payload["boundary"]["deploy_requires"],
-                "run-batch --deploy for a validated train; run-next --deploy only "
-                "when none is pending",
+                "explicit user/operator approval for the displayed exact validated "
+                "train, then run-batch --deploy; run-next --deploy only when no "
+                "validated train is pending",
             )
 
     def test_integration_human_status_preserves_json_machine_status(self) -> None:
@@ -1371,7 +1377,11 @@ terminology:
                 code = main(["--repo", str(repo), "init", "--project", "demo", "--write"])
             self.assertEqual(code, 0)
             self.assertTrue((repo / ".mergetrain.yaml").exists())
-            self.assertTrue((repo / "AGENTS.mergetrain.md").exists())
+            agent_contract = (repo / "AGENTS.mergetrain.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("A task agent stops after enqueueing", agent_contract)
+            self.assertIn("separate explicit user/operator approval", agent_contract)
 
     def test_init_write_preflights_all_conflicts_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as td:

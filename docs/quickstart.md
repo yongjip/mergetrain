@@ -50,6 +50,11 @@ mergetrain enqueue --task "feature a" --branch codex/feature-a --capture-sha
 mergetrain status --json
 ```
 
+For a task agent, a successful exact-SHA enqueue is the handoff boundary: stop
+here. A request to implement, merge, integrate, land, or enqueue the task does
+not authorize validation or deploy. The remaining steps belong to the one
+separately authorized runner/operator.
+
 ## 4. Validate
 
 ```sh

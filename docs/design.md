@@ -17,7 +17,16 @@ This document describes the model and how the pieces fit together. For task-orie
 9. Each job is marked `validated`, `deployed`, `blocked`, or `failed`.
 10. Temporary worktrees are removed unless `--keep-worktree` is set.
 
-Agents never push deploy refs themselves; they enqueue and read JSON. One runner (or daemon) owns merge, test, push, and verify.
+Task agents never push deploy refs themselves; they enqueue the exact committed
+HEAD and stop. One separately authorized runner (or daemon) owns merge, test,
+push, and verify. Task or integration intent is not deploy approval; approval
+names the displayed exact validated train.
+
+Relative queue, log, and integration-worktree state resolves to one shared
+control checkout across standard Git linked worktrees. The current task
+worktree remains the repository/branch identity used for readiness checks, but
+all linked worktrees observe the same SQLite queue and runner lock. This keeps
+state ownership singular without adding a queue-selection mode.
 
 ## Runtime responsibility boundaries
 

@@ -6,13 +6,17 @@ Agents interacting with mergetrain must follow this contract.
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
-3. Do not push configured Git refs directly.
+3. Do not push configured Git refs directly. Task agents hand off by enqueueing
+   the exact committed HEAD, then stop unless separately authorized as the
+   runner.
 4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
    the next action.
 5. Use `--auto` only after explicit unattended-deploy approval.
 6. Reuse validated gates only after explicit config or `--reuse-validated`
    authorization.
-7. Let one runner or daemon own merge, test, push, and verify.
+7. Let one separately authorized runner or daemon own merge, test, push, and
+   verify. A task, merge, integration, or enqueue request is not deploy
+   approval.
 8. Fix blocked or failed work in the owning branch, commit a clean result, then
    run `mergetrain retry <job-id>` to enqueue a fresh SHA-pinned job.
 9. Replace a validated train only with `mergetrain supersede`; validate and
@@ -57,6 +61,12 @@ a separate action.
 
 `next_action` is advisory. It does not replace user approval for deploy,
 unattended auto deploy, or destructive cleanup.
+
+For a task agent, a successful exact-SHA enqueue is the terminal handoff.
+`run_batch_validate` and deploy-oriented next actions are runner/operator
+guidance, not permission to continue after enqueueing. The same agent may act as
+the runner only when that role is separately authorized; deploy still requires
+approval for the displayed exact validated train.
 
 After a crash or ambiguous push response, `reconcile`/`recover` resolve
 `needs_reconcile` jobs against the remote (never re-pushing a landed deploy);
