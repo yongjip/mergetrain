@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import signal
 import subprocess
@@ -212,14 +213,19 @@ command = json.loads(os.environ[{real_key!r}])
 env = os.environ.copy()
 {inside}os.execvpe(command[0], [*command, *sys.argv[1:]], env)
 """
+    if os.name == "nt":
+        script_path = path.with_suffix(".py")
+        script_path.write_text(source, encoding="utf-8")
+        launcher_path = path.with_suffix(".cmd")
+        launcher = subprocess.list2cmdline([python, str(script_path)])
+        launcher_path.write_text(f"@echo off\n{launcher} %*\n", encoding="utf-8")
+        return
     path.write_text(source, encoding="utf-8")
     path.chmod(0o755)
 
 
 def _create_remote_hook(path: Path, *, log_path: Path, python: str) -> None:
-    source = f"""#!{python}
-from __future__ import annotations
-
+    source = f"""from __future__ import annotations
 import json
 import os
 import sys
@@ -237,7 +243,16 @@ record = {{
 with open({str(log_path)!r}, "a", encoding="utf-8") as stream:
     stream.write(json.dumps(record, sort_keys=True) + "\\n")
 """
-    path.write_text(source, encoding="utf-8")
+    script_path = path.with_suffix(".py")
+    script_path.write_text(source, encoding="utf-8")
+    shell_python = python.replace("\\", "/") if os.name == "nt" else python
+    shell_script = (
+        str(script_path).replace("\\", "/") if os.name == "nt" else str(script_path)
+    )
+    path.write_text(
+        f"#!/bin/sh\nexec {shlex.quote(shell_python)} {shlex.quote(shell_script)} \"$@\"\n",
+        encoding="utf-8",
+    )
     path.chmod(0o755)
 
 

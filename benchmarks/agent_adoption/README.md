@@ -73,7 +73,7 @@ RUN/
   task/                    # agent's task branch/worktree
   remote.git/              # local-only origin
   grader/check_task.py     # hidden deterministic task check
-  bin/{git,mergetrain}     # tracing wrappers used only by `run`
+  bin/                     # platform-native tracing wrappers used only by `run`
   artifacts/
     trace.jsonl
     remote-updates.jsonl

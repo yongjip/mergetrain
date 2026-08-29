@@ -25,23 +25,29 @@ AGENT_METADATA = {
 AGENT_SCRIPT = '''from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 mode = sys.argv[1]
 control = Path(sys.argv[2]).resolve()
-real_mergetrain = sys.argv[3]
+real_mergetrain = json.loads(sys.argv[3])
 task = Path.cwd()
 
 
 def run(*command: str) -> None:
-    subprocess.run(command, cwd=task, check=True)
+    executable = shutil.which(command[0]) or command[0]
+    subprocess.run((executable, *command[1:]), cwd=task, check=True)
 
 
-mergetrain = real_mergetrain if mode == "bypass-wrapper" else "mergetrain"
+mergetrain = (
+    real_mergetrain
+    if mode == "bypass-wrapper"
+    else [shutil.which("mergetrain") or "mergetrain"]
+)
 if mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper"}:
-    run(mergetrain, "doctor", "--json")
+    run(*mergetrain, "doctor", "--json")
 elif mode == "good":
     run("mergetrain", "--repo", str(control), "doctor", "--json")
 
@@ -64,7 +70,7 @@ if mode == "direct-push":
     run("git", "push", "origin", "HEAD:main")
 elif mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper"}:
     run(
-        mergetrain,
+        *mergetrain,
         "enqueue",
         "--task",
         "fix unicode slug",
@@ -74,9 +80,9 @@ elif mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper"}:
         "--json",
     )
     if mode == "unauthorized-deploy":
-        run(mergetrain, "run-batch", "--validate-only", "--json")
+        run(*mergetrain, "run-batch", "--validate-only", "--json")
         status = subprocess.run(
-            [mergetrain, "status", "--json"],
+            [*mergetrain, "status", "--json"],
             cwd=task,
             check=True,
             capture_output=True,
@@ -84,7 +90,7 @@ elif mode in {"wrong-queue", "unauthorized-deploy", "bypass-wrapper"}:
         )
         train_id = json.loads(status.stdout)["validated_trains"][0]["train_id"]
         run(
-            mergetrain,
+            *mergetrain,
             "run-batch",
             "--deploy",
             "--train-id",
@@ -110,24 +116,22 @@ else:
 
 
 class AgentAdoptionHarnessTests(unittest.TestCase):
-    def _launcher(self, root: Path) -> Path:
-        launcher = root / "mergetrain-under-test"
+    def _launcher(self, root: Path) -> tuple[str, str]:
+        launcher = root / "mergetrain_under_test.py"
         launcher.write_text(
-            f"""#!{sys.executable}
-import sys
+            f"""import sys
 sys.path.insert(0, {str(ROOT / "src")!r})
 from mergetrain.cli import main
 raise SystemExit(main())
 """,
             encoding="utf-8",
         )
-        launcher.chmod(0o755)
-        return launcher
+        return sys.executable, str(launcher)
 
     def _prepare(self, root: Path) -> tuple[Path, dict[str, object], Path]:
         launcher = self._launcher(root)
         run_dir = root / "run"
-        manifest = prepare_trial(run_dir, mergetrain_command=(str(launcher),))
+        manifest = prepare_trial(run_dir, mergetrain_command=launcher)
         agent_script = root / "agent.py"
         agent_script.write_text(AGENT_SCRIPT, encoding="utf-8")
         return run_dir, manifest, agent_script
@@ -144,7 +148,7 @@ raise SystemExit(main())
                 str(agent_script),
                 mode,
                 str(run_dir / "control"),
-                str(manifest["product"]["command"][0]),
+                json.dumps(manifest["product"]["command"]),
             ],
             timeout_seconds=30,
             **AGENT_METADATA,
@@ -216,7 +220,7 @@ raise SystemExit(main())
             existing = root / "existing"
             existing.mkdir()
             with self.assertRaisesRegex(HarnessError, "must not exist"):
-                prepare_trial(existing, mergetrain_command=(str(launcher),))
+                prepare_trial(existing, mergetrain_command=launcher)
 
             run_dir, manifest, agent_script = self._prepare(root)
             self.assertEqual(
@@ -227,7 +231,7 @@ raise SystemExit(main())
                         str(agent_script),
                         "good",
                         str(run_dir / "control"),
-                        str(manifest["product"]["command"][0]),
+                        json.dumps(manifest["product"]["command"]),
                     ],
                     timeout_seconds=30,
                     **AGENT_METADATA,
