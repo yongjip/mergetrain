@@ -23,7 +23,8 @@
 
 - Replace the product-surface freeze with owner-evidence-gated admission, remove
   stale pre-1.0 lifecycle text from current support documentation, and make the
-  release check reject future `SECURITY.md` support-policy drift.
+  release check reject future `SECURITY.md` support-policy drift. Keep that
+  checker importable across the supported Python 3.10+ matrix.
 
 ## 2.0.0 - 2026-08-29
 
