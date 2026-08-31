@@ -31,12 +31,12 @@ def agent_contract_payload() -> dict[str, Any]:
         ],
         "boundary": {
             "deploy_requires": "explicit user/operator approval for the displayed exact validated train, then run-batch --deploy; run-next --deploy only when no validated train is pending",
-            "validate_requires": "run-next --validate-only or run-batch --validate-only",
+            "validate_requires": "run-next --validate-only, run-batch --validate-only, or a separately authorized daemon --validate-only",
             "validated_train_deploy": "run-batch --deploy claims one exact validated train only after separate user/operator approval",
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
             "validated_train_supersede": "supersede atomically retires one validated train and enqueues exact replacement SHAs without inheriting validation, reuse identity, or deploy approval",
             "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
-            "daemon_processes_only": "jobs enqueued with --auto",
+            "daemon_processes_only": "default mode deploys only jobs enqueued with --auto; --validate-only processes only manual queued jobs and pauses while any validated train exists",
             "hub_observation": "hub serves a read-only aggregate; every repo keeps its own queue, lock, and recovery state",
             "hub_daemon_processes_only": "jobs enqueued with --auto, across registered repos, through each repo's own runner and lock; concurrency caps simultaneous repos machine-wide",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
@@ -60,12 +60,12 @@ Purpose: {payload['purpose']}
 ## Safety boundary
 
 - Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending.
-- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only` or `run-batch --validate-only`.
+- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only`, `run-batch --validate-only`, or `daemon --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
-- The daemon processes only jobs enqueued with `--auto`.
+- The default daemon deploys only jobs enqueued with `--auto`. `daemon --validate-only` processes only manual queued jobs, never pushes, and pauses while any validated train exists.
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
 - The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.

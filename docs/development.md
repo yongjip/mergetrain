@@ -16,11 +16,11 @@ mergetrain/
       queue.py         # enqueue, retry, supersede, dismiss, cancel
       inspection.py    # status, events, history, stats, logs, doctor
       deploy.py        # validation/deploy execution
-      daemon.py        # single-repository auto-only daemon command
+      daemon.py        # single-repository auto-deploy/validation daemon command
       recovery.py      # reconcile, recover, unlock, verify, cleanup
       hub.py           # dashboard and multi-repository hub commands
     config.py          # safe YAML loading + typed policy validation
-    daemon.py          # auto-only daemon loop
+    daemon.py          # auto-deploy/validation daemon loop
     evidence.py        # evidence-backed outcome, validation, and batching metrics
     errors.py          # MergetrainError hierarchy
     command_runner.py  # managed subprocesses, POSIX shell, environment
@@ -70,7 +70,7 @@ do not import each other.
 
 ## Product-surface budget
 
-Public product surface has a default zero-growth budget. Before adding a CLI
+Public product surface has an owner-evidence-gated growth budget. Before adding a CLI
 command or flag, YAML field, dashboard control or view, daemon/Hub behavior,
 MCP tool, recovery action, notification path, or validated-reuse control, read
 the [product scope and complexity budget](product-scope.md). A qualifying change
@@ -131,7 +131,10 @@ single full run.
 The suite covers the behaviors that make the queue safe:
 
 - **persistence** — atomic token-fenced claims; stale-owner rejection; cooperative whole-train cancellation; validated-train identity; resumable/scoped events; orphan recovery; and versioned legacy-DB migrations.
-- **daemon** — `--once` processes only auto jobs and leaves manual jobs queued; repeated DB connections do not leak file descriptors; a tick exception releases the lock and leaves the job queued.
+- **daemon** — default `--once` processes only auto jobs; `--validate-only`
+  processes only manual jobs and pauses at an existing validated train; repeated
+  DB connections do not leak file descriptors; a tick exception releases the
+  lock and leaves the job queued.
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
 - **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, resumable JSONL events, inspect/log follow termination, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
 - **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.

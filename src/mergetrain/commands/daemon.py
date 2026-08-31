@@ -7,6 +7,7 @@ import sys
 
 from ..cli_support import _preflight_config, config_from_args
 from ..daemon import daemon_loop
+from ..errors import QueueError
 from ..git_runner import GitRunner
 from ..models import Job
 from ..store import default_owner
@@ -21,6 +22,8 @@ def cmd_daemon(args: argparse.Namespace) -> int:
     # Reject both before the loop can claim and deploy a single auto job (#84,
     # defect 6).
     _preflight_config(config)
+    if args.validate_only and args.notify:
+        raise QueueError("daemon --validate-only cannot be combined with --notify")
     if args.notify and not config.notify.webhook_url:
         print(
             "mergetrain warning: --notify requested but notify.webhook_url is not "
@@ -34,7 +37,7 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         return runner.process_batch(
             conn,
             jobs,
-            deploy=True,
+            deploy=not args.validate_only,
             keep_worktree=args.keep_worktree,
             owner=owner,
             ttl_minutes=config.queue.lock_ttl_minutes,
@@ -53,5 +56,6 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         notification_path=str(config.repo),
         notification_transitions=config.notify.transitions,
         notification_state_path=repo_notify_state_path(config.state.db),
+        validate_only=args.validate_only,
     )
     return 0

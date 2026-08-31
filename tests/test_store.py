@@ -1237,6 +1237,65 @@ class StoreTests(unittest.TestCase):
         release_runner_lock(conn, owner="owner:999999", token=jobs[0].claim_token)
         self.assertEqual(manual.status, "queued")
 
+    def test_manual_only_batch_claim_skips_auto_jobs(self) -> None:
+        conn = self.make_conn()
+        manual = enqueue_job(conn, task="manual", branch="manual")
+        auto = enqueue_job(conn, task="auto", branch="auto", auto_deploy=True)
+        jobs = claim_all_queued(conn, owner="owner:999999", manual_only=True)
+        self.assertEqual([job.id for job in jobs], [manual.id])
+        self.assertEqual(jobs[0].status, "in_progress")
+        release_runner_lock(conn, owner="owner:999999", token=jobs[0].claim_token)
+        self.assertEqual(get_job(conn, auto.id).status, "queued")
+
+    def test_batch_claim_filters_are_mutually_exclusive(self) -> None:
+        conn = self.make_conn()
+        enqueue_job(conn, task="manual", branch="manual")
+        with self.assertRaisesRegex(QueueError, "mutually exclusive"):
+            claim_all_queued(
+                conn,
+                owner="owner:999999",
+                auto_only=True,
+                manual_only=True,
+            )
+        self.assertIsNone(get_lock(conn))
+
+    def test_manual_only_claim_refuses_while_any_validated_row_exists(self) -> None:
+        conn = self.make_conn()
+        validated = enqueue_job(conn, task="validated", branch="validated")
+        mark_job(conn, validated.id, status="validated")
+        waiting = enqueue_job(conn, task="waiting", branch="waiting")
+
+        jobs = claim_all_queued(conn, owner="owner:999999", manual_only=True)
+
+        self.assertEqual(jobs, [])
+        self.assertEqual(get_job(conn, waiting.id).status, "queued")
+        self.assertIsNone(get_lock(conn))
+
+    def test_manual_only_claim_pauses_when_lock_recovery_creates_reconcile(self) -> None:
+        conn = self.make_conn()
+        orphan = enqueue_job(conn, task="orphan", branch="orphan")
+        waiting = enqueue_job(conn, task="waiting", branch="waiting")
+        conn.execute(
+            """
+            INSERT INTO locks (name, owner, acquired_at, heartbeat_at, expires_at, token)
+            VALUES ('runner', 'ghost:999999', '2000-01-01T00:00:00Z',
+                    '2000-01-01T00:00:00Z', '2000-01-01T00:00:01Z', 'dead-token')
+            """
+        )
+        conn.execute(
+            "UPDATE deploy_queue SET status='in_progress', claim_token='dead-token', "
+            "pending_deploy_sha='deadbeef' WHERE id = ?",
+            (orphan.id,),
+        )
+        conn.commit()
+
+        jobs = claim_all_queued(conn, owner="owner:999999", manual_only=True)
+
+        self.assertEqual(jobs, [])
+        self.assertEqual(get_job(conn, orphan.id).status, "needs_reconcile")
+        self.assertEqual(get_job(conn, waiting.id).status, "queued")
+        self.assertIsNone(get_lock(conn))
+
     def test_terminal_job_cannot_be_canceled(self) -> None:
         conn = self.make_conn()
         job = enqueue_job(conn, task="a", branch="a")

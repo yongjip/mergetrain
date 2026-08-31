@@ -540,6 +540,13 @@ def has_queued_auto(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def has_queued_manual(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 0 LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+
 def validated_train_summaries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Describe pending validated trains and whether their identity is complete."""
 

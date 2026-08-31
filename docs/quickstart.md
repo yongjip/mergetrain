@@ -122,7 +122,21 @@ mergetrain supersede --train-id <old-id> \
 The replacement captures exact HEADs but carries no validation or approval.
 Run `run-batch --validate-only` again and approve the new train identity.
 
-## 7. Auto-only daemon
+## 7. Optional validation daemon
+
+If manual jobs arrive repeatedly, authorize one foreground runner to assemble
+and validate them:
+
+```sh
+mergetrain daemon --validate-only --interval 15
+```
+
+It processes only manual queued jobs and pauses as soon as any validated train
+exists. It never pushes; inspect and approve that exact train, then deploy it
+with `run-batch --deploy`. Resolve, dismiss, or supersede the train before the
+validation daemon can build another one.
+
+## 8. Auto-only deploy daemon
 
 Use `--auto` only when unattended deploy is explicitly approved:
 
@@ -131,4 +145,5 @@ mergetrain enqueue --task "safe fix" --branch codex/safe-fix --capture-sha --aut
 mergetrain daemon --interval 15
 ```
 
-The daemon ignores manual queued jobs.
+The default daemon ignores manual queued jobs. `hub daemon` also remains
+auto-deploy-only.

@@ -1,4 +1,4 @@
-"""Foreground daemon loop for auto-approved jobs."""
+"""Foreground daemon loops for auto deploys and explicitly authorized validation."""
 
 from __future__ import annotations
 
@@ -26,8 +26,10 @@ from .store import (
     force_clear_lock_and_split,
     has_in_progress,
     has_queued_auto,
+    has_queued_manual,
     recover_orphans,
     release_runner_lock,
+    validated_train_summaries,
 )
 
 Say = Callable[[str], None]
@@ -60,6 +62,34 @@ def _grade_batch(results: object, claimed: int, say: Say) -> str:
     return f"no_landing:{total}"
 
 
+def _grade_validation_batch(results: object, claimed: int, say: Say) -> str:
+    """Grade a validation batch without implying that anything deployed."""
+
+    statuses = [getattr(job, "status", "") for job in results] if isinstance(results, list) else []
+    if not statuses:
+        return f"validation_processed:{claimed}"
+    validated = sum(1 for status in statuses if status == "validated")
+    total = len(statuses)
+    if validated == total:
+        return f"validated:{validated}"
+    if validated:
+        say(
+            f"mergetrain validation daemon: {validated}/{total} validated, "
+            "rest blocked/failed"
+        )
+        return f"validation_partial:{validated}/{total}"
+    say(f"mergetrain validation daemon: 0/{total} validated — jobs blocked or failed")
+    return f"validation_failed:{total}"
+
+
+def _validation_pause(say: Say) -> str:
+    say(
+        "mergetrain validation daemon tick: a validated train is pending; "
+        "validation paused until it is deployed, dismissed, or superseded"
+    )
+    return "validation_paused"
+
+
 def daemon_tick(
     *,
     db_path: str,
@@ -68,13 +98,13 @@ def daemon_tick(
     lock_ttl_minutes: int = 30,
     say: Say = print,
     sovereign: bool = False,
+    validate_only: bool = False,
 ) -> str:
-    """Run one auto-only pass over a single repo's queue.
+    """Run one daemon pass over a single repo's queue.
 
-    This is the daemon's whole per-tick policy in one reusable place — the
-    hub daemon calls it per registered repo so auto-only claiming, the
-    reconcile pause, and lease release cannot drift between the two paths.
-    Returns ``"reconcile_paused"``, ``"processed:<n>"``, or ``"idle"``.
+    The default is the auto-deploy policy shared with the Hub daemon.
+    ``validate_only`` is the single-repo, manual-queue policy: it never claims
+    auto-approved work and pauses as soon as any validated train exists.
     Exceptions propagate; callers decide how to isolate them.
 
     Policy probes run on a read-only connection first, so an idle tick never
@@ -110,10 +140,15 @@ def daemon_tick(
                 # an operator runs `mergetrain reconcile --apply`.
                 say(
                     f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
-                    "deploy paused (run 'mergetrain reconcile --apply')"
+                    f"{'validation' if validate_only else 'deploy'} paused "
+                    "(run 'mergetrain reconcile --apply')"
                 )
                 return "reconcile_paused"
-            has_work = has_queued_auto(probe)
+            if validate_only and validated_train_summaries(probe):
+                return _validation_pause(say)
+            has_work = (
+                has_queued_manual(probe) if validate_only else has_queued_auto(probe)
+            )
             # A dead runner (or a batch that raised) can leave a job stranded
             # in_progress with no queued work to trigger a heal. Notice it here
             # so the writable path recovers it instead of reporting idle forever
@@ -128,7 +163,10 @@ def daemon_tick(
         finally:
             probe.close()
         if not has_work and not has_orphans:
-            say("mergetrain daemon tick: no auto-approved queued jobs")
+            if validate_only:
+                say("mergetrain validation daemon tick: no manual queued jobs")
+            else:
+                say("mergetrain daemon tick: no auto-approved queued jobs")
             return "idle"
     conn = connect(db_path)
     try:
@@ -143,20 +181,26 @@ def daemon_tick(
         if pending:
             say(
                 f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
-                "deploy paused (run 'mergetrain reconcile --apply')"
+                f"{'validation' if validate_only else 'deploy'} paused "
+                "(run 'mergetrain reconcile --apply')"
             )
             return "reconcile_paused"
-        if has_queued_auto(conn):
+        if validate_only and validated_train_summaries(conn):
+            return _validation_pause(say)
+        has_work = has_queued_manual(conn) if validate_only else has_queued_auto(conn)
+        if has_work:
             jobs = claim_all_queued(
                 conn,
                 owner=owner,
                 ttl_minutes=lock_ttl_minutes,
-                auto_only=True,
-                deploy=True,
+                auto_only=not validate_only,
+                manual_only=validate_only,
+                deploy=not validate_only,
             )
             if jobs:
                 lease_token = jobs[0].claim_token
-                say(f"mergetrain daemon processing {len(jobs)} auto job(s)")
+                mode = "manual validation" if validate_only else "auto"
+                say(f"mergetrain daemon processing {len(jobs)} {mode} job(s)")
                 try:
                     results = process_batch(conn, jobs)
                 except Exception:
@@ -168,16 +212,24 @@ def daemon_tick(
                     force_clear_lock_and_split(conn, owner=owner, token=lease_token)
                     lease_token = ""
                     raise
+                if validate_only:
+                    return _grade_validation_batch(results, len(jobs), say)
                 return _grade_batch(results, len(jobs), say)
             if deploy_reconcile_pending(conn):
                 # The claim itself parked orphans as needs_reconcile and
                 # refused to proceed (TOCTOU guard in claim_all_queued).
                 say(
-                    "mergetrain daemon tick: jobs pending reconcile; deploy "
+                    "mergetrain daemon tick: jobs pending reconcile; "
+                    f"{'validation' if validate_only else 'deploy'} "
                     "paused (run 'mergetrain reconcile --apply')"
                 )
                 return "reconcile_paused"
-        say("mergetrain daemon tick: no auto-approved queued jobs")
+            if validate_only and validated_train_summaries(conn):
+                return _validation_pause(say)
+        if validate_only:
+            say("mergetrain validation daemon tick: no manual queued jobs")
+        else:
+            say("mergetrain daemon tick: no auto-approved queued jobs")
         return "idle"
     finally:
         try:
@@ -207,14 +259,18 @@ def daemon_loop(
     notification_path: str = "",
     notification_transitions: tuple[str, ...] | None = None,
     notification_state_path: str | Path | None = None,
+    validate_only: bool = False,
 ) -> None:
-    """Run an auto-only mergetrain daemon loop.
+    """Run a mergetrain daemon loop in auto-deploy or manual-validation mode.
 
-    The daemon only claims jobs with ``auto_deploy = 1``. It does not decide
-    whether a job is safe for unattended deployment; it trusts the enqueue-time
-    ``--auto`` flag as the explicit approval boundary.
+    Auto-deploy mode claims only ``auto_deploy = 1`` jobs. Validation mode
+    claims only manual jobs and pauses after producing one validated train.
+    The caller must hold the corresponding unattended-deploy or validation-runner
+    authorization before starting the loop.
     """
 
+    if validate_only and notifier is not None:
+        raise QueueError("validation daemon does not support deploy notifications")
     actual_owner = owner or default_owner()
     stop = threading.Event()
     state_path = Path(notification_state_path) if notification_state_path else repo_notify_state_path(db_path)
@@ -250,6 +306,7 @@ def daemon_loop(
                     # The single-repo daemon runs inside its own repo and may
                     # create/migrate its own queue database.
                     sovereign=True,
+                    validate_only=validate_only,
                 )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")

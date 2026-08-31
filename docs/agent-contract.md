@@ -64,6 +64,11 @@ guidance, not permission to continue after enqueueing. The same agent may act as
 the runner only when that role is separately authorized; deploy still requires
 approval for the displayed exact validated train.
 
+The default daemon deploys only jobs explicitly enqueued with `--auto`.
+`daemon --validate-only` is a separate runner authorization: it processes only
+manual queued jobs, never pushes, and pauses while any validated train is
+pending. Starting it authorizes merge and gates, not deploy.
+
 After a crash or ambiguous push response, `reconcile`/`recover` resolve
 `needs_reconcile` jobs against the remote (never re-pushing a landed deploy);
 `run-batch --deploy` is refused while any job is `needs_reconcile`. See the

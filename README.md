@@ -130,7 +130,9 @@ Store, Kubernetes, or other provider release.
 `mergetrain init` also writes agent-facing instructions. The essential rule is
 simple: agents commit and enqueue; one runner owns merge → test → push → verify.
 Unattended daemons process only jobs that a human explicitly enqueued with
-`--auto`.
+`--auto`. For manual jobs, `daemon --validate-only` can run merge and gates in
+the background, but it pauses at the validated-train approval boundary and
+never pushes.
 
 See the [quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md)
 for configuration, dashboard, daemon, and multi-repository Hub setup.

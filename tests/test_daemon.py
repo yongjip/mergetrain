@@ -7,7 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from mergetrain.daemon import _grade_batch, daemon_loop, daemon_tick
+from mergetrain.daemon import (
+    _grade_batch,
+    _grade_validation_batch,
+    daemon_loop,
+    daemon_tick,
+)
 from mergetrain.errors import QueueError
 from mergetrain.models import Job
 from mergetrain.store import (
@@ -17,6 +22,7 @@ from mergetrain.store import (
     enqueue_job,
     get_job,
     list_jobs,
+    mark_job,
     release_runner_lock,
 )
 
@@ -40,8 +46,116 @@ class GradeBatchTests(unittest.TestCase):
     def test_uninspectable_result_falls_back_to_processed(self) -> None:
         self.assertEqual(_grade_batch(None, 3, lambda _: None), "processed:3")
 
+    def test_validation_grading_never_implies_a_deploy(self) -> None:
+        self.assertEqual(
+            _grade_validation_batch(
+                self._jobs("validated", "validated"), 2, lambda _: None
+            ),
+            "validated:2",
+        )
+        self.assertEqual(
+            _grade_validation_batch(
+                self._jobs("validated", "blocked"), 2, lambda _: None
+            ),
+            "validation_partial:1/2",
+        )
+        self.assertEqual(
+            _grade_validation_batch(
+                self._jobs("blocked", "failed"), 2, lambda _: None
+            ),
+            "validation_failed:2",
+        )
+        self.assertEqual(
+            _grade_validation_batch(None, 3, lambda _: None),
+            "validation_processed:3",
+        )
+
 
 class DaemonTests(unittest.TestCase):
+    def test_validation_loop_rejects_deploy_notifier(self) -> None:
+        with self.assertRaisesRegex(QueueError, "does not support"):
+            daemon_loop(
+                db_path="unused.sqlite",
+                process_batch=lambda conn, jobs: [],
+                once=True,
+                notifier=lambda title, message: None,
+                validate_only=True,
+            )
+
+    def test_validate_only_processes_manual_jobs_then_pauses_at_train(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            manual = enqueue_job(conn, task="manual", branch="manual")
+            auto = enqueue_job(conn, task="auto", branch="auto", auto_deploy=True)
+            conn.close()
+
+            seen: list[int] = []
+
+            def validate(conn, jobs):  # type: ignore[no-untyped-def]
+                seen.extend(job.id for job in jobs)
+                return [
+                    mark_job(
+                        conn,
+                        job.id,
+                        status="validated",
+                        expected_claim_token=job.claim_token,
+                    )
+                    for job in jobs
+                ]
+
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=validate,
+                owner="daemon:999999",
+                say=lambda _: None,
+                validate_only=True,
+            )
+            self.assertEqual(outcome, "validated:1")
+            self.assertEqual(seen, [manual.id])
+
+            second = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail(
+                    "a second train was claimed while validation was paused"
+                ),
+                owner="daemon:999999",
+                say=lambda _: None,
+                validate_only=True,
+            )
+            self.assertEqual(second, "validation_paused")
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, manual.id).status, "validated")
+                self.assertEqual(get_job(conn, auto.id).status, "queued")
+            finally:
+                conn.close()
+
+    def test_validate_only_pauses_on_incomplete_validated_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            old = enqueue_job(conn, task="validated", branch="validated")
+            mark_job(conn, old.id, status="validated")
+            waiting = enqueue_job(conn, task="waiting", branch="waiting")
+            conn.close()
+
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail("queued job was claimed"),
+                owner="daemon:999999",
+                say=lambda _: None,
+                validate_only=True,
+            )
+
+            self.assertEqual(outcome, "validation_paused")
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, waiting.id).status, "queued")
+                self.assertEqual(conn.execute("SELECT * FROM locks").fetchall(), [])
+            finally:
+                conn.close()
+
     def test_tick_reports_live_marker_owner_as_active_not_reconcile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"

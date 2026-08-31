@@ -247,9 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
             )
         p_run.set_defaults(func=func)
 
-    p_daemon = subparsers.add_parser("daemon", help="Run foreground auto-only daemon")
+    p_daemon = subparsers.add_parser(
+        "daemon", help="Run foreground auto-deploy or manual-validation daemon"
+    )
     p_daemon.add_argument("--interval", type=int)
     p_daemon.add_argument("--once", action="store_true")
+    p_daemon.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate manual queued jobs and pause when one validated train exists",
+    )
     p_daemon.add_argument(
         "--notify",
         action="store_true",

@@ -65,22 +65,40 @@ def claim_all_queued(
     owner: str | None = None,
     ttl_minutes: int = 30,
     auto_only: bool = False,
+    manual_only: bool = False,
     deploy: bool = False,
 ) -> list[Job]:
+    if auto_only and manual_only:
+        raise QueueError("auto_only and manual_only are mutually exclusive")
     owner = owner or default_owner()
     with immediate(conn):
         lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
-        if auto_only and deploy_reconcile_pending(conn):
+        if (auto_only or manual_only) and deploy_reconcile_pending(conn):
             # Acquiring the lock can itself park marker-bearing orphans as
-            # needs_reconcile (dead-owner requeue). An unattended deploy must
-            # observe that inside the same claim transaction — checking only
-            # before the claim leaves a TOCTOU window where the daemon pushes
-            # over a pending reconcile.
+            # needs_reconcile (dead-owner requeue). Both daemon policies pause
+            # for that state, so observe it inside the same claim transaction —
+            # checking only before the claim leaves a TOCTOU window where the
+            # selected batch runs past a newly created reconcile boundary.
             _release_lock_token(conn, owner=owner, token=lock.token)
             return []
+        if manual_only:
+            # The validation daemon is intentionally a one-train-at-a-time
+            # workflow. Check inside the claim transaction, after acquiring the
+            # shared runner lock, so another runner cannot create a validated
+            # train between the daemon's read-only probe and this claim.
+            validated = conn.execute(
+                "SELECT 1 FROM deploy_queue WHERE status = 'validated' LIMIT 1"
+            ).fetchone()
+            if validated is not None:
+                _release_lock_token(conn, owner=owner, token=lock.token)
+                return []
         if auto_only:
             rows = conn.execute(
                 "SELECT id FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 1 ORDER BY id ASC"
+            ).fetchall()
+        elif manual_only:
+            rows = conn.execute(
+                "SELECT id FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 0 ORDER BY id ASC"
             ).fetchall()
         else:
             rows = conn.execute(

@@ -60,7 +60,7 @@ quota.
 | CLI | 27 top-level commands; `hub` has 4 subcommands; compact `hub status --summary` view | Reuse existing commands; add flags only for measured workflow or payload cost. |
 | Configuration | 9 top-level YAML keys: `version`, `project`, `state`, `git`, `queue`, `notify`, `gate_parallelism`, `gates`, `deploy` | No speculative fields; require a durable policy need. |
 | Dashboard | 2 read-only modes: one repository and multi-repository Hub | Keep mutation out; new views require a repeated decision need. |
-| Daemon and Hub | single-repo `daemon`; Hub roster/serve plus auto-only `hub daemon` | New execution semantics require repeated owner work and the same lock/recovery invariants. |
+| Daemon and Hub | single-repo `daemon` with default auto deploy and manual `--validate-only`; Hub roster/serve plus auto-only `hub daemon` | New execution semantics require repeated owner work and the same lock/recovery invariants. |
 | MCP | 12 tools: 9 read-only, 2 non-shipping mutations, 1 human-gated deploy | Prefer CLI reuse; no MCP-only business logic. |
 | Recovery | 5 recovery/cleanup commands: `gc`, `reconcile`, `recover`, `unlock`, `verify`; mutation paths remain terminal-only | Compose or improve diagnostics before another recovery verb. |
 | Notifications | browser alerts and one provider-neutral webhook; 4 headless transition classes | Add transitions/backends only for a demonstrated missed decision. |
@@ -127,7 +127,7 @@ further expansion.
 | `history`, `stats`, gate timing, and detailed dashboard activity | Provide local operating evidence and explain latency or failure without inventing telemetry. | Add metrics only when a decision consumes them and retained data can support them honestly. |
 | `retry`, `supersede`, `cancel`, `dismiss`, `recover`, `unlock`, `verify`, and `gc` | Preserve evidence while repairing distinct blocked, superseded, crashed, or post-push states. | Prefer better `doctor` guidance and composition over another recovery verb. |
 | `run-next` | Preserves the direct one-job workflow and its existing machine contract. | Do not add behavior unique to it; converge on the batch engine where contracts permit. |
-| `daemon` and `hub daemon` | Remove repeated manual runner starts only for jobs already marked with explicit unattended approval. | Auto-only eligibility, per-repo locks, and reconcile pauses are invariant. |
+| `daemon` and `hub daemon` | Remove repeated runner starts: default/Hub modes deploy only explicitly auto-approved jobs, while single-repo `--validate-only` spends runner time on manual jobs but stops before deploy. | Queue filters stay disjoint; per-repo locks and reconcile pauses are invariant; validation mode pauses at one validated train and cannot push. |
 | Read-only dashboard and Hub | Make several queues and runners legible without creating another state owner. | Keep HTTP surfaces read-only; execution stays in the CLI/MCP contract. |
 | MCP adapter | Gives agents bounded reads and a client-rendered human deploy confirmation while reusing CLI JSON. | No independent business logic and no unattended, cleanup, or recovery mutation tools. |
 | Path-scoped and parallel gates | Reduce measured gate time while failing closed and preserving deterministic evidence. | New scheduling knobs require measurements that existing `paths`, groups, weights, and timeouts cannot express. |
@@ -177,6 +177,33 @@ The bar is not “never.” The bar is a named repeated workflow, measured cost,
 concrete incorrect state that the current core cannot address.
 
 ## Applied corrections within the existing budget
+
+### 2026-09-01: manual-queue validation daemon
+
+- **Admission criterion:** remove a recurring manual integration step without
+  weakening the exact-train deploy approval boundary.
+- **Evidence:** retained August events record 28 separately started validation
+  runs (23 successful) versus 19 deploy runs. Every manual validation required
+  another foreground `run-batch --validate-only` or `run-next --validate-only`
+  invocation even though the queue and single-runner lease already persisted.
+- **Existing surface considered:** the existing validation commands remain the
+  one-shot path; the default and Hub daemons remain the unattended auto-deploy
+  path. A config mode, new command, Hub scheduler mode, MCP mutation, and
+  notification transition were rejected as larger surfaces.
+- **Public surface change:** the existing single-repo `daemon` gains one
+  `--validate-only` flag. It claims only `auto_deploy = 0` jobs, while default
+  daemon behavior continues to claim and deploy only `auto_deploy = 1` jobs.
+- **State, contract, recovery, and security impact:** no schema or config
+  change. Validation mode calls the runner with deploy disabled, never pushes
+  or verifies, pauses for pending reconcile, and refuses a writable claim when
+  any validated row exists (including incomplete legacy identity). The guard is
+  repeated inside the lock-held claim transaction. It cannot combine with
+  deploy-oriented `--notify`; Hub and MCP surfaces are unchanged.
+- **Success measure and simplification trigger:** validation runs can start from
+  one authorized foreground process while each exact validated train still
+  requires separate deploy approval. If owner traces do not show repeated use,
+  remove the flag and retain the one-shot validation commands; do not add a
+  persistent config switch or Hub equivalent without new evidence.
 
 ### 2026-09-01: current-window operational recommendations
 

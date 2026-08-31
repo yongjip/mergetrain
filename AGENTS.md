@@ -12,7 +12,9 @@ worktrees.
    10` only when job or train details are needed, and read `attention_jobs`
    before recent history.
 5. Use `--auto` only after explicit unattended-deploy approval.
-6. Let one runner or daemon own merge, test, push, and verify.
+6. Let one runner or daemon own merge and test. The default daemon may push and
+   verify only `--auto` jobs; `daemon --validate-only` handles manual jobs but
+   stops at a validated train and never deploys.
 7. Fix blocked or failed work in the owning branch, commit a clean result, then
    enqueue a new job.
 8. Do not delete or rewrite remote `refs/mergetrain/deploys/*`; they are

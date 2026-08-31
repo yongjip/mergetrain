@@ -174,6 +174,56 @@ class CliTests(unittest.TestCase):
             self.assertIn("no headless notification backend", err.getvalue())
             self.assertIsNotNone(loop.call_args.kwargs["notifier"])
 
+    def test_single_repo_validation_daemon_never_deploys(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            with patch("mergetrain.commands.daemon.GitRunner") as runner_type, patch(
+                "mergetrain.commands.daemon.daemon_loop"
+            ) as loop:
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "daemon",
+                        "--once",
+                        "--validate-only",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertTrue(loop.call_args.kwargs["validate_only"])
+            callback = loop.call_args.kwargs["process_batch"]
+            callback(None, [Job(id=1, task="t", branch="b")])
+            self.assertFalse(
+                runner_type.return_value.process_batch.call_args.kwargs["deploy"]
+            )
+
+    def test_single_repo_validation_daemon_rejects_notifications(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            err = io.StringIO()
+            with patch("mergetrain.commands.daemon.daemon_loop") as loop, redirect_stderr(err):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "daemon",
+                        "--once",
+                        "--validate-only",
+                        "--notify",
+                    ]
+                )
+
+            self.assertEqual(code, 1)
+            self.assertIn("cannot be combined", err.getvalue())
+            loop.assert_not_called()
+
     def test_hub_daemon_warns_once_per_repo_when_notify_has_no_webhook(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -1315,7 +1365,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         payload = json.loads(out.getvalue())
         self.assertIn("rules", payload)
-        self.assertEqual(payload["boundary"]["daemon_processes_only"], "jobs enqueued with --auto")
+        self.assertEqual(
+            payload["boundary"]["daemon_processes_only"],
+            "default mode deploys only jobs enqueued with --auto; --validate-only processes only manual queued jobs and pauses while any validated train exists",
+        )
         self.assertIn("exact validated train", payload["boundary"]["validated_train_deploy"])
         self.assertIn("then stop", " ".join(payload["rules"]))
         self.assertIn(

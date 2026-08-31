@@ -25,12 +25,12 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 ### Safety boundary
 
 - Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending.
-- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only` or `run-batch --validate-only`.
+- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only`, `run-batch --validate-only`, or `daemon --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
-- The daemon processes only jobs enqueued with `--auto`.
+- The default daemon deploys only jobs enqueued with `--auto`. `daemon --validate-only` processes only manual queued jobs, never pushes, and pauses while any validated train exists.
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
 - The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.

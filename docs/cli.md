@@ -39,7 +39,7 @@ mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
 mergetrain mcp
 mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
 mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
-mergetrain daemon [--interval SECONDS] [--once] [--notify] [--keep-worktree]
+mergetrain daemon [--validate-only] [--interval SECONDS] [--once] [--notify] [--keep-worktree]
 mergetrain gc [--json] [--apply] [--delete-branches]
 mergetrain reconcile [--apply] [--json]
 mergetrain recover [--gc] [--json]
@@ -599,20 +599,30 @@ approval for its new train ID before deployment.
 
 ## `daemon`
 
-Run an unattended, auto-only worker.
+Run a foreground auto-deploy worker by default, or a manual-queue validation
+worker with `--validate-only`.
 
 ```sh
 mergetrain daemon --interval 15
 mergetrain daemon --once
 mergetrain daemon --once --notify
+mergetrain daemon --validate-only --interval 15
+mergetrain daemon --validate-only --once
 ```
 
-Claims only jobs enqueued with `--auto`. `--notify` uses the same persisted
+Default mode claims and deploys only jobs enqueued with `--auto`.
+`--validate-only` claims only manual queued jobs, invokes no push or post-push
+verify, and pauses while any validated train exists. Starting that mode
+authorizes merge and gates, not deployment; deploy still requires approval for
+the exact displayed train. `--validate-only` and `--notify` are incompatible,
+and `hub daemon` remains auto-deploy-only.
+
+In default mode, `--notify` uses the same persisted
 landed/blocked/reconcile/error transition dedup as `hub daemon`, plus the
 provider-neutral webhook configured under `notify`. Browser alerts are instead
 owned by the open dashboard page. With no `notify.webhook_url`, the command
-prints a startup warning because `--notify` has no headless delivery backend. See the
-[daemon guide](daemon.md) and [config reference](config.md#notify).
+prints a startup warning because `--notify` has no headless delivery backend.
+See the [daemon guide](daemon.md) and [config reference](config.md#notify).
 
 ## `gc`
 

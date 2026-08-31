@@ -126,7 +126,11 @@ ships.
 
 **Verify hook** — a post-push verification command (`deploy.verify` in config) run after the push to confirm the deploy is live.
 
-**Auto job** — a job enqueued with `--auto` (`auto_deploy = 1`). It is the only kind the unattended daemon will process. `--auto` does not mean the agent decided to auto-deploy; it records that the caller already holds explicit unattended-deploy approval.
+**Auto job** — a job enqueued with `--auto` (`auto_deploy = 1`). It is the only
+kind the default and Hub daemons will deploy. `--auto` does not mean the agent
+decided to auto-deploy; it records that the caller already holds explicit
+unattended-deploy approval. The single-repo `daemon --validate-only` mode is the
+inverse queue filter: it validates only manual jobs and cannot deploy.
 
 See the [config reference](config.md) for how gates, verify hooks, and worktree paths are configured.
 
@@ -371,7 +375,15 @@ modes](failure-modes.md#post-push-verify-failure).
 
 ## Daemon model
 
-The daemon is a foreground, auto-only worker. Each tick it checks for `queued` jobs with `auto_deploy = 1`; only if any exist does it claim them and run the batch. It never touches manual jobs, releases only the exact lease token it acquired, and finishes the current tick before exiting on `SIGINT`/`SIGTERM`. "Auto" is determined solely by the `auto_deploy` field, never by daemon judgment. Operational detail and supervisor recipes are in the [daemon guide](daemon.md).
+The daemon is a foreground runner. By default each tick checks for `queued`
+jobs with `auto_deploy = 1`; only if any exist does it claim and deploy the
+batch. `daemon --validate-only` instead checks only manual queued jobs, runs the
+batch with deployment disabled, and pauses while any validated train exists.
+That pause is checked both read-only and inside the claim transaction so a
+second train cannot slip past the approval boundary. Both modes release only
+the exact lease token they acquired and finish the current tick before exiting
+on `SIGINT`/`SIGTERM`. The Hub daemon retains only the auto-deploy policy.
+Operational detail and supervisor recipes are in the [daemon guide](daemon.md).
 
 ## Agent CLI observability
 
