@@ -12,7 +12,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
 3. Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.
-4. Read doctor --json or status --json before deciding the next action.
+4. Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.
 5. Use --auto only after explicit unattended-deployment approval from the user/operator.
 6. Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.
 7. Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.
@@ -66,7 +66,7 @@ Repository-specific additions:
 
 ## You may do these without asking
 
-- `mergetrain status --json` and `mergetrain doctor --json` — inspect the queue, lock, and `next_action`.
+- `mergetrain doctor --json` first, then `mergetrain status --json --limit 10` only when job or train details are needed; read `attention_jobs` before recent history.
 - `mergetrain gc --json` — dry-run cleanup preview (does **not** delete anything).
 - `mergetrain run-batch --validate-only` — validate the queued train; this never pushes.
 - `mergetrain enqueue --task "<t>" --branch <b> --capture-sha` — only for a branch that is already committed and on a clean worktree.
@@ -75,7 +75,7 @@ Repository-specific additions:
 
 A deploy ships code. **Never deploy as a side effect of another request.** Before any deploy:
 
-1. Run `doctor --json` and `status --json`.
+1. Run `doctor --json`, then `status --json --limit 10` for the exact train and job details.
 2. Post a short summary of exactly what will ship: the pending validated `train_id`, its job IDs, branches, recorded HEADs, the integration ref, the doctor `next_action`, and anything `blocked`/`failed`. If no validated train exists, summarize the queued jobs that a direct deploy would claim.
 3. **Wait for the user's explicit confirmation in the thread** (e.g. "deploy", "yes ship it", "go"). A vague or general instruction is not confirmation.
 4. Only then run `mergetrain run-batch --deploy` (or `scripts/mt-deploy.sh --confirm`). If multiple validated trains are pending, select the approved one with `--train-id`.

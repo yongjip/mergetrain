@@ -359,6 +359,28 @@ def list_jobs(conn: sqlite3.Connection, *, limit: int = 50) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
+def list_attention_jobs(conn: sqlite3.Connection) -> list[Job]:
+    """Return every job that may require a runner or operator decision.
+
+    This intentionally has no display limit. A recent-history cap must not
+    hide an older blocked train, pending reconcile, or unresolved post-push
+    verification from the compact status view.
+    """
+
+    rows = conn.execute(
+        """
+        SELECT * FROM deploy_queue
+        WHERE status IN (
+          'queued', 'in_progress', 'blocked', 'failed', 'validated',
+          'needs_reconcile'
+        )
+        OR (status = 'deployed' AND verify_status = 'unknown')
+        ORDER BY id DESC
+        """
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
+
+
 def list_history_jobs(
     conn: sqlite3.Connection,
     *,

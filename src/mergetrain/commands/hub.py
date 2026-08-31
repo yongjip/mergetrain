@@ -58,10 +58,15 @@ def cmd_hub_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_hub_status(args: argparse.Namespace) -> int:
-    from ..hub import build_hub_snapshot
+    from ..hub import build_hub_snapshot, build_hub_summary
     from ..registry import load_registry
 
-    snapshot = build_hub_snapshot(load_registry(args.registry))
+    registered = load_registry(args.registry)
+    snapshot = (
+        build_hub_summary(registered)
+        if args.summary or not args.json
+        else build_hub_snapshot(registered)
+    )
     if args.json:
         dump_json(snapshot)
         return 0
@@ -76,7 +81,7 @@ def cmd_hub_status(args: argparse.Namespace) -> int:
         if entry.get("empty"):
             print(f"{name}: no queue database yet")
             continue
-        repo_snapshot = entry["snapshot"]
+        repo_snapshot = entry.get("summary") or entry["snapshot"]
         counts = repo_snapshot.get("counts", {})
         active = " ".join(
             f"{key}={counts[key]}"

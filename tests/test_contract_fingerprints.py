@@ -403,6 +403,27 @@ def _cap_hub_status(repo):
     return _run_json(["--repo", str(repo), "hub", "status", "--registry", str(registry)])
 
 
+def _cap_hub_status_summary(repo):
+    from mergetrain.registry import add_repo
+
+    registry = repo / "hub-summary-repos.json"
+    conn = connect(_db(repo))
+    enqueue_job(conn, task="a", branch="feature/a")
+    conn.close()
+    add_repo(repo, registry)
+    return _run_json(
+        [
+            "--repo",
+            str(repo),
+            "hub",
+            "status",
+            "--summary",
+            "--registry",
+            str(registry),
+        ]
+    )
+
+
 def _cap_init(repo):
     # `init --write` reports the scaffold it produced and what to do next. It
     # has no --json flag: the payload is unconditional, so capture it directly.
@@ -467,6 +488,7 @@ SURFACES = {
     "retry": _cap_retry,
     "cancel": _cap_cancel,
     "hub_status": _cap_hub_status,
+    "hub_status_summary": _cap_hub_status_summary,
     "gc_applied": _cap_gc_applied,
     "hub_add": _cap_hub_add,
     "hub_remove": _cap_hub_remove,

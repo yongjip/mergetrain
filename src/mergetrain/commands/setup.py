@@ -20,7 +20,7 @@ def agent_contract_payload() -> dict[str, Any]:
             "Work on a task-specific branch and worktree.",
             "Commit all changes before enqueueing.",
             "Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.",
-            "Read doctor --json or status --json before deciding the next action.",
+            "Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.",
             "Use --auto only after explicit unattended-deployment approval from the user/operator.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.",

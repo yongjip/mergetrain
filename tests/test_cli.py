@@ -823,6 +823,51 @@ class CliTests(unittest.TestCase):
                         "--limit must be 1 or greater", payload["error"]["message"]
                     )
 
+    def test_status_defaults_to_ten_recent_jobs_but_keeps_all_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                old_attention = enqueue_job(
+                    conn,
+                    task="old blocked",
+                    branch="feature/blocked",
+                )
+                mark_job(conn, old_attention.id, status="blocked", note="fix me")
+                for index in range(12):
+                    job = enqueue_job(
+                        conn,
+                        task=f"done {index}",
+                        branch=f"feature/done-{index}",
+                    )
+                    mark_job(
+                        conn,
+                        job.id,
+                        status="deployed",
+                        push_status="succeeded",
+                        verify_status="succeeded",
+                    )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "--db", str(db), "status", "--json"]
+                )
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["jobs_limit"], 10)
+        self.assertEqual(len(payload["jobs"]), 10)
+        self.assertTrue(payload["jobs_truncated"])
+        self.assertEqual(payload["counts"]["blocked"], 1)
+        self.assertEqual(
+            [job["id"] for job in payload["attention_jobs"]],
+            [old_attention.id],
+        )
+
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

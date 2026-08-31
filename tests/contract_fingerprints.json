@@ -699,6 +699,42 @@
         }
       }
     },
+    "hub_status_summary": {
+      "contract_version": null,
+      "generated_at": null,
+      "hub": null,
+      "ok": null,
+      "repo_count": null,
+      "repos": {
+        "[]": {
+          "daemon": null,
+          "name": null,
+          "ok": null,
+          "path": null,
+          "summary": {
+            "counts": {
+              "auto_queued": null,
+              "blocked": null,
+              "blocked_with_marker": null,
+              "canceled": null,
+              "deployed": null,
+              "deployed_verify_unknown": null,
+              "failed": null,
+              "in_progress": null,
+              "in_progress_with_marker": null,
+              "manual_queued": null,
+              "needs_reconcile": null,
+              "queued": null,
+              "validated": null
+            },
+            "lock": null,
+            "next_action": null,
+            "validated_trains": "[]?"
+          }
+        }
+      },
+      "view": null
+    },
     "init": {
       "contract_version": null,
       "next_step": null,
@@ -1207,9 +1243,27 @@
       }
     },
     "status": {
+      "attention_jobs": "[]?",
       "contract_version": null,
+      "counts": {
+        "auto_queued": null,
+        "blocked": null,
+        "blocked_with_marker": null,
+        "canceled": null,
+        "deployed": null,
+        "deployed_verify_unknown": null,
+        "failed": null,
+        "in_progress": null,
+        "in_progress_with_marker": null,
+        "manual_queued": null,
+        "needs_reconcile": null,
+        "queued": null,
+        "validated": null
+      },
       "db": null,
       "jobs": "[]?",
+      "jobs_limit": null,
+      "jobs_truncated": null,
       "lock": null,
       "next_action": null,
       "ok": null,

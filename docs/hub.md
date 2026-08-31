@@ -12,7 +12,8 @@ with a per-repo drill-down into the full single-repo view.
 mergetrain hub add ~/projects/app        # register a repo (requires .mergetrain.yaml)
 mergetrain hub add .                     # register the current repo
 mergetrain hub                           # serve http://127.0.0.1:8765/
-mergetrain hub status [--json]           # same aggregate, for terminals and agents
+mergetrain hub status [--json]           # full dashboard aggregate
+mergetrain hub status --summary --json   # compact agent/coordinator read
 mergetrain hub remove ~/projects/app     # deregister (repo state untouched)
 ```
 
@@ -21,6 +22,11 @@ The registry lives at `$XDG_CONFIG_HOME/mergetrain/repos.json` (default
 `~/.config/mergetrain/repos.json`; override with `MERGETRAIN_HUB_REGISTRY` or
 `--registry`). It is re-read on every snapshot, so adding or removing a repo
 shows up live without restarting the server.
+
+Routine coordinators should use `hub status --summary --json`. It reads only
+queue counts, the public runner lock, validated-train identities, and the next
+safe action for each repo. Full `hub status --json` remains available for
+dashboard-equivalent job and event detail.
 
 ## The contract: sovereign repos, stateless hub
 

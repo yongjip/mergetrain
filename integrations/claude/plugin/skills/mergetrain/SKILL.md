@@ -13,7 +13,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
 3. Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.
-4. Read doctor --json or status --json before deciding the next action.
+4. Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.
 5. Use --auto only after explicit unattended-deployment approval from the user/operator.
 6. Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.
 7. Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.

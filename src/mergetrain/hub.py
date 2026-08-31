@@ -29,7 +29,7 @@ from typing import Any
 
 from .config import load_config
 from .registry import DEFAULT_CONFIG_NAME
-from .snapshot import build_dashboard_snapshot, next_action
+from .snapshot import build_dashboard_snapshot, build_queue_summary, next_action
 from .store import owner_liveness, utc_now
 
 
@@ -240,6 +240,65 @@ def build_hub_snapshot(
     return {
         "ok": True,
         "hub": True,
+        "generated_at": utc_now(),
+        "repo_count": len(repos),
+        "repos": repos,
+    }
+
+
+def _repo_summary_entry(raw_path: str) -> dict[str, Any]:
+    """Read one repo without materializing its dashboard history payload."""
+
+    entry: dict[str, Any] = {"path": display_path(raw_path)}
+    try:
+        repo = Path(raw_path)
+        if not repo.is_dir():
+            entry.update(ok=False, error="repo directory is missing")
+            return entry
+        config = load_config(repo=repo)
+        entry["name"] = config.project.name
+        if not config.config_exists:
+            entry.update(ok=False, error="no .mergetrain.yaml in this repo")
+            return entry
+        db = Path(config.state.db)
+        if not db.is_file():
+            entry.update(
+                {
+                    "ok": True,
+                    "empty": True,
+                    "project": {
+                        "name": config.project.name,
+                        "integration_ref": config.git.integration_ref,
+                        "remote": config.git.remote,
+                        "push_refs": list(config.git.push_refs),
+                    },
+                }
+            )
+            return entry
+        entry.update(
+            {
+                "ok": True,
+                "summary": build_queue_summary(config, read_only=True),
+            }
+        )
+        return entry
+    except Exception as exc:  # noqa: BLE001 - isolate each registered repo
+        entry.update(ok=False, error=str(exc) or exc.__class__.__name__)
+        return entry
+
+
+def build_hub_summary(registered: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a compact machine-wide queue summary for routine agent reads."""
+
+    repos = []
+    for item in registered:
+        entry = _repo_summary_entry(str(item.get("path") or ""))
+        entry["daemon"] = bool(item.get("daemon", True))
+        repos.append(entry)
+    return {
+        "ok": True,
+        "hub": True,
+        "view": "summary",
         "generated_at": utc_now(),
         "repo_count": len(repos),
         "repos": repos,

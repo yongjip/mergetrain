@@ -23,7 +23,10 @@ A new feature should normally satisfy at least one of these tests:
 Technical possibility, symmetry with another product, or an unused extension
 point is not sufficient evidence.
 
-The default budget for new public surface is **zero net growth**. Public surface
+The default budget for new public surface is **owner-evidence-gated growth**.
+There is no product freeze: a bounded surface may be added when local operating
+evidence shows that it removes repeated work, corrects an incorrect state, or
+materially reduces measured cost. Public surface
 includes CLI commands and flags, configuration fields or modes, dashboard
 controls and views, daemon or Hub behaviors, MCP tools, recovery actions,
 notification channels or transitions, and validated-reuse controls. Prefer, in
@@ -32,8 +35,8 @@ order:
 1. clarify documentation or diagnostics;
 2. improve an existing behavior without adding a mode;
 3. consolidate or replace an existing surface;
-4. add public surface only when one of the admission tests is evidenced and the
-   smaller alternatives do not solve the workflow.
+4. add the smallest public surface when one of the admission tests is evidenced
+   and the smaller alternatives do not solve the workflow.
 
 A justified safety fix may expand the surface without a matching deletion.
 That exception must name the incorrect state it prevents. A latency feature
@@ -52,16 +55,16 @@ The baseline below describes the product when this budget was introduced. Its
 purpose is to make expansion visible during review, not to encourage filling a
 quota.
 
-| Surface | Current baseline | Default expansion budget |
+| Surface | Current baseline | Admission default |
 | --- | --- | --- |
-| CLI | 27 top-level commands; `hub` has 4 subcommands | 0 new commands, aliases, or behavioral flags |
-| Configuration | 9 top-level YAML keys: `version`, `project`, `state`, `git`, `queue`, `notify`, `gate_parallelism`, `gates`, `deploy` | 0 new fields or modes |
-| Dashboard | 2 read-only modes: one repository and multi-repository Hub | 0 mutation controls; 0 new views without a repeated decision need |
-| Daemon and Hub | single-repo `daemon`; Hub roster/serve plus auto-only `hub daemon` | 0 new execution or scheduling semantics |
-| MCP | 12 tools: 9 read-only, 2 non-shipping mutations, 1 human-gated deploy | 0 new tools; no MCP-only capability |
-| Recovery | 5 recovery/cleanup commands: `gc`, `reconcile`, `recover`, `unlock`, `verify`; mutation paths remain terminal-only | 0 new commands; compose or improve diagnostics first |
-| Notifications | browser alerts and one provider-neutral webhook; 4 headless transition classes | 0 new backends or transition classes |
-| Validated reuse | one opt-in subsystem with persistent or one-shot authorization, preview, fingerprints, age/mismatch policy, and mandatory-rerun gates | 0 new controls until local stats show a repeated unresolved cost |
+| CLI | 27 top-level commands; `hub` has 4 subcommands; compact `hub status --summary` view | Reuse existing commands; add flags only for measured workflow or payload cost. |
+| Configuration | 9 top-level YAML keys: `version`, `project`, `state`, `git`, `queue`, `notify`, `gate_parallelism`, `gates`, `deploy` | No speculative fields; require a durable policy need. |
+| Dashboard | 2 read-only modes: one repository and multi-repository Hub | Keep mutation out; new views require a repeated decision need. |
+| Daemon and Hub | single-repo `daemon`; Hub roster/serve plus auto-only `hub daemon` | New execution semantics require repeated owner work and the same lock/recovery invariants. |
+| MCP | 12 tools: 9 read-only, 2 non-shipping mutations, 1 human-gated deploy | Prefer CLI reuse; no MCP-only business logic. |
+| Recovery | 5 recovery/cleanup commands: `gc`, `reconcile`, `recover`, `unlock`, `verify`; mutation paths remain terminal-only | Compose or improve diagnostics before another recovery verb. |
+| Notifications | browser alerts and one provider-neutral webhook; 4 headless transition classes | Add transitions/backends only for a demonstrated missed decision. |
+| Validated reuse | one opt-in subsystem with persistent or one-shot authorization, preview, fingerprints, age/mismatch policy, and mandatory-rerun gates | New controls require local stats showing unresolved cost. |
 
 The CLI baseline includes these commands:
 
@@ -174,6 +177,30 @@ The bar is not “never.” The bar is a named repeated workflow, measured cost,
 concrete incorrect state that the current core cannot address.
 
 ## Applied corrections within the existing budget
+
+### 2026-08-31: compact routine state reads
+
+- **Admission criterion:** substantially reduce measured agent payload and
+  cognitive cost while preserving detailed inspection on demand.
+- **Evidence:** the owner queue produced about 84 KB from default
+  `status --json`, 18 KB with `--limit 10`, and about 200 KB from full
+  `hub status --json`; `doctor --json` was about 4.5 KB.
+- **Existing surface used:** `doctor`, `status --limit`, and `hub status` are
+  retained. No command, config field, dashboard control, MCP tool, or state
+  owner is added.
+- **Public surface change:** routine `status` defaults to 10 recent jobs and
+  adds uncapped `attention_jobs` plus truncation metadata. The existing Hub
+  status command gains `--summary`; full JSON remains unchanged and human Hub
+  status uses the compact reader internally.
+- **State, contract, recovery, and security impact:** additive contract-2 keys
+  only; summary reads databases read-only, masks lock owners exactly like the
+  dashboard, isolates per-repo errors, and never creates or migrates queue
+  state.
+- **Success measure and simplification trigger:** the owner repo's default
+  status should remain under 25 KB and Hub summary at least 80% smaller than
+  the full aggregate. Agent instructions now start with doctor; if routine
+  traces no longer need status detail, further consolidate guidance rather
+  than adding another observation command.
 
 ### 2026-08-29: linked-worktree handoff and deploy-approval boundary
 

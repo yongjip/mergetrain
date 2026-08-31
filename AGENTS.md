@@ -8,18 +8,20 @@ worktrees.
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
 3. Do not push deploy refs directly.
-4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
-   the next action.
+4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
+   10` only when job or train details are needed, and read `attention_jobs`
+   before recent history.
 5. Use `--auto` only after explicit unattended-deploy approval.
 6. Let one runner or daemon own merge, test, push, and verify.
 7. Fix blocked or failed work in the owning branch, commit a clean result, then
    enqueue a new job.
 8. Do not delete or rewrite remote `refs/mergetrain/deploys/*`; they are
    permanent recovery evidence.
-9. Treat public product surface as a zero-growth budget by default. Before
+9. Treat public product surface as an owner-evidence budget. Before
    adding a CLI command or flag, config field, dashboard control, daemon/Hub
    behavior, MCP tool, recovery action, notification path, or reuse control,
-   apply the admission test in `docs/product-scope.md` and record the evidence.
+   apply the admission test in `docs/product-scope.md`, prefer consolidation,
+   and record the measured cost, repeated workflow, or incorrect state.
 
 ## Useful commands
 

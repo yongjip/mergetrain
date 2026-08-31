@@ -130,6 +130,12 @@ explanation with `identity_checks`, per-gate actions, and
 `estimated_savings`. `eligible` is `null` when the dashboard has not performed
 an exact preview, and `estimated_savings.authorizes_reuse` is always false.
 
+`status` may include additive `counts`, `attention_jobs`, `jobs_limit`, and
+`jobs_truncated` fields. `jobs` remains the newest limited history, while
+`attention_jobs` is the uncapped action-required view. `hub status --summary`
+is a separately fingerprinted compact view whose repo entries carry `summary`
+instead of a full dashboard `snapshot`.
+
 **Breaking changes bump `contract_version`** (a deliberate, reviewed decision):
 removing or renaming a key, changing a value's type or meaning, changing the
 `ok`/`result` semantics, changing exit codes, or changing the JSONL frame or
@@ -165,11 +171,11 @@ changelog); removed or renamed keys are breaking and require bumping
 `contract_version` first. It cannot detect a same-keys value-meaning change;
 that residual rests on review.
 
-Coverage is **every payload a command can emit**, currently 24 surfaces plus the
+Coverage is **every payload a command can emit**, currently 25 surfaces plus the
 JSONL frames: `doctor`, `status`, `version`, `agent_contract`, `init`, `enqueue`,
 `retry`, `inspect`, `history`, `stats`, `gc`, `run_batch_validate`,
 `run_batch_preview`, `reconcile`, `recover`, `unlock`, `verify`, `dismiss`,
-`cancel`, `gc_applied`, `hub_status`, `hub_add`, `hub_remove`,
+`cancel`, `gc_applied`, `hub_status`, `hub_status_summary`, `hub_add`, `hub_remove`,
 `failure_envelope`,
 and `_jsonl_frames`. A new `--json` payload must be added to `SURFACES` in the
 same change that introduces it, or the gate silently does not cover it. Run

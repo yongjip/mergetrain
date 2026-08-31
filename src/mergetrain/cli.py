@@ -168,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_status = subparsers.add_parser("status", help="Show queue and lock status")
     p_status.add_argument("--json", action="store_true")
-    p_status.add_argument("--limit", type=int, default=50)
+    p_status.add_argument("--limit", type=int, default=10)
     p_status.set_defaults(func=cmd_status)
 
     p_events = subparsers.add_parser(
@@ -377,6 +377,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_hub_status.add_argument("--registry", help="Override the hub registry file path")
     p_hub_status.add_argument("--json", action="store_true")
+    p_hub_status.add_argument(
+        "--summary",
+        action="store_true",
+        help="Emit counts, lock, validated trains, and next action without full dashboard history",
+    )
     p_hub_status.set_defaults(func=cmd_hub_status)
     p_hub_daemon = hub_sub.add_parser(
         "daemon",

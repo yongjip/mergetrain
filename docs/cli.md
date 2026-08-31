@@ -172,10 +172,15 @@ untouched. The worktree must be clean and checked out on the job's branch.
 Print queue and lock state.
 
 ```sh
-mergetrain status --json --limit 50
+mergetrain status --json
+mergetrain status --json --limit 50  # explicit deeper history
 ```
 
-`--json` returns `ok`, `db`, `lock`, `jobs`, and `validated_trains`. `--limit` caps the job list (default 50).
+`--json` returns `ok`, `db`, `lock`, `counts`, `jobs`, `attention_jobs`,
+`jobs_limit`, `jobs_truncated`, and `validated_trains`. `jobs` remains the newest
+`--limit` rows (default 10). `attention_jobs` is uncapped and separately keeps
+every queued, running, blocked, failed, reconcile-pending, validated, or
+post-push-verify-unknown job visible even when it is older than recent history.
 
 ## `events`
 
@@ -470,12 +475,15 @@ One machine-wide read of every registered repo's queue — the coordinator-agent
 counterpart of the hub dashboard:
 
 ```sh
-mergetrain hub status [--json] [--registry PATH]
+mergetrain hub status [--json] [--summary] [--registry PATH]
 ```
 
 Human mode prints one line per repo (nonzero counts, runner liveness, and the
 advisory next action); `--json` emits the same aggregate payload the hub
-dashboard serves, per-repo errors isolated.
+dashboard serves, per-repo errors isolated. `--summary --json` emits only each
+repo's counts, public lock, validated trains, and next action; it does not load
+dashboard jobs, events, reuse analysis, progress, or ETA history. Human mode
+uses this compact read internally.
 
 ### `hub daemon`
 

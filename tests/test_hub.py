@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 from mergetrain.config import load_config
 from mergetrain.dashboard import create_hub_server
 from mergetrain.errors import QueueError
-from mergetrain.hub import build_hub_snapshot
+from mergetrain.hub import build_hub_snapshot, build_hub_summary
 from mergetrain.registry import add_repo, load_registry, remove_repo
 from mergetrain.store import connect, enqueue_job, utc_now
 
@@ -83,6 +83,33 @@ class HubSnapshotTests(unittest.TestCase):
 
             # The read-only contract: peeking at a repo with no queue must not
             # scaffold .mergetrain/ inside it.
+            self.assertFalse((empty / ".mergetrain").exists())
+
+    def test_summary_reads_queue_truth_without_building_dashboard_history(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            empty = make_repo(root, "empty")
+            for repo in (live, empty):
+                add_repo(repo, registry)
+
+            with patch(
+                "mergetrain.hub.build_dashboard_snapshot",
+                side_effect=AssertionError("full dashboard snapshot was built"),
+            ):
+                summary = build_hub_summary(load_registry(registry))
+
+            self.assertEqual(summary["view"], "summary")
+            by_name = {entry.get("name"): entry for entry in summary["repos"]}
+            self.assertEqual(by_name["live"]["summary"]["counts"]["queued"], 1)
+            self.assertEqual(
+                by_name["live"]["summary"]["next_action"],
+                "run_batch_validate",
+            )
+            self.assertNotIn("snapshot", by_name["live"])
+            self.assertTrue(by_name["empty"]["empty"])
             self.assertFalse((empty / ".mergetrain").exists())
 
     def test_read_only_connect_refuses_missing_db_and_writes(self) -> None:
@@ -454,6 +481,40 @@ class HubStatusCliTests(unittest.TestCase):
             lines = stdout.getvalue().splitlines()
             self.assertIn("live: queued=1 | next: run_batch_validate", lines)
             self.assertTrue(any("gone" in line and "ERROR" in line for line in lines))
+
+    def test_hub_status_summary_json_omits_full_snapshots(self) -> None:
+        import contextlib
+        import io
+
+        from mergetrain.cli import main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(
+                    [
+                        "hub",
+                        "status",
+                        "--registry",
+                        str(registry),
+                        "--summary",
+                        "--json",
+                    ]
+                )
+
+            payload = json.loads(stdout.getvalue())
+            entry = payload["repos"][0]
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["view"], "summary")
+            self.assertIn("summary", entry)
+            self.assertNotIn("snapshot", entry)
+            self.assertNotIn("jobs", entry["summary"])
 
 
 class HubServerTests(unittest.TestCase):

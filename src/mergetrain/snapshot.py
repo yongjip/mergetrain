@@ -191,6 +191,40 @@ def _public_lock(lock: RunnerLock | None) -> dict[str, Any] | None:
     }
 
 
+def build_queue_summary(
+    config: MergetrainConfig,
+    *,
+    read_only: bool = False,
+) -> dict[str, Any]:
+    """Build the small queue truth needed by agents and Hub status.
+
+    Unlike the dashboard snapshot this does not load job history, events,
+    reuse analysis, progress, or ETA data.
+    """
+
+    conn = connect(config.state.db, read_only=read_only)
+    try:
+        count_data = counts(conn)
+        lock = _public_lock(get_lock(conn))
+        validated_trains = validated_train_summaries(conn)
+    finally:
+        conn.close()
+    payload = {
+        "counts": count_data,
+        "lock": lock,
+        "validated_trains": validated_trains,
+    }
+    payload["next_action"] = next_action(
+        {
+            **payload,
+            "config_exists": config.config_exists,
+            "gc": {"worktree_candidates": []},
+        },
+        config_version=config.config_version,
+    )
+    return payload
+
+
 def _selected_jobs(conn) -> tuple[list[Job], str]:
     in_progress = list_jobs_fifo(conn, status="in_progress")
     if in_progress:

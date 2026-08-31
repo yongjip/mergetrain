@@ -9,8 +9,9 @@ Agents interacting with mergetrain must follow this contract.
 3. Do not push configured Git refs directly. Task agents hand off by enqueueing
    the exact committed HEAD, then stop unless separately authorized as the
    runner.
-4. Read `mergetrain doctor --json` or `mergetrain status --json` before deciding
-   the next action.
+4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
+   10` only when job or train details are needed, and read `attention_jobs`
+   before recent history.
 5. Use `--auto` only after explicit unattended-deploy approval.
 6. Reuse validated gates only after explicit config or `--reuse-validated`
    authorization.

@@ -49,6 +49,7 @@ from ..store import (
     counts,
     get_job,
     get_lock,
+    list_attention_jobs,
     list_jobs,
     list_run_events,
     list_train_jobs,
@@ -64,11 +65,31 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         lock = get_lock(conn)
         validated_trains = validated_train_summaries(conn)
+        count_data = counts(conn)
+        recent_jobs = list_jobs(conn, limit=args.limit)
+        attention_jobs = list_attention_jobs(conn)
+        job_total = sum(
+            count_data.get(status, 0)
+            for status in (
+                "queued",
+                "in_progress",
+                "blocked",
+                "failed",
+                "validated",
+                "needs_reconcile",
+                "deployed",
+                "canceled",
+            )
+        )
         payload: dict[str, Any] = {
             "ok": True,
             "db": str(config.state.db),
             "lock": lock.to_dict() if lock else None,
-            "jobs": [job.to_dict() for job in list_jobs(conn, limit=args.limit)],
+            "counts": count_data,
+            "jobs": [job.to_dict() for job in recent_jobs],
+            "attention_jobs": [job.to_dict() for job in attention_jobs],
+            "jobs_limit": args.limit,
+            "jobs_truncated": job_total > len(recent_jobs),
             "validated_trains": validated_trains,
             # CLAUDE.md tells agents to read status --json OR doctor --json
             # before acting; carry next_action on both so the two mandated
@@ -76,7 +97,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "next_action": _doctor_next_action(
                 {
                     "lock": lock.to_dict() if lock else None,
-                    "counts": counts(conn),
+                    "counts": count_data,
                     "validated_trains": validated_trains,
                     "gc": {"worktree_candidates": []},
                     "config_exists": config.config_exists,
