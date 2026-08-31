@@ -19,7 +19,7 @@ from .command_runner import (
     run_command,
     run_shell,
 )
-from .config import GateConfig, MergetrainConfig
+from .config import GateConfig, MergetrainConfig, effective_gates
 from .errors import CancellationRequested, CommandFailed, MergetrainError
 from .path_gates import any_path_matches, parse_name_status_z
 from .reuse import environment_sha
@@ -57,6 +57,7 @@ class GateRunner:
 
     def __init__(self, config: MergetrainConfig):
         self.config = config
+        self.gates = effective_gates(config)
 
     def run_gate(
         self,
@@ -97,7 +98,7 @@ class GateRunner:
     ) -> None:
         """Run configured gates in deterministic, resource-bounded waves."""
 
-        gates = self.config.gates
+        gates = self.gates
         if not gates:
             return
         total = 1 + len(gates)
@@ -323,7 +324,7 @@ class GateRunner:
         base_ref: str = "",
         head_ref: str = "HEAD",
     ) -> None:
-        total = 1 + len(self.config.gates)
+        total = 1 + len(self.gates)
         diff_command = [
             "git",
             "diff",
@@ -343,7 +344,7 @@ class GateRunner:
         if on_gate:
             on_gate("diff-check", "success", 1, total, _dashboard_command(diff_command))
         changed_paths = None
-        if any(gate.paths for gate in self.config.gates):
+        if any(gate.paths for gate in self.gates):
             changed_paths = self.changed_paths(
                 worktree=worktree,
                 base_ref=base_ref,
@@ -352,7 +353,7 @@ class GateRunner:
                 pulse=pulse,
             )
         initial_states: dict[str, tuple[str, str]] = {}
-        for gate in self.config.gates:
+        for gate in self.gates:
             if (
                 gate.paths
                 and changed_paths is not None
@@ -426,11 +427,11 @@ class GateRunner:
         pulse: Pulse | None,
         on_gate: GateProgress | None = None,
     ) -> None:
-        total = 1 + len(self.config.gates)
+        total = 1 + len(self.gates)
         if on_gate:
             on_gate("diff-check", "reused", 1, total, validation_sha)
         changed_paths = None
-        if any(gate.paths for gate in self.config.gates):
+        if any(gate.paths for gate in self.gates):
             changed_paths = self.changed_paths(
                 worktree=worktree,
                 base_ref=base_ref,
@@ -439,7 +440,7 @@ class GateRunner:
                 pulse=pulse,
             )
         initial_states: dict[str, tuple[str, str]] = {}
-        for gate in self.config.gates:
+        for gate in self.gates:
             if (
                 gate.paths
                 and changed_paths is not None

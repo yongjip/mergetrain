@@ -245,8 +245,6 @@ gate_parallelism:
   timeout_seconds: 1800
 
 gates:
-  - name: diff-check
-    run: git diff --check ${integration_ref}..HEAD
   - name: tests
     run: python -m unittest discover -s tests
     paths:
@@ -274,6 +272,11 @@ gates:
 Gates run before push in the temporary integration worktree. The optional
 `always_rerun_on_deploy` flag matters only when validated-gate reuse is accepted;
 that gate still runs against the exact restored validation commit.
+
+mergetrain always runs one built-in `diff-check` before configured gates. Older
+generated configs may still contain the same gate explicitly; that exact
+default is ignored at runtime and `doctor` recommends removing it. A customized
+gate is never discarded merely because it uses the same name.
 
 An optional non-empty `paths` list scopes a pre-push gate to the assembled
 train's changed paths. A scoped gate runs when any changed path matches any

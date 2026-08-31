@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from statistics import median
 from typing import Any
 
-from .config import MergetrainConfig
+from .config import MergetrainConfig, effective_gates
 from .models import Job
 from .path_gates import any_path_matches
 
@@ -57,7 +57,7 @@ def gate_policy_sha(config: MergetrainConfig) -> str:
                     "workers": gate.workers,
                     "timeout_seconds": gate.timeout_seconds,
                 }
-                for gate in config.gates
+                for gate in effective_gates(config)
             ],
             "environment_fingerprints": [
                 {"name": item.name, "run": item.run}
@@ -188,7 +188,7 @@ def _reuse_gate_plan(
                 "parallel_group": gate.parallel_group,
                 "workers": gate.workers,
             }
-            for gate in config.gates
+            for gate in effective_gates(config)
         ],
     ]
     authorization_only = bool(

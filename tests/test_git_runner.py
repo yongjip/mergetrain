@@ -400,6 +400,41 @@ deploy:
                 ],
             )
 
+    def test_exact_configured_diff_check_duplicate_runs_only_once(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    "gates:\n",
+                    "gates:\n"
+                    "  - name: diff-check\n"
+                    "    run: git diff --check ${integration_ref}..HEAD\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            events: list[tuple[str, str, int]] = []
+
+            runner._run_gates(
+                worktree=repo,
+                log=io.StringIO(),
+                pulse=None,
+                on_gate=lambda name, state, _index, total, _detail: events.append(
+                    (name, state, total)
+                ),
+            )
+
+            self.assertEqual(
+                [event for event in events if event[0] == "diff-check"],
+                [
+                    ("diff-check", "active", 2),
+                    ("diff-check", "success", 2),
+                ],
+            )
+
     def test_command_env_prioritizes_the_runner_python_tool_directory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

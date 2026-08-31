@@ -17,7 +17,11 @@ from ..cli_support import (
     dump_json,
 )
 from ..command_runner import run_command
-from ..config import CONFIG_VERSION, MergetrainConfig
+from ..config import (
+    CONFIG_VERSION,
+    MergetrainConfig,
+    is_redundant_builtin_diff_check,
+)
 from ..contract import CONTRACT_VERSION
 from ..errors import QueueError, redact_secrets
 from ..git_ops import (
@@ -586,6 +590,7 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
 
 
 def _doctor_recommendations(
+    config: MergetrainConfig,
     config_drift: dict[str, Any],
 ) -> list[dict[str, Any]]:
     recommendations: list[dict[str, Any]] = []
@@ -605,6 +610,31 @@ def _doctor_recommendations(
             "actions": [
                 "review the configuration diff before queue-advancing commands",
                 "synchronize a clean operator checkout without discarding local work",
+            ],
+        })
+    redundant = [
+        gate
+        for gate in config.gates
+        if is_redundant_builtin_diff_check(
+            gate,
+            integration_ref=config.git.integration_ref,
+        )
+    ]
+    if redundant:
+        recommendations.append({
+            "code": "redundant_builtin_diff_check",
+            "severity": "info",
+            "summary": (
+                "The configured diff-check exactly repeats mergetrain's "
+                "built-in integrity gate and is ignored at runtime."
+            ),
+            "evidence": {
+                "configured_gate_count": len(redundant),
+                "gate": "diff-check",
+                "run": redundant[0].run,
+            },
+            "actions": [
+                "remove the redundant diff-check entry from .mergetrain.yaml",
             ],
         })
     return recommendations
@@ -660,7 +690,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if repo_root else False,
         },
         "config_drift": config_drift,
-        "recommendations": _doctor_recommendations(config_drift),
+        "recommendations": _doctor_recommendations(config, config_drift),
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
         "validated_trains": validated_trains,

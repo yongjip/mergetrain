@@ -7,6 +7,7 @@ typed runtime configuration below.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -29,6 +30,8 @@ DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 # rollback can never lock an operator out of crash recovery.
 CONFIG_VERSION = 2
 NOTIFY_TRANSITIONS = ("landed", "blocked", "needs_reconcile", "daemon_paused")
+BUILTIN_DIFF_CHECK_NAME = "diff-check"
+BUILTIN_DIFF_CHECK_TEMPLATE = "git diff --check ${integration_ref}..HEAD"
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +203,51 @@ class MergetrainConfig:
         return data
 
 
+def is_redundant_builtin_diff_check(
+    gate: GateConfig,
+    *,
+    integration_ref: str,
+) -> bool:
+    """Return whether a configured gate exactly repeats the built-in check.
+
+    Keep the raw configuration visible for diagnostics, but remove this one
+    historical default from the effective plan. Customized gates that merely
+    reuse the name remain configured work and are never discarded implicitly.
+    """
+
+    if (
+        gate.name != BUILTIN_DIFF_CHECK_NAME
+        or gate.always_rerun_on_deploy
+        or gate.paths
+        or gate.parallel_group
+        or gate.needs
+        or gate.workers != 1
+        or gate.timeout_seconds is not None
+    ):
+        return False
+    expanded = gate.run.replace("${integration_ref}", integration_ref)
+    expected = BUILTIN_DIFF_CHECK_TEMPLATE.replace(
+        "${integration_ref}", integration_ref
+    )
+    try:
+        return shlex.split(expanded) == shlex.split(expected)
+    except ValueError:
+        return False
+
+
+def effective_gates(config: MergetrainConfig) -> tuple[GateConfig, ...]:
+    """Configured gates after removing an exact built-in duplicate."""
+
+    return tuple(
+        gate
+        for gate in config.gates
+        if not is_redundant_builtin_diff_check(
+            gate,
+            integration_ref=config.git.integration_ref,
+        )
+    )
+
+
 _LEGACY_YAML_BOOLEAN = re.compile(r"^(?:yes|no|on|off)$", re.IGNORECASE)
 _AMBIGUOUS_YAML_INTEGER = re.compile(
     r"^[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-9]+)$"
@@ -292,7 +340,7 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
             "timeout_seconds": 10,
         },
         "gate_parallelism": {"max_workers": 1},
-        "gates": [{"name": "diff-check", "run": "git diff --check ${integration_ref}..HEAD"}],
+        "gates": [],
         "deploy": {"verify": []},
     }
 
@@ -340,9 +388,8 @@ gate_parallelism:
   # Optional total wall-clock ceiling for the configured gate plan.
   # timeout_seconds: 1800
 
-gates:
-  - name: diff-check
-    run: git diff --check ${{integration_ref}}..HEAD
+gates: []
+  # mergetrain always runs its built-in diff-check first.
   # Add service-specific checks here, for example:
   # - name: tests
   #   run: python -m unittest discover -s tests

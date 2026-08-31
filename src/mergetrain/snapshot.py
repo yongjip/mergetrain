@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
-from .config import CONFIG_VERSION, MergetrainConfig
+from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
 from .errors import redact_secrets
 from .models import Job, RunEvent, RunnerLock
 from .observability import _gate_runs, elapsed_seconds
@@ -571,7 +571,8 @@ def build_dashboard_snapshot(
         history_events = list_history_events(conn)
         raw_events = history_events[-max(1, min(int(event_limit), 200)):]
         lock = _public_lock(get_lock(conn))
-        gate_names = ("diff-check", *(gate.name for gate in config.gates))
+        configured_gates = effective_gates(config)
+        gate_names = ("diff-check", *(gate.name for gate in configured_gates))
         payload: dict[str, Any] = {
             "ok": True,
             "generated_at": utc_now(),
@@ -596,7 +597,7 @@ def build_dashboard_snapshot(
                     "fingerprint_count": len(config.deploy.reuse.fingerprints),
                     "always_rerun_gates": [
                         gate.name
-                        for gate in config.gates
+                        for gate in configured_gates
                         if gate.always_rerun_on_deploy
                     ],
                 },

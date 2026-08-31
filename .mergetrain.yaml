@@ -31,8 +31,6 @@ gate_parallelism:
   timeout_seconds: 3600
 
 gates:
-  - name: diff-check
-    run: git diff --check ${integration_ref}..HEAD
   # ruff and mypy are the blocking CI lint job. They ran only in CI before, so
   # a lint error could land on main and stay there; both are dev extras
   # (`pip install -e ".[dev]"`), and a missing tool fails the gate on purpose.

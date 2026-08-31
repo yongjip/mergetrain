@@ -21,8 +21,6 @@ queue:
   command_timeout_seconds: 3600
 
 gates:
-  - name: diff-check
-    run: git diff --check ${integration_ref}..HEAD
   - name: tests
     run: python -m unittest discover -s tests
 

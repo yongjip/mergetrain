@@ -7,6 +7,7 @@ from pathlib import Path
 
 from mergetrain.config import (
     CONFIG_VERSION,
+    effective_gates,
     load_config,
     load_yaml,
     render_default_config,
@@ -64,7 +65,30 @@ notify:
         self.assertEqual(data["git"]["push_refs"], ["main"])
         self.assertNotIn("agent", data)
         self.assertNotIn("terminology", data)
-        self.assertEqual(data["gates"][0]["name"], "diff-check")
+        self.assertEqual(data["gates"], [])
+
+    def test_exact_builtin_diff_check_duplicate_is_not_effective(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """git:\n  integration_branch: main\ngates:\n  - name: diff-check\n    run: git diff --check ${integration_ref}..HEAD\n  - name: tests\n    run: python -m unittest\n""",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+
+        self.assertEqual([gate.name for gate in config.gates], ["diff-check", "tests"])
+        self.assertEqual([gate.name for gate in effective_gates(config)], ["tests"])
+
+    def test_custom_diff_check_named_gate_remains_effective(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "gates:\n  - name: diff-check\n    run: ./scripts/custom-diff-check\n",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+
+        self.assertEqual([gate.name for gate in effective_gates(config)], ["diff-check"])
 
     def test_version_one_removed_settings_are_migrated_in_memory(self) -> None:
         with tempfile.TemporaryDirectory() as td:

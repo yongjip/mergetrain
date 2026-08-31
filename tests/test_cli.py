@@ -444,6 +444,53 @@ class CliTests(unittest.TestCase):
             drift["integration"]["blob_sha"],
         )
 
+    def test_doctor_reports_redundant_builtin_diff_check(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            config_text = render_default_config("duplicate").replace(
+                "gates: []",
+                "gates:\n"
+                "  - name: diff-check\n"
+                "    run: git diff --check ${integration_ref}..HEAD",
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                config_text,
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "doctor", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        recommendation = payload["recommendations"][0]
+        self.assertEqual(
+            recommendation["code"],
+            "redundant_builtin_diff_check",
+        )
+        self.assertEqual(recommendation["evidence"]["configured_gate_count"], 1)
+
     def test_doctor_warns_when_operator_config_drifted_from_integration_ref(
         self,
     ) -> None:
