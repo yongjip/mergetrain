@@ -454,6 +454,18 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 f"median={phase['median_seconds']}s "
                 f"p95={phase['p95_seconds']}s"
             )
+        current = payload["current"]
+        window = current["window"]
+        print(
+            "current window: "
+            f"{window['complete_runs']}/{window['limit']} latest complete runs · "
+            f"{window['started_at'] or 'n/a'} → {window['ended_at'] or 'n/a'}"
+        )
+        for gate in current["gates"]:
+            print(
+                f"current gate {gate['name']}: runs={gate['runs']} "
+                f"median={gate['median_seconds']}s p95={gate['p95_seconds']}s"
+            )
         for recommendation in payload["recommendations"]:
             print(
                 f"recommendation {recommendation['code']}: "

@@ -1060,6 +1060,52 @@
         "queue_history": null,
         "recovery_operations": null
       },
+      "current": {
+        "gates": "[]?",
+        "latency": {
+          "approval_wait": {
+            "median_seconds": null,
+            "p95_seconds": null,
+            "samples": null
+          },
+          "coverage": {
+            "complete_runs": null,
+            "history_complete": null,
+            "observed_runs": null,
+            "retained_events": null,
+            "retention_limit": null,
+            "runs_with_job_identity": null,
+            "runs_with_observed_start": null,
+            "runs_with_terminal": null,
+            "source": null
+          },
+          "phases": "[]?",
+          "queue_wait": {
+            "median_seconds": null,
+            "p95_seconds": null,
+            "samples": null
+          },
+          "runs": {
+            "deploy": {
+              "median_seconds": null,
+              "p95_seconds": null,
+              "samples": null
+            },
+            "validate": {
+              "median_seconds": null,
+              "p95_seconds": null,
+              "samples": null
+            }
+          }
+        },
+        "window": {
+          "basis": null,
+          "complete_runs": null,
+          "ended_at": null,
+          "limit": null,
+          "started_at": null
+        }
+      },
       "evidence_gaps": {
         "[]": {
           "metric": null,

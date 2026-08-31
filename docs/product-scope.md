@@ -178,6 +178,27 @@ concrete incorrect state that the current core cannot address.
 
 ## Applied corrections within the existing budget
 
+### 2026-09-01: current-window operational recommendations
+
+- **Admission criterion:** prevent historical data from producing a concrete,
+  stale operating recommendation.
+- **Evidence:** lifetime test-gate p95 was about 295 seconds while the August
+  cohort was about 39 seconds; using the retained lifetime tail described a
+  gate that is no longer slow. Overnight approval outliers similarly dominated
+  p95 despite a several-minute median.
+- **Existing surface used:** `stats --since`, retained claim-token events, and
+  the existing `recommendations` list. No command, flag, config, or state field
+  is added.
+- **Public surface change:** additive `stats.current` reports the latest 20
+  complete runs. Recommendations consume this disclosed cohort; approval
+  advice uses a 15-minute median threshold rather than a single long tail.
+- **State, contract, recovery, and security impact:** read-only derivation from
+  existing retained events; no schema or retention change. Full selected-history
+  metrics keep their established meaning.
+- **Success measure and simplification trigger:** recent test p95 should no
+  longer emit `slow_gate` on the owner database. Keep one current window; do not
+  add configurable windows until a repeated decision needs one.
+
 ### 2026-08-31: compact routine state reads
 
 - **Admission criterion:** substantially reduce measured agent payload and

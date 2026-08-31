@@ -10,7 +10,7 @@ from math import ceil
 from statistics import mean, median
 from typing import Any
 
-from .config import MergetrainConfig
+from .config import MergetrainConfig, effective_gates
 from .errors import redact_secrets
 from .evidence import history_groups, history_status, product_evidence, run_mode
 from .models import Job, RunEvent, RunnerLock
@@ -34,8 +34,10 @@ COMPLETED_STATUSES = {"validated", "deployed", "blocked", "failed", "canceled"}
 TIMED_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
 RUN_MODES = ("validate", "deploy")
 SLOW_GATE_P95_SECONDS = 60.0
+SLOW_APPROVAL_MEDIAN_SECONDS = 900.0
 MIN_RECOMMENDATION_SAMPLES = 3
 TERMINAL_RUN_PHASES = {"ready", "complete", "blocked", "failed", "canceled"}
+CURRENT_RUN_LIMIT = 20
 
 
 def _timestamp(value: str) -> datetime | None:
@@ -251,7 +253,7 @@ def _stats_recommendations(
     gates: Sequence[dict[str, Any]],
     latency: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    scoped = {gate.name: bool(gate.paths) for gate in config.gates}
+    scoped = {gate.name: bool(gate.paths) for gate in effective_gates(config)}
     recommendations: list[dict[str, Any]] = []
     for gate in gates:
         name = str(gate["name"])
@@ -291,28 +293,32 @@ def _stats_recommendations(
 
     approval = latency["approval_wait"]
     deploy = latency["runs"]["deploy"]
+    approval_median = approval["median_seconds"]
     approval_p95 = approval["p95_seconds"]
+    deploy_median = deploy["median_seconds"]
     deploy_p95 = deploy["p95_seconds"]
     if (
         approval["samples"] >= MIN_RECOMMENDATION_SAMPLES
-        and approval_p95 is not None
-        and float(approval_p95) >= SLOW_GATE_P95_SECONDS
-        and deploy_p95 is not None
-        and float(approval_p95) > float(deploy_p95)
+        and approval_median is not None
+        and float(approval_median) >= SLOW_APPROVAL_MEDIAN_SECONDS
+        and deploy_median is not None
+        and float(approval_median) > float(deploy_median)
     ):
         recommendations.append(
             {
                 "code": "approval_wait_dominates",
                 "severity": "info",
                 "summary": (
-                    f"Approval wait p95 {float(approval_p95):.3f}s exceeds "
-                    f"deploy-run p95 {float(deploy_p95):.3f}s."
+                    f"Approval wait median {float(approval_median):.3f}s exceeds "
+                    f"deploy-run median {float(deploy_median):.3f}s."
                 ),
                 "evidence": {
+                    "approval_wait_median_seconds": approval_median,
                     "approval_wait_p95_seconds": approval_p95,
+                    "deploy_run_median_seconds": deploy_median,
                     "deploy_run_p95_seconds": deploy_p95,
                     "samples": approval["samples"],
-                    "threshold_seconds": SLOW_GATE_P95_SECONDS,
+                    "threshold_seconds": SLOW_APPROVAL_MEDIAN_SECONDS,
                 },
                 "actions": [
                     "validate only after the intended train is final",
@@ -419,6 +425,78 @@ def _gate_runs(events: Sequence[RunEvent]) -> list[dict[str, Any]]:
     """Public gate rows without the internal claim-token join key."""
 
     return [run for _, run in _gate_runs_with_tokens(events)]
+
+
+def _gate_summary(gate_runs: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    gate_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for run in gate_runs:
+        gate_groups[str(run["name"])].append(run)
+    summary: list[dict[str, Any]] = []
+    for name in sorted(gate_groups):
+        runs = gate_groups[name]
+        elapsed = [
+            float(run["duration_seconds"])
+            for run in runs
+            if run["duration_seconds"] is not None
+        ]
+        states = Counter(str(run["state"]) for run in runs)
+        summary.append(
+            {
+                "name": name,
+                "runs": len(runs),
+                "timed_runs": len(elapsed),
+                "state_counts": dict(sorted(states.items())),
+                "median_seconds": round(median(elapsed), 3) if elapsed else None,
+                "p95_seconds": _percentile(elapsed, 0.95),
+            }
+        )
+    return summary
+
+
+def _current_run_stats(
+    jobs: Sequence[Job],
+    events: Sequence[RunEvent],
+    *,
+    limit: int = CURRENT_RUN_LIMIT,
+) -> dict[str, Any]:
+    """Summarize the latest complete claim-token runs only."""
+
+    grouped: dict[str, list[RunEvent]] = defaultdict(list)
+    for event in events:
+        if event.claim_token:
+            grouped[event.claim_token].append(event)
+    complete: list[tuple[int, str, RunEvent, RunEvent]] = []
+    for token, token_events in grouped.items():
+        ordered = sorted(token_events, key=lambda event: event.id)
+        claim = next(
+            (
+                event
+                for event in ordered
+                if event.phase == "claiming" and event.state == "active"
+            ),
+            None,
+        )
+        terminal = ordered[-1]
+        if claim is not None and terminal.phase in TERMINAL_RUN_PHASES:
+            complete.append((terminal.id, token, claim, terminal))
+    selected = sorted(complete, reverse=True)[: max(0, int(limit))]
+    tokens = {token for _, token, _, _ in selected}
+    selected_events = [event for event in events if event.claim_token in tokens]
+    tagged_gate_runs = _gate_runs_with_tokens(selected_events)
+    return {
+        "window": {
+            "basis": "latest_complete_runs",
+            "limit": limit,
+            "complete_runs": len(selected),
+            "started_at": _time_edge([claim.created_at for _, _, claim, _ in selected]),
+            "ended_at": _time_edge(
+                [terminal.created_at for _, _, _, terminal in selected],
+                latest=True,
+            ),
+        },
+        "gates": _gate_summary([run for _, run in tagged_gate_runs]),
+        "latency": _run_latency(jobs, selected_events),
+    }
 
 
 def _group_history(
@@ -544,29 +622,9 @@ def stats_payload(
         for item in items
         if item["queue_seconds"] is not None
     ]
-    gate_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for run in gate_runs:
-        gate_groups[str(run["name"])].append(run)
-    per_gate: list[dict[str, Any]] = []
-    for name in sorted(gate_groups):
-        runs = gate_groups[name]
-        elapsed = [
-            float(run["duration_seconds"])
-            for run in runs
-            if run["duration_seconds"] is not None
-        ]
-        states = Counter(str(run["state"]) for run in runs)
-        per_gate.append(
-            {
-                "name": name,
-                "runs": len(runs),
-                "timed_runs": len(elapsed),
-                "state_counts": dict(sorted(states.items())),
-                "median_seconds": round(median(elapsed), 3) if elapsed else None,
-                "p95_seconds": _percentile(elapsed, 0.95),
-            }
-        )
+    per_gate = _gate_summary(gate_runs)
     latency = _run_latency(jobs, events)
+    current = _current_run_stats(jobs, events)
     return {
         "ok": True,
         "since": since,
@@ -591,12 +649,17 @@ def stats_payload(
         "average_queue_seconds": round(mean(queue_times), 3) if queue_times else None,
         "gates": per_gate,
         "latency": latency,
+        "current": current,
         "outcomes": evidence["outcomes"],
         "validation": evidence["validation"],
         "batching": evidence["batching"],
         "recovery": evidence["recovery"],
         "evidence_gaps": evidence["evidence_gaps"],
-        "recommendations": _stats_recommendations(config, per_gate, latency),
+        "recommendations": _stats_recommendations(
+            config,
+            current["gates"],
+            current["latency"],
+        ),
         "coverage": {
             "queue_history": "unbounded",
             "gate_events": f"latest_{RUN_EVENT_RETENTION}",

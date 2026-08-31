@@ -305,8 +305,14 @@ events are unbounded from their explicit tracking baseline.
 duration, and fetch/assembly/gate/push/verify phases. Its `coverage` reports
 retained event counts, the 5,000-row limit, complete runs, and runs with job
 identity; incomplete histories are never reported as zero-duration samples.
-Evidence-backed `recommendations` appear only after at least three timed
-samples. `finished`
+`current` repeats gate timing and latency for the latest 20 complete claim-token
+runs inside the selected `--since` range, with the actual window boundaries and
+sample count. Incomplete runs never displace a completed run from this window.
+Evidence-backed `recommendations` use `current`, while the established top-level
+aggregates continue to describe the full selected history. Slow-gate advice
+requires at least three recent timed samples. Approval wait is treated as human
+dwell: its p95 remains visible, but advice requires a recent median of at least
+15 minutes that also exceeds the deploy-run median. `finished`
 counts deployed + blocked + failed — every train that reached an end state,
 excluding canceled and still-open ones — and is the denominator of `land_rate`;
 it is deliberately not called `completed`, which is configured human vocabulary

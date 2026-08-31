@@ -9,6 +9,7 @@ from mergetrain.config import load_config
 from mergetrain.models import Job, RunEvent, RunnerLock
 from mergetrain.observability import (
     _lease_context,
+    _stats_recommendations,
     event_record,
     gate_details,
     history_payload,
@@ -879,6 +880,125 @@ class HistoryStatsTests(unittest.TestCase):
             )
             self.assertEqual(partial["coverage"]["runs_with_terminal"], 6)
             self.assertEqual(partial["coverage"]["complete_runs"], 5)
+
+    def test_stats_recommendations_use_latest_twenty_complete_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                "gates:\n  - name: tests\n    run: 'true'\n",
+                encoding="utf-8",
+            )
+            config = load_config(repo=root, db_override=root / "queue.sqlite")
+            conn = connect(config.state.db)
+            try:
+                base = datetime(2026, 8, 1, tzinfo=timezone.utc)
+                rows = []
+                for index in range(25):
+                    token = f"run-{index:02d}"
+                    started = base + timedelta(minutes=index * 5)
+                    duration = 120 if index < 5 else 10
+                    rows.extend(
+                        [
+                            (
+                                token,
+                                "claiming",
+                                "active",
+                                "Validation runner claimed 1 job",
+                                "mode=validate",
+                                started,
+                            ),
+                            (
+                                token,
+                                "gating",
+                                "active",
+                                "Running gate 1/1: tests",
+                                "",
+                                started + timedelta(seconds=1),
+                            ),
+                            (
+                                token,
+                                "gating",
+                                "success",
+                                "Passed gate 1/1: tests",
+                                "",
+                                started + timedelta(seconds=1 + duration),
+                            ),
+                            (
+                                token,
+                                "ready",
+                                "success",
+                                "Validation complete",
+                                "",
+                                started + timedelta(seconds=2 + duration),
+                            ),
+                        ]
+                    )
+                # The newest token is incomplete and must not displace a
+                # completed run from the current window.
+                rows.extend(
+                    [
+                        (
+                            "incomplete",
+                            "claiming",
+                            "active",
+                            "Validation runner claimed 1 job",
+                            "mode=validate",
+                            base + timedelta(hours=4),
+                        ),
+                        (
+                            "incomplete",
+                            "gating",
+                            "active",
+                            "Running gate 1/1: tests",
+                            "",
+                            base + timedelta(hours=4, seconds=1),
+                        ),
+                    ]
+                )
+                conn.executemany(
+                    "INSERT INTO run_events "
+                    "(claim_token, phase, state, message, detail, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        (*row[:-1], row[-1].isoformat().replace("+00:00", "Z"))
+                        for row in rows
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            stats = stats_payload(config)
+
+        self.assertEqual(stats["gates"][0]["p95_seconds"], 120.0)
+        self.assertEqual(stats["current"]["window"]["complete_runs"], 20)
+        self.assertEqual(stats["current"]["gates"][0]["p95_seconds"], 10.0)
+        self.assertEqual(stats["current"]["latency"]["coverage"]["complete_runs"], 20)
+        self.assertEqual(stats["recommendations"], [])
+
+    def test_approval_tail_alone_does_not_create_workflow_recommendation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = load_config(repo=td, db_override=Path(td) / "queue.sqlite")
+        latency = {
+            "approval_wait": {
+                "samples": 3,
+                "median_seconds": 300.0,
+                "p95_seconds": 36000.0,
+            },
+            "runs": {
+                "deploy": {
+                    "samples": 3,
+                    "median_seconds": 120.0,
+                    "p95_seconds": 180.0,
+                }
+            },
+        }
+        self.assertEqual(_stats_recommendations(config, [], latency), [])
+
+        latency["approval_wait"]["median_seconds"] = 1200.0
+        recommendation = _stats_recommendations(config, [], latency)[0]
+        self.assertEqual(recommendation["code"], "approval_wait_dominates")
+        self.assertEqual(recommendation["evidence"]["threshold_seconds"], 900.0)
 
     def test_event_frame_reports_a_stranded_runner_as_lost(self) -> None:
         # A one-shot events reader (how the MCP server reads progress) has no

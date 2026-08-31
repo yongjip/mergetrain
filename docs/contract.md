@@ -136,6 +136,11 @@ an exact preview, and `estimated_savings.authorizes_reuse` is always false.
 is a separately fingerprinted compact view whose repo entries carry `summary`
 instead of a full dashboard `snapshot`.
 
+`stats` may include additive `current.window`, `current.gates`, and
+`current.latency` objects. Established top-level aggregates retain their
+selected-history meaning; automatic recommendations use the latest 20 complete
+claim-token runs disclosed by `current.window`.
+
 **Breaking changes bump `contract_version`** (a deliberate, reviewed decision):
 removing or renaming a key, changing a value's type or meaning, changing the
 `ok`/`result` semantics, changing exit codes, or changing the JSONL frame or

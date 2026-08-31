@@ -209,7 +209,7 @@ def build_queue_summary(
         validated_trains = validated_train_summaries(conn)
     finally:
         conn.close()
-    payload = {
+    payload: dict[str, Any] = {
         "counts": count_data,
         "lock": lock,
         "validated_trains": validated_trains,
