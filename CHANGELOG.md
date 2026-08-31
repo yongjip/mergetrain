@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Remove the redundant configured copy of the built-in worktree diff check.
+  Runtime gate selection now ignores only that exact legacy duplicate, while
+  `doctor` reports it and custom diff gates remain untouched.
+
+- Make routine state reads smaller without hiding action-required work:
+  `status` defaults to 10 recent jobs and adds uncapped `attention_jobs` plus
+  truncation metadata; `hub status --summary` returns a compact per-repo view;
+  agent instructions start with `doctor` and request detailed status only when
+  needed.
+
+- Base operational recommendations on the latest 20 complete runs while
+  retaining selected-history aggregates. `stats.current` discloses the cohort,
+  and approval advice now requires a slow median instead of one tail outlier.
+
+- Add `daemon --validate-only` for repeated manual-queue validation. It claims
+  no auto-approved jobs, never pushes or verifies, pauses at any existing
+  validated train or pending reconcile, and leaves the default and Hub daemons
+  auto-deploy-only.
+
+- Replace the product-surface freeze with owner-evidence-gated admission, remove
+  stale pre-1.0 lifecycle text from current support documentation, and make the
+  release check reject future `SECURITY.md` support-policy drift.
+
 ## 2.0.0 - 2026-08-29
 
 - Clarify that lease fencing serializes mergetrain runners but cannot stop a

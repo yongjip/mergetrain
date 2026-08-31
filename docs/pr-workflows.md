@@ -85,9 +85,9 @@ that ceremony, but deliberately gives up the forge's review surface.
   retention if an organization requires centralized evidence.
 - **Batching has a failure cost.** A green train saves repeated gate runs; a red
   train spends extra runs isolating the bad job or interaction.
-- **The project is pre-1.0.** Its operational model is implemented and tested,
-  but teams needing a mature hosted control plane should prefer their forge's
-  native workflow.
+- **It is local and owner-operated.** Its operational model is implemented and
+  tested, but teams needing a mature hosted control plane should prefer their
+  forge's native workflow.
 
 Review the [security boundary](security.md) before enabling unattended jobs and
 the [failure modes](failure-modes.md) before allowing direct integration.

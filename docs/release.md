@@ -12,7 +12,7 @@ Every pull request runs:
 - the installed-CLI E2E suite on macOS and Linux;
 - dashboard unit/build checks and a headless Chromium interaction suite for
   notification permission, duplicate tabs, drill-down clicks, and feed recovery;
-- version and changelog consistency checks;
+- version, changelog, and security support-policy consistency checks;
 - isolated sdist and wheel builds;
 - `twine check --strict` on both distributions; and
 - a clean-environment wheel install and CLI smoke test.

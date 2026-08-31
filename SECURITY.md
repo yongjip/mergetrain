@@ -29,4 +29,4 @@ third-party data. The most relevant issue classes are:
 
 ## Supported versions
 
-mergetrain is pre-1.0. Only the latest version published to PyPI receives fixes.
+Only the latest release published to PyPI receives security fixes.

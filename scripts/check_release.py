@@ -13,6 +13,21 @@ from pathlib import Path
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
+SECURITY_SUPPORT_POLICY = (
+    "Only the latest release published to PyPI receives security fixes."
+)
+
+
+def _security_policy_errors(text: str) -> list[str]:
+    errors: list[str] = []
+    if re.search(r"\bpre-1\.0\b", text, flags=re.IGNORECASE):
+        errors.append("SECURITY.md still describes mergetrain as pre-1.0")
+    if SECURITY_SUPPORT_POLICY not in text:
+        errors.append(
+            "SECURITY.md needs the release-independent supported-versions policy: "
+            f"{SECURITY_SUPPORT_POLICY}"
+        )
+    return errors
 
 
 def _project_version() -> str:
@@ -58,6 +73,9 @@ def check_release(*, tag: str = "") -> list[str]:
         errors.append(
             f"CHANGELOG.md needs a dated '## {project_version} - YYYY-MM-DD' heading"
         )
+
+    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    errors.extend(_security_policy_errors(security))
 
     if tag and tag != f"v{project_version}":
         errors.append(

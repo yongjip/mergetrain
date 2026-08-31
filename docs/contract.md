@@ -187,8 +187,11 @@ same change that introduces it, or the gate silently does not cover it. Run
 results share one builder, so `run_batch_validate` also pins `run-batch --deploy`
 and `run-next`.
 
-## Freeze linkage (0.9.0)
+## Compatibility enforcement
 
-The 0.9.0 release candidate promises **additive-only changes within a contract
-major**. That promise is mechanical, not a pledge: the fingerprint gate is what
-makes it impossible to change a shape without a conscious version decision.
+Contract 2 permits **additive-only changes within the contract major**. This is
+a machine-consumer compatibility boundary, not a product-feature freeze: owner
+evidence may justify a bounded new capability, but breaking JSON or JSONL
+semantics still requires a conscious contract-version decision. The fingerprint
+gate makes key-shape changes visible; semantic changes remain a review
+responsibility.
