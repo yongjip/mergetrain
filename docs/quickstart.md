@@ -25,9 +25,33 @@ Edit `.mergetrain.yaml` so `git.remote`, `git.integration_branch`, `git.push_ref
 `init` writes `.mergetrain.yaml` and the agent-contract docs, and an uncommitted
 file trips the clean-worktree check at enqueue time:
 
+The generated sidecars are deliberately separate so `init` never overwrites
+existing project instructions. They are not discovered automatically. Link
+them from the platform-standard root files before relying on agent behavior:
+
+```markdown
+<!-- AGENTS.md -->
+Read and follow ./AGENTS.mergetrain.md for integration handoff and deploy rules.
+
+<!-- CLAUDE.md -->
+@CLAUDE.mergetrain.md
+```
+
+Then commit the config, sidecars, and root-file links:
+
 ```sh
-git add .mergetrain.yaml AGENTS.mergetrain.md CLAUDE.mergetrain.md
+git add .mergetrain.yaml AGENTS.md CLAUDE.md \
+  AGENTS.mergetrain.md CLAUDE.mergetrain.md
 git commit -m "add mergetrain config"
+```
+
+After upgrading mergetrain, refresh only the generated contract documents—
+without touching `.mergetrain.yaml`—using the existing command:
+
+```sh
+mergetrain agent-contract > AGENTS.mergetrain.md
+mergetrain agent-contract > CLAUDE.mergetrain.md
+git diff -- AGENTS.mergetrain.md CLAUDE.mergetrain.md
 ```
 
 mergetrain's own `.mergetrain/` runtime directory (queue DB, logs, worktrees)
@@ -65,7 +89,9 @@ A successful validation marks merged jobs as `validated`, records a shared
 `train_id` plus the integration and task SHAs, and does not push. Inspect
 `status --json` before a one-shot approval to see the exact deployable train.
 If `integration_changed_since_validation` is true, deploy remains eligible but
-will reassemble against the current integration ref and rerun gates.
+will reassemble against the current integration ref and evaluate the configured
+gate policy. This status field observes the local ref without fetching; deploy
+fetches before rebuilding.
 
 ## 5. Observe a long run
 

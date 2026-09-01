@@ -178,6 +178,25 @@ concrete incorrect state that the current core cannot address.
 
 ## Applied corrections within the existing budget
 
+### 2026-09-02: batch-size-independent semantic conflict classification
+
+- **Admission criterion:** correct an unsafe inconsistency in the existing
+  failure-isolation meaning; do not add a command, flag, config field, or
+  recovery action.
+- **Evidence:** two individually green jobs that failed only when combined were
+  split into separate validated/deployed results when the batch had two or
+  three members, but the same pair became reciprocal `blocked` conflicts after
+  unrelated compatible jobs increased the batch to four. FIFO order could
+  therefore choose a product rule that the runner should leave to the owner.
+- **Existing surface correction:** every multi-job gate failure now uses the
+  existing subset-probe classifier. Individually failing jobs still finish
+  `failed`; minimal joint failures finish `blocked` with reciprocal
+  `conflict_with`; compatible survivors are revalidated as one exact train.
+- **Safety and success measure:** validation produces no train for the
+  conflicting members, and direct deploy performs no push. The same semantic
+  pair must receive the same classification with zero or more unrelated
+  compatible jobs present.
+
 ### 2026-09-02: bounded deploy approval and stale validation-base diagnosis
 
 - **Admission criterion:** remove repeated approval steps that provide no
@@ -203,12 +222,15 @@ concrete incorrect state that the current core cannot address.
   summaries; opaque IDs remain internal binding evidence.
 - **Existing MCP surface correction:** the deploy confirmation now consumes the
   selected train plus uncapped `attention_jobs`, and presents task intent,
-  destinations, gates, validation evidence, and stale-base reassembly risk. It
-  adds no tool or authorization state and never exposes a train chooser to the
-  model.
+  destinations, gate policy, validation evidence, stale-base reassembly risk,
+  and unresolved post-push verification. Its wording does not promise every
+  gate will rerun when path scopes or validated-gate reuse can change the actual
+  plan. It adds no tool or authorization state and never exposes a train chooser
+  to the model.
 - **State, contract, recovery, and security impact:** no schema, mutation path,
   deploy eligibility, SHA binding, gate reuse, or recovery change. Deploy still
-  reassembles the exact train and reruns gates before atomic push. Bounded
+  reassembles the exact train and evaluates the configured gate policy before
+  atomic push. Bounded
   authorization ends on task-scope or destination change, a product/business
   decision, or a destructive/reconcile recovery boundary.
 - **Success measure and simplification trigger:** held-out agent traces should

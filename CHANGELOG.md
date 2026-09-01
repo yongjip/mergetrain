@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Classify semantic conflicts consistently at every multi-job batch size.
+  Two or three individually green jobs that fail only in combination are now
+  blocked together with reciprocal `conflict_with` evidence instead of being
+  split into FIFO-dependent validated or deployed jobs.
+
+- Make MCP deploy summaries describe gate-policy evaluation without promising
+  unconditional reruns when path scopes or validated-gate reuse apply, and
+  include deployed jobs whose post-push verification is still unknown.
+
+- State that stale-validation diagnostics observe the local integration ref
+  without fetching; deploy still fetches and reassembles before any push.
+
+- Keep MCP SDK v1 pinned while recording that v2 is now stable and requires a
+  deliberate server and elicitation migration rather than a range-only bump.
+
+- Clarify that generated agent-contract sidecars require a link from standard
+  root instruction files, and document refreshing them through the existing
+  `agent-contract` command without overwriting project configuration.
+
 ## 2.1.0 - 2026-09-02
 
 - Make MCP deploy confirmation describe only the selected change set in human

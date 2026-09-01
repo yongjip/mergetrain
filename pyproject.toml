@@ -34,8 +34,8 @@ dependencies = ["PyYAML>=6.0"]
 # Kept as a no-op compatibility extra so existing `mergetrain[yaml]` install
 # commands continue to work after PyYAML became a core dependency.
 yaml = []
-# `mergetrain mcp` only. Pinned below 2 because the SDK's own README warns that
-# a v2 beta exists; the SDK stays out of the core dependency set either way.
+# `mergetrain mcp` only. MCP SDK v2 is stable but has breaking server and
+# elicitation APIs; keep v1 until the adapter and confirmation tests are ported.
 mcp = ["mcp>=1.16,<2"]
 dev = [
   "build>=1.0",

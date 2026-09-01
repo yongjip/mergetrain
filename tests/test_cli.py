@@ -1491,6 +1491,8 @@ class CliTests(unittest.TestCase):
             self.assertIn("A task agent stops after enqueueing", agent_contract)
             self.assertIn("human-readable exact-train summary", agent_contract)
             self.assertIn("never make the user repeat it", agent_contract)
+            payload = json.loads(out.getvalue())
+            self.assertIn("standard AGENTS.md and/or CLAUDE.md", payload["next_step"])
 
     def test_init_write_preflights_all_conflicts_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1636,7 +1638,7 @@ class CliTests(unittest.TestCase):
                     ["--repo", str(repo), "--db", str(db), "status"]
                 )
             self.assertEqual(text_code, 0)
-            self.assertIn("deploy will reassemble", text_out.getvalue())
+            self.assertIn("deploy will fetch, reassemble", text_out.getvalue())
 
             doctor_out = io.StringIO()
             with redirect_stdout(doctor_out):
@@ -1658,7 +1660,7 @@ class CliTests(unittest.TestCase):
                 recommendation["evidence"]["trains"][0]["train_id"],
                 "train-stale",
             )
-            self.assertIn("rerun gates", " ".join(recommendation["actions"]))
+            self.assertIn("gate policy", " ".join(recommendation["actions"]))
 
             conn = connect(db)
             try:

@@ -520,14 +520,36 @@ class DeployGateTests(unittest.TestCase):
             "#8 Handle payment retry: agent/two",
             "Destination: origin (git@github.com:example/checkout.git) atomically updates main",
             "refs/mergetrain/deploys/<deploy-sha>",
-            "Pre-push gates rerun: diff-check, ruff, tests",
+            "Pre-push gate policy evaluated: diff-check, ruff, tests",
             "Post-push verification: github-ci",
             "deploy_validated_train_when_approved",
-            "integration advanced since validation",
+            "local integration ref advanced since validation",
             "Repair refund calculation — agent/three blocked",
         ):
             self.assertIn(expected, summary)
         self.assertNotIn("abc123", summary)
+
+    def test_summary_includes_unresolved_post_push_verification(self) -> None:
+        unresolved = {
+            "id": 10,
+            "task": "Verify reconciled checkout deploy",
+            "branch": "agent/reconciled",
+            "status": "deployed",
+            "verify_status": "unknown",
+            "note": "push reconciled; verification outcome is unknown",
+        }
+        status = dict(
+            STATUS,
+            attention_jobs=[*STATUS["attention_jobs"], unresolved],
+        )
+
+        summary = self.tools.deploy_summary(DOCTOR, status, TRAIN)
+
+        self.assertIn(
+            "Verify reconciled checkout deploy — agent/reconciled "
+            "deployed (verification unknown)",
+            summary,
+        )
 
     def test_summary_describes_only_the_selected_train(self) -> None:
         other = dict(

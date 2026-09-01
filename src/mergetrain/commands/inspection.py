@@ -150,9 +150,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         for train in payload["validated_trains"]:
             if train["integration_changed_since_validation"]:
                 print(
-                    f"warning validated train {train['train_id']}: integration "
-                    "changed since validation; deploy will reassemble the train "
-                    "and rerun gates before push"
+                    f"warning validated train {train['train_id']}: the local "
+                    "integration ref changed since validation; deploy will "
+                    "fetch, reassemble the train, and evaluate the configured "
+                    "gate policy before push"
                 )
     return 0
 
@@ -719,8 +720,9 @@ def _doctor_recommendations(
             "code": "validated_train_base_changed",
             "severity": "warning",
             "summary": (
-                "A validated train's base differs from the current integration "
-                "ref; its earlier gate result is not current deploy evidence."
+                "A validated train's base differs from the locally observed "
+                "integration ref; its earlier gate result is not current deploy "
+                "evidence."
             ),
             "evidence": {
                 "integration_ref": config.git.integration_ref,
@@ -739,7 +741,7 @@ def _doctor_recommendations(
             },
             "actions": [
                 "summarize task intent, changes, destination refs, gates, and reassembly risk in human terms",
-                "expect deploy to reassemble the train and rerun gates before any push",
+                "expect deploy to reassemble the train and evaluate the configured gate policy before any push",
                 "do not ask the user to repeat an opaque train ID",
             ],
         })

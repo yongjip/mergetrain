@@ -304,14 +304,13 @@ During validation, the runner merges all queued jobs into one integration
 worktree in order. A branch that conflicts is marked `blocked`, `git merge
 --abort` is attempted, and the remaining jobs are still tried. Gates then run
 **once** over the whole train. If a pre-push gate fails, the train is torn
-down and the failure is isolated: trains of up to 3 jobs re-process each
-merged job individually, larger trains are bisected (subset re-assembly +
-gate probes, O(log n) runs) down to either an individually failing job
-(`failed`) or a minimal set of jobs that pass alone but fail together — a
-**semantic conflict**, finished `blocked` with partner job IDs in
-`conflict_with` and partner SHAs in the note. Every conflict member is
+down and the failure is isolated. A one-job train is reprocessed directly;
+multi-job trains use subset re-assembly and gate probes to find either an
+individually failing job (`failed`) or a minimal set of jobs that pass alone but
+fail together — a **semantic conflict**, finished `blocked` with partner job IDs
+in `conflict_with` and partner SHAs in the note. Every conflict member is
 verified to pass alone before being blamed; probes that hit merge conflicts
-or a non-reproducing failure abort bisection and fall back to one-by-one
+or a non-reproducing failure abort probing and fall back to one-by-one
 isolation. Surviving jobs re-run as a fresh train, so nothing ships without
 a full gate pass over the exact final combination. Successful jobs receive
 a shared train identity and validation SHA. Path-scoped gates are evaluated
@@ -321,8 +320,10 @@ hide a failure during isolation.
 During a later validated deploy, the selected train is atomic: every current
 task branch must still resolve to its recorded `validated_head_sha`, and the
 stored member count and shared metadata must be complete. The runner starts
-from the current integration ref, merges the recorded commits, and reruns all
-gates. Integration movement is therefore safe, but an identity mismatch,
+from the current integration ref, merges the recorded commits, and evaluates
+the configured gate policy. The default path reruns all gates; explicitly
+authorized validated-gate reuse follows the stricter identity checks below.
+Integration movement is therefore safe, but an identity mismatch,
 merge conflict, or gate failure blocks/fails the whole approved train rather
 than shipping a subset. On success, every member is marked `deployed` with the
 new shared `deploy_sha`.

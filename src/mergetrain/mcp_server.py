@@ -445,7 +445,7 @@ class MergetrainTools:
             f"{', '.join(push_refs) or 'unknown refs'} and records "
             "refs/mergetrain/deploys/<deploy-sha>",
             f"Integration source: {git.get('integration_ref', 'unknown')}",
-            "Pre-push gates rerun: "
+            "Pre-push gate policy evaluated: "
             + ", ".join(dict.fromkeys(["diff-check", *gates])),
             "Post-push verification: " + (", ".join(verify_hooks) or "none configured"),
             f"doctor next_action: {doctor.get('next_action', 'unknown')}",
@@ -467,25 +467,38 @@ class MergetrainTools:
         current_sha = str(train.get("current_integration_sha") or "")
         if train.get("integration_changed_since_validation") is True:
             lines.append(
-                "Reassembly risk: integration advanced since validation to "
+                "Reassembly risk: the local integration ref advanced since "
+                "validation to "
                 f"{current_sha[:12] or 'an unknown commit'}; deploy will reassemble "
-                "the selected change set and rerun all pre-push gates before push"
+                "the selected change set and evaluate the configured pre-push "
+                "gate policy before push"
             )
         else:
             lines.append(
-                "Reassembly: deploy will rebuild the selected change set and rerun "
-                "all pre-push gates before push"
+                "Reassembly: deploy will rebuild the selected change set and "
+                "evaluate the configured pre-push gate policy before push"
             )
         attention_source = status.get("attention_jobs")
         if attention_source is None:
             attention_source = status.get("jobs") or []
-        attention = [
-            f"#{job.get('id')} {' '.join(str(job.get('task') or 'task not recorded').split())} "
-            f"— {job.get('branch')} {job.get('status')}: "
-            f"{' '.join(str(job.get('note', '')).split())[:160]}"
-            for job in attention_source
-            if job.get("status") in {"blocked", "failed", "needs_reconcile"}
-        ]
+        attention = []
+        for job in attention_source:
+            status_label = str(job.get("status") or "unknown")
+            verification_unknown = (
+                status_label == "deployed" and job.get("verify_status") == "unknown"
+            )
+            if status_label not in {"blocked", "failed", "needs_reconcile"} and not (
+                verification_unknown
+            ):
+                continue
+            if verification_unknown:
+                status_label += " (verification unknown)"
+            attention.append(
+                f"#{job.get('id')} "
+                f"{' '.join(str(job.get('task') or 'task not recorded').split())} "
+                f"— {job.get('branch')} {status_label}: "
+                f"{' '.join(str(job.get('note', '')).split())[:160]}"
+            )
         if attention:
             lines.append("Needs attention: " + "; ".join(attention))
         return "\n".join(lines)

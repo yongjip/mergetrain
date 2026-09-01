@@ -46,7 +46,7 @@ that ceremony, but deliberately gives up the forge's review surface.
 | Unit of coordination | One proposed change for human review | One committed agent branch; several jobs can form one train |
 | Human review | Inline comments, approvals, ownership rules, and discussion are first-class | No review UI; review must happen before enqueue or through another workflow |
 | Combined correctness | Plain per-PR CI can miss interactions; a native merge queue can test merge groups | The exact assembled train is gated before its atomic push |
-| Failure isolation | Usually one failing PR/check at a time; cross-PR failures depend on the forge queue | Small trains isolate linearly; larger trains bisect to an individual failure or semantic conflict |
+| Failure isolation | Usually one failing PR/check at a time; cross-PR failures depend on the forge queue | Multi-job failures use subset probes to classify an individual failure or semantic conflict consistently at every batch size |
 | Latency and CI use | Every branch normally pays PR creation, remote scheduling, and CI latency | Local gates can run once for a successful batch; failed batches require additional isolation runs |
 | Infrastructure | Hosted forge, branch rules, webhooks, and CI service | A local runner, SQLite state, Git worktrees, and configured shell commands |
 | Privacy and portability | Metadata and CI execution live in the selected platform | Queue state and gates stay local; only configured Git and verify traffic leave the machine |

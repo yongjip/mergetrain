@@ -39,6 +39,8 @@ remain unchanged, both independent pairs to pass, and only `promo+shipping` to
 fail with the expected `$85 < $90` invariant violation.
 
 The evaluator does not run or deploy a train. Use one runner after the handoff,
-inspect `status --json`, and preserve the normal boundary: a validated train is
-deployed only after approval names its exact `train_id`. A blocked branch is
+inspect `status --json`, and preserve the normal boundary: without prior
+bounded unattended approval, present one human-readable summary of the tasks,
+destination, gates, and reassembly risk. Keep the exact `train_id` as internal
+binding evidence rather than asking the user to repeat it. A blocked branch is
 fixed in its owning worktree, committed, and handed back through `retry`.

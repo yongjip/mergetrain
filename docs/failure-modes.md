@@ -28,16 +28,16 @@ Gate failures are pre-push failures. The deploy ref is not updated. In batch
 mode, mergetrain isolates the failure so unrelated jobs can still
 validate/deploy:
 
-- **Trains of up to 3 jobs** are isolated one-by-one: each merged job is
-  re-run individually through the full merge → gate → (deploy) path.
-- **Larger trains** are bisected: subsets are re-assembled and gated
-  (O(log n) gate runs instead of O(n)) until the failure is pinned to either
+- A **one-job train** is re-run through the full merge → gate → (deploy) path.
+- **Multi-job trains** are probed by re-assembling and gating subsets until the
+  failure is pinned to either
   an individually failing job (finished `failed`) or a **semantic conflict**
   — jobs that pass gates alone but fail combined. Conflicting jobs finish
   `blocked` with both partners' SHAs in the note and a machine-readable
   `conflict_with` field listing the partner job IDs. Surviving jobs are
-  re-run as a fresh train, so nothing ships without a full gate pass over
-  the exact final combination.
+  re-run as a fresh train, so nothing ships without a full gate pass over the
+  exact final combination. This classification is independent of unrelated
+  compatible jobs being added to or removed from the batch.
 
 To resolve a semantic conflict, rebase one side onto the other (or onto the
 integration branch with the other side merged), fix the joint breakage, and

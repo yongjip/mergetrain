@@ -140,7 +140,8 @@ Validated-train entries on `status` and `doctor` may include
 `current_integration_sha` and `integration_changed_since_validation`. The
 latter is `true` or `false` when the current ref and recorded validation base
 are comparable, otherwise `null`. A true value is diagnostic and does not
-change `deploy_eligible`. Doctor may add the
+change `deploy_eligible`. The observation uses the local integration ref and
+does not imply that a remote fetch occurred. Doctor may add the
 `validated_train_base_changed` recommendation.
 
 `stats` may include additive `current.window`, `current.gates`, and

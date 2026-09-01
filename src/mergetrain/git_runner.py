@@ -1052,7 +1052,7 @@ class GitRunner:
         ttl_minutes: int,
         pulse: Pulse,
     ) -> list[Job]:
-        """Isolate a failed train in O(log n) gate runs instead of O(n).
+        """Classify a failed multi-job train with subset gate probes.
 
         Bisection only ever *removes* jobs from the train: individually
         failing jobs finish as ``failed``, and combinations whose members
@@ -1714,7 +1714,7 @@ class GitRunner:
                             )
                             for job in jobs
                         ]
-                    if len(merged_jobs) <= 3:
+                    if len(merged_jobs) == 1:
                         log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
                         self._event(
                             conn,
@@ -1741,13 +1741,19 @@ class GitRunner:
                             )
                         )
                         return results
-                    log.write(f"\ntrain gate failed; bisecting {len(merged_jobs)} merged jobs\n")
+                    log.write(
+                        "\ntrain gate failed; probing "
+                        f"{len(merged_jobs)} merged jobs for semantic conflicts\n"
+                    )
                     self._event(
                         conn,
                         lease_token=lease_token,
                         phase="gating",
                         state="warning",
-                        message=f"Train gate failed; bisecting {len(merged_jobs)} jobs",
+                        message=(
+                            "Train gate failed; probing "
+                            f"{len(merged_jobs)} jobs for semantic conflicts"
+                        ),
                         detail=f"exit_code={exc.returncode}",
                     )
                     results.extend(

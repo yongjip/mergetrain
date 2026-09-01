@@ -59,7 +59,13 @@ mergetrain init --project demo            # print config to stdout
 mergetrain init --project demo --write    # write files into the repo
 ```
 
-`--write` creates `.mergetrain.yaml`, `AGENTS.mergetrain.md`, and `CLAUDE.mergetrain.md`. Existing files are not overwritten without `--force`. See [config reference](config.md).
+`--write` creates `.mergetrain.yaml`, `AGENTS.mergetrain.md`, and
+`CLAUDE.mergetrain.md`. Existing files are not overwritten without `--force`.
+The sidecars are not automatically discovered; link them from the repository's
+root `AGENTS.md` and/or `CLAUDE.md`. Refresh either sidecar later with the
+existing `mergetrain agent-contract` output instead of using `init --force`,
+which also regenerates config. See [quickstart](quickstart.md#1-initialize-config)
+and the [config reference](config.md).
 
 ## `agent-contract`
 
@@ -183,7 +189,10 @@ every queued, running, blocked, failed, reconcile-pending, validated, or
 post-push-verify-unknown job visible even when it is older than recent history.
 Each validated-train entry also reports `current_integration_sha` and nullable
 `integration_changed_since_validation`. A true value leaves `deploy_eligible`
-unchanged but warns that deploy will reassemble and rerun gates before push.
+unchanged but warns that deploy will reassemble and evaluate its configured
+gate policy before push. This is a read-only observation of the local
+integration ref; `status` does not fetch the remote. Deploy performs its own
+fetch before rebuilding, so this diagnostic never replaces deploy-time safety.
 
 ## `events`
 
@@ -556,12 +565,14 @@ mergetrain run-batch --deploy --train-id <id> --reuse-validated
 After validation, plain `--deploy` selects the only pending validated train and
 leaves newer queued jobs untouched. If more than one train is pending, deployment
 fails safely until `--train-id` selects one. The runner verifies every validated
-task HEAD, rebuilds on the current integration ref, and reruns gates before push.
+task HEAD, rebuilds on the current integration ref, and evaluates the configured
+gate policy before push. The default path reruns gates; explicitly authorized
+validated-gate reuse can reuse only an unchanged safety identity.
 Changed task HEADs block the whole validated train. During initial validation,
-conflicts still block only the offending job and a train gate failure is
-isolated per job — one-by-one for small trains, by bisection with
-semantic-conflict reporting (`conflict_with`) for trains of more than 3
-jobs. See [Design → Batch](design.md#batch--merge-train-run-batch).
+conflicts still block only the offending job. A one-job gate failure is
+reprocessed directly; multi-job failures use subset probes so individually
+failing branches and semantic conflicts (`conflict_with`) are classified the
+same way regardless of batch size. See [Design → Batch](design.md#batch--merge-train-run-batch).
 
 Validated-gate reuse is disabled by default. `--reuse-validated` authorizes the
 configured policy for that command; `deploy.reuse.enabled: true` is the persistent

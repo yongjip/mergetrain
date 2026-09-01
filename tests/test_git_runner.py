@@ -2050,6 +2050,134 @@ def add_branch(repo: Path, name: str, filename: str) -> None:
 
 
 class BisectIsolationTests(unittest.TestCase):
+    def test_semantic_conflict_classification_is_independent_of_batch_size(self) -> None:
+        for filler_count in (0, 2):
+            with self.subTest(filler_count=filler_count), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                gate = (
+                    f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                    "sys.exit(1 if (pathlib.Path('left.txt').exists() "
+                    "and pathlib.Path('right.txt').exists()) else 0)\""
+                )
+                repo, _ = make_demo_repo(root, gate_command=gate)
+                add_branch(repo, "agent/left", "left.txt")
+                add_branch(repo, "agent/right", "right.txt")
+                for index in range(filler_count):
+                    add_branch(repo, f"agent/ok{index}", f"ok{index}.txt")
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    jobs = [
+                        enqueue_job(conn, task=name, branch=f"agent/{name}")
+                        for name in (
+                            "left",
+                            "right",
+                            *(f"ok{index}" for index in range(filler_count)),
+                        )
+                    ]
+                    GitRunner(config).process_batch(conn, jobs, deploy=False)
+                    stored = {job.branch: get_job(conn, job.id) for job in jobs}
+                    ids = {job.branch: job.id for job in jobs}
+                finally:
+                    conn.close()
+
+                left, right = stored["agent/left"], stored["agent/right"]
+                self.assertEqual(left.status, "blocked")
+                self.assertEqual(right.status, "blocked")
+                self.assertEqual(left.conflict_with, str(ids["agent/right"]))
+                self.assertEqual(right.conflict_with, str(ids["agent/left"]))
+                self.assertFalse(left.train_id)
+                self.assertFalse(right.train_id)
+                for index in range(filler_count):
+                    survivor = stored[f"agent/ok{index}"]
+                    self.assertEqual(survivor.status, "validated")
+                    self.assertEqual(survivor.conflict_with, "")
+
+    def test_two_job_semantic_conflict_never_pushes_in_direct_deploy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                "sys.exit(1 if (pathlib.Path('left.txt').exists() "
+                "and pathlib.Path('right.txt').exists()) else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            add_branch(repo, "agent/left", "left.txt")
+            add_branch(repo, "agent/right", "right.txt")
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            token = ""
+            try:
+                for name in ("left", "right"):
+                    enqueue_job(
+                        conn,
+                        task=name,
+                        branch=f"agent/{name}",
+                        auto_deploy=True,
+                    )
+                claimed = claim_all_queued(
+                    conn,
+                    owner=owner,
+                    auto_only=True,
+                    deploy=True,
+                )
+                token = claimed[0].claim_token
+                runner = GitRunner(config)
+                with patch.object(runner, "push_verified_head") as push:
+                    runner.process_batch(conn, claimed, deploy=True, owner=owner)
+                stored = {job.branch: get_job(conn, job.id) for job in claimed}
+                ids = {job.branch: job.id for job in claimed}
+            finally:
+                if token:
+                    release_runner_lock(conn, owner=owner, token=token)
+                conn.close()
+
+            push.assert_not_called()
+            self.assertEqual(stored["agent/left"].status, "blocked")
+            self.assertEqual(stored["agent/right"].status, "blocked")
+            self.assertEqual(
+                stored["agent/left"].conflict_with,
+                str(ids["agent/right"]),
+            )
+            self.assertEqual(
+                stored["agent/right"].conflict_with,
+                str(ids["agent/left"]),
+            )
+
+    def test_exact_three_job_semantic_conflict_blocks_all_members(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f"{SHELL_PYTHON} -c \"import sys, pathlib; p=pathlib.Path; "
+                "sys.exit(1 if all(p(f'{name}.txt').exists() for name in "
+                "('one', 'two', 'three')) else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            for name in ("one", "two", "three"):
+                add_branch(repo, f"agent/{name}", f"{name}.txt")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [
+                    enqueue_job(conn, task=name, branch=f"agent/{name}")
+                    for name in ("one", "two", "three")
+                ]
+                GitRunner(config).process_batch(conn, jobs, deploy=False)
+                stored = {job.id: get_job(conn, job.id) for job in jobs}
+            finally:
+                conn.close()
+
+            ids = {job.id for job in jobs}
+            for job in jobs:
+                result = stored[job.id]
+                self.assertEqual(result.status, "blocked")
+                self.assertEqual(
+                    {int(value) for value in result.conflict_with.split(",")},
+                    ids - {job.id},
+                )
+                self.assertFalse(result.train_id)
+
     def test_bisect_isolates_single_bad_job_and_revalidates_the_rest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -2087,7 +2215,10 @@ class BisectIsolationTests(unittest.TestCase):
                 self.assertEqual(by_branch[branch].train_size, 4, branch)
             self.assertEqual(len(results), 5)
             messages = [event.message for event in events]
-            self.assertIn("Train gate failed; bisecting 5 jobs", messages)
+            self.assertIn(
+                "Train gate failed; probing 5 jobs for semantic conflicts",
+                messages,
+            )
             self.assertIn("Bisect isolation complete: 4 job(s) rejoin the train", messages)
             self.assertIn("Skipped gate 2/2: marker", messages)
 
@@ -2278,7 +2409,7 @@ class BisectIsolationTests(unittest.TestCase):
                 ["needs_reconcile", "queued", "queued", "queued"],
             )
 
-    def test_small_train_keeps_linear_isolation(self) -> None:
+    def test_small_train_isolates_single_failure_and_revalidates_survivors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
@@ -2303,10 +2434,14 @@ class BisectIsolationTests(unittest.TestCase):
             self.assertEqual(stored["feature/a"].status, "validated")
             self.assertEqual(stored["agent/b"].status, "validated")
             messages = [event.message for event in events]
-            self.assertIn("Train gate failed; isolating jobs", messages)
-            self.assertNotIn("Train gate failed; bisecting 3 jobs", messages)
+            self.assertIn(
+                "Train gate failed; probing 3 jobs for semantic conflicts",
+                messages,
+            )
 
-    def test_linear_isolation_stops_after_ambiguous_push(self) -> None:
+    def test_semantic_conflicts_remain_blocked_when_survivor_push_is_ambiguous(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
@@ -2349,13 +2484,16 @@ class BisectIsolationTests(unittest.TestCase):
             self.assertEqual(push.call_count, 1)
             self.assertEqual(
                 [job.status for job in stored],
-                ["needs_reconcile", "queued", "queued"],
+                ["needs_reconcile", "blocked", "blocked"],
             )
+            self.assertEqual(stored[1].conflict_with, str(stored[2].id))
+            self.assertEqual(stored[2].conflict_with, str(stored[1].id))
             self.assertEqual(
                 [job.status for job in results],
-                ["needs_reconcile", "queued", "queued"],
+                ["blocked", "blocked", "needs_reconcile"],
             )
-            self.assertTrue(all("reconcile" in job.note for job in stored))
+            self.assertIn("reconcile", stored[0].note)
+            self.assertTrue(all("semantic conflict" in job.note for job in stored[1:]))
 
 
 class PushRejectionTests(unittest.TestCase):
