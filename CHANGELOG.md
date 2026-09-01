@@ -14,8 +14,12 @@
 - State that stale-validation diagnostics observe the local integration ref
   without fetching; deploy still fetches and reassembles before any push.
 
-- Keep MCP SDK v1 pinned while recording that v2 is now stable and requires a
-  deliberate server and elicitation migration rather than a range-only bump.
+- Migrate the optional MCP adapter to SDK v2 and its `MCPServer`, `Resolve`, and
+  `Elicit` APIs. Deploy confirmation now works through the modern
+  `InputRequiredResult` retry flow, rechecks train eligibility after the human
+  response, remains compatible with older negotiated protocols, and is covered
+  by real v2 client transcripts for accept, decline, cancel, unchecked,
+  unsupported-client, and changed-state paths.
 
 - Clarify that generated agent-contract sidecars require a link from standard
   root instruction files, and document refreshing them through the existing

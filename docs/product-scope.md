@@ -227,6 +227,11 @@ concrete incorrect state that the current core cannot address.
   gate will rerun when path scopes or validated-gate reuse can change the actual
   plan. It adds no tool or authorization state and never exposes a train chooser
   to the model.
+- **MCP SDK v2 migration:** the same 12 tools and the same single human-gated
+  deploy surface now use resolver-driven elicitation. No command, flag, config
+  field, tool, or permission was added. The modern retry re-reads queue state
+  after confirmation and binds the answer to the SDK-rendered question; clients
+  without form elicitation still receive the existing terminal fallback.
 - **State, contract, recovery, and security impact:** no schema, mutation path,
   deploy eligibility, SHA binding, gate reuse, or recovery change. Deploy still
   reassembles the exact train and evaluates the configured gate policy before

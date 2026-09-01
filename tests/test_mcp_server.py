@@ -13,18 +13,22 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, suppress
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from mergetrain.cli import main
 from mergetrain.mcp_server import (
     MergetrainTools,
-    _elicit_deploy_accept,
+    _deploy_approval,
     _replace_local_path_root,
     _stop_cli_process,
 )
 
-HAS_MCP = importlib.util.find_spec("mcp") is not None
+try:
+    HAS_MCP = importlib.util.find_spec("mcp.server.mcpserver") is not None
+except ModuleNotFoundError:
+    HAS_MCP = False
 
 
 def completed(stdout: str, returncode: int = 0, stderr: str = "") -> Any:
@@ -119,40 +123,13 @@ class FakeCapabilities:
         self.elicitation = object() if elicitation else None
 
 
-class FakeClientParams:
-    def __init__(self, *, elicitation: bool) -> None:
-        self.capabilities = FakeCapabilities(elicitation=elicitation)
-
-
-class FakeSession:
-    def __init__(self, *, elicitation: bool) -> None:
-        self.client_params = FakeClientParams(elicitation=elicitation)
-
-
 class FakeContext:
-    """A client stand-in: records what it was shown and answers as told."""
+    """Minimal context for direct deploy-plan tests."""
 
     def __init__(self, *, elicitation: bool = True, action: str = "accept", confirm: bool = True):
-        self.session = FakeSession(elicitation=elicitation)
+        self.client_capabilities = FakeCapabilities(elicitation=elicitation)
         self.action = action
         self.confirm = confirm
-        self.messages: list[str] = []
-
-    async def elicit(self, message: str, schema: Any) -> Any:
-        self.messages.append(message)
-
-        class Result:
-            pass
-
-        result = Result()
-        result.action = self.action  # type: ignore[attr-defined]
-        result.data = schema(confirm=self.confirm) if self.action == "accept" else None  # type: ignore[attr-defined]
-        return result
-
-
-class ExplodingContext(FakeContext):
-    async def elicit(self, message: str, schema: Any) -> Any:
-        raise RuntimeError("transport closed")
 
 
 class ToolSurfaceTests(unittest.TestCase):
@@ -495,22 +472,33 @@ class DeployGateTests(unittest.TestCase):
             return completed(json.dumps({"ok": True, "result": "success"}))
 
         with patch.object(MergetrainTools, "_run", new=fake_run):
-            payload = asyncio.run(self.tools.deploy(ctx, train_id=train_id))
+            plan = asyncio.run(self.tools.prepare_deploy(ctx, train_id=train_id))
+            data = (
+                SimpleNamespace(confirm=ctx.confirm)
+                if ctx.action == "accept"
+                else None
+            )
+            approval = SimpleNamespace(action=ctx.action, data=data)
+            payload = asyncio.run(self.tools.deploy(plan, approval))
         return payload, calls
 
-    @unittest.skipUnless(HAS_MCP, "the confirmation schema needs the mcp extra")
     def test_accepted_confirmation_deploys_the_named_train(self) -> None:
         ctx = FakeContext(action="accept", confirm=True)
         payload, calls = self._deploy(ctx)
         self.assertEqual(payload, {"ok": True, "result": "success"})
         self.assertIn(["run-batch", "--deploy", "--train-id", "abc123", "--json"], calls)
 
-    @unittest.skipUnless(HAS_MCP, "the confirmation schema needs the mcp extra")
     def test_the_human_sees_the_operating_contract_summary(self) -> None:
         ctx = FakeContext()
-        self._deploy(ctx)
-        shown = ctx.messages[0]
-        self.assertIn("atomically push the change set below", shown)
+        payloads = [DOCTOR, STATUS]
+
+        async def fake_run(_self: Any, args: list[str]) -> Any:
+            return completed(json.dumps(payloads[0] if args[0] == "doctor" else payloads[1]))
+
+        with patch.object(MergetrainTools, "_run", new=fake_run):
+            plan = asyncio.run(self.tools.prepare_deploy(ctx))
+        shown = plan.summary
+        self.assertIn("Destination: origin", shown)
         self.assertNotIn("abc123", shown)
 
     def test_summary_uses_human_context_and_uncapped_attention(self) -> None:
@@ -592,18 +580,10 @@ class DeployGateTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
         self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
 
-    @unittest.skipUnless(HAS_MCP, "the confirmation schema needs the mcp extra")
     def test_an_accept_with_the_box_unchecked_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="accept", confirm=False))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
         self.assertIn("unchecked", payload["error"]["message"])
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
-
-    @unittest.skipUnless(HAS_MCP, "the confirmation schema needs the mcp extra")
-    def test_a_failed_dialog_is_not_consent(self) -> None:
-        payload, calls = self._deploy(ExplodingContext())
-        self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
-        self.assertIn("transport closed", payload["error"]["message"])
         self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
 
     def test_several_pending_trains_require_an_explicit_choice(self) -> None:
@@ -613,7 +593,6 @@ class DeployGateTests(unittest.TestCase):
         payload, calls = self._deploy(ctx, status=status)
         self.assertEqual(payload["error"]["code"], "train_id_required")
         self.assertEqual(payload["pending_train_ids"], ["abc123", "def456"])
-        self.assertEqual(ctx.messages, [], "no dialog before a train is chosen")
         self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
 
     def test_an_unknown_train_id_is_refused(self) -> None:
@@ -637,18 +616,142 @@ class DeployGateTests(unittest.TestCase):
 
     def test_confirmation_requires_a_pydantic_accept_shape(self) -> None:
         # Guards the helper itself: anything but action=accept plus confirm=True
-        # is a refusal, whatever the client sends.
-        if not HAS_MCP:
-            self.skipTest("pydantic ships with the mcp extra")
+        # is a refusal, whatever the resolver returns.
         for action, confirm, expected in (
             ("accept", True, True),
             ("accept", False, False),
             ("decline", True, False),
             ("cancel", True, False),
         ):
-            ctx = FakeContext(action=action, confirm=confirm)
-            accepted, _ = asyncio.run(_elicit_deploy_accept(ctx, "summary"))
+            data = SimpleNamespace(confirm=confirm) if action == "accept" else None
+            accepted, _ = _deploy_approval(SimpleNamespace(action=action, data=data))
             self.assertEqual(accepted, expected, f"{action}/{confirm}")
+
+
+@unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")
+class MCPV2DeployProtocolTests(unittest.TestCase):
+    """Exercise the real v2 client, including its InputRequiredResult retry."""
+
+    def _call(
+        self,
+        *,
+        action: str | None,
+        confirm: bool = True,
+        mode: str = "auto",
+        statuses: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], list[list[str]], list[str]]:
+        from mcp import Client
+        from mcp.types import ElicitResult
+
+        calls: list[list[str]] = []
+        messages: list[str] = []
+        status_values = iter(statuses or [STATUS])
+        current_status = STATUS
+
+        async def fake_json(_self: Any, args: list[str]) -> dict[str, Any]:
+            nonlocal current_status
+            calls.append(args)
+            if args[0] == "doctor":
+                return DOCTOR
+            if args[0] == "status":
+                try:
+                    current_status = next(status_values)
+                except StopIteration:
+                    pass
+                return current_status
+            return {"ok": True, "result": "success"}
+
+        async def confirm_deploy(_ctx: Any, params: Any) -> Any:
+            messages.append(params.message)
+            content = {"confirm": confirm} if action == "accept" else None
+            return ElicitResult(action=action, content=content)
+
+        async def scenario() -> dict[str, Any]:
+            from mergetrain.mcp_server import build_server
+
+            kwargs = {"mode": mode}
+            if action is not None:
+                kwargs["elicitation_callback"] = confirm_deploy
+            async with Client(build_server(Path("/repo")), **kwargs) as client:
+                result = await client.call_tool("mergetrain_deploy", {})
+            return result.model_dump(by_alias=True, exclude_none=True)["structuredContent"]
+
+        with patch.object(MergetrainTools, "_json", new=fake_json):
+            payload = asyncio.run(scenario())
+        return payload, calls, messages
+
+    def test_modern_client_accepts_and_deploys_exactly_once(self) -> None:
+        payload, calls, messages = self._call(action="accept")
+        self.assertEqual(payload, {"ok": True, "result": "success"})
+        self.assertEqual(
+            calls.count(["run-batch", "--deploy", "--train-id", "abc123", "--json"]),
+            1,
+        )
+        self.assertEqual(len(messages), 1)
+        self.assertIn("atomically push the change set below", messages[0])
+        self.assertNotIn("abc123", messages[0])
+
+    def test_legacy_protocol_client_still_uses_the_v2_resolver(self) -> None:
+        payload, calls, messages = self._call(action="accept", mode="legacy")
+        self.assertEqual(payload, {"ok": True, "result": "success"})
+        self.assertEqual(len(messages), 1)
+        self.assertTrue(any(args[:2] == ["run-batch", "--deploy"] for args in calls))
+
+    def test_decline_cancel_and_unchecked_accept_never_deploy(self) -> None:
+        for action, confirm in (("decline", True), ("cancel", True), ("accept", False)):
+            with self.subTest(action=action, confirm=confirm):
+                payload, calls, _ = self._call(action=action, confirm=confirm)
+                self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
+                self.assertTrue(
+                    all(args[:2] != ["run-batch", "--deploy"] for args in calls)
+                )
+
+    def test_client_without_form_elicitation_gets_terminal_fallback(self) -> None:
+        payload, calls, messages = self._call(action=None)
+        self.assertEqual(payload["error"]["code"], "confirmation_required")
+        self.assertIn("run-batch --deploy --train-id abc123", payload["command"])
+        self.assertEqual(messages, [])
+        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+
+    def test_state_change_after_confirmation_is_rechecked_and_refused(self) -> None:
+        no_train = dict(STATUS, validated_trains=[])
+        payload, calls, messages = self._call(
+            action="accept", statuses=[STATUS, no_train]
+        )
+        self.assertEqual(payload["error"]["code"], "no_validated_train")
+        self.assertEqual(len(messages), 1)
+        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+
+    def test_client_callback_error_is_fail_closed(self) -> None:
+        from mcp import Client
+        from mcp.shared.exceptions import MCPError
+        from mcp.types import ErrorData
+
+        from mergetrain.mcp_server import build_server
+
+        calls: list[list[str]] = []
+
+        async def fake_json(_self: Any, args: list[str]) -> dict[str, Any]:
+            calls.append(args)
+            if args[0] == "doctor":
+                return DOCTOR
+            if args[0] == "status":
+                return STATUS
+            return {"ok": True, "result": "must not happen"}
+
+        async def broken_callback(_ctx: Any, _params: Any) -> ErrorData:
+            return ErrorData(code=-32603, message="dialog host failed")
+
+        async def scenario() -> None:
+            async with Client(
+                build_server(Path("/repo")), elicitation_callback=broken_callback
+            ) as client:
+                with self.assertRaises(MCPError):
+                    await client.call_tool("mergetrain_deploy", {})
+
+        with patch.object(MergetrainTools, "_json", new=fake_json):
+            asyncio.run(scenario())
+        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
 
 
 @unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")
@@ -676,11 +779,11 @@ class ServerRegistrationTests(unittest.TestCase):
             },
         )
         for name in ("mergetrain_status", "mergetrain_doctor", "mergetrain_gc_preview"):
-            self.assertTrue(tools[name].annotations.readOnlyHint, name)
+            self.assertTrue(tools[name].annotations.read_only_hint, name)
         # validate runs gate commands and moves job status, so claiming
         # read-only would misinform the client about its side effects.
-        self.assertFalse(tools["mergetrain_validate"].annotations.readOnlyHint)
-        self.assertTrue(tools["mergetrain_deploy"].annotations.destructiveHint)
+        self.assertFalse(tools["mergetrain_validate"].annotations.read_only_hint)
+        self.assertTrue(tools["mergetrain_deploy"].annotations.destructive_hint)
 
     def test_the_deploy_context_is_injected_not_a_model_argument(self) -> None:
         from mergetrain.mcp_server import build_server
@@ -689,8 +792,8 @@ class ServerRegistrationTests(unittest.TestCase):
         deploy = next(
             tool for tool in asyncio.run(server.list_tools()) if tool.name == "mergetrain_deploy"
         )
-        self.assertNotIn("ctx", deploy.inputSchema.get("properties", {}))
-        self.assertEqual(set(deploy.inputSchema.get("properties", {})), {"train_id"})
+        self.assertNotIn("ctx", deploy.input_schema.get("properties", {}))
+        self.assertEqual(set(deploy.input_schema.get("properties", {})), {"train_id"})
 
 
 class SubcommandTests(unittest.TestCase):

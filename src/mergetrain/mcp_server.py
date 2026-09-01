@@ -27,15 +27,15 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from .errors import redact_secrets
 
 try:
-    # A real name in module globals, because FastMCP resolves the deploy tool's
+    # A real name in module globals, because MCPServer resolves the deploy tool's
     # annotations to decide what to inject. The fallback keeps the module
     # importable without the extra so the tool logic stays testable.
-    from mcp.server.fastmcp import Context
+    from mcp.server.mcpserver import Context
 except ImportError:  # pragma: no cover - depends on whether the extra is present
     Context = Any  # type: ignore[assignment, misc]
 
@@ -62,6 +62,24 @@ INSTALL_HINT = (
 _CLI_TIMEOUT_SECONDS = 3600
 _CLI_TERMINATE_GRACE_SECONDS = 5.0
 _LOG_TAIL_MAX_LINES = 500
+
+
+@dataclass(frozen=True, slots=True)
+class _DeployPlan:
+    """One current deploy decision, resolved before any confirmation is shown."""
+
+    refusal: dict[str, Any] | None = None
+    train_id: str = ""
+    summary: str = ""
+    command: str = ""
+    can_elicit: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _ConfirmationSkipped:
+    """Resolver value used when there is no question to send to the client."""
+
+    reason: str
 
 
 def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -541,47 +559,59 @@ class MergetrainTools:
             )
         return trains[0], None
 
-    async def deploy(self, ctx: Context, train_id: str = "") -> dict[str, Any]:
-        """Deploy one validated train after a human accepts it.
+    async def prepare_deploy(self, ctx: Context, train_id: str = "") -> _DeployPlan:
+        """Resolve the current train and the human-facing confirmation summary.
 
         There is no ``confirm`` parameter, on purpose: a model-supplied argument
         would be the model confirming its own deploy. The accept has to come
-        through the client's elicitation dialog, and when the client cannot show
-        one this refuses and hands the human a terminal command instead of
-        quietly shipping.
+        through MCP's resolver-driven elicitation flow.
         """
 
         doctor = await self.doctor()
         status = await self.status(limit=50)
         for payload in (doctor, status):
             if payload.get("ok") is False:
-                return payload
+                return _DeployPlan(refusal=payload)
         train, refusal = self.select_train(status, train_id)
         if refusal is not None:
-            return refusal
+            return _DeployPlan(refusal=refusal)
         assert train is not None
         chosen = str(train.get("train_id"))
         summary = self.deploy_summary(doctor, status, train)
         command = f"mergetrain --repo {self.repo} run-batch --deploy --train-id {chosen}"
+        return _DeployPlan(
+            train_id=chosen,
+            summary=summary,
+            command=command,
+            can_elicit=_client_can_elicit(ctx),
+        )
 
-        if not _client_can_elicit(ctx):
+    async def deploy(self, plan: _DeployPlan, approval: Any) -> dict[str, Any]:
+        """Deploy a prepared train only after the resolver returns explicit consent."""
+
+        if plan.refusal is not None:
+            return plan.refusal
+
+        if not plan.can_elicit:
             return _error(
                 "confirmation_required",
                 "this client cannot show a confirmation dialog, so the deploy "
                 "was not started; run it in a terminal after reviewing the "
-                f"summary:\n{summary}\n\n{command}",
-                train_id=chosen,
-                command=command,
+                f"summary:\n{plan.summary}\n\n{plan.command}",
+                train_id=plan.train_id,
+                command=plan.command,
             )
-        accepted, reason = await _elicit_deploy_accept(ctx, summary)
+        accepted, reason = _deploy_approval(approval)
         if not accepted:
             return _error(
                 "deploy_not_confirmed",
                 f"the deploy was not confirmed ({reason}); nothing was pushed",
-                train_id=chosen,
-                command=command,
+                train_id=plan.train_id,
+                command=plan.command,
             )
-        return await self._json(["run-batch", "--deploy", "--train-id", chosen, "--json"])
+        return await self._json(
+            ["run-batch", "--deploy", "--train-id", plan.train_id, "--json"]
+        )
 
 
 def _client_can_elicit(ctx: Any) -> bool:
@@ -596,26 +626,22 @@ def _client_can_elicit(ctx: Any) -> bool:
     """
 
     try:
-        params = ctx.session.client_params
-        return params is not None and params.capabilities.elicitation is not None
+        capabilities = ctx.client_capabilities
     except Exception:
         return False
+    elicitation = getattr(capabilities, "elicitation", None)
+    if elicitation is None:
+        return False
+    # Before elicitation modes existed, an empty capability meant form support.
+    # In v2, form support is explicit and url-only clients cannot render this gate.
+    return getattr(elicitation, "form", None) is not None or getattr(
+        elicitation, "url", None
+    ) is None
 
 
-async def _elicit_deploy_accept(ctx: Any, summary: str) -> tuple[bool, str]:
-    """Show the summary and require an explicit accept plus an explicit yes."""
+def _deploy_approval(result: Any) -> tuple[bool, str]:
+    """Require an accepted resolver outcome whose checkbox is explicitly true."""
 
-    if _DeployConfirmation is None:  # pragma: no cover - needs the extra missing
-        return False, "the confirmation schema is unavailable"
-
-    message = (
-        "mergetrain will atomically push the change set below. "
-        "This ships code.\n\n" + summary
-    )
-    try:
-        result = await ctx.elicit(message=message, schema=_DeployConfirmation)
-    except Exception as exc:  # a transport or client-side failure is not consent
-        return False, f"the confirmation dialog failed: {exc}"
     action = getattr(result, "action", "")
     if action != "accept":
         outcome = {"decline": "declined", "cancel": "cancelled"}.get(
@@ -623,6 +649,8 @@ async def _elicit_deploy_accept(ctx: Any, summary: str) -> tuple[bool, str]:
         )
         return False, f"the human {outcome}"
     data = getattr(result, "data", None)
+    if isinstance(data, _ConfirmationSkipped):
+        return False, data.reason
     if data is None or not getattr(data, "confirm", False):
         return False, "the confirmation was left unchecked"
     return True, "accepted"
@@ -631,11 +659,13 @@ async def _elicit_deploy_accept(ctx: Any, summary: str) -> tuple[bool, str]:
 def build_server(repo: Path) -> Any:
     """Register the tool surface, annotated with what each tool actually does."""
 
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import MCPServer
+    from mcp.server.elicitation import ElicitationResult
+    from mcp.server.mcpserver import Elicit, Resolve
     from mcp.types import ToolAnnotations
 
     tools = MergetrainTools(repo=repo)
-    server = FastMCP(
+    server = MCPServer(
         name="mergetrain",
         instructions=(
             "mergetrain is a local merge-and-push queue for coding-agent "
@@ -649,7 +679,41 @@ def build_server(repo: Path) -> Any:
         ),
     )
 
-    read_only = ToolAnnotations(readOnlyHint=True, destructiveHint=False)
+    async def resolve_deploy_plan(train_id: str, ctx: Context) -> _DeployPlan:
+        return await tools.prepare_deploy(ctx, train_id)
+
+    async def resolve_deploy_confirmation(plan: _DeployPlan) -> Any:
+        if plan.refusal is not None:
+            return _ConfirmationSkipped("the deploy request was refused before confirmation")
+        if not plan.can_elicit:
+            return _ConfirmationSkipped("the client cannot show a confirmation dialog")
+        assert _DeployConfirmation is not None
+        message = (
+            "mergetrain will atomically push the change set below. "
+            "This ships code.\n\n" + plan.summary
+        )
+        return Elicit(message=message, schema=_DeployConfirmation)
+
+    # Resolver parameters are deliberately absent from the tool schema. Setting
+    # concrete annotations here keeps the optional SDK import out of module load
+    # while still giving MCPServer the complete dependency graph at registration.
+    plan_dependency = Annotated[_DeployPlan, Resolve(resolve_deploy_plan)]
+    resolve_deploy_confirmation.__annotations__["plan"] = plan_dependency
+    resolve_deploy_confirmation.__annotations__["return"] = (
+        Elicit[_DeployConfirmation] | _ConfirmationSkipped
+    )
+
+    async def deploy_tool(plan: Any, approval: Any, train_id: str = "") -> dict[str, Any]:
+        return await tools.deploy(plan, approval)
+
+    deploy_tool.__annotations__["plan"] = plan_dependency
+    deploy_tool.__annotations__["approval"] = Annotated[
+        ElicitationResult[Any], Resolve(resolve_deploy_confirmation)
+    ]
+    deploy_tool.__annotations__["train_id"] = str
+    deploy_tool.__annotations__["return"] = dict[str, Any]
+
+    read_only = ToolAnnotations(read_only_hint=True, destructive_hint=False)
     for fn, name, hints in (
         (tools.status, "mergetrain_status", read_only),
         (tools.doctor, "mergetrain_doctor", read_only),
@@ -664,17 +728,29 @@ def build_server(repo: Path) -> Any:
         (
             tools.validate,
             "mergetrain_validate",
-            ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
+            ToolAnnotations(
+                read_only_hint=False,
+                destructive_hint=False,
+                idempotent_hint=False,
+            ),
         ),
         (
             tools.enqueue,
             "mergetrain_enqueue",
-            ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
+            ToolAnnotations(
+                read_only_hint=False,
+                destructive_hint=False,
+                idempotent_hint=False,
+            ),
         ),
         (
-            tools.deploy,
+            deploy_tool,
             "mergetrain_deploy",
-            ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False),
+            ToolAnnotations(
+                read_only_hint=False,
+                destructive_hint=True,
+                idempotent_hint=False,
+            ),
         ),
     ):
         server.add_tool(fn, name=name, annotations=hints)

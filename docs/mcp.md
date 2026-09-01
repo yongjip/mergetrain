@@ -104,6 +104,14 @@ argument would be the model confirming its own deploy. Instead the server
 4. asks the client to show it and requires an explicit accept **and** a checked
    confirmation before running the deploy.
 
+The server uses MCP SDK v2's resolver-driven elicitation. On the current
+protocol the SDK returns the confirmation as an `InputRequiredResult`, binds
+the response to that exact rendered question, and then retries the tool call.
+mergetrain re-reads `doctor` and `status` on that retry, so a train that stopped
+being deploy-eligible while the dialog was open is refused instead of shipping
+from the stale first-round snapshot. Older negotiated MCP protocols use the
+same resolver and retain their server-to-client elicitation flow.
+
 Anything short of that is a refusal, and nothing is pushed:
 
 | Situation | `error.code` |
@@ -111,7 +119,7 @@ Anything short of that is a refusal, and nothing is pushed:
 | Client declared no elicitation support | `confirmation_required` (with the terminal command to run) |
 | Human declined or cancelled | `deploy_not_confirmed` |
 | Accepted with the box unchecked | `deploy_not_confirmed` |
-| The dialog itself failed | `deploy_not_confirmed` |
+| The client callback or MCP exchange failed | MCP call error; deploy is not started |
 | Several validated trains pending | `train_id_required` |
 | Named train absent or not deploy-eligible | `train_not_found` / `no_validated_train` |
 
