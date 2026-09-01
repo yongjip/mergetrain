@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a fail-closed Antigravity CLI adapter to the repository-local agent
+  adoption harness and record its first fixed `current_init` operational cell.
+  All three fully instrumented trials ended in provider `high traffic` errors,
+  so the evidence reports availability failure without claiming measured
+  discovery or protocol behavior.
+
 - Remove the redundant configured copy of the built-in worktree diff check.
   Runtime gate selection now ignores only that exact legacy duplicate, while
   `doctor` reports it and custom diff gates remain untouched.

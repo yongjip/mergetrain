@@ -8,6 +8,8 @@ Diagnostic pilot notes live under [`pilots/`](pilots/) and explicitly separate
 scored trials from launcher or instrumentation failures. The current repeated
 Codex result after the 1.4.2 corrections is recorded in the
 [`2026-08-29` note](pilots/2026-08-29-codex-142-current-init-repetitions.md).
+The first Antigravity CLI operational cell is recorded separately in the
+[`2026-09-01` note](pilots/2026-09-01-agy-current-init-repetitions.md).
 
 The current milestone supports the `current_init` condition and one Tier-1 task.
 It creates a disposable Git repository, local bare remote, task worktree, hidden
@@ -85,6 +87,53 @@ and starts a fresh ephemeral Codex session with user config ignored. Use
 fields are changed too. Other agent products need their own equally explicit
 benchmark adapters; they do not belong in mergetrain core.
 
+Antigravity CLI also needs a product-specific observation adapter. Authenticate
+interactively once, then use a fresh project and the exact model and permission
+profile recorded for the trial:
+
+```sh
+python -m benchmarks.agent_adoption.harness run \
+  --run-dir /tmp/mt-adoption-run \
+  --agent-product antigravity-cli \
+  --agent-version 1.1.22 \
+  --model gemini-3.1-pro-high \
+  --reasoning-setting high \
+  --permission-profile 'fresh-project+print; tool-permission=proceed-in-sandbox; mode=accept-edits; sandbox; add-dir=task+control; allow=scoped-unsandboxed; slash-commands=disabled; permission-bypass=off' \
+  -- python benchmarks/agent_adoption/agy_launcher.py \
+    /tmp/mt-adoption-run/prompt.txt \
+    /tmp/mt-adoption-run/control \
+    --agy /path/to/agy \
+    --model gemini-3.1-pro-high \
+    --effort high
+```
+
+The adapter starts a new headless project, emits `stream-json`, disables slash
+commands, enables the terminal sandbox, explicitly adds both the task and
+control repositories to the workspace, and never uses
+`--dangerously-skip-permissions`. It also restores tracing-wrapper precedence
+through a controlled `ZDOTDIR` on macOS.
+
+Headless Ask decisions are soft-denied, while Antigravity CLI `1.1.22` on the
+measured macOS host could not read a linked-worktree current directory from its
+native terminal sandbox. The measured fallback therefore used only these
+temporary global Allow rules:
+
+```text
+unsandboxed(git)
+unsandboxed(mergetrain)
+unsandboxed(python3)
+unsandboxed(pytest)
+unsandboxed(ls)
+unsandboxed(PYTHONPATH=.* python3)
+```
+
+These rules are stored in the user's global Antigravity settings, not the
+disposable run. Remove them immediately after the benchmark. Do not broaden
+them to `unsandboxed(*)`; the official
+[headless](https://antigravity.google/docs/cli/headless/) and
+[permissions](https://antigravity.google/docs/cli/permissions/) documentation
+recommends scoped rules instead of the all-tools bypass.
+
 The `current_init` condition intentionally preserves the released `init --write`
 output. If an agent enqueues into task-worktree-local state instead of the
 control repository's shared queue, the grader records `wrong_queue`; the harness
@@ -102,6 +151,7 @@ RUN/
   grader/check_task.py     # hidden deterministic task check
   bin/                     # platform-native tracing wrappers used only by `run`
   codex-zdotdir/           # adapter-owned login-shell profile, when Codex is used
+  agy-zdotdir/             # adapter-owned login-shell profile, when AGY is used
   artifacts/
     trace.jsonl
     remote-updates.jsonl

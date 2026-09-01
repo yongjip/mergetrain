@@ -19,14 +19,14 @@ command.
 
 ## Current pilot status
 
-The supported evidence matrix as of 2026-08-29 is intentionally narrow:
+The supported evidence matrix as of 2026-09-01 is intentionally narrow:
 
 | Agent path | Valid `current_init` trials | Status |
 | --- | ---: | --- |
 | Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max`; mergetrain `1.4.2` | 3 | Safe handoff `3/3`, with shared exact-SHA enqueue and no unauthorized mutation; see the [post-correction repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-142-current-init-repetitions.md) |
 | Historical correction baseline: the same Codex cell with mergetrain `1.4.1` | 3 | Safe handoff `0/3`; discovery, state read, and task checks `3/3`; see the [pre-correction repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md) |
 | Claude Code | 0 | Unavailable in the test environment because no license was available; excluded, not failed |
-| Antigravity CLI `1.1.22` | 0 | Installed, but an interactive Google sign-in is still required before an agent turn can run; excluded, not failed |
+| Antigravity CLI `1.1.22`, `gemini-3.1-pro-high`, effort `high`; mergetrain `2.0.0` | 3 | Operational completion `0/3` because the provider returned `high traffic` in every fixed trial; safe handoff `0/3`, but no requested turn completed successfully, so discovery and protocol behavior are not estimable; see the [AGY operational note](../benchmarks/agent_adoption/pilots/2026-09-01-agy-current-init-repetitions.md) |
 | Legacy Gemini CLI `0.46.0` with an individual Google account | 0 | Individual free/Pro/Ultra service ended on 2026-06-18; excluded, not failed |
 
 The 1.4.1 Codex repetitions consistently found mergetrain, but all three used a
@@ -37,12 +37,21 @@ queue and stopped at enqueue. This is useful regression evidence, not a general
 adoption-rate claim: both corrections changed together, the sample contains one
 task family, and the 3/3 Wilson interval remains approximately `43.9%–100%`.
 
+The Antigravity cell is an operational availability result, not evidence that
+the model rejects or misses the mergetrain protocol. All three command/ref
+boundaries were complete, but AGY returned a provider `ERROR` before a model
+successfully completed the requested turn: twice before any tool use and once
+after producing a correct task change. The benchmark contract retains those
+fixed trials instead of silently retrying for favorable samples. Conditional
+discovery and protocol rates are therefore unmeasured for this cell; a later
+dated repetition must be reported alongside, not substituted for, this result.
+
 The next scored work should broaden `current_init` across held-out Tier-1 tasks
 and prompts, then cover Tier-2 boundaries and negative controls. The result does
 not justify a new command, flag, config field, Skill, MCP tool, or
-provider-specific runtime behavior. Unavailable provider paths remain an
-availability ledger until their supported client and authentication prerequisite
-exist.
+provider-specific runtime behavior. Unavailable or provider-failed paths remain
+an availability ledger until a supported client, authentication prerequisite,
+and completed model turn exist.
 
 ## Scope and non-goals
 
