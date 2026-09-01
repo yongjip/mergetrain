@@ -7,13 +7,13 @@
     "url": "https://github.com/yongjip/mergetrain",
     "source": "github"
   },
-  "version": "2.0.0",
+  "version": "2.1.0",
   "websiteUrl": "https://github.com/yongjip/mergetrain",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mergetrain",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "packageArguments": [
         {
           "type": "positional",

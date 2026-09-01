@@ -229,7 +229,7 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
 
 ## Status
 
-The package version is `v2.0.0`. Machine-contract major 2 is additive-only:
+The package version is `v2.1.0`. Machine-contract major 2 is additive-only:
 existing JSON keys are not removed or renamed without another contract-version
 change.
 Issues and operating reports are welcome on

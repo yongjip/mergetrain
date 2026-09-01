@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.1.0 - 2026-09-02
+
 - Make MCP deploy confirmation describe only the selected change set in human
   terms: task intent, destinations, gates, validation evidence, stale-base
   reassembly risk, and the uncapped attention set. Keep opaque train IDs
