@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 - 2026-09-02
 
 - Classify semantic conflicts consistently at every multi-job batch size.
   Two or three individually green jobs that fail only in combination are now
