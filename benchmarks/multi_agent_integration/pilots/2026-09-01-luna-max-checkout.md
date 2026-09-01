@@ -58,7 +58,22 @@ and a semantic cross-branch failure while retaining an independent survivor.
 It does not measure external discoverability, other operating systems, team
 permissions, or real-hosting credentials.
 
-The exact validated order-reference train remains intentionally undeployed in
-this record until separate approval names train
-`47dd47d8f4044de1ac847f334992dbc7`. The follow-on runner result for jobs 4 and 5
-must be appended after that boundary is crossed.
+## End-to-end runner result
+
+After the scoped deployment approval, the runner completed the local-only
+sequence without another state owner:
+
+1. order-reference train `47dd47d8f4044de1ac847f334992dbc7`
+   deployed successfully;
+2. recovery jobs 4 and 5 each validated independently against that new base;
+3. FIFO promo train `74134df0973d47b18e91c7f510d99cb7` deployed
+   successfully; and
+4. shipping train `3e5f00c39410493b9296a69603bbb158` was reassembled
+   against the now-current main and reran all gates before push.
+
+The final shipping gate ran nine tests and failed on the intended invariant:
+the combined checkout total was `$85.00`, below the required `$90.00` floor.
+The job ended `failed`, its push remained `not_run`, and the remote retained the
+safe order-reference-plus-promotion state. This is the expected terminal result
+for the contradictory task pair; repairing it would require a product decision,
+not an integration guess.
