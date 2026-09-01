@@ -38,8 +38,15 @@ DOCTOR = {
     "contract_version": 1,
     "health": True,
     "next_action": "deploy_validated_train_when_approved",
+    "git": {"remote_url": "git@github.com:example/checkout.git"},
     "config": {
-        "git": {"integration_ref": "origin/main", "push_refs": ["main"]},
+        "git": {
+            "remote": "origin",
+            "integration_ref": "origin/main",
+            "push_refs": ["main"],
+        },
+        "gates": [{"name": "ruff"}, {"name": "tests"}],
+        "deploy": {"verify": [{"name": "github-ci"}]},
     },
 }
 
@@ -51,6 +58,11 @@ TRAIN = {
         {"job_id": 7, "branch": "agent/one", "validated_head_sha": "a" * 40},
         {"job_id": 8, "branch": "agent/two", "validated_head_sha": "b" * 40},
     ],
+    "validated_at": "2026-09-02T00:00:00Z",
+    "validation_base_sha": "c" * 40,
+    "validation_sha": "d" * 40,
+    "current_integration_sha": "e" * 40,
+    "integration_changed_since_validation": True,
     "deploy_eligible": True,
 }
 
@@ -60,8 +72,43 @@ STATUS = {
     "next_action": "deploy_validated_train_when_approved",
     "validated_trains": [TRAIN],
     "jobs": [
-        {"id": 7, "branch": "agent/one", "status": "validated", "note": ""},
-        {"id": 9, "branch": "agent/three", "status": "blocked", "note": "gate tests failed"},
+        {
+            "id": 7,
+            "task": "Add checkout guard",
+            "branch": "agent/one",
+            "status": "validated",
+            "note": "",
+        },
+        {
+            "id": 8,
+            "task": "Handle payment retry",
+            "branch": "agent/two",
+            "status": "validated",
+            "note": "",
+        },
+    ],
+    "attention_jobs": [
+        {
+            "id": 7,
+            "task": "Add checkout guard",
+            "branch": "agent/one",
+            "status": "validated",
+            "note": "",
+        },
+        {
+            "id": 8,
+            "task": "Handle payment retry",
+            "branch": "agent/two",
+            "status": "validated",
+            "note": "",
+        },
+        {
+            "id": 9,
+            "task": "Repair refund calculation",
+            "branch": "agent/three",
+            "status": "blocked",
+            "note": "gate tests failed",
+        },
     ],
 }
 
@@ -463,15 +510,44 @@ class DeployGateTests(unittest.TestCase):
         ctx = FakeContext()
         self._deploy(ctx)
         shown = ctx.messages[0]
+        self.assertIn("atomically push the change set below", shown)
+        self.assertNotIn("abc123", shown)
+
+    def test_summary_uses_human_context_and_uncapped_attention(self) -> None:
+        summary = self.tools.deploy_summary(DOCTOR, STATUS, TRAIN)
         for expected in (
-            "abc123",
-            "#7 agent/one",
-            "#8 agent/two",
-            "origin/main",
+            "#7 Add checkout guard: agent/one",
+            "#8 Handle payment retry: agent/two",
+            "Destination: origin (git@github.com:example/checkout.git) atomically updates main",
+            "refs/mergetrain/deploys/<deploy-sha>",
+            "Pre-push gates rerun: diff-check, ruff, tests",
+            "Post-push verification: github-ci",
             "deploy_validated_train_when_approved",
-            "agent/three blocked",
+            "integration advanced since validation",
+            "Repair refund calculation — agent/three blocked",
         ):
-            self.assertIn(expected, shown)
+            self.assertIn(expected, summary)
+        self.assertNotIn("abc123", summary)
+
+    def test_summary_describes_only_the_selected_train(self) -> None:
+        other = dict(
+            TRAIN,
+            train_id="def456",
+            train_size=1,
+            branches=[
+                {
+                    "job_id": 10,
+                    "branch": "agent/not-selected",
+                    "validated_head_sha": "f" * 40,
+                }
+            ],
+        )
+        status = dict(STATUS, validated_trains=[TRAIN, other])
+        summary = self.tools.deploy_summary(DOCTOR, status, TRAIN)
+        self.assertIn("agent/one", summary)
+        self.assertNotIn("agent/not-selected", summary)
+        self.assertNotIn("abc123", summary)
+        self.assertNotIn("def456", summary)
 
     def test_a_client_without_elicitation_is_refused_with_instructions(self) -> None:
         ctx = FakeContext(elicitation=False)
@@ -549,7 +625,7 @@ class DeployGateTests(unittest.TestCase):
             ("cancel", True, False),
         ):
             ctx = FakeContext(action=action, confirm=confirm)
-            accepted, _ = asyncio.run(_elicit_deploy_accept(ctx, "summary", "abc123"))
+            accepted, _ = asyncio.run(_elicit_deploy_accept(ctx, "summary"))
             self.assertEqual(accepted, expected, f"{action}/{confirm}")
 
 

@@ -96,9 +96,11 @@ argument would be the model confirming its own deploy. Instead the server
 1. re-reads `doctor` and `status`,
 2. selects the validated train — refusing with `train_id_required` when several
    are pending, because choosing for the human would ship code nobody picked,
-3. builds the summary the operating contract requires (train id, member jobs,
-   branches, recorded HEADs, integration ref, `next_action`, anything blocked or
-   failed),
+3. builds a human-readable summary of only the selected change set: task intent,
+   member branches and recorded HEADs, destination refs, pre-push gates,
+   post-push verification, validation evidence, stale-base reassembly risk,
+   `next_action`, and every blocked, failed, or reconcile-pending job from the
+   uncapped `attention_jobs` view; the opaque train ID remains internal,
 4. asks the client to show it and requires an explicit accept **and** a checked
    confirmation before running the deploy.
 

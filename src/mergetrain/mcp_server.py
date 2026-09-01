@@ -406,38 +406,84 @@ class MergetrainTools:
 
     # --- ships code, human-gated -----------------------------------------
 
-    def deploy_summary(self, doctor: dict[str, Any], status: dict[str, Any]) -> str:
+    def deploy_summary(
+        self,
+        doctor: dict[str, Any],
+        status: dict[str, Any],
+        train: dict[str, Any],
+    ) -> str:
         """Build the deploy summary the operating contract requires.
 
-        Same content CLAUDE.md asks an agent to post before deploying: the
-        train, its jobs and recorded HEADs, the integration ref, the advisory
-        next action, and anything blocked or failed.
+        Describe only the train selected for this deploy. Exact train identity
+        remains internal while the human sees task intent, destinations, gate
+        evidence, reassembly risk, and every action-required job.
         """
 
         config = doctor.get("config") or {}
         git = config.get("git") or {}
+        remote = git.get("remote") or "origin"
+        remote_url = (doctor.get("git") or {}).get("remote_url")
+        remote_label = f"{remote} ({remote_url})" if remote_url else str(remote)
+        push_refs = [str(ref) for ref in git.get("push_refs") or []]
+        gates = [
+            str(gate.get("name"))
+            for gate in config.get("gates") or []
+            if gate.get("name")
+        ]
+        verify_hooks = [
+            str(hook.get("name"))
+            for hook in (config.get("deploy") or {}).get("verify") or []
+            if hook.get("name")
+        ]
+        jobs_by_id: dict[str, dict[str, Any]] = {}
+        for key in ("jobs", "attention_jobs"):
+            for job in status.get(key) or []:
+                jobs_by_id[str(job.get("id"))] = job
         lines = [
             f"Repository: {self.repo}",
-            f"Integration ref: {git.get('integration_ref', 'unknown')} "
-            f"(pushes {', '.join(git.get('push_refs') or []) or 'unknown'})",
+            f"Destination: {remote_label} atomically updates "
+            f"{', '.join(push_refs) or 'unknown refs'} and records "
+            "refs/mergetrain/deploys/<deploy-sha>",
+            f"Integration source: {git.get('integration_ref', 'unknown')}",
+            "Pre-push gates rerun: "
+            + ", ".join(dict.fromkeys(["diff-check", *gates])),
+            "Post-push verification: " + (", ".join(verify_hooks) or "none configured"),
             f"doctor next_action: {doctor.get('next_action', 'unknown')}",
         ]
-        trains = status.get("validated_trains") or []
-        for train in trains:
-            members = ", ".join(
-                f"#{member.get('job_id')} {member.get('branch')} "
-                f"@{str(member.get('validated_head_sha') or '')[:12]}"
-                for member in train.get("branches") or []
-            )
+        lines.append(f"Selected change set ({train.get('train_size')} job(s)):")
+        for member in train.get("branches") or []:
+            job = jobs_by_id.get(str(member.get("job_id"))) or {}
+            task = " ".join(str(job.get("task") or "task not recorded").split())
             lines.append(
-                f"Train {train.get('train_id')} "
-                f"(size {train.get('train_size')}, "
-                f"deploy_eligible={train.get('deploy_eligible')}): {members}"
+                f"- #{member.get('job_id')} {task}: {member.get('branch')} "
+                f"@{str(member.get('validated_head_sha') or '')[:12]}"
             )
+        lines.append(
+            "Recorded validation: "
+            f"{train.get('validated_at') or 'time unavailable'}; integration base "
+            f"{str(train.get('validation_base_sha') or 'unavailable')[:12]}; "
+            f"validated commit {str(train.get('validation_sha') or 'unavailable')[:12]}"
+        )
+        current_sha = str(train.get("current_integration_sha") or "")
+        if train.get("integration_changed_since_validation") is True:
+            lines.append(
+                "Reassembly risk: integration advanced since validation to "
+                f"{current_sha[:12] or 'an unknown commit'}; deploy will reassemble "
+                "the selected change set and rerun all pre-push gates before push"
+            )
+        else:
+            lines.append(
+                "Reassembly: deploy will rebuild the selected change set and rerun "
+                "all pre-push gates before push"
+            )
+        attention_source = status.get("attention_jobs")
+        if attention_source is None:
+            attention_source = status.get("jobs") or []
         attention = [
-            f"#{job.get('id')} {job.get('branch')} {job.get('status')}: "
+            f"#{job.get('id')} {' '.join(str(job.get('task') or 'task not recorded').split())} "
+            f"— {job.get('branch')} {job.get('status')}: "
             f"{' '.join(str(job.get('note', '')).split())[:160]}"
-            for job in status.get("jobs") or []
+            for job in attention_source
             if job.get("status") in {"blocked", "failed", "needs_reconcile"}
         ]
         if attention:
@@ -502,7 +548,7 @@ class MergetrainTools:
             return refusal
         assert train is not None
         chosen = str(train.get("train_id"))
-        summary = self.deploy_summary(doctor, status)
+        summary = self.deploy_summary(doctor, status, train)
         command = f"mergetrain --repo {self.repo} run-batch --deploy --train-id {chosen}"
 
         if not _client_can_elicit(ctx):
@@ -514,7 +560,7 @@ class MergetrainTools:
                 train_id=chosen,
                 command=command,
             )
-        accepted, reason = await _elicit_deploy_accept(ctx, summary, chosen)
+        accepted, reason = await _elicit_deploy_accept(ctx, summary)
         if not accepted:
             return _error(
                 "deploy_not_confirmed",
@@ -543,16 +589,14 @@ def _client_can_elicit(ctx: Any) -> bool:
         return False
 
 
-async def _elicit_deploy_accept(
-    ctx: Any, summary: str, train_id: str
-) -> tuple[bool, str]:
+async def _elicit_deploy_accept(ctx: Any, summary: str) -> tuple[bool, str]:
     """Show the summary and require an explicit accept plus an explicit yes."""
 
     if _DeployConfirmation is None:  # pragma: no cover - needs the extra missing
         return False, "the confirmation schema is unavailable"
 
     message = (
-        f"mergetrain will push validated train {train_id}. "
+        "mergetrain will atomically push the change set below. "
         "This ships code.\n\n" + summary
     )
     try:

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make MCP deploy confirmation describe only the selected change set in human
+  terms: task intent, destinations, gates, validation evidence, stale-base
+  reassembly risk, and the uncapped attention set. Keep opaque train IDs
+  internal to selection and execution.
+
 - Treat an explicit bounded request to QA, deploy, verify, and finish as
   unattended approval for that unchanged task scope and destination. Keep exact
   train IDs internal, require human-readable one-shot deploy summaries, and

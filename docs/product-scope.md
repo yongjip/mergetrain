@@ -201,6 +201,11 @@ concrete incorrect state that the current core cannot address.
   (`validated_train_base_changed`). Existing agent-contract text now recognizes
   explicit bounded end-to-end approval and requires human-readable one-shot
   summaries; opaque IDs remain internal binding evidence.
+- **Existing MCP surface correction:** the deploy confirmation now consumes the
+  selected train plus uncapped `attention_jobs`, and presents task intent,
+  destinations, gates, validation evidence, and stale-base reassembly risk. It
+  adds no tool or authorization state and never exposes a train chooser to the
+  model.
 - **State, contract, recovery, and security impact:** no schema, mutation path,
   deploy eligibility, SHA binding, gate reuse, or recovery change. Deploy still
   reassembles the exact train and reruns gates before atomic push. Bounded
