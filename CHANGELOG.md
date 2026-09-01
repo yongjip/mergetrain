@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a provider-neutral local multi-agent integration benchmark that measures
+  exact-SHA handoff, remote safety, conflict recovery, and semantic pair
+  isolation with a disposable local bare remote.
+
 - Add a fail-closed Antigravity CLI adapter to the repository-local agent
   adoption harness and record its first fixed `current_init` operational cell.
   All three fully instrumented trials ended in provider `high traffic` errors,
