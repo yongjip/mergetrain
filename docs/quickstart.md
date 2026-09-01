@@ -63,7 +63,9 @@ mergetrain run-batch --validate-only
 
 A successful validation marks merged jobs as `validated`, records a shared
 `train_id` plus the integration and task SHAs, and does not push. Inspect
-`status --json` before approval to see the exact deployable train.
+`status --json` before a one-shot approval to see the exact deployable train.
+If `integration_changed_since_validation` is true, deploy remains eligible but
+will reassemble against the current integration ref and rerun gates.
 
 ## 5. Observe a long run
 
@@ -82,7 +84,8 @@ local output is appropriate for the destination.
 
 ## 6. Deploy
 
-After explicit approval:
+After either a human-readable one-shot approval or prior bounded unattended
+approval for this task and destination:
 
 ```sh
 mergetrain run-batch --deploy
@@ -97,7 +100,8 @@ ref, then runs `deploy.verify` hooks. If a validated train is
 pending, only that exact train is rebuilt and deployed; newly queued jobs wait
 for a later validation. Integration-ref movement is allowed because the train
 is rebuilt and gated again, but a changed task branch is blocked and must be
-enqueued fresh.
+enqueued fresh. The opaque `train_id` selects the train internally; it is not
+something the user must understand or repeat.
 
 For an explicitly configured validated-gate reuse policy, preview the decision
 before deploying:

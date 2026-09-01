@@ -181,6 +181,9 @@ mergetrain status --json --limit 50  # explicit deeper history
 `--limit` rows (default 10). `attention_jobs` is uncapped and separately keeps
 every queued, running, blocked, failed, reconcile-pending, validated, or
 post-push-verify-unknown job visible even when it is older than recent history.
+Each validated-train entry also reports `current_integration_sha` and nullable
+`integration_changed_since_validation`. A true value leaves `deploy_eligible`
+unchanged but warns that deploy will reassemble and rerun gates before push.
 
 ## `events`
 
@@ -366,6 +369,11 @@ known integration ref without fetching or changing either checkout. A
 `drifted` state adds an `operator_config_drift` warning; missing refs/configs
 and an outside-repo `--config` path are explicit non-comparable states. The
 warning is advisory and does not replace `next_action`.
+
+A `validated_train_base_changed` warning means a pending validated train used a
+different integration base. Its evidence lists the affected jobs and branches;
+deploy remains fail-closed and reruns assembly and gates against the current
+integration ref.
 
 `next_action` is one of:
 

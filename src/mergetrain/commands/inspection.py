@@ -57,6 +57,34 @@ from ..store import (
 )
 
 
+def _validated_trains_with_integration_state(
+    config: MergetrainConfig,
+    trains: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Annotate validated trains without changing their deploy eligibility."""
+
+    if not trains:
+        return []
+    current_sha = _git_object_sha(
+        config.repo,
+        ["rev-parse", "--verify", f"{config.git.integration_ref}^{{commit}}"],
+    )
+    annotated: list[dict[str, Any]] = []
+    for train in trains:
+        validation_base_sha = str(train.get("validation_base_sha") or "")
+        comparable = bool(current_sha and validation_base_sha)
+        annotated.append(
+            {
+                **train,
+                "current_integration_sha": current_sha or None,
+                "integration_changed_since_validation": (
+                    current_sha != validation_base_sha if comparable else None
+                ),
+            }
+        )
+    return annotated
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     if args.limit < 1:
         raise QueueError("--limit must be 1 or greater")
@@ -64,7 +92,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     conn = connect(config.state.db)
     try:
         lock = get_lock(conn)
-        validated_trains = validated_train_summaries(conn)
+        validated_trains = _validated_trains_with_integration_state(
+            config,
+            validated_train_summaries(conn),
+        )
         count_data = counts(conn)
         recent_jobs = list_jobs(conn, limit=args.limit)
         attention_jobs = list_attention_jobs(conn)
@@ -116,6 +147,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"next action: {payload['next_action']}")
         for job in payload["jobs"]:
             print(f"{_job_result_line(job)} - {job['task']}")
+        for train in payload["validated_trains"]:
+            if train["integration_changed_since_validation"]:
+                print(
+                    f"warning validated train {train['train_id']}: integration "
+                    "changed since validation; deploy will reassemble the train "
+                    "and rerun gates before push"
+                )
     return 0
 
 
@@ -625,6 +663,7 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
 def _doctor_recommendations(
     config: MergetrainConfig,
     config_drift: dict[str, Any],
+    validated_trains: Sequence[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     recommendations: list[dict[str, Any]] = []
     if config_drift["state"] == "drifted":
@@ -670,6 +709,40 @@ def _doctor_recommendations(
                 "remove the redundant diff-check entry from .mergetrain.yaml",
             ],
         })
+    changed_trains = [
+        train
+        for train in validated_trains
+        if train.get("integration_changed_since_validation") is True
+    ]
+    if changed_trains:
+        recommendations.append({
+            "code": "validated_train_base_changed",
+            "severity": "warning",
+            "summary": (
+                "A validated train's base differs from the current integration "
+                "ref; its earlier gate result is not current deploy evidence."
+            ),
+            "evidence": {
+                "integration_ref": config.git.integration_ref,
+                "current_integration_sha": changed_trains[0][
+                    "current_integration_sha"
+                ],
+                "trains": [
+                    {
+                        "train_id": train["train_id"],
+                        "validation_base_sha": train["validation_base_sha"],
+                        "job_ids": train["job_ids"],
+                        "branches": train["branches"],
+                    }
+                    for train in changed_trains
+                ],
+            },
+            "actions": [
+                "summarize task intent, changes, destination refs, gates, and reassembly risk in human terms",
+                "expect deploy to reassemble the train and rerun gates before any push",
+                "do not ask the user to repeat an opaque train ID",
+            ],
+        })
     return recommendations
 
 
@@ -685,6 +758,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         validated_trains = validated_train_summaries(conn)
     finally:
         conn.close()
+    validated_trains = _validated_trains_with_integration_state(
+        config,
+        validated_trains,
+    )
     remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
     repo_root = git_repo_root(config.repo)
     config_drift = _config_drift(config, repo_root=repo_root)
@@ -723,7 +800,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if repo_root else False,
         },
         "config_drift": config_drift,
-        "recommendations": _doctor_recommendations(config, config_drift),
+        "recommendations": _doctor_recommendations(
+            config,
+            config_drift,
+            validated_trains,
+        ),
         "lock": lock.to_dict() if lock else None,
         "counts": count_data,
         "validated_trains": validated_trains,

@@ -31,7 +31,12 @@ That's it — the same conversation now syncs between phone and desktop. Full de
 
 You send a short message from your phone. On your Mac, Claude reads [`CLAUDE.md`](../CLAUDE.md), runs the right `mergetrain` commands in your repo, and replies with a short summary (plus a push notification when it's done or needs your go-ahead).
 
-**Deploy policy: confirm, then deploy.** Status checks and `--validate-only` run freely. For an actual deploy, the agent first summarizes exactly what will ship and waits for your explicit "deploy / yes / go" in the thread before running `run-batch --deploy`. The `scripts/mt-deploy.sh` wrapper enforces the same thing on the command line: it prints what would ship and does nothing unless you pass `--confirm`.
+**Deploy policy: approve a clear scope, then finish.** Status checks and
+`--validate-only` run freely. You can either approve one human-readable deploy
+summary with "deploy / yes / go", or explicitly tell the agent to QA, deploy,
+verify, and finish a named task end-to-end. In the latter mode it should not ask
+for each opaque train ID. The `scripts/mt-deploy.sh` wrapper remains a guarded
+one-shot command: it prints what would ship and requires `--confirm`.
 
 ## Phone phrasebook
 

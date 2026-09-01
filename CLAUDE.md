@@ -13,21 +13,21 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 2. Commit all changes before enqueueing.
 3. Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.
 4. Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.
-5. Use --auto only after explicit unattended-deployment approval from the user/operator.
+5. Use --auto only after explicit unattended-deployment approval from the user/operator. A bounded instruction to QA, deploy, verify, and finish end-to-end is unattended-deployment approval for that task scope; continue without repeated train-ID prompts unless the scope or destination changes or recovery needs new authority.
 6. Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.
-7. Let one separately authorized runner or daemon own merge, test, push, and verify; a task, merge, integration, or enqueue request is not deploy approval.
+7. Let one separately authorized runner or daemon own merge, test, push, and verify; ordinary task, merge, integration, or enqueue intent is not deploy approval unless the user explicitly authorizes bounded end-to-end deployment.
 8. Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.
-9. Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation and deploy approval.
+9. Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation. One-shot train approval does not carry over; bounded unattended-deployment approval carries only while task scope and destination remain unchanged.
 10. After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.
 11. Do not delete or rewrite refs/mergetrain/deploys/*; they are permanent remote recovery evidence.
 
 ### Safety boundary
 
-- Git deployment requires separate explicit user/operator approval for the displayed exact validated train, then `run-batch --deploy`; `run-next --deploy` is allowed only when no validated train is pending.
+- Git deployment requires either explicit approval after a human-readable exact-train summary or prior explicit bounded unattended-deployment approval. An opaque train ID binds the operation internally; never make the user repeat it.
 - A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only`, `run-batch --validate-only`, or `daemon --validate-only`.
-- A validated train is deployed as one exact identity by `run-batch --deploy`.
+- A validated train is deployed as one exact identity by `run-batch --deploy`; summarize changes, destination refs, gates, blocked or failed work, and reassembly risk in human terms.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
-- `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and deploy approval never carry over.
+- `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and one-shot train approval never carry over. Bounded unattended authorization continues only while task scope and destination remain unchanged.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The default daemon deploys only jobs enqueued with `--auto`. `daemon --validate-only` processes only manual queued jobs, never pushes, and pauses while any validated train exists.
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
@@ -71,19 +71,32 @@ Repository-specific additions:
 - `mergetrain run-batch --validate-only` — validate the queued train; this never pushes.
 - `mergetrain enqueue --task "<t>" --branch <b> --capture-sha` — only for a branch that is already committed and on a clean worktree.
 
-## Deploy policy — confirm, then deploy
+## Deploy policy — scoped approval, then finish
 
-A deploy ships code. **Never deploy as a side effect of another request.** Before any deploy:
+A deploy ships code. Never infer deploy permission from an ordinary request to
+implement, merge, integrate, land, or enqueue. There are two valid approval
+modes:
 
-1. Run `doctor --json`, then `status --json --limit 10` for the exact train and job details.
-2. Post a short summary of exactly what will ship: the pending validated `train_id`, its job IDs, branches, recorded HEADs, the integration ref, the doctor `next_action`, and anything `blocked`/`failed`. If no validated train exists, summarize the queued jobs that a direct deploy would claim.
-3. **Wait for the user's explicit confirmation in the thread** (e.g. "deploy", "yes ship it", "go"). A vague or general instruction is not confirmation.
-4. Only then run `mergetrain run-batch --deploy` (or `scripts/mt-deploy.sh --confirm`). If multiple validated trains are pending, select the approved one with `--train-id`.
-5. Report the outcome: which jobs are now `deployed`, the `deploy_sha`, and any post-push verify warning recorded in the note.
+1. A bounded instruction to QA, deploy, verify, and finish end-to-end grants
+   unattended-deploy approval for that named task and destination. Enqueue with
+   `--auto` when appropriate, let one runner complete validation, deploy, and
+   verification, and do not stop for intermediate train-ID confirmations.
+2. Without bounded unattended approval, run `doctor --json` and `status --json
+   --limit 10`, then give one human-readable deploy packet: task intent and
+   changes, branches and recorded HEADs, destination refs, gate evidence,
+   blocked or failed work, and any reassembly risk. Wait for a simple explicit
+   "deploy / yes / go"; keep the opaque `train_id` internal rather than asking
+   the user to copy it.
+
+In either mode, use the exact selected train internally and report deployed job
+IDs, `deploy_sha`, push status, and post-push verification. Stop for new authority
+only when task scope or destination changes, a product/business decision is
+needed, or recovery crosses a destructive or reconcile boundary.
 
 ## Do NOT do these unless explicitly told
 
-- `mergetrain enqueue ... --auto` or `mergetrain daemon` — these bypass the confirm-then-deploy step (unattended deploy).
+- `mergetrain enqueue ... --auto` or `mergetrain daemon` without bounded
+  unattended-deploy approval.
 - Destructive cleanup: `mergetrain gc --apply`, `gc --delete-branches`, or `mergetrain cancel <id>`.
 
 ## Blocked / failed jobs

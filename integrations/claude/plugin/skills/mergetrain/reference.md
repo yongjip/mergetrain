@@ -11,7 +11,7 @@
 | `reconcile_conflict_manual` | Inspect the marker-bearing conflict and report the required Git repair. |
 | `fix_blocked_job` | Fix and commit in the owning branch, then use `retry <id>`. |
 | `verify_reconciled_deploy` | Re-run verification or record an explicit acknowledgement. |
-| `deploy_validated_train_when_approved` | Show the exact train identity and wait for explicit deploy confirmation. |
+| `deploy_validated_train_when_approved` | Continue under bounded unattended approval; otherwise show one human-readable deploy packet and keep the exact train ID internal. |
 | `cancel_and_reenqueue_legacy_validated_jobs` | Explain that legacy validation lacks a deployable identity; do not cancel without approval. |
 | `run_daemon_or_run_batch_deploy_when_approved` | Auto work exists; unattended deploy still requires explicit approval. |
 | `run_batch_validate` | Validate the queued train without pushing. |

@@ -11,7 +11,9 @@ worktrees.
 4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
    10` only when job or train details are needed, and read `attention_jobs`
    before recent history.
-5. Use `--auto` only after explicit unattended-deploy approval.
+5. Use `--auto` only after explicit unattended-deploy approval. A bounded
+   instruction to QA, deploy, verify, and finish end-to-end grants that approval
+   for the named task and destination; do not ask for each opaque train ID.
 6. Let one runner or daemon own merge and test. The default daemon may push and
    verify only `--auto` jobs; `daemon --validate-only` handles manual jobs but
    stops at a validated train and never deploys.

@@ -12,12 +12,14 @@ Agents interacting with mergetrain must follow this contract.
 4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
    10` only when job or train details are needed, and read `attention_jobs`
    before recent history.
-5. Use `--auto` only after explicit unattended-deploy approval.
+5. Use `--auto` only after explicit unattended-deploy approval. A bounded
+   instruction to QA, deploy, verify, and finish end-to-end grants that approval
+   for the named task scope and destination.
 6. Reuse validated gates only after explicit config or `--reuse-validated`
    authorization.
 7. Let one separately authorized runner or daemon own merge, test, push, and
-   verify. A task, merge, integration, or enqueue request is not deploy
-   approval.
+   verify. Ordinary task, merge, integration, or enqueue intent is not deploy
+   approval unless the user explicitly authorizes bounded end-to-end deployment.
 8. Fix blocked or failed work in the owning branch, commit a clean result, then
    run `mergetrain retry <job-id>` to enqueue a fresh SHA-pinned job.
 9. Replace a validated train only with `mergetrain supersede`; validate and
@@ -61,8 +63,9 @@ unattended auto deploy, or destructive cleanup.
 For a task agent, a successful exact-SHA enqueue is the terminal handoff.
 `run_batch_validate` and deploy-oriented next actions are runner/operator
 guidance, not permission to continue after enqueueing. The same agent may act as
-the runner only when that role is separately authorized; deploy still requires
-approval for the displayed exact validated train.
+the runner when that role is separately authorized. Bounded end-to-end
+authorization lets that runner continue through QA, deploy, and verification
+without repeated train-ID prompts.
 
 The default daemon deploys only jobs explicitly enqueued with `--auto`.
 `daemon --validate-only` is a separate runner authorization: it processes only
@@ -74,15 +77,21 @@ After a crash or ambiguous push response, `reconcile`/`recover` resolve
 `run-batch --deploy` is refused while any job is `needs_reconcile`. See the
 [failure modes guide](failure-modes.md).
 
-When `validated_trains` is non-empty, approval applies to the displayed train
-identity and member HEADs. A later deploy must not silently include newer
-queued jobs. Validated-but-not-deployed branches are not GC deletion candidates.
-Deploy approval by itself does not authorize gate reuse; that is a separate,
-explicit policy decision.
+When `validated_trains` is non-empty, mergetrain binds deployment to the exact
+train identity and member HEADs internally. A later deploy must not silently
+include newer queued jobs. For one-shot approval, summarize task intent and
+changes, destination refs, gates, blocked or failed work, and reassembly risk;
+the user can answer with a simple "deploy / yes / go" and never needs to repeat
+an opaque train ID. Validated-but-not-deployed branches are not GC deletion
+candidates. Deploy approval does not authorize gate reuse; that remains a
+separate explicit policy decision.
 
-Changing an approved train also invalidates approval. `supersede` records the
-old/new relationship atomically for audit, but the replacement never inherits
-validation, gate-reuse identity, or deploy authorization.
+Changing a train invalidates one-shot approval. `supersede` records the old/new
+relationship atomically for audit, but the replacement never inherits
+validation or gate-reuse identity. Bounded unattended authorization may
+continue only while the named task scope and destination remain unchanged.
+Scope or destination changes, product/business decisions, and destructive or
+reconcile recovery boundaries require new authority.
 
 When a runner is active, observe it with read-only commands instead of inspecting
 the process tree:

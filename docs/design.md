@@ -19,8 +19,10 @@ This document describes the model and how the pieces fit together. For task-orie
 
 Task agents never push deploy refs themselves; they enqueue the exact committed
 HEAD and stop. One separately authorized runner (or daemon) owns merge, test,
-push, and verify. Task or integration intent is not deploy approval; approval
-names the displayed exact validated train.
+push, and verify. Ordinary task or integration intent is not deploy approval.
+Approval is either a human-readable one-shot decision bound internally to the
+exact train or explicit bounded unattended authorization for a named task scope
+and destination.
 
 Relative queue, log, and integration-worktree state resolves to one shared
 control checkout across standard Git linked worktrees. The current task
@@ -96,6 +98,12 @@ member stores the shared `train_id`, expected `train_size`, `validated_at`,
 policy, environment, and ordered train identity hashes. This makes the approval
 target machine-readable and lets the deploy runner reject partial or changed
 trains.
+
+`status` and `doctor` compare `validation_base_sha` with the locally known
+integration ref. A changed base does not revoke deploy eligibility: deploy
+reassembles the exact member HEADs on the current integration tip and reruns the
+gates before push. The diagnostic prevents an earlier gate result from being
+mistaken for current deploy evidence.
 
 **Runner lock** — a single `runner` row in the `locks` table with an owner,
 last heartbeat, expiry, and unique lease token. Claimed jobs carry the same token, so a stale

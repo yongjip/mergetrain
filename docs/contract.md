@@ -136,6 +136,13 @@ an exact preview, and `estimated_savings.authorizes_reuse` is always false.
 is a separately fingerprinted compact view whose repo entries carry `summary`
 instead of a full dashboard `snapshot`.
 
+Validated-train entries on `status` and `doctor` may include
+`current_integration_sha` and `integration_changed_since_validation`. The
+latter is `true` or `false` when the current ref and recorded validation base
+are comparable, otherwise `null`. A true value is diagnostic and does not
+change `deploy_eligible`. Doctor may add the
+`validated_train_base_changed` recommendation.
+
 `stats` may include additive `current.window`, `current.gates`, and
 `current.latency` objects. Established top-level aggregates retain their
 selected-history meaning; automatic recommendations use the latest 20 complete

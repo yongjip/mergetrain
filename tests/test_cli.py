@@ -1369,12 +1369,17 @@ class CliTests(unittest.TestCase):
             payload["boundary"]["daemon_processes_only"],
             "default mode deploys only jobs enqueued with --auto; --validate-only processes only manual queued jobs and pauses while any validated train exists",
         )
-        self.assertIn("exact validated train", payload["boundary"]["validated_train_deploy"])
+        self.assertIn("opaque train ID", payload["boundary"]["validated_train_deploy"])
         self.assertIn("then stop", " ".join(payload["rules"]))
         self.assertIn(
-            "explicit user/operator approval",
+            "human-readable exact-train summary",
             payload["boundary"]["deploy_requires"],
         )
+        self.assertIn(
+            "bounded unattended-deployment approval",
+            payload["boundary"]["deploy_requires"],
+        )
+        self.assertIn("QA, deploy, verify, and finish", " ".join(payload["rules"]))
         self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
         self.assertIn("read-only", payload["boundary"]["progress_observation"])
         self.assertNotIn("human_vocabulary", payload)
@@ -1484,7 +1489,8 @@ class CliTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("A task agent stops after enqueueing", agent_contract)
-            self.assertIn("separate explicit user/operator approval", agent_contract)
+            self.assertIn("human-readable exact-train summary", agent_contract)
+            self.assertIn("never make the user repeat it", agent_contract)
 
     def test_init_write_preflights_all_conflicts_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1529,6 +1535,157 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(payload["validated_trains"][0]["train_id"], "train-1")
             self.assertTrue(payload["validated_trains"][0]["deploy_eligible"])
+            self.assertIsNone(
+                payload["validated_trains"][0]["current_integration_sha"]
+            )
+            self.assertIsNone(
+                payload["validated_trains"][0][
+                    "integration_changed_since_validation"
+                ]
+            )
+
+    def test_status_and_doctor_explain_stale_validated_train_base(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            subprocess.run(["git", "init", "-b", "main", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "tests@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Mergetrain Tests"],
+                cwd=repo,
+                check=True,
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("stale-train"),
+                encoding="utf-8",
+            )
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", "base"], cwd=repo, check=True
+            )
+            validation_base_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            (repo / "README.md").write_text("base\nadvanced\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", "advance integration"],
+                cwd=repo,
+                check=True,
+            )
+            current_integration_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                [
+                    "git",
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    current_integration_sha,
+                ],
+                cwd=repo,
+                check=True,
+            )
+
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="stale", branch="feature/stale")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="validated",
+                    train_id="train-stale",
+                    train_size=1,
+                    validated_at="2026-09-02T00:00:00Z",
+                    validation_base_sha=validation_base_sha,
+                    validation_sha="b" * 40,
+                    validated_head_sha="c" * 40,
+                )
+            finally:
+                conn.close()
+
+            status_out = io.StringIO()
+            with redirect_stdout(status_out):
+                status_code = main(
+                    ["--repo", str(repo), "--db", str(db), "status", "--json"]
+                )
+            status_payload = json.loads(status_out.getvalue())
+            train = status_payload["validated_trains"][0]
+            self.assertEqual(status_code, 0)
+            self.assertEqual(train["current_integration_sha"], current_integration_sha)
+            self.assertTrue(train["integration_changed_since_validation"])
+            self.assertTrue(train["deploy_eligible"])
+
+            text_out = io.StringIO()
+            with redirect_stdout(text_out):
+                text_code = main(
+                    ["--repo", str(repo), "--db", str(db), "status"]
+                )
+            self.assertEqual(text_code, 0)
+            self.assertIn("deploy will reassemble", text_out.getvalue())
+
+            doctor_out = io.StringIO()
+            with redirect_stdout(doctor_out):
+                doctor_code = main(
+                    ["--repo", str(repo), "--db", str(db), "doctor", "--json"]
+                )
+            doctor_payload = json.loads(doctor_out.getvalue())
+            recommendation = next(
+                item
+                for item in doctor_payload["recommendations"]
+                if item["code"] == "validated_train_base_changed"
+            )
+            self.assertEqual(doctor_code, 0)
+            self.assertEqual(
+                recommendation["evidence"]["current_integration_sha"],
+                current_integration_sha,
+            )
+            self.assertEqual(
+                recommendation["evidence"]["trains"][0]["train_id"],
+                "train-stale",
+            )
+            self.assertIn("rerun gates", " ".join(recommendation["actions"]))
+
+            conn = connect(db)
+            try:
+                conn.execute(
+                    "UPDATE deploy_queue SET validation_base_sha = ? WHERE id = ?",
+                    (current_integration_sha, job.id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            current_out = io.StringIO()
+            with redirect_stdout(current_out):
+                current_code = main(
+                    ["--repo", str(repo), "--db", str(db), "doctor", "--json"]
+                )
+            current_payload = json.loads(current_out.getvalue())
+            self.assertEqual(current_code, 0)
+            self.assertFalse(
+                current_payload["validated_trains"][0][
+                    "integration_changed_since_validation"
+                ]
+            )
+            self.assertNotIn(
+                "validated_train_base_changed",
+                [item["code"] for item in current_payload["recommendations"]],
+            )
 
     def test_inspect_json_exposes_gate_elapsed_and_heartbeat(self) -> None:
         with tempfile.TemporaryDirectory() as td:

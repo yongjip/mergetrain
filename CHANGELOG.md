@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Treat an explicit bounded request to QA, deploy, verify, and finish as
+  unattended approval for that unchanged task scope and destination. Keep exact
+  train IDs internal, require human-readable one-shot deploy summaries, and
+  stop repeated per-train approval prompts without weakening SHA binding.
+
+- Annotate pending validated trains in `status` and `doctor` when the
+  integration ref has advanced since validation. The diagnostic explains that
+  deploy remains eligible but will reassemble and rerun gates before push.
+
 - Add a provider-neutral local multi-agent integration benchmark that measures
   exact-SHA handoff, remote safety, conflict recovery, and semantic pair
   isolation with a disposable local bare remote.

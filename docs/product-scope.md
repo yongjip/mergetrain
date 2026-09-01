@@ -178,6 +178,40 @@ concrete incorrect state that the current core cannot address.
 
 ## Applied corrections within the existing budget
 
+### 2026-09-02: bounded deploy approval and stale validation-base diagnosis
+
+- **Admission criterion:** remove repeated approval steps that provide no
+  meaningful decision context, and prevent an earlier validation result from
+  being mistaken for current deploy evidence after the integration ref moves.
+- **Evidence:** a local two-train recovery exercise validated both trains from
+  integration base `160498746c892223084c44e29e6b5e3709309933`. Deploying the
+  first advanced integration to `93b5a8f62225aa6fd8f86106006d39722f46de33`;
+  the second remained deploy-eligible and its required reassembly correctly
+  caught the semantic failure `$85.00 < $90.00` before push. The runner was
+  safe, but observation exposed no stale-base warning and the operating
+  contract caused the user to be asked to repeat opaque train identifiers even
+  after authorizing QA through deployment.
+- **Existing surface considered:** existing `--auto` authorization, exact
+  validated-train identity, deploy reassembly, gate reruns, `validated_trains`,
+  and doctor `recommendations`. A new approval mode, token, command, flag,
+  config field, or runner state was rejected.
+- **Public surface change:** two additive fields on existing `status` and
+  `doctor` validated-train entries (`current_integration_sha` and nullable
+  `integration_changed_since_validation`) and one recommendation code
+  (`validated_train_base_changed`). Existing agent-contract text now recognizes
+  explicit bounded end-to-end approval and requires human-readable one-shot
+  summaries; opaque IDs remain internal binding evidence.
+- **State, contract, recovery, and security impact:** no schema, mutation path,
+  deploy eligibility, SHA binding, gate reuse, or recovery change. Deploy still
+  reassembles the exact train and reruns gates before atomic push. Bounded
+  authorization ends on task-scope or destination change, a product/business
+  decision, or a destructive/reconcile recovery boundary.
+- **Success measure and simplification trigger:** held-out agent traces should
+  finish an unchanged approved scope without per-train prompts and should name
+  the reassembly risk when the validation base is stale. If prompts remain,
+  refine the existing contract and summary; do not add an authorization state
+  machine without repeated evidence that instructions are insufficient.
+
 ### 2026-09-01: manual-queue validation daemon
 
 - **Admission criterion:** remove a recurring manual integration step without
