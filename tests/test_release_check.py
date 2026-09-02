@@ -106,8 +106,7 @@ class ReleaseManifestTests(unittest.TestCase):
         self.assertNotIn("actions/checkout@", attest)
         self.assertIn("actions: read", attest)
         self.assertIn(
-            'gh run download "${GITHUB_RUN_ID}" --name '
-            "python-package-distributions --dir dist",
+            'gh run download "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}"',
             attest,
         )
 
@@ -116,8 +115,7 @@ class ReleaseManifestTests(unittest.TestCase):
         )[0]
         self.assertIn("actions: read", publish)
         self.assertIn(
-            'gh run download "${GITHUB_RUN_ID}" --name '
-            "python-package-distributions --dir dist",
+            'gh run download "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}"',
             publish,
         )
 

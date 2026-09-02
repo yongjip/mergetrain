@@ -104,7 +104,9 @@ jobs:
       - name: Download verified release distributions
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download "${GITHUB_RUN_ID}" --name python-package-distributions --dir dist
+        run: >-
+          gh run download "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}"
+          --name python-package-distributions --dir dist
       - name: Attest release distributions
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
         with:
@@ -122,7 +124,9 @@ jobs:
       - name: Download attested release distributions
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download "${GITHUB_RUN_ID}" --name python-package-distributions --dir dist
+        run: >-
+          gh run download "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}"
+          --name python-package-distributions --dir dist
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
 
