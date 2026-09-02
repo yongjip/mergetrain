@@ -98,6 +98,10 @@ def _release_workflow_errors(text: str | None = None) -> list[str]:
         ),
         "the verified source checkout": "ref: ${{ needs.verify.outputs.commit_sha }}",
         "the production publishing environment": "environment: pypi",
+        "API-based release artifact download": (
+            'gh run download "${GITHUB_RUN_ID}" --name '
+            "python-package-distributions --dir dist"
+        ),
     }
     for description, marker in required.items():
         if marker not in workflow:

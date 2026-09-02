@@ -104,6 +104,22 @@ class ReleaseManifestTests(unittest.TestCase):
             self.assertNotIn("environment:", unprivileged)
             self.assertNotIn("secrets.", unprivileged)
         self.assertNotIn("actions/checkout@", attest)
+        self.assertIn("actions: read", attest)
+        self.assertIn(
+            'gh run download "${GITHUB_RUN_ID}" --name '
+            "python-package-distributions --dir dist",
+            attest,
+        )
+
+        publish = workflow.split("\n  publish:\n", 1)[1].split(
+            "\n  publish-mcp-registry:\n", 1
+        )[0]
+        self.assertIn("actions: read", publish)
+        self.assertIn(
+            'gh run download "${GITHUB_RUN_ID}" --name '
+            "python-package-distributions --dir dist",
+            publish,
+        )
 
     def test_testpypi_builds_only_the_verified_commit_from_main(self) -> None:
         root = Path(__file__).resolve().parents[1]
