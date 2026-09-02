@@ -24,6 +24,7 @@ for required in \
   benchmarks \
   .github/workflows/demo-gif.yml \
   .github/workflows/mcp-registry.yml \
+  .github/release-allowed-signers \
   SECURITY.md \
   .mergetrain.yaml; do
   if [ ! -e "$package_root/$required" ]; then

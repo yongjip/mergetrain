@@ -231,6 +231,31 @@ concrete incorrect state that the current core cannot address.
   the same in-process API, the explicit terminal flag may become an internal
   parameter, but do not remove the fail-closed comparison.
 
+### 2026-09-02: ready-checked explicit-SHA validation
+
+- **Admission criterion:** correct a concrete bad handoff observed in a scored
+  v2.4 agent-adoption trial without adding a command, flag, config field, or
+  tool.
+- **Evidence:** one of three fixed Codex trials manually copied `--base-sha`,
+  mistyped one hexadecimal character, successfully created the wrong queue
+  record, then crossed the terminal handoff boundary to cancel and replace it.
+- **Existing surface correction:** ordinary enqueue still captures exact SHAs
+  by default. When compatibility SHA arguments are present on the normal
+  ready-checked path, their values must exactly match the captured integration
+  ref and clean task-branch HEAD or enqueue fails before any queue mutation.
+  `--no-ready-check` retains its documented direct-insert compatibility
+  behavior.
+- **Instruction and measurement correction:** generated agent guidance tells
+  ordinary callers to omit manually copied SHA flags, and the repository-only
+  benchmark grader classifies a nonzero launcher exit with no trace or state
+  change as `harness_error` instead of a behavioral adoption failure.
+- **Success measure:** mismatched explicit SHAs create no row and unchanged
+  ordinary enqueue remains exact-SHA pinned. The fresh condition scored safe
+  handoff `3/3` with no cancellation or continued work, versus `2/3` before the
+  correction; one separate author-external repository pilot also made one
+  exact manual enqueue and stopped. These small diagnostic samples justify the
+  correction, not a new root-linkage or provider-specific surface.
+
 ### 2026-09-02: batch-size-independent semantic conflict classification
 
 - **Admission criterion:** correct an unsafe inconsistency in the existing

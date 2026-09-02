@@ -19,15 +19,28 @@ command.
 
 ## Current pilot status
 
-The supported evidence matrix as of 2026-09-01 is intentionally narrow:
+The supported evidence matrix as of 2026-09-02 is intentionally narrow:
 
 | Agent path | Valid `current_init` trials | Status |
 | --- | ---: | --- |
+| Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max`; candidate wheel `mergetrain 2.4.1` | 3 | Safe handoff `3/3`; ordinary enqueue captured the exact SHAs and every run stopped at enqueue; see the [2.4.0/2.4.1 diagnostic note](../benchmarks/agent_adoption/pilots/2026-09-02-codex-240-241-current-init-repetitions.md) |
+| Same Codex and candidate wheel in an author-external PyPA `sampleproject` snapshot | 1 | Diagnostic safe handoff `1/1` from unlinked generated sidecars; exact manual enqueue, no remote mutation; not pooled with the fixed fixture, see the [external-repository pilot](../benchmarks/agent_adoption/pilots/2026-09-02-codex-241-external-sampleproject.md) |
+| Correction baseline: the same Codex cell with public wheel `mergetrain 2.4.0` | 3 | Safe handoff `2/3`; task, discovery, and eventual exact-SHA handoff `3/3`, but one agent cancelled a row created with a mistyped copied base SHA and continued after handoff; see the [2.4.0/2.4.1 diagnostic note](../benchmarks/agent_adoption/pilots/2026-09-02-codex-240-241-current-init-repetitions.md) |
 | Codex CLI `0.150.1`, `gpt-5.6-sol`, reasoning `max`; mergetrain `1.4.2` | 3 | Safe handoff `3/3`, with shared exact-SHA enqueue and no unauthorized mutation; see the [post-correction repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-142-current-init-repetitions.md) |
 | Historical correction baseline: the same Codex cell with mergetrain `1.4.1` | 3 | Safe handoff `0/3`; discovery, state read, and task checks `3/3`; see the [pre-correction repetition note](../benchmarks/agent_adoption/pilots/2026-08-29-codex-current-init-repetitions.md) |
 | Claude Code | 0 | Unavailable in the test environment because no license was available; excluded, not failed |
 | Antigravity CLI `1.1.22`, `gemini-3.1-pro-high`, effort `high`; mergetrain `2.0.0` | 3 | Operational completion `0/3` because the provider returned `high traffic` in every fixed trial; safe handoff `0/3`, but no requested turn completed successfully, so discovery and protocol behavior are not estimable; see the [AGY operational note](../benchmarks/agent_adoption/pilots/2026-09-01-agy-current-init-repetitions.md) |
 | Legacy Gemini CLI `0.46.0` with an individual Google account | 0 | Individual free/Pro/Ultra service ended on 2026-06-18; excluded, not failed |
+
+The 2.4.x paired diagnostic found mergetrain and completed the coding task in
+all six valid trials. In 2.4.0, one agent manually copied a base SHA with a
+one-character omission, then crossed the terminal boundary by cancelling and
+re-enqueueing. The 2.4.1 condition removes copied SHA options from ordinary
+handoff instructions and rejects mismatched compatibility SHAs before queue
+mutation; all three repetitions then stopped after one correct enqueue. This is
+useful regression evidence, not a general adoption-rate or causal claim: the
+runtime and instruction corrections changed together, the sample contains one
+task family, and the 3/3 Wilson interval remains approximately `43.9%–100%`.
 
 The 1.4.1 Codex repetitions consistently found mergetrain, but all three used a
 task-worktree-local queue and crossed the human deploy-approval boundary after
@@ -48,10 +61,17 @@ dated repetition must be reported alongside, not substituted for, this result.
 
 The next scored work should broaden `current_init` across held-out Tier-1 tasks
 and prompts, then cover Tier-2 boundaries and negative controls. The result does
-not justify a new command, flag, config field, Skill, MCP tool, or
-provider-specific runtime behavior. Unavailable or provider-failed paths remain
-an availability ledger until a supported client, authentication prerequisite,
-and completed model turn exist.
+not justify managed root-instruction linkage, a new protocol-revision surface,
+a new command, flag, config field, Skill, MCP tool, or provider-specific runtime
+behavior. Unavailable or provider-failed paths remain an availability ledger
+until a supported client, authentication prerequisite, and completed model turn
+exist.
+
+One author-external `sampleproject` snapshot also completed a safe handoff from
+the generated, unlinked sidecars. It is recorded as a single diagnostic pilot,
+not pooled with the controlled fixture or used as a rate estimate. Its value is
+only that the measured behavior was not confined to mergetrain's synthetic task
+layout.
 
 ## Scope and non-goals
 

@@ -63,6 +63,23 @@ class ReleaseManifestTests(unittest.TestCase):
     def test_current_release_metadata_is_self_consistent(self) -> None:
         self.assertEqual(check_release(), [])
 
+    def test_release_workflow_verifies_tag_signature_before_building(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        checkout = workflow.index("actions/checkout@")
+        verify = workflow.index('git verify-tag "${GITHUB_REF_NAME}"')
+        build = workflow.index("python -m build")
+
+        self.assertLess(checkout, verify)
+        self.assertLess(verify, build)
+        self.assertIn(".github/release-allowed-signers", workflow)
+        allowed_signers = (root / ".github/release-allowed-signers").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ssh-ed25519 ", allowed_signers)
+
 
 if __name__ == "__main__":
     unittest.main()

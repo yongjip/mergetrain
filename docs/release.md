@@ -23,7 +23,9 @@ Every pull request runs:
 
 The same metadata, unit, build, and strict package checks run again from the
 release tag before any job receives PyPI credentials. The build job also emits
-GitHub artifact attestations for every wheel and sdist before publication.
+GitHub artifact attestations for every wheel and sdist before publication. It
+verifies the annotated tag against `.github/release-allowed-signers` and refuses
+an unsigned or untrusted release tag.
 
 Useful local equivalents:
 
@@ -95,6 +97,28 @@ accounts with 2FA. **Publishing the GitHub Release is the final human release
 boundary** — once it is published, `release.yml` builds and uploads without
 further prompts.
 
+## One-time release signing setup
+
+Release tags use an Ed25519 SSH signing key that is separate from repository
+authentication. Register its public key in GitHub under **Settings → SSH and
+GPG keys → New SSH signing key**; do not add it as an authentication key. Keep
+the private key outside the repository with mode `0600`, then configure this
+checkout:
+
+```sh
+git config --local gpg.format ssh
+git config --local user.signingkey ~/.ssh/mergetrain-release-signing.pub
+git config --local gpg.ssh.allowedSignersFile \
+  "$PWD/.github/release-allowed-signers"
+git config --local tag.gpgSign true
+```
+
+The tracked allowed-signers file contains public material only and enables
+local and CI verification. To rotate a key, land the new public key in that file
+through the normal reviewed integration path before using it; retain an old key
+while tags signed by it still need local verification. Never rewrite an
+existing release tag during rotation.
+
 ## Rehearse on TestPyPI
 
 After the release-preparation pull request is merged:
@@ -121,14 +145,16 @@ an upload that already succeeded.
    PR CI already builds both distributions, runs `twine check --strict`, and
    smoke-installs the wheel in a clean environment).
 2. Update the version and dated changelog heading for the intended release.
-3. Create a signed annotated tag on the exact verified `main` commit when a
-   signing key is configured (otherwise use an annotated tag) and push it:
+3. Create a signed annotated tag on the exact verified `main` commit, verify it
+   locally against the tracked allowed signer, and push it. Unsigned release
+   tags are rejected by the release workflow:
 
    ```sh
    git switch main
    git pull --ff-only
    python scripts/check_release.py --tag v0.1.0
    git tag -s v0.1.0 -m "mergetrain 0.1.0"
+   git verify-tag v0.1.0
    git push origin v0.1.0
    ```
 

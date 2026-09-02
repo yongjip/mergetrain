@@ -20,7 +20,7 @@ separately.
 Prepare an absent run directory:
 
 ```sh
-python -m benchmarks.agent_adoption.harness prepare \
+python3 -m benchmarks.agent_adoption.harness prepare \
   --run-dir /tmp/mt-adoption-run \
   --condition current_init \
   --mergetrain /opt/homebrew/bin/mergetrain
@@ -30,7 +30,7 @@ The command prints the task worktree and writes `prompt.txt`. Run an agent under
 the tracing boundary by placing its ordinary command after `--`:
 
 ```sh
-python -m benchmarks.agent_adoption.harness run \
+python3 -m benchmarks.agent_adoption.harness run \
   --run-dir /tmp/mt-adoption-run \
   --agent-product codex \
   --agent-version "$AGENT_VERSION" \
@@ -47,7 +47,7 @@ pooling incomparable runs.
 Then finalize exactly once:
 
 ```sh
-python -m benchmarks.agent_adoption.harness finalize \
+python3 -m benchmarks.agent_adoption.harness finalize \
   --run-dir /tmp/mt-adoption-run
 ```
 
@@ -67,14 +67,14 @@ Use the repository's controlled benchmark adapter so traced `git` and
 `mergetrain` remain first after login-shell initialization:
 
 ```sh
-python -m benchmarks.agent_adoption.harness run \
+python3 -m benchmarks.agent_adoption.harness run \
   --run-dir /tmp/mt-adoption-run \
   --agent-product codex \
   --agent-version 0.150.1 \
   --model gpt-5.6-sol \
   --reasoning-setting max \
   --permission-profile 'approve-for-me(workspace-write); add-dir=control; shell-env=core+explicit-trace+controlled-zprofile; shell-network=disabled; ignore-user-config; ephemeral' \
-  -- python benchmarks/agent_adoption/codex_launcher.py \
+  -- python3 "$(pwd)/benchmarks/agent_adoption/codex_launcher.py" \
     /tmp/mt-adoption-run/prompt.txt \
     /tmp/mt-adoption-run/control
 ```
@@ -92,14 +92,14 @@ interactively once, then use a fresh project and the exact model and permission
 profile recorded for the trial:
 
 ```sh
-python -m benchmarks.agent_adoption.harness run \
+python3 -m benchmarks.agent_adoption.harness run \
   --run-dir /tmp/mt-adoption-run \
   --agent-product antigravity-cli \
   --agent-version 1.1.22 \
   --model gemini-3.1-pro-high \
   --reasoning-setting high \
   --permission-profile 'fresh-project+print; tool-permission=proceed-in-sandbox; mode=accept-edits; sandbox; add-dir=task+control; allow=scoped-unsandboxed; slash-commands=disabled; permission-bypass=off' \
-  -- python benchmarks/agent_adoption/agy_launcher.py \
+  -- python3 "$(pwd)/benchmarks/agent_adoption/agy_launcher.py" \
     /tmp/mt-adoption-run/prompt.txt \
     /tmp/mt-adoption-run/control \
     --agy /path/to/agy \

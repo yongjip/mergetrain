@@ -19,7 +19,7 @@ def agent_contract_payload() -> dict[str, Any]:
         "rules": [
             "Work on a task-specific branch and worktree.",
             "Commit all changes before enqueueing.",
-            "Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.",
+            "Do not push configured Git refs directly. For ordinary handoff, run mergetrain enqueue with the task, branch, and optional worktree only; do not copy --base-sha, --head-sha, or --capture-sha because the CLI captures and validates the exact commits by default. Stop after the successful enqueue unless separately authorized as the runner.",
             "Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.",
             "Use --auto only after explicit unattended-deployment approval from the user/operator. A bounded instruction to QA, deploy, verify, and finish end-to-end is unattended-deployment approval for that task scope; continue without repeated train-ID prompts unless the scope, destination, execution policy, or recovery authority changes.",
             "An auto job is bound to the approved Git destination and execution policy. If the remote, push refs, gates, validation-reuse policy, command timeout, or verify hooks change, mergetrain blocks before claim, gates, or push; review the change before enqueueing with --auto again.",
@@ -61,7 +61,7 @@ Purpose: {payload['purpose']}
 ## Safety boundary
 
 - Git deployment requires either explicit approval after a human-readable exact-train summary or prior explicit bounded unattended-deployment approval. An opaque train ID binds the operation internally; never make the user repeat it.
-- A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only`, `run-batch --validate-only`, or `daemon --validate-only`.
+- A task agent uses ordinary `enqueue` without manually copied SHA options and stops after it succeeds. Only a separately authorized runner validates with `run-next --validate-only`, `run-batch --validate-only`, or `daemon --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`; summarize changes, destination refs, gates, blocked or failed work, and reassembly risk in human terms.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and one-shot train approval never carry over. Bounded unattended authorization continues only while task scope, destination, and execution policy remain unchanged.
