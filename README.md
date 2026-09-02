@@ -185,8 +185,8 @@ covers direct, one-PR, split-PR, and validation-only patterns.
   `reconcile`/`recover` determine whether a killed push landed, without replaying
   a successful deploy or calling a missing one shipped.
 - **Explicit automation.** A bare run never deploys. Daemons touch only
-  pre-approved `--auto` jobs, and MCP deploy still requires attributable human
-  confirmation.
+  pre-approved `--auto` jobs whose destination and gate/reuse/verify policy
+  still match, and MCP deploy still requires attributable human confirmation.
 - **Observable state.** `doctor`, `status`, inspection, events, and statistics
   expose structured state and the next safe action instead of asking an agent to
   infer it from processes or prose.

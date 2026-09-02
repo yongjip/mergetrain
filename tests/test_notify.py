@@ -231,7 +231,10 @@ class SingleDaemonNotifyIntegrationTests(unittest.TestCase):
 class HubDaemonNotifyIntegrationTests(unittest.TestCase):
     def test_once_sweep_delivers_notifications_to_injected_notifier(self) -> None:
         from mergetrain.config import load_config
-        from mergetrain.deploy_plan import deploy_destination_sha
+        from mergetrain.deploy_plan import (
+            deploy_destination_sha,
+            deploy_execution_policy_sha,
+        )
         from mergetrain.hub_daemon import hub_daemon_loop
         from mergetrain.registry import add_repo
         from mergetrain.store import connect, enqueue_job
@@ -258,6 +261,9 @@ class HubDaemonNotifyIntegrationTests(unittest.TestCase):
                     worktree_path=str(repo),
                     auto_deploy=True,
                     approval_destination_sha=deploy_destination_sha(config),
+                    approval_execution_policy_sha=(
+                        deploy_execution_policy_sha(config)
+                    ),
                 )
             finally:
                 conn.close()

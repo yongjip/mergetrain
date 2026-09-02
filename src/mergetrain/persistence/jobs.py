@@ -63,6 +63,7 @@ def enqueue_job(
     allow_duplicate: bool = False,
     auto_deploy: bool = False,
     approval_destination_sha: str = "",
+    approval_execution_policy_sha: str = "",
 ) -> Job:
     task = task.strip()
     branch = branch.strip()
@@ -83,8 +84,9 @@ def enqueue_job(
             """
             INSERT INTO deploy_queue (
               task, branch, worktree_path, status, base_sha, head_sha,
-              requested_at, note, auto_deploy, approval_destination_sha
-            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+              requested_at, note, auto_deploy, approval_destination_sha,
+              approval_execution_policy_sha
+            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task,
@@ -96,6 +98,7 @@ def enqueue_job(
                 note,
                 1 if auto_deploy else 0,
                 approval_destination_sha if auto_deploy else "",
+                approval_execution_policy_sha if auto_deploy else "",
             ),
         )
         job_id = cur.lastrowid
@@ -110,6 +113,7 @@ def retry_job(
     base_sha: str,
     head_sha: str,
     current_approval_destination_sha: str | None = None,
+    current_approval_execution_policy_sha: str | None = None,
 ) -> tuple[Job, Job]:
     """Atomically dismiss a failed outcome and enqueue its fresh replacement."""
 
@@ -138,23 +142,29 @@ def retry_job(
 
         now = utc_now()
         approval_matches = (
-            current_approval_destination_sha is None
-            or (
-                bool(original.approval_destination_sha)
-                and original.approval_destination_sha
-                == current_approval_destination_sha
-            )
+            bool(original.approval_destination_sha)
+            and bool(original.approval_execution_policy_sha)
+            and current_approval_destination_sha is not None
+            and current_approval_execution_policy_sha is not None
+            and original.approval_destination_sha
+            == current_approval_destination_sha
+            and original.approval_execution_policy_sha
+            == current_approval_execution_policy_sha
         )
         inherit_auto = original.auto_deploy and approval_matches
         inherited_destination = (
             original.approval_destination_sha if inherit_auto else ""
         )
+        inherited_policy = (
+            original.approval_execution_policy_sha if inherit_auto else ""
+        )
         cur = conn.execute(
             """
             INSERT INTO deploy_queue (
               task, branch, worktree_path, status, base_sha, head_sha,
-              requested_at, note, auto_deploy, approval_destination_sha
-            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+              requested_at, note, auto_deploy, approval_destination_sha,
+              approval_execution_policy_sha
+            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 original.task,
@@ -166,6 +176,7 @@ def retry_job(
                 original.note,
                 1 if inherit_auto else 0,
                 inherited_destination,
+                inherited_policy,
             ),
         )
         replacement_id = cur.lastrowid

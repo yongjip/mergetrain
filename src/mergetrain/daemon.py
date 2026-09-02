@@ -35,6 +35,7 @@ from .store import (
 Say = Callable[[str], None]
 ProcessBatch = Callable[[Any, list[Job]], object]
 ApprovalDestination = str | Callable[[], str]
+ApprovalExecutionPolicy = str | Callable[[], str]
 
 
 def _grade_batch(results: object, claimed: int, say: Say) -> str:
@@ -101,6 +102,7 @@ def daemon_tick(
     sovereign: bool = False,
     validate_only: bool = False,
     approval_destination_sha: ApprovalDestination = "",
+    approval_execution_policy_sha: ApprovalExecutionPolicy = "",
 ) -> str:
     """Run one daemon pass over a single repo's queue.
 
@@ -203,6 +205,14 @@ def daemon_tick(
                 # error. A non-empty sentinel makes the existing transactional
                 # mismatch path block every queued auto job before runner work.
                 current_destination_sha = "invalid-deploy-destination"
+            try:
+                current_execution_policy_sha = (
+                    approval_execution_policy_sha()
+                    if callable(approval_execution_policy_sha)
+                    else approval_execution_policy_sha
+                )
+            except MergetrainError:
+                current_execution_policy_sha = "invalid-execution-policy"
             jobs = claim_all_queued(
                 conn,
                 owner=owner,
@@ -212,6 +222,9 @@ def daemon_tick(
                 deploy=not validate_only,
                 approval_destination_sha=(
                     "" if validate_only else current_destination_sha
+                ),
+                approval_execution_policy_sha=(
+                    "" if validate_only else current_execution_policy_sha
                 ),
             )
             if jobs:
@@ -278,6 +291,7 @@ def daemon_loop(
     notification_state_path: str | Path | None = None,
     validate_only: bool = False,
     approval_destination_sha: ApprovalDestination = "",
+    approval_execution_policy_sha: ApprovalExecutionPolicy = "",
 ) -> None:
     """Run a mergetrain daemon loop in auto-deploy or manual-validation mode.
 
@@ -326,6 +340,7 @@ def daemon_loop(
                     sovereign=True,
                     validate_only=validate_only,
                     approval_destination_sha=approval_destination_sha,
+                    approval_execution_policy_sha=approval_execution_policy_sha,
                 )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")

@@ -237,6 +237,7 @@ def _not_landed_reason(jobs: Sequence[Job]) -> str | None:
             return "push_rejected"
         if any(
             "approval_destination_changed" in note
+            or "approval_execution_policy_changed" in note
             or "deploy_plan_changed" in note
             for note in lowered
         ):

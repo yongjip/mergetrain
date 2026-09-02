@@ -68,6 +68,7 @@ def claim_all_queued(
     manual_only: bool = False,
     deploy: bool = False,
     approval_destination_sha: str = "",
+    approval_execution_policy_sha: str = "",
 ) -> list[Job]:
     if auto_only and manual_only:
         raise QueueError("auto_only and manual_only are mutually exclusive")
@@ -127,14 +128,54 @@ def claim_all_queued(
                         message="Unattended deploy destination changed",
                         detail="approval_destination_changed",
                     )
+            if approval_execution_policy_sha:
+                mismatched = conn.execute(
+                    """
+                    SELECT id FROM deploy_queue
+                    WHERE status = 'queued' AND auto_deploy = 1
+                      AND approval_execution_policy_sha != ?
+                    ORDER BY id ASC
+                    """,
+                    (approval_execution_policy_sha,),
+                ).fetchall()
+                for row in mismatched:
+                    job_id = int(row["id"])
+                    note = (
+                        "approval_execution_policy_changed: unattended deploy "
+                        "approval does not match the configured gates, validation "
+                        "reuse, or verify hooks; enqueue again with --auto only "
+                        "after approving this execution policy"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE deploy_queue
+                        SET status = 'blocked', finished_at = ?, note = ?
+                        WHERE id = ? AND status = 'queued' AND auto_deploy = 1
+                        """,
+                        (utc_now(), note, job_id),
+                    )
+                    _record_run_event(
+                        conn,
+                        job_id=job_id,
+                        phase="claiming",
+                        state="error",
+                        message="Unattended deploy execution policy changed",
+                        detail="approval_execution_policy_changed",
+                    )
             rows = conn.execute(
                 """
                 SELECT id FROM deploy_queue
                 WHERE status = 'queued' AND auto_deploy = 1
                   AND (? = '' OR approval_destination_sha = ?)
+                  AND (? = '' OR approval_execution_policy_sha = ?)
                 ORDER BY id ASC
                 """,
-                (approval_destination_sha, approval_destination_sha),
+                (
+                    approval_destination_sha,
+                    approval_destination_sha,
+                    approval_execution_policy_sha,
+                    approval_execution_policy_sha,
+                ),
             ).fetchall()
         elif manual_only:
             rows = conn.execute(

@@ -151,6 +151,10 @@ class ApprovalDestinationChanged(MergeBlocked):
     """Raised when an auto-approved job no longer targets its approved refs."""
 
 
+class ApprovalExecutionPolicyChanged(MergeBlocked):
+    """Raised when an auto-approved job no longer has its approved QA policy."""
+
+
 class DeployPlanChanged(MergeBlocked):
     """Raised when a confirmed manual deploy plan changed before push."""
 

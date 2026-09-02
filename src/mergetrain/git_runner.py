@@ -20,11 +20,12 @@ from .atomic_push import (
     post_push_verify_status as _post_push_verify_status,
 )
 from .command_runner import run_command
-from .config import GateConfig, MergetrainConfig
-from .deploy_plan import deploy_plan_sha
+from .config import GateConfig, MergetrainConfig, load_config
+from .deploy_plan import deploy_execution_policy_sha, deploy_plan_sha
 from .errors import (
     AmbiguousPush,
     ApprovalDestinationChanged,
+    ApprovalExecutionPolicyChanged,
     CancellationRequested,
     CommandFailed,
     DeployPlanChanged,
@@ -598,7 +599,7 @@ class GitRunner:
         approved_destinations = {
             job.approval_destination_sha
             for job in current_jobs
-            if job.auto_deploy and job.approval_destination_sha
+            if job.auto_deploy
         }
         try:
             destination = resolve_git_destination(self.config)
@@ -623,9 +624,20 @@ class GitRunner:
                 "approval_destination_changed: unattended deploy approval no "
                 "longer matches the current remote or push refs; nothing was pushed"
             )
+        self._assert_auto_execution_policy(current_jobs)
         if expected_plan_sha:
+            try:
+                current_config = load_config(
+                    repo=self.config.repo,
+                    config_path=self.config.config_path,
+                )
+            except MergetrainError as exc:
+                raise DeployPlanChanged(
+                    "deploy_plan_changed: the confirmed execution policy can "
+                    "no longer be resolved; nothing was pushed"
+                ) from exc
             current_plan_sha = deploy_plan_sha(
-                self.config,
+                current_config,
                 current_jobs,
                 reuse_validated=reuse_validated,
                 destination=destination,
@@ -653,6 +665,36 @@ class GitRunner:
             clear_rejected=self._clear_rejected_push,
             run_verify_hooks=self._run_verify_hooks,
         )
+
+    def _assert_auto_execution_policy(self, jobs: Iterable[Job]) -> None:
+        auto_jobs = [job for job in jobs if job.auto_deploy]
+        if not auto_jobs:
+            return
+        approved_policies = {
+            job.approval_execution_policy_sha for job in auto_jobs
+        }
+        try:
+            # Reload from the control checkout at every irreversible boundary.
+            # The runner executes the immutable policy snapshot loaded at
+            # startup, while this comparison detects an on-disk policy edit
+            # made after claim or while gates were running.
+            current_policy = deploy_execution_policy_sha(
+                load_config(
+                    repo=self.config.repo,
+                    config_path=self.config.config_path,
+                )
+            )
+        except MergetrainError as exc:
+            raise ApprovalExecutionPolicyChanged(
+                "approval_execution_policy_changed: unattended deploy policy "
+                "can no longer be resolved; nothing was pushed"
+            ) from exc
+        if approved_policies != {current_policy}:
+            raise ApprovalExecutionPolicyChanged(
+                "approval_execution_policy_changed: unattended deploy approval "
+                "no longer matches the configured gates, validation reuse, or "
+                "verify hooks; nothing was pushed"
+            )
 
     @staticmethod
     def _git_common_dir(path: Path) -> Path | None:
@@ -885,6 +927,8 @@ class GitRunner:
                 )
                 deploy_sha = git_rev_parse(worktree, "HEAD")
                 normal_pulse()
+                if deploy:
+                    self._assert_auto_execution_policy([job])
                 if persistent_workspace:
                     cache_reused = self._activate_persistent_validation_cache(
                         worktree=worktree,
@@ -1706,6 +1750,8 @@ class GitRunner:
                             else "Persistent validation cache initialized"
                         ),
                     )
+                if deploy:
+                    self._assert_auto_execution_policy(merged_jobs)
                 try:
                     if reuse_fallback_reason:
                         self._event(

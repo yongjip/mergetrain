@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SECURITY_SUPPORT_POLICY = (
     "Only the latest release published to PyPI receives security fixes."
 )
+_FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _security_policy_errors(text: str) -> list[str]:
@@ -48,6 +49,28 @@ def _readme_status_errors(text: str) -> list[str]:
             "README.md must not hard-code the latest package version; use the PyPI badge"
         ]
     return []
+
+
+def _workflow_pin_errors(workflows_dir: Path | None = None) -> list[str]:
+    """Require immutable commit pins for every external workflow action."""
+
+    directory = workflows_dir or ROOT / ".github" / "workflows"
+    errors: list[str] = []
+    for path in sorted((*directory.glob("*.yml"), *directory.glob("*.yaml"))):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            match = re.match(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)", line)
+            if match is None:
+                continue
+            target = match.group(1)
+            if target.startswith("./"):
+                continue
+            _separator, marker, revision = target.rpartition("@")
+            if not marker or not _FULL_COMMIT_SHA.fullmatch(revision):
+                errors.append(
+                    f"{path.relative_to(directory.parent.parent)}:{lineno} "
+                    f"must pin external action {target!r} to a full commit SHA"
+                )
+    return errors
 
 
 def _project_version() -> str:
@@ -123,6 +146,7 @@ def check_release(*, tag: str = "") -> list[str]:
         )
 
     errors.extend(_readme_status_errors(readme))
+    errors.extend(_workflow_pin_errors())
 
     packages = server.get("packages")
     pypi_packages = [

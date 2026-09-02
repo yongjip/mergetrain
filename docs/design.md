@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   note          TEXT NOT NULL DEFAULT '',
   auto_deploy   INTEGER NOT NULL DEFAULT 0,
   approval_destination_sha TEXT NOT NULL DEFAULT '',
+  approval_execution_policy_sha TEXT NOT NULL DEFAULT '',
   train_id      TEXT NOT NULL DEFAULT '',
   train_size    INTEGER NOT NULL DEFAULT 0,
   validated_at  TEXT NOT NULL DEFAULT '',
@@ -200,6 +201,13 @@ that hash matches, so recovery never follows a changed `pushurl`. The field is
 intentionally omitted from the public job JSON contract. A v12 marker migrated
 with a blank hash remains parked: v2.3.1 cannot prove its historical endpoint
 from current config and will not reconcile it automatically.
+
+Schema v14 adds the internal `approval_execution_policy_sha` to auto jobs. It
+binds approval to the semantic gate policy (including the default command
+timeout), validation-reuse configuration and authorization, and verify hooks.
+Legacy rows migrate with a blank value and therefore fail closed instead of
+being silently upgraded to the current policy. The field is intentionally
+omitted from public job JSON.
 
 ### `locks`
 

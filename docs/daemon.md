@@ -20,6 +20,12 @@ mergetrain daemon --validate-only --once
   multiple push URLs and relative filesystem push URLs fail closed. A mismatch becomes `blocked` with
   `approval_destination_changed`; no ref is touched. Manual queued jobs remain
   untouched.
+- The persisted execution-policy hash must also match the effective gates,
+  default command timeout, validation-reuse configuration and authorization,
+  and post-push verify hooks. The daemon checks it transactionally at claim;
+  the runner reloads it before gates and again before the push marker. A blank
+  legacy hash or mismatch becomes `blocked` with
+  `approval_execution_policy_changed` and requires a fresh `--auto` enqueue.
 - `--validate-only` claims only manual jobs (`auto_deploy = 0`) and invokes the
   batch runner with `deploy=False`; it cannot push or run post-push verify.
 - Validation mode pauses before a writable claim whenever any `validated` row
@@ -56,8 +62,9 @@ Then run it from cron, launchd, systemd timer, or a service-specific supervisor.
 ## Safety boundary
 
 The default daemon does not decide whether a job is safe for unattended deploy.
-It only trusts the enqueue-time `--auto` flag. Your wrapper, agent instruction,
-or human operator must enforce explicit approval before `--auto` is used.
+It requires the enqueue-time `--auto` flag plus matching destination and
+execution-policy identities. Your wrapper, agent instruction, or human operator
+must enforce explicit approval before `--auto` is used.
 
 Starting `daemon --validate-only` is explicit authorization to spend local
 runner resources on merge and gates; it is not deploy approval. The pending

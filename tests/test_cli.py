@@ -21,7 +21,10 @@ from mergetrain.cli import (
 )
 from mergetrain.config import load_config, render_default_config
 from mergetrain.contract import CONTRACT_VERSION
-from mergetrain.deploy_plan import deploy_destination_sha
+from mergetrain.deploy_plan import (
+    deploy_destination_sha,
+    deploy_execution_policy_sha,
+)
 from mergetrain.errors import CommandFailed
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
@@ -194,14 +197,13 @@ class CliTests(unittest.TestCase):
                         "--validate-only",
                     ]
                 )
-
-            self.assertEqual(code, 0)
-            self.assertTrue(loop.call_args.kwargs["validate_only"])
-            callback = loop.call_args.kwargs["process_batch"]
-            callback(None, [Job(id=1, task="t", branch="b")])
-            self.assertFalse(
-                runner_type.return_value.process_batch.call_args.kwargs["deploy"]
-            )
+                self.assertEqual(code, 0)
+                self.assertTrue(loop.call_args.kwargs["validate_only"])
+                callback = loop.call_args.kwargs["process_batch"]
+                callback(None, [Job(id=1, task="t", branch="b")])
+                self.assertFalse(
+                    runner_type.return_value.process_batch.call_args.kwargs["deploy"]
+                )
 
     def test_single_repo_validation_daemon_rejects_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1076,6 +1078,9 @@ class CliTests(unittest.TestCase):
                     note="operator context",
                     auto_deploy=True,
                     approval_destination_sha=deploy_destination_sha(config),
+                    approval_execution_policy_sha=(
+                        deploy_execution_policy_sha(config)
+                    ),
                 )
                 mark_job(conn, original.id, status="failed", note="gate failed")
             finally:
@@ -1433,7 +1438,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("rules", payload)
         self.assertEqual(
             payload["boundary"]["daemon_processes_only"],
-            "default mode deploys only jobs enqueued with --auto whose approved destination still matches; --validate-only processes only manual queued jobs and pauses while any validated train exists",
+            "default mode deploys only jobs enqueued with --auto whose approved destination and execution policy still match; --validate-only processes only manual queued jobs and pauses while any validated train exists",
         )
         self.assertIn("opaque train ID", payload["boundary"]["validated_train_deploy"])
         self.assertIn("then stop", " ".join(payload["rules"]))

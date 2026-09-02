@@ -57,6 +57,7 @@ class NotLandedReasonTests(unittest.TestCase):
         ({"status": "blocked", "note": "source HEAD changed"}, "source_identity_mismatch"),
         ({"status": "blocked", "note": "gate fingerprint changed"}, "validated_reuse_mismatch"),
         ({"status": "blocked", "note": "deploy_plan_changed"}, "deploy_authorization_changed"),
+        ({"status": "blocked", "note": "approval_execution_policy_changed"}, "deploy_authorization_changed"),
         ({"status": "blocked"}, "merge_blocked"),
         ({"status": "failed", "push_status": "failed"}, "push_failed"),
         ({"status": "failed", "note": "command timed out"}, "command_timeout"),

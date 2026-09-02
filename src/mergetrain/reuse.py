@@ -32,9 +32,10 @@ def gate_policy_sha(config: MergetrainConfig) -> str:
 
     return _sha256_json(
         {
-            "version": 2,
+            "version": 3,
             "project": config.project.name,
             "integration_ref": config.git.integration_ref,
+            "default_command_timeout_seconds": config.queue.command_timeout_seconds,
             "gate_parallelism": {
                 "max_workers": config.gate_parallelism.max_workers,
                 "timeout_seconds": config.gate_parallelism.timeout_seconds,

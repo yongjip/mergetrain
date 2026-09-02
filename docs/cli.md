@@ -146,7 +146,7 @@ mergetrain enqueue --task feature-a --branch agent/feature-a
 | `--base-sha` / `--head-sha` | Record SHAs manually. |
 | `--capture-sha` | Compatibility spelling for the default exact-SHA capture. |
 | `--note` | Free-text status note. |
-| `--auto` | Mark the job eligible for the unattended daemon (requires prior approval). |
+| `--auto` | Bind the current destination and execution policy, then mark the job eligible for the unattended daemon (requires prior approval). |
 | `--allow-duplicate` | Allow a second active job for the same branch. |
 | `--allow-dirty` | Allow enqueue from a dirty worktree. |
 | `--allow-branch-mismatch` | Allow the worktree's current branch to differ from `--branch`. |
@@ -168,8 +168,10 @@ mergetrain retry 12 --json
 mergetrain retry 12 --rebase
 ```
 
-The replacement inherits the original task, note, worktree, branch, and `--auto`
-eligibility, and always captures fresh integration/base and branch/head SHAs.
+The replacement inherits the original task, note, worktree, and branch, and
+always captures fresh integration/base and branch/head SHAs. It inherits
+`--auto` eligibility only when both the destination and execution-policy hashes
+still match; otherwise the replacement is manual and needs fresh approval.
 Dismissal and insertion are one SQLite transaction. `--json` returns the new
 `job` plus the `dismissed_job` it replaced — singular and an object, unlike
 `dismiss`, whose `dismissed` is an array. With `--rebase`, Git fetch
@@ -640,7 +642,8 @@ mergetrain daemon --validate-only --interval 15
 mergetrain daemon --validate-only --once
 ```
 
-Default mode claims and deploys only jobs enqueued with `--auto`.
+Default mode claims and deploys only jobs enqueued with `--auto` whose bound
+destination and execution-policy identities still match.
 `--validate-only` claims only manual queued jobs, invokes no push or post-push
 verify, and pauses while any validated train exists. Starting that mode
 authorizes merge and gates, not deployment; deploy still requires approval for

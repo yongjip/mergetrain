@@ -6,8 +6,9 @@ import argparse
 import sys
 
 from ..cli_support import _preflight_config, config_from_args
+from ..config import MergetrainConfig
 from ..daemon import daemon_loop
-from ..deploy_plan import deploy_destination_sha
+from ..deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from ..errors import QueueError
 from ..git_runner import GitRunner
 from ..models import Job
@@ -31,11 +32,26 @@ def cmd_daemon(args: argparse.Namespace) -> int:
             "configured; no headless notification backend is active",
             file=sys.stderr,
         )
-    runner = GitRunner(config)
     owner = default_owner()
+    approval_snapshot: list[MergetrainConfig] = []
+
+    def current_config() -> MergetrainConfig:
+        latest = config_from_args(args)
+        _preflight_config(latest)
+        return latest
+
+    def current_destination_sha() -> str:
+        latest = current_config()
+        approval_snapshot[:] = [latest]
+        return deploy_destination_sha(latest)
+
+    def current_execution_policy_sha() -> str:
+        latest = approval_snapshot.pop() if approval_snapshot else current_config()
+        return deploy_execution_policy_sha(latest)
 
     def process_batch(conn, jobs: list[Job]) -> object:  # type: ignore[no-untyped-def]
-        return runner.process_batch(
+        latest = current_config()
+        return GitRunner(latest).process_batch(
             conn,
             jobs,
             deploy=not args.validate_only,
@@ -59,7 +75,12 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         notification_state_path=repo_notify_state_path(config.state.db),
         validate_only=args.validate_only,
         approval_destination_sha=(
-            "" if args.validate_only else lambda: deploy_destination_sha(config)
+            "" if args.validate_only else current_destination_sha
+        ),
+        approval_execution_policy_sha=(
+            ""
+            if args.validate_only
+            else current_execution_policy_sha
         ),
     )
     return 0

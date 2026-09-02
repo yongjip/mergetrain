@@ -14,12 +14,12 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 2. Commit all changes before enqueueing.
 3. Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.
 4. Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.
-5. Use --auto only after explicit unattended-deployment approval from the user/operator. A bounded instruction to QA, deploy, verify, and finish end-to-end is unattended-deployment approval for that task scope; continue without repeated train-ID prompts unless the scope or destination changes or recovery needs new authority.
-6. An auto job is bound to the approved Git destination. If the remote or push refs change, mergetrain blocks before claim or push; review the new destination before enqueueing with --auto again.
+5. Use --auto only after explicit unattended-deployment approval from the user/operator. A bounded instruction to QA, deploy, verify, and finish end-to-end is unattended-deployment approval for that task scope; continue without repeated train-ID prompts unless the scope, destination, execution policy, or recovery authority changes.
+6. An auto job is bound to the approved Git destination and execution policy. If the remote, push refs, gates, validation-reuse policy, command timeout, or verify hooks change, mergetrain blocks before claim, gates, or push; review the change before enqueueing with --auto again.
 7. Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.
 8. Let one separately authorized runner or daemon own merge, test, push, and verify; ordinary task, merge, integration, or enqueue intent is not deploy approval unless the user explicitly authorizes bounded end-to-end deployment.
 9. Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.
-10. Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation. One-shot train approval does not carry over; bounded unattended-deployment approval carries only while task scope and destination remain unchanged.
+10. Replace a validated train only with mergetrain supersede; the replacement is a new SHA-pinned train that requires fresh validation. One-shot train approval does not carry over; bounded unattended-deployment approval carries only while task scope, destination, and execution policy remain unchanged.
 11. After a crash, run reconcile/recover to resolve needs_reconcile jobs against the remote before deploying; run reconcile before any manual force-push.
 12. Do not delete or rewrite refs/mergetrain/deploys/*; they are permanent remote recovery evidence.
 
@@ -29,10 +29,10 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 - A task agent stops after enqueueing. Only a separately authorized runner validates with `run-next --validate-only`, `run-batch --validate-only`, or `daemon --validate-only`.
 - A validated train is deployed as one exact identity by `run-batch --deploy`; summarize changes, destination refs, gates, blocked or failed work, and reassembly risk in human terms.
 - Validated-gate reuse is disabled unless config or `--reuse-validated` explicitly authorizes it.
-- `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and one-shot train approval never carry over. Bounded unattended authorization continues only while task scope and destination remain unchanged.
+- `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and one-shot train approval never carry over. Bounded unattended authorization continues only while task scope, destination, and execution policy remain unchanged.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The default daemon deploys only jobs enqueued with `--auto`. `daemon --validate-only` processes only manual queued jobs, never pushes, and pauses while any validated train exists.
-- Auto approval is bound to the Git remote, integration ref, and push refs recorded at enqueue. A destination change blocks before claim or push and requires renewed approval for that destination.
+- Auto approval is bound to the Git remote, integration ref, push refs, gates, command timeout, validation-reuse policy, and verify hooks recorded at enqueue. A destination or execution-policy change blocks before claim, gates, or push and requires renewed approval.
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
 - The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.

@@ -77,6 +77,7 @@ listed here as an unexpected failure and fall back to `message`.
 | `lost_lease` | **yes** | this runner no longer owns the lease it was given; re-read state and retry |
 | `merge_blocked` | no | the branch cannot be merged into the integration train |
 | `approval_destination_changed` | no | unattended approval no longer matches the live Git destination; nothing was pushed |
+| `approval_execution_policy_changed` | no | unattended approval no longer matches the live gates, reuse policy, command timeout, or verify hooks; nothing was pushed |
 | `deploy_plan_changed` | no | the confirmed train, destination, gates/reuse policy, or verify hooks changed; refresh the preview before deploying |
 | `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |
 | `push_rejected` | no | the remote refused the push on policy or permissions; the job parks `blocked` |

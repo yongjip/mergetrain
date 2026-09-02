@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from scripts.check_release import (
     SECURITY_SUPPORT_POLICY,
     _readme_status_errors,
     _security_policy_errors,
+    _workflow_pin_errors,
     check_release,
 )
 
@@ -26,6 +29,22 @@ class SecuritySupportPolicyTests(unittest.TestCase):
 
 
 class ReleaseManifestTests(unittest.TestCase):
+    def test_workflow_actions_require_full_commit_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            workflows = Path(td)
+            (workflows / "ci.yml").write_text(
+                "steps:\n"
+                "  - uses: actions/checkout@v7\n"
+                "  - uses: ./.github/actions/local\n"
+                "  - uses: owner/action@0123456789abcdef0123456789abcdef01234567\n",
+                encoding="utf-8",
+            )
+
+            errors = _workflow_pin_errors(workflows)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("actions/checkout@v7", errors[0])
+
     def test_readme_status_rejects_a_hard_coded_release_number(self) -> None:
         self.assertTrue(
             _readme_status_errors(

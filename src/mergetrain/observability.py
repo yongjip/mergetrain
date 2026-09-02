@@ -711,6 +711,7 @@ def job_outcome(job: Job) -> dict[str, Any]:
             category = "push_rejected"
         elif (
             "approval_destination_changed" in lowered
+            or "approval_execution_policy_changed" in lowered
             or "deploy_plan_changed" in lowered
         ):
             category = "deploy_authorization_changed"

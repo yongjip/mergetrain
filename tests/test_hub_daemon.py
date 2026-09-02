@@ -7,7 +7,10 @@ import unittest
 from pathlib import Path
 
 from mergetrain.config import load_config
-from mergetrain.deploy_plan import deploy_destination_sha
+from mergetrain.deploy_plan import (
+    deploy_destination_sha,
+    deploy_execution_policy_sha,
+)
 from mergetrain.hub_daemon import hub_daemon_loop, hub_sweep
 from mergetrain.registry import add_repo, load_registry, save_registry
 from mergetrain.store import connect, enqueue_job, list_jobs
@@ -39,6 +42,9 @@ def seed_jobs(repo: Path, *, auto: bool) -> int:
             auto_deploy=auto,
             approval_destination_sha=(
                 deploy_destination_sha(config) if auto else ""
+            ),
+            approval_execution_policy_sha=(
+                deploy_execution_policy_sha(config) if auto else ""
             ),
         )
         return job.id
@@ -88,6 +94,39 @@ class HubSweepTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(jobs[manual_id].status, "queued")
+
+    def test_sweep_reloads_policy_and_blocks_changed_auto_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root, "policy-change")
+            auto_id = seed_jobs(repo, auto=True)
+            add_repo(repo, registry)
+            (repo / ".mergetrain.yaml").write_text(
+                "project:\n  name: policy-change\n"
+                "gates:\n"
+                "  - name: tests\n"
+                "    run: python -m pytest\n",
+                encoding="utf-8",
+            )
+
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=lambda config, owner: (
+                    lambda conn, jobs: self.fail("changed policy reached runner")
+                ),
+            )
+
+            self.assertEqual(outcomes[0]["outcome"], "idle")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                blocked = {job.id: job for job in list_jobs(conn)}[auto_id]
+            finally:
+                conn.close()
+            self.assertEqual(blocked.status, "blocked")
+            self.assertIn("approval_execution_policy_changed", blocked.note)
 
     def test_sweep_skips_queueless_repos_without_creating_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:

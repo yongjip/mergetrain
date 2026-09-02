@@ -51,6 +51,7 @@ class JobOutcomeTests(unittest.TestCase):
         ({"status": "blocked", "note": "validated reuse mismatch"}, "validated_reuse_mismatch", "failure"),
         ({"status": "blocked", "note": "gate fingerprint changed"}, "validated_reuse_mismatch", "failure"),
         ({"status": "blocked", "note": "approval_destination_changed"}, "deploy_authorization_changed", "failure"),
+        ({"status": "blocked", "note": "approval_execution_policy_changed"}, "deploy_authorization_changed", "failure"),
         ({"status": "blocked"}, "merge_blocked", "failure"),  # empty note falls through
         ({"status": "failed", "push_status": "failed", "note": "remote rejected the update"}, "push_failed", "failure"),
         ({"status": "failed", "note": "the command timed out"}, "command_timeout", "failure"),

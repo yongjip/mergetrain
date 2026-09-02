@@ -14,7 +14,8 @@ worktrees.
 5. Use `--auto` only after explicit unattended-deploy approval. A bounded
    instruction to QA, deploy, verify, and finish end-to-end grants that approval
    for the named task and destination; do not ask for each opaque train ID.
-   Auto jobs are bound to that Git destination and must block if it changes.
+   Auto jobs are bound to that Git destination and the approved gate, reuse,
+   and verify policy; they must block if either identity changes.
 6. Let one runner or daemon own merge and test. The default daemon may push and
    verify only `--auto` jobs; `daemon --validate-only` handles manual jobs but
    stops at a validated train and never deploys.

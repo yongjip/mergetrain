@@ -48,7 +48,10 @@ class DemoAssetTests(unittest.TestCase):
         # The tape names JetBrains Mono; a fallback face would be silent.
         self.assertIn("fonts-jetbrains-mono", workflow)
         self.assertIn("vhs docs/demo.tape", workflow)
-        self.assertIn("uses: actions/upload-artifact@v7", workflow)
+        self.assertRegex(
+            workflow,
+            r"uses: actions/upload-artifact@[0-9a-f]{40}\s+# v7\.0\.1",
+        )
 
     def test_readme_embeds_the_generated_gif(self) -> None:
         readme = (self.repo / "README.md").read_text(encoding="utf-8")

@@ -43,6 +43,12 @@ This prevents configuration drift from redirecting an approved mergetrain
 operation; it does not stop an actor who already has shell and integration
 credentials from invoking `git push` outside mergetrain.
 
+Unattended approval also binds the effective gates, default command timeout,
+validation-reuse policy and authorization, and verify hooks. The daemon checks
+that identity during claim, and the runner reloads the trusted control-checkout
+configuration before gates and before creating a push marker. Policy drift
+therefore requires a fresh approved enqueue instead of silently weakening QA.
+
 ## Secrets
 
 - Do not store provider tokens or credentials in `.mergetrain.yaml`.

@@ -216,6 +216,14 @@ concrete incorrect state that the current core cannot address.
   URLs. Mismatches block without creating a pending-push marker or touching a
   remote ref; permanent deploy audit evidence and reconcile semantics are
   unchanged.
+- **v2.4 closure:** schema v14 adds one internal, credential-free execution
+  policy hash to the existing auto-approval row. It covers gates, the default
+  command timeout, validation-reuse configuration and authorization, and verify
+  hooks; claim, pre-gate, and pre-push checks block blank or changed identities.
+  Retry preserves unattended eligibility only when both hashes match. This adds
+  no command, flag, config field, dashboard control, MCP tool, or public job key;
+  it closes the reproduced state where removing a mandatory gate after enqueue
+  allowed a same-destination push.
 - **Success measure and simplification trigger:** regression tests change
   destinations before claim and during gates and prove zero pushes; same-target
   retry remains unattended while changed-target retry becomes manual. Keep one

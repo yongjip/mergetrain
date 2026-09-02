@@ -21,8 +21,9 @@ Or let mergetrain fetch and start the rebase with
 worktree ready for manual resolution and does not dismiss the old job. `retry`
 only replaces a blocked/failed job (never queued or in-progress work), inherits
 its task and note, and captures fresh base/head SHAs. It inherits `--auto`
-eligibility only while the approved destination hash still matches; a changed
-remote or push ref turns the replacement into a manual job.
+eligibility only while both the approved destination and execution-policy
+hashes still match; a changed destination, gate/reuse policy, command timeout,
+or verify hook turns the replacement into a manual job.
 
 ## Deploy authorization changed
 
@@ -36,6 +37,15 @@ push. A mismatch finishes the job `blocked` with
 `deploy_authorization_changed`. Review the new destination, then enqueue the
 fixed committed branch with `--auto` only if unattended deployment is approved
 for it.
+
+Auto jobs separately bind the execution policy: effective gates, default
+command timeout, validation-reuse configuration and authorization, and verify
+hooks. The daemon compares that identity inside claim, and the runner reloads
+the control checkout before gates and immediately before the push marker. A
+blank legacy identity or mismatch becomes `blocked` with
+`approval_execution_policy_changed`, under the same `inspect` category. Review
+the current QA/deploy/verify policy and enqueue a fresh approved job; do not
+retrofit a hash onto the old row.
 
 MCP and other preview-driven confirmations use the broader deploy-plan hash.
 If the train, destination, gate/reuse policy, or verify hooks change, the CLI

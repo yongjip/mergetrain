@@ -54,7 +54,21 @@ class MCPRegistryWorkflowTests(unittest.TestCase):
 
     def test_registry_launch_uses_the_pinned_uvx_runtime(self) -> None:
         self.assertIn("python -m pip install uv==0.12.7", self.workflow)
-        self.assertIn("--attempts 6 --timeout 120", self.workflow)
+        self.assertIn("timeout-minutes: 15", self.workflow)
+        self.assertIn("--attempts 18 --timeout 120", self.workflow)
+
+    def test_release_attests_built_distributions_before_upload(self) -> None:
+        attest = self.release_workflow.index("uses: actions/attest@")
+        upload = self.release_workflow.index("uses: actions/upload-artifact@")
+
+        self.assertIn("attestations: write", self.release_workflow)
+        self.assertIn("id-token: write", self.release_workflow)
+        self.assertRegex(
+            self.release_workflow,
+            r"uses: actions/attest@[0-9a-f]{40}\s+# v4\.2\.2",
+        )
+        self.assertIn("subject-path: dist/*", self.release_workflow)
+        self.assertLess(attest, upload)
 
     def test_release_waits_for_pypi_before_calling_registry_workflow(
         self,

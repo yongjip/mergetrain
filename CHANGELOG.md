@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.4.0 - 2026-09-02
+
+- Bind unattended deploy approval to the exact execution policy as well as the
+  Git destination. Enqueue records the effective gates, command timeout,
+  validation-reuse policy and authorization, and verify hooks; daemon claim,
+  pre-gate, and pre-push checks fail closed if any of them changes. Legacy auto
+  approvals and retries without both identities require fresh approval.
+
+- Make MCP Registry publication resilient to fresh-PyPI metadata propagation
+  by retrying the exact manifest command with an isolated uv cache and bounded
+  workflow timeout.
+
+- Pin every third-party GitHub Action to an immutable commit, enforce pins in
+  the release checker, and generate GitHub artifact attestations for release
+  distributions.
+
 ## 2.3.1 - 2026-09-02
 
 - Bind approval, audit lookup, atomic push, and crash reconciliation to one
@@ -22,9 +38,9 @@
 ## 2.3.0 - 2026-09-02
 
 - Bind unattended approval to a credential-free destination identity and MCP
-  confirmation to the CLI's exact deploy-plan hash. Destination or policy
-  changes now fail closed before claim and immediately before push; retry keeps
-  auto approval only for the same destination.
+  confirmation to the CLI's exact deploy-plan hash. Destination changes and
+  confirmed-plan policy changes now fail closed before claim or push; retry
+  keeps auto approval only for the same destination.
 
 - Capture base and task SHAs by default for normal CLI enqueue, while retaining
   the existing flag and explicit direct-insert escape for compatibility.

@@ -105,6 +105,40 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(blocked.status, "blocked")
             self.assertIn("approval_destination_changed", blocked.note)
 
+    def test_execution_policy_mismatch_blocks_auto_jobs_before_runner_work(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(
+                conn,
+                task="auto",
+                branch="auto",
+                auto_deploy=True,
+                approval_destination_sha="destination-a",
+                approval_execution_policy_sha="policy-a",
+            )
+            conn.close()
+
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail(
+                    "auto job reached runner work"
+                ),
+                owner="daemon:1",
+                say=lambda _: None,
+                approval_destination_sha="destination-a",
+                approval_execution_policy_sha="policy-b",
+            )
+
+            self.assertEqual(outcome, "idle")
+            conn = connect(db)
+            try:
+                blocked = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(blocked.status, "blocked")
+            self.assertIn("approval_execution_policy_changed", blocked.note)
+
     def test_validation_loop_rejects_deploy_notifier(self) -> None:
         with self.assertRaisesRegex(QueueError, "does not support"):
             daemon_loop(

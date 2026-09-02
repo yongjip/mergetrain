@@ -13,6 +13,7 @@ Every pull request runs:
 - dashboard unit/build checks and a headless Chromium interaction suite for
   notification permission, duplicate tabs, drill-down clicks, and feed recovery;
 - version, changelog, and security support-policy consistency checks;
+- immutable full-commit pins for every external GitHub Action;
 - isolated sdist and wheel builds, followed by extraction and execution of the
   packaged sdist's own collection and test suite;
 - `twine check --strict` on both distributions; and
@@ -21,7 +22,8 @@ Every pull request runs:
   protocol, lists tools, and verifies the deploy input schema.
 
 The same metadata, unit, build, and strict package checks run again from the
-release tag before any job receives PyPI credentials.
+release tag before any job receives PyPI credentials. The build job also emits
+GitHub artifact attestations for every wheel and sdist before publication.
 
 Useful local equivalents:
 
@@ -119,13 +121,14 @@ an upload that already succeeded.
    PR CI already builds both distributions, runs `twine check --strict`, and
    smoke-installs the wheel in a clean environment).
 2. Update the version and dated changelog heading for the intended release.
-3. Create an annotated tag on the exact verified `main` commit and push it:
+3. Create a signed annotated tag on the exact verified `main` commit when a
+   signing key is configured (otherwise use an annotated tag) and push it:
 
    ```sh
    git switch main
    git pull --ff-only
    python scripts/check_release.py --tag v0.1.0
-   git tag -a v0.1.0 -m "mergetrain 0.1.0"
+   git tag -s v0.1.0 -m "mergetrain 0.1.0"
    git push origin v0.1.0
    ```
 
@@ -141,11 +144,14 @@ an upload that already succeeded.
    official MCP Registry with GitHub OIDC. There is no further prompt — the
    Release publication in step 4 **is** the approval.
 6. Verify <https://pypi.org/project/mergetrain/>, install from PyPI in a fresh
-   environment, and confirm the Registry API returns the released version:
+   environment, verify its GitHub artifact attestation, and confirm the Registry
+   API returns the released version:
 
    ```sh
    curl \
      "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yongjip%2Fmergetrain"
+   gh attestation verify dist/mergetrain-0.1.0-py3-none-any.whl \
+     --repo yongjip/mergetrain
    ```
 
 7. The Homebrew tap picks the release up on its own daily cron. To make that
@@ -166,7 +172,9 @@ The workflow:
 - downloads a pinned `mcp-publisher` binary and verifies its SHA-256;
 - validates `server.json` against the public Registry;
 - constructs the manifest's exact `uvx --from mergetrain[mcp]==<version>`
-  command against PyPI and verifies an MCP initialize + `tools/list` handshake;
+  command against PyPI and verifies an MCP initialize + `tools/list` handshake,
+  retrying with an isolated uv cache so stale negative metadata cannot poison a
+  just-published release;
 - authenticates with short-lived GitHub Actions OIDC; and
 - publishes the manifest.
 

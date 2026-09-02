@@ -29,6 +29,45 @@ def deploy_destination_sha(config: MergetrainConfig) -> str:
     return resolve_git_destination(config).destination_sha
 
 
+def _execution_policy_identity(
+    config: MergetrainConfig,
+    *,
+    reuse_validated: bool,
+) -> dict[str, Any]:
+    """Return the configured QA/deploy policy that an approval authorizes."""
+
+    return {
+        "version": 1,
+        "gate_policy_sha": gate_policy_sha(config),
+        "reuse": {
+            "authorized": bool(reuse_validated),
+            "configured": config.deploy.reuse.enabled,
+            "max_age_minutes": config.deploy.reuse.max_age_minutes,
+            "on_mismatch": config.deploy.reuse.on_mismatch,
+        },
+        "verify": [
+            {
+                "name": hook.name,
+                "run": hook.run,
+                "always_rerun_on_deploy": hook.always_rerun_on_deploy,
+            }
+            for hook in config.deploy.verify
+        ],
+    }
+
+
+def deploy_execution_policy_sha(
+    config: MergetrainConfig,
+    *,
+    reuse_validated: bool = False,
+) -> str:
+    """Hash the configured gates, reuse authorization, and verify hooks."""
+
+    return _sha256_json(
+        _execution_policy_identity(config, reuse_validated=reuse_validated)
+    )
+
+
 def deploy_plan_sha(
     config: MergetrainConfig,
     jobs: Iterable[Job],
@@ -41,25 +80,14 @@ def deploy_plan_sha(
     ordered = list(jobs)
     return _sha256_json(
         {
-            "version": 1,
+            "version": 2,
             "train_identity_sha": train_identity_sha(ordered),
             "destination_sha": (
                 destination or resolve_git_destination(config)
             ).destination_sha,
-            "gate_policy_sha": gate_policy_sha(config),
-            "reuse": {
-                "authorized": bool(reuse_validated),
-                "configured": config.deploy.reuse.enabled,
-                "max_age_minutes": config.deploy.reuse.max_age_minutes,
-                "on_mismatch": config.deploy.reuse.on_mismatch,
-            },
-            "verify": [
-                {
-                    "name": hook.name,
-                    "run": hook.run,
-                    "always_rerun_on_deploy": hook.always_rerun_on_deploy,
-                }
-                for hook in config.deploy.verify
-            ],
+            "execution_policy": _execution_policy_identity(
+                config,
+                reuse_validated=reuse_validated,
+            ),
         }
     )

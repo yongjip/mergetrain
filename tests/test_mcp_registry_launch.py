@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from scripts.check_mcp_registry_launch import registry_command
+from scripts.check_mcp_registry_launch import (
+    isolated_uv_environment,
+    registry_command,
+)
 
 
 class MCPRegistryLaunchTests(unittest.TestCase):
@@ -15,11 +18,18 @@ class MCPRegistryLaunchTests(unittest.TestCase):
             [
                 "uvx",
                 "--from",
-                "mergetrain[mcp]==2.3.1",
+                "mergetrain[mcp]==2.4.0",
                 "mergetrain",
                 "mcp",
             ],
         )
+
+    def test_each_retry_can_use_an_isolated_uv_cache(self) -> None:
+        cache = Path("/tmp/one-attempt")
+
+        env = isolated_uv_environment(cache)
+
+        self.assertEqual(env["UV_CACHE_DIR"], str(cache))
 
 
 if __name__ == "__main__":

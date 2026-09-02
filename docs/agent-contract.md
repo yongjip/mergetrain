@@ -14,7 +14,7 @@ Agents interacting with mergetrain must follow this contract.
    before recent history.
 5. Use `--auto` only after explicit unattended-deploy approval. A bounded
    instruction to QA, deploy, verify, and finish end-to-end grants that approval
-   for the named task scope and destination.
+   for the named task scope, destination, and current trusted execution policy.
 6. Reuse validated gates only after explicit config or `--reuse-validated`
    authorization.
 7. Let one separately authorized runner or daemon own merge, test, push, and
@@ -65,7 +65,9 @@ For a task agent, a successful exact-SHA enqueue is the terminal handoff.
 guidance, not permission to continue after enqueueing. The same agent may act as
 the runner when that role is separately authorized. Bounded end-to-end
 authorization lets that runner continue through QA, deploy, and verification
-without repeated train-ID prompts.
+without repeated train-ID prompts. The auto approval remains valid only while
+the destination, gates, command timeout, validation-reuse policy, and verify
+hooks match their enqueue-time identities.
 
 The default daemon deploys only jobs explicitly enqueued with `--auto`.
 `daemon --validate-only` is a separate runner authorization: it processes only

@@ -19,7 +19,7 @@ from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, load_config
 from .daemon import ProcessBatch, Say, daemon_tick
-from .deploy_plan import deploy_destination_sha
+from .deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from .hub import display_path
 from .notify import (
     Notifier,
@@ -132,6 +132,9 @@ def hub_sweep(
                 lock_ttl_minutes=config.queue.lock_ttl_minutes,
                 say=lambda message: say(f"[{config.project.name}] {message}"),
                 approval_destination_sha=lambda: deploy_destination_sha(config),
+                approval_execution_policy_sha=lambda: deploy_execution_policy_sha(
+                    config
+                ),
             )
             out.update(ok=True, outcome=outcome)
             return out

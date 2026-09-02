@@ -57,7 +57,10 @@ from mergetrain.command_runner import (
     run_shell,
 )
 from mergetrain.config import load_config
-from mergetrain.deploy_plan import deploy_destination_sha
+from mergetrain.deploy_plan import (
+    deploy_destination_sha,
+    deploy_execution_policy_sha,
+)
 from mergetrain.errors import (
     AmbiguousPush,
     CommandFailed,
@@ -203,6 +206,64 @@ def enable_persistent_validation_workspace(
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_auto_enqueue_blocks_when_execution_policy_changes_before_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            config_path = repo / ".mergetrain.yaml"
+            git(repo, "add", ".mergetrain.yaml")
+            git(repo, "commit", "-m", "configure mergetrain")
+            git(repo, "push", "origin", "main")
+            git(repo, "switch", "feature/a")
+            git(repo, "rebase", "main")
+
+            enqueue_out = io.StringIO()
+            with redirect_stdout(enqueue_out):
+                enqueue_code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "enqueue",
+                        "--task",
+                        "policy-bound auto deploy",
+                        "--branch",
+                        "feature/a",
+                        "--worktree",
+                        str(repo),
+                        "--auto",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(enqueue_code, 0, enqueue_out.getvalue())
+            job_id = int(json.loads(enqueue_out.getvalue())["job"]["id"])
+            approved_main = git(root / "remote.git", "rev-parse", "main")
+
+            original = config_path.read_text(encoding="utf-8")
+            gates_start = original.index("gates:\n")
+            deploy_start = original.index("deploy:\n")
+            config_path.write_text(
+                original[:gates_start] + "gates: []\n" + original[deploy_start:],
+                encoding="utf-8",
+            )
+
+            daemon_out = io.StringIO()
+            with redirect_stdout(daemon_out):
+                daemon_code = main(["--repo", str(repo), "daemon", "--once"])
+            self.assertEqual(daemon_code, 0, daemon_out.getvalue())
+
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                stored = get_job(conn, job_id)
+            finally:
+                conn.close()
+            self.assertEqual(stored.status, "blocked")
+            self.assertIn("approval_execution_policy_changed", stored.note)
+            self.assertEqual(
+                git(root / "remote.git", "rev-parse", "main"), approved_main
+            )
+            self.assertFalse(marker.exists(), "changed policy must block before gates")
+
     def test_invalid_manual_destination_is_typed_before_push(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -269,6 +330,7 @@ class GitRunnerTests(unittest.TestCase):
             git(root, "init", "--bare", str(other_remote))
             config = load_config(repo=repo)
             approved_destination = deploy_destination_sha(config)
+            approved_policy = deploy_execution_policy_sha(config)
             conn = connect(config.state.db)
             owner = f"runner:{os.getpid()}"
             try:
@@ -280,6 +342,7 @@ class GitRunnerTests(unittest.TestCase):
                     head_sha=git(repo, "rev-parse", "feature/a"),
                     auto_deploy=True,
                     approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
                 )
                 claimed = claim_all_queued(
                     conn,
@@ -287,6 +350,7 @@ class GitRunnerTests(unittest.TestCase):
                     auto_only=True,
                     deploy=True,
                     approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
                 )
                 runner = GitRunner(config)
                 real_run_gates = runner._run_gates
@@ -349,6 +413,7 @@ class GitRunnerTests(unittest.TestCase):
             git(root, "init", "--bare", str(remote_c))
             config = load_config(repo=repo)
             approved_destination = deploy_destination_sha(config)
+            approved_policy = deploy_execution_policy_sha(config)
             conn = connect(config.state.db)
             owner = f"runner:{os.getpid()}"
             try:
@@ -360,6 +425,7 @@ class GitRunnerTests(unittest.TestCase):
                     head_sha=git(repo, "rev-parse", "feature/a"),
                     auto_deploy=True,
                     approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
                 )
                 claimed = claim_all_queued(
                     conn,
@@ -367,6 +433,7 @@ class GitRunnerTests(unittest.TestCase):
                     auto_only=True,
                     deploy=True,
                     approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
                 )
                 runner = GitRunner(config)
                 real_run_gates = runner._run_gates
@@ -422,6 +489,77 @@ class GitRunnerTests(unittest.TestCase):
                     ).stdout,
                     "",
                 )
+
+    def test_auto_execution_policy_change_during_gates_blocks_before_marker(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            approved_destination = deploy_destination_sha(config)
+            approved_policy = deploy_execution_policy_sha(config)
+            config_path = repo / ".mergetrain.yaml"
+            conn = connect(config.state.db)
+            owner = f"runner:{os.getpid()}"
+            try:
+                enqueue_job(
+                    conn,
+                    task="a",
+                    branch="feature/a",
+                    base_sha=git(repo, "rev-parse", "origin/main"),
+                    head_sha=git(repo, "rev-parse", "feature/a"),
+                    auto_deploy=True,
+                    approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
+                )
+                claimed = claim_all_queued(
+                    conn,
+                    owner=owner,
+                    auto_only=True,
+                    deploy=True,
+                    approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
+                )
+                runner = GitRunner(config)
+                real_run_gates = runner._run_gates
+
+                def gates_then_change_policy(*args, **kwargs):  # type: ignore[no-untyped-def]
+                    result = real_run_gates(*args, **kwargs)
+                    config_path.write_text(
+                        config_path.read_text(encoding="utf-8").replace(
+                            "command_timeout_seconds: 30",
+                            "command_timeout_seconds: 31",
+                        ),
+                        encoding="utf-8",
+                    )
+                    return result
+
+                with patch.object(
+                    runner,
+                    "_run_gates",
+                    side_effect=gates_then_change_policy,
+                ):
+                    results = runner.process_batch(
+                        conn,
+                        claimed,
+                        deploy=True,
+                        owner=owner,
+                        ttl_minutes=1,
+                    )
+            finally:
+                lock = get_lock(conn)
+                if lock is not None:
+                    release_runner_lock(conn, owner=owner, token=lock.token)
+                conn.close()
+
+            self.assertEqual([job.status for job in results], ["blocked"])
+            self.assertIn("approval_execution_policy_changed", results[0].note)
+            self.assertEqual(results[0].pending_deploy_sha, "")
+            self.assertNotIn(
+                "a.txt",
+                git(root / "remote.git", "ls-tree", "-r", "--name-only", "main"),
+            )
 
     def test_parallel_gate_group_is_bounded_and_events_are_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2327,6 +2465,8 @@ class BisectIsolationTests(unittest.TestCase):
             add_branch(repo, "agent/left", "left.txt")
             add_branch(repo, "agent/right", "right.txt")
             config = load_config(repo=repo)
+            approved_destination = deploy_destination_sha(config)
+            approved_policy = deploy_execution_policy_sha(config)
             owner = f"runner:{os.getpid()}"
             conn = connect(config.state.db)
             token = ""
@@ -2337,12 +2477,16 @@ class BisectIsolationTests(unittest.TestCase):
                         task=name,
                         branch=f"agent/{name}",
                         auto_deploy=True,
+                        approval_destination_sha=approved_destination,
+                        approval_execution_policy_sha=approved_policy,
                     )
                 claimed = claim_all_queued(
                     conn,
                     owner=owner,
                     auto_only=True,
                     deploy=True,
+                    approval_destination_sha=approved_destination,
+                    approval_execution_policy_sha=approved_policy,
                 )
                 token = claimed[0].claim_token
                 runner = GitRunner(config)

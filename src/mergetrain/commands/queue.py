@@ -12,7 +12,7 @@ from ..cli_support import (
     dump_json,
 )
 from ..command_runner import run_command
-from ..deploy_plan import deploy_destination_sha
+from ..deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from ..errors import CommandFailed, MergetrainError, QueueError
 from ..git_ops import (
     git_current_branch,
@@ -94,6 +94,9 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             worktree, args.branch, label="head"
         )
     approval_destination_sha = deploy_destination_sha(config) if args.auto else ""
+    approval_execution_policy_sha = (
+        deploy_execution_policy_sha(config) if args.auto else ""
+    )
     conn = connect(config.state.db)
     try:
         job = enqueue_job(
@@ -107,6 +110,7 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             allow_duplicate=args.allow_duplicate,
             auto_deploy=args.auto,
             approval_destination_sha=approval_destination_sha,
+            approval_execution_policy_sha=approval_execution_policy_sha,
         )
     finally:
         conn.close()
@@ -153,7 +157,9 @@ def cmd_retry(args: argparse.Namespace) -> int:
             worktree, original.branch, label="head"
         )
         current_destination_sha = ""
+        current_execution_policy_sha = ""
         if original.auto_deploy:
+            current_execution_policy_sha = deploy_execution_policy_sha(config)
             try:
                 current_destination_sha = deploy_destination_sha(config)
             except MergetrainError:
@@ -166,6 +172,7 @@ def cmd_retry(args: argparse.Namespace) -> int:
             base_sha=base_sha,
             head_sha=head_sha,
             current_approval_destination_sha=current_destination_sha,
+            current_approval_execution_policy_sha=current_execution_policy_sha,
         )
         next_action = _recovery_next_action(conn, config)
     finally:

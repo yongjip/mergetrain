@@ -379,6 +379,8 @@ class StoreTests(unittest.TestCase):
             worktree_path="/tmp/retry",
             note="original context",
             auto_deploy=True,
+            approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-a",
         )
         mark_job(conn, original.id, status="failed", note="gate failed")
 
@@ -387,6 +389,8 @@ class StoreTests(unittest.TestCase):
             original.id,
             base_sha="a" * 40,
             head_sha="b" * 40,
+            current_approval_destination_sha="destination-a",
+            current_approval_execution_policy_sha="policy-a",
         )
 
         self.assertEqual(dismissed.status, "canceled")
@@ -397,6 +401,8 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(replacement.worktree_path, "/tmp/retry")
         self.assertEqual(replacement.note, "gate failed")
         self.assertTrue(replacement.auto_deploy)
+        self.assertEqual(replacement.approval_destination_sha, "destination-a")
+        self.assertEqual(replacement.approval_execution_policy_sha, "policy-a")
         self.assertEqual(replacement.base_sha, "a" * 40)
         self.assertEqual(replacement.head_sha, "b" * 40)
 
@@ -621,8 +627,10 @@ class StoreTests(unittest.TestCase):
         self.assertIn("pending_deploy_remote", columns)
         self.assertIn("pending_deploy_refs", columns)
         self.assertIn("approval_destination_sha", columns)
+        self.assertIn("approval_execution_policy_sha", columns)
         self.assertEqual(migrated.pending_deploy_remote, "")
         self.assertEqual(migrated.pending_deploy_refs, "")
+        self.assertEqual(migrated.approval_execution_policy_sha, "")
         migrated_db = sqlite3.connect(db)
         try:
             self.assertEqual(
@@ -1261,7 +1269,54 @@ class StoreTests(unittest.TestCase):
         self.assertIn("approval_destination_changed", blocked.note)
         self.assertIsNone(get_lock(conn))
 
-    def test_retry_inherits_auto_only_for_the_same_destination(self) -> None:
+    def test_auto_claim_blocks_execution_policy_mismatch_before_runner_work(self) -> None:
+        conn = self.make_conn()
+        auto = enqueue_job(
+            conn,
+            task="auto",
+            branch="auto",
+            auto_deploy=True,
+            approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-a",
+        )
+
+        jobs = claim_all_queued(
+            conn,
+            owner="owner:999999",
+            auto_only=True,
+            approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-b",
+        )
+
+        self.assertEqual(jobs, [])
+        blocked = get_job(conn, auto.id)
+        self.assertEqual(blocked.status, "blocked")
+        self.assertIn("approval_execution_policy_changed", blocked.note)
+        self.assertIsNone(get_lock(conn))
+
+    def test_legacy_blank_execution_policy_is_not_silently_authorized(self) -> None:
+        conn = self.make_conn()
+        auto = enqueue_job(
+            conn,
+            task="legacy auto",
+            branch="legacy-auto",
+            auto_deploy=True,
+            approval_destination_sha="destination-a",
+        )
+
+        jobs = claim_all_queued(
+            conn,
+            owner="owner:999999",
+            auto_only=True,
+            approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-a",
+        )
+
+        self.assertEqual(jobs, [])
+        self.assertEqual(get_job(conn, auto.id).status, "blocked")
+        self.assertIsNone(get_lock(conn))
+
+    def test_retry_inherits_auto_only_for_the_same_destination_and_policy(self) -> None:
         conn = self.make_conn()
         original = enqueue_job(
             conn,
@@ -1269,6 +1324,7 @@ class StoreTests(unittest.TestCase):
             branch="feature/same-destination",
             auto_deploy=True,
             approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-a",
         )
         mark_job(conn, original.id, status="failed", note="gate failed")
 
@@ -1278,10 +1334,12 @@ class StoreTests(unittest.TestCase):
             base_sha="a" * 40,
             head_sha="b" * 40,
             current_approval_destination_sha="destination-a",
+            current_approval_execution_policy_sha="policy-a",
         )
 
         self.assertTrue(replacement.auto_deploy)
         self.assertEqual(replacement.approval_destination_sha, "destination-a")
+        self.assertEqual(replacement.approval_execution_policy_sha, "policy-a")
 
     def test_retry_drops_auto_when_destination_changed(self) -> None:
         conn = self.make_conn()
@@ -1291,6 +1349,7 @@ class StoreTests(unittest.TestCase):
             branch="feature/changed-destination",
             auto_deploy=True,
             approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-a",
         )
         mark_job(conn, original.id, status="failed", note="gate failed")
 
@@ -1300,10 +1359,37 @@ class StoreTests(unittest.TestCase):
             base_sha="a" * 40,
             head_sha="b" * 40,
             current_approval_destination_sha="destination-b",
+            current_approval_execution_policy_sha="policy-a",
         )
 
         self.assertFalse(replacement.auto_deploy)
         self.assertEqual(replacement.approval_destination_sha, "")
+        self.assertEqual(replacement.approval_execution_policy_sha, "")
+
+    def test_retry_drops_auto_when_execution_policy_changed(self) -> None:
+        conn = self.make_conn()
+        original = enqueue_job(
+            conn,
+            task="changed policy",
+            branch="feature/changed-policy",
+            auto_deploy=True,
+            approval_destination_sha="destination-a",
+            approval_execution_policy_sha="policy-a",
+        )
+        mark_job(conn, original.id, status="failed", note="gate failed")
+
+        _dismissed, replacement = retry_job(
+            conn,
+            original.id,
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            current_approval_destination_sha="destination-a",
+            current_approval_execution_policy_sha="policy-b",
+        )
+
+        self.assertFalse(replacement.auto_deploy)
+        self.assertEqual(replacement.approval_destination_sha, "")
+        self.assertEqual(replacement.approval_execution_policy_sha, "")
 
     def test_manual_only_batch_claim_skips_auto_jobs(self) -> None:
         conn = self.make_conn()

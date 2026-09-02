@@ -17,6 +17,7 @@ from mergetrain.config import (
     ReuseConfig,
     StateConfig,
 )
+from mergetrain.deploy_plan import deploy_execution_policy_sha
 from mergetrain.models import Job
 from mergetrain.reuse import (
     ReuseCheck,
@@ -170,6 +171,75 @@ class GatePolicyShaTests(unittest.TestCase):
         self.assertNotEqual(
             sha,
             gate_policy_sha(_config(gate_paths=("src/**",))),
+        )
+        self.assertNotEqual(
+            sha,
+            gate_policy_sha(
+                replace(
+                    _config(),
+                    queue=replace(
+                        _config().queue,
+                        command_timeout_seconds=120,
+                    ),
+                )
+            ),
+        )
+
+
+class DeployExecutionPolicyShaTests(unittest.TestCase):
+    def test_stable_and_sensitive_to_every_authorized_execution_surface(self) -> None:
+        config = _config(gate_paths=("src/**",))
+        baseline = deploy_execution_policy_sha(config)
+
+        self.assertEqual(baseline, deploy_execution_policy_sha(config))
+        self.assertNotEqual(
+            baseline,
+            deploy_execution_policy_sha(
+                replace(
+                    config,
+                    queue=replace(config.queue, command_timeout_seconds=120),
+                )
+            ),
+        )
+        self.assertNotEqual(
+            baseline,
+            deploy_execution_policy_sha(
+                replace(
+                    config,
+                    deploy=replace(
+                        config.deploy,
+                        verify=(GateConfig(name="live", run="./smoke"),),
+                    ),
+                )
+            ),
+        )
+        self.assertNotEqual(
+            baseline,
+            deploy_execution_policy_sha(
+                replace(
+                    config,
+                    deploy=replace(
+                        config.deploy,
+                        reuse=replace(config.deploy.reuse, enabled=True),
+                    ),
+                )
+            ),
+        )
+        self.assertNotEqual(
+            baseline,
+            deploy_execution_policy_sha(config, reuse_validated=True),
+        )
+
+    def test_operational_poll_interval_is_not_an_execution_policy_input(self) -> None:
+        config = _config()
+        changed = replace(
+            config,
+            queue=replace(config.queue, daemon_interval_seconds=99),
+        )
+
+        self.assertEqual(
+            deploy_execution_policy_sha(config),
+            deploy_execution_policy_sha(changed),
         )
 
 

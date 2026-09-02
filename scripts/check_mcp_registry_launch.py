@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import subprocess
+import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -91,7 +94,12 @@ def _send(stream: TextIO, payload: dict[str, Any]) -> None:
     stream.flush()
 
 
-def smoke(command: list[str], *, timeout: float) -> None:
+def smoke(
+    command: list[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
+) -> None:
     process = subprocess.Popen(
         command,
         cwd=ROOT,
@@ -101,6 +109,7 @@ def smoke(command: list[str], *, timeout: float) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=None if env is None else dict(env),
     )
     assert process.stdin is not None
     assert process.stdout is not None
@@ -112,6 +121,7 @@ def smoke(command: list[str], *, timeout: float) -> None:
         stderr.extend(process.stderr.readlines())
 
     threading.Thread(target=read_stderr, daemon=True).start()
+    request_error: BaseException | None = None
     try:
         _send(
             process.stdin,
@@ -154,6 +164,8 @@ def smoke(command: list[str], *, timeout: float) -> None:
                 "mergetrain_deploy input schema must expose only train_id; "
                 f"received {sorted(properties)}"
             )
+    except BaseException as exc:
+        request_error = exc
     finally:
         process.stdin.close()
         try:
@@ -165,11 +177,22 @@ def smoke(command: list[str], *, timeout: float) -> None:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+    detail = "".join(stderr).strip()[-2000:]
+    if request_error is not None:
+        suffix = f"; stderr: {detail}" if detail else ""
+        raise RuntimeError(f"{request_error}{suffix}") from request_error
     if process.returncode not in {0, -15}:
-        detail = "".join(stderr).strip()[-2000:]
         raise RuntimeError(
             f"MCP server exited with {process.returncode}: {detail or 'no stderr'}"
         )
+
+
+def isolated_uv_environment(cache_dir: Path) -> dict[str, str]:
+    """Return a clean uv cache environment for one Registry launch attempt."""
+
+    env = os.environ.copy()
+    env["UV_CACHE_DIR"] = str(cache_dir)
+    return env
 
 
 def main() -> int:
@@ -183,7 +206,16 @@ def main() -> int:
     last_error: BaseException | None = None
     for attempt in range(1, max(1, args.attempts) + 1):
         try:
-            smoke(command, timeout=args.timeout)
+            # PyPI permits metadata caches to stay fresh for several minutes.
+            # A newly published version can therefore produce a cached
+            # "version not found" result. Give each retry a fresh uv cache
+            # while preserving the exact command constructed from server.json.
+            with tempfile.TemporaryDirectory(prefix="mergetrain-registry-uv-") as td:
+                smoke(
+                    command,
+                    timeout=args.timeout,
+                    env=isolated_uv_environment(Path(td)),
+                )
             print("MCP Registry launch OK: initialize, tools/list, deploy schema")
             return 0
         except BaseException as exc:
