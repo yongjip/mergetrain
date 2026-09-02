@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.4.2 - 2026-09-02
+
+- Root production publishing in the protected `main` workflow and signer
+  policy instead of the release tag being verified. The publisher now accepts
+  a signed tag as data, requires its commit in current main, builds the captured
+  commit SHA, and refuses non-main dispatches or a mutable GitHub Release before
+  any tag-provided code or PyPI credential is used.
+
+- Separate tag verification, package build, artifact attestation, and PyPI
+  publication permissions. TestPyPI rehearsals use the same main-rooted signed
+  source resolution, and downstream MCP publication checks out the verified
+  release commit.
+
 ## 2.4.1 - 2026-09-02
 
 - Reject manually supplied base or head SHAs on a normal ready-checked enqueue

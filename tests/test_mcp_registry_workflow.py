@@ -26,11 +26,9 @@ class MCPRegistryWorkflowTests(unittest.TestCase):
     def test_manual_publication_is_serialized_and_main_only(self) -> None:
         self.assertIn("group: mcp-registry-publish", self.workflow)
         self.assertIn("cancel-in-progress: false", self.workflow)
-        self.assertIn(
-            "github.event_name != 'workflow_dispatch' "
-            "|| github.ref == 'refs/heads/main'",
-            self.workflow,
-        )
+        self.assertIn("if: github.ref == 'refs/heads/main'", self.workflow)
+        self.assertIn("source_sha:", self.workflow)
+        self.assertIn("ref: ${{ inputs.source_sha || github.sha }}", self.workflow)
 
     def test_registry_workflow_pins_and_verifies_the_publisher(self) -> None:
         self.assertIn('MCP_PUBLISHER_VERSION: "v1.8.0"', self.workflow)
@@ -57,9 +55,9 @@ class MCPRegistryWorkflowTests(unittest.TestCase):
         self.assertIn("timeout-minutes: 15", self.workflow)
         self.assertIn("--attempts 18 --timeout 120", self.workflow)
 
-    def test_release_attests_built_distributions_before_upload(self) -> None:
+    def test_release_attests_built_distributions_before_pypi(self) -> None:
         attest = self.release_workflow.index("uses: actions/attest@")
-        upload = self.release_workflow.index("uses: actions/upload-artifact@")
+        publish = self.release_workflow.index("uses: pypa/gh-action-pypi-publish@")
 
         self.assertIn("attestations: write", self.release_workflow)
         self.assertIn("id-token: write", self.release_workflow)
@@ -68,13 +66,13 @@ class MCPRegistryWorkflowTests(unittest.TestCase):
             r"uses: actions/attest@[0-9a-f]{40}\s+# v4\.2\.2",
         )
         self.assertIn("subject-path: dist/*", self.release_workflow)
-        self.assertLess(attest, upload)
+        self.assertLess(attest, publish)
 
     def test_release_waits_for_pypi_before_calling_registry_workflow(
         self,
     ) -> None:
         job = self.release_workflow.index("publish-mcp-registry:")
-        dependency = self.release_workflow.index("needs: publish", job)
+        dependency = self.release_workflow.index("needs: [verify, publish]", job)
         workflow = self.release_workflow.index(
             "uses: ./.github/workflows/mcp-registry.yml",
             job,

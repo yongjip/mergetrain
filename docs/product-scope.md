@@ -422,6 +422,31 @@ concrete incorrect state that the current core cannot address.
   failures remain, refine the existing contract and diagnostics before
   considering more surface.
 
+### 2026-09-02: protected-main release trust root
+
+- **Admission criterion:** close a reproduced supply-chain authorization gap
+  without adding runtime product surface.
+- **Evidence:** the v2.4.1 `release: published` workflow checked out the tag and
+  verified it against an allowed-signers file from that same tag. A tag could
+  therefore define both the executable publisher and its own trust root before
+  PyPI OIDC publication.
+- **Existing surface used:** GitHub `workflow_dispatch`, the tracked signer
+  policy, signed annotated tags, environment deployment rules, artifact
+  attestations, and the existing release metadata checker.
+- **Public surface change:** no CLI command, flag, config field, dashboard
+  control, MCP tool, or agent-contract key. Release automation gains one
+  required tag input and a repository-internal verifier.
+- **State, recovery, and security impact:** a main-rooted read-only job verifies
+  the tag signature and main ancestry before tag code runs; later jobs build the
+  captured commit SHA. Production requires a human-published immutable Release
+  and a `pypi` environment restricted to main. Package and queue state are
+  unchanged.
+- **Success measure and simplification trigger:** unsigned, self-authorized,
+  lightweight, moved, off-main, mutable-release, and non-main-dispatch cases
+  all stop before build or publication; the signed main tag still completes
+  TestPyPI and production publication. Keep this separate verifier while GitHub
+  event refs can select workflow source.
+
 ## Review record for an exception
 
 A change that expands public surface should include this compact record in its

@@ -73,6 +73,38 @@ def _workflow_pin_errors(workflows_dir: Path | None = None) -> list[str]:
     return errors
 
 
+def _release_workflow_errors(text: str | None = None) -> list[str]:
+    """Keep package publication rooted in protected main, not release tags."""
+
+    workflow = text
+    if workflow is None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+    errors: list[str] = []
+    if "types: [published]" in workflow or re.search(
+        r"(?m)^\s*release:\s*$", workflow
+    ):
+        errors.append("release.yml must not publish from a release event at a tag ref")
+    required = {
+        "a manual main-rooted trigger": "workflow_dispatch:",
+        "an exact main-ref guard": "github.ref == 'refs/heads/main'",
+        "an explicit wrong-ref rejection": "github.ref != 'refs/heads/main'",
+        "deny-by-default workflow permissions": "permissions: {}",
+        "the protected-main tag verifier": "scripts/verify_release_source.py verify",
+        "the protected-main signer policy": ".github/release-allowed-signers",
+        "a published immutable GitHub Release check": (
+            ".draft == false and .immutable == true"
+        ),
+        "the verified source checkout": "ref: ${{ needs.verify.outputs.commit_sha }}",
+        "the production publishing environment": "environment: pypi",
+    }
+    for description, marker in required.items():
+        if marker not in workflow:
+            errors.append(f"release.yml needs {description}: {marker}")
+    return errors
+
+
 def _project_version() -> str:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return str(data["project"]["version"])
@@ -147,6 +179,7 @@ def check_release(*, tag: str = "") -> list[str]:
 
     errors.extend(_readme_status_errors(readme))
     errors.extend(_workflow_pin_errors())
+    errors.extend(_release_workflow_errors())
 
     packages = server.get("packages")
     pypi_packages = [

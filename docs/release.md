@@ -22,10 +22,12 @@ Every pull request runs:
   protocol, lists tools, and verifies the deploy input schema.
 
 The same metadata, unit, build, and strict package checks run again from the
-release tag before any job receives PyPI credentials. The build job also emits
-GitHub artifact attestations for every wheel and sdist before publication. It
-verifies the annotated tag against `.github/release-allowed-signers` and refuses
-an unsigned or untrusted release tag.
+verified release commit before any job receives PyPI credentials. A
+`workflow_dispatch` run rooted at protected `main` authenticates the annotated
+tag with main's `.github/release-allowed-signers`, requires the tag commit in
+current `origin/main`, and builds the captured commit SHA rather than resolving
+the tag again. The build artifacts receive GitHub attestations before
+publication.
 
 Useful local equivalents:
 
@@ -56,14 +58,15 @@ Create two GitHub Environments in repository settings:
 
 | Environment | Purpose | Protection |
 | --- | --- | --- |
-| `testpypi` | Manual TestPyPI rehearsal | No required reviewer (deliberate, 2026-07-21) |
-| `pypi` | Production PyPI release | No required reviewer (deliberate, 2026-07-21) |
+| `testpypi` | Manual TestPyPI rehearsal | Selected branch `main`; optional reviewer |
+| `pypi` | Production PyPI release | Selected branch `main`; no second click after Release publication |
 
-Both environments intentionally carry **no manual approval gate**: publishing
-the GitHub Release is itself the deliberate human act that authorizes the
-upload, and adding a second click on top of it only slowed releases down.
-OIDC still scopes credentials to these exact workflows, and versions are
-immutable once published.
+The deployment branch rule is part of the trust boundary, not a convenience:
+both environments must reject tag and non-main workflow runs. Publishing the
+immutable GitHub Release is the deliberate production act that authorizes the
+upload; the later main-rooted workflow dispatch is its mechanical continuation,
+not another per-artifact approval. OIDC scopes credentials to the exact workflow
+and environment, and package versions are immutable once published.
 
 Then register one pending publisher on each package index. The values must
 match exactly.
@@ -94,8 +97,9 @@ On <https://pypi.org/manage/account/publishing/>:
 
 No GitHub or PyPI API token is stored in repository secrets. Protect both
 accounts with 2FA. **Publishing the GitHub Release is the final human release
-boundary** — once it is published, `release.yml` builds and uploads without
-further prompts.
+boundary.** Production publication still requires an explicit dispatch of
+`release.yml` at `main`; it refuses another branch or tag ref and refuses a
+release that GitHub has not marked immutable.
 
 ## One-time release signing setup
 
@@ -114,17 +118,18 @@ git config --local tag.gpgSign true
 ```
 
 The tracked allowed-signers file contains public material only and enables
-local and CI verification. To rotate a key, land the new public key in that file
-through the normal reviewed integration path before using it; retain an old key
-while tags signed by it still need local verification. Never rewrite an
-existing release tag during rotation.
+local and CI verification. To rotate a key, land the new public key through the
+normal reviewed integration path before using it; the publisher reads that
+policy from main, never from the release tag. Retain an old key while tags
+signed by it still need verification. Never rewrite an existing release tag.
 
 ## Rehearse on TestPyPI
 
-After the release-preparation pull request is merged:
+After the release-preparation change is integrated and its signed tag is pushed:
 
-1. Open **Actions → TestPyPI → Run workflow** on `main`. Triggering the run
-   is the deliberate act; it publishes without further approval.
+1. Open **Actions → TestPyPI → Run workflow** on `main`, enter the signed tag,
+   and trigger the run. The workflow authenticates the tag with main's signer
+   policy and builds its captured commit SHA.
 2. Wait for the publish job to complete.
 3. Install the exact version from TestPyPI in a fresh environment:
 
@@ -158,18 +163,28 @@ an upload that already succeeded.
    git push origin v0.1.0
    ```
 
-4. Publish a GitHub Release for that existing tag:
+4. Confirm repository-level **Release immutability** is enabled. It applies only
+   to future Releases, so do this before publishing the release.
+5. Publish a GitHub Release for that existing tag. Once published, the tag and
+   any attached assets are locked:
 
    ```sh
    gh release create v0.1.0 --verify-tag --generate-notes \
      --title "mergetrain 0.1.0"
    ```
 
-5. Publishing the GitHub Release triggers `.github/workflows/release.yml`,
-   which builds and uploads to PyPI, then publishes `server.json` to the
-   official MCP Registry with GitHub OIDC. There is no further prompt — the
-   Release publication in step 4 **is** the approval.
-6. Verify <https://pypi.org/project/mergetrain/>, install from PyPI in a fresh
+6. Dispatch the trusted workflow explicitly at `main` with the same tag:
+
+   ```sh
+   gh workflow run release.yml --ref main -f tag=v0.1.0
+   ```
+
+   The workflow refuses non-main dispatches, mutable/draft Releases, untrusted
+   signatures, lightweight tags, and commits outside current main before any
+   tag-provided code or package-publishing credential is used. It builds and
+   uploads to PyPI, then publishes `server.json` to the official MCP Registry.
+   The Release publication in step 5 remains the human approval.
+7. Verify <https://pypi.org/project/mergetrain/>, install from PyPI in a fresh
    environment, verify its GitHub artifact attestation, and confirm the Registry
    API returns the released version:
 
@@ -180,14 +195,14 @@ an upload that already succeeded.
      --repo yongjip/mergetrain
    ```
 
-7. The Homebrew tap picks the release up on its own daily cron. To make that
+8. The Homebrew tap picks the release up on its own daily cron. To make that
    immediate, see the optional dispatch below; otherwise check
    `brew install yongjip/tap/mergetrain` the next day.
 
 ## Publish or repair MCP Registry metadata
 
 `.github/workflows/mcp-registry.yml` is also manually dispatchable from
-**Actions → Publish MCP Registry → Run workflow**. Use that path to bootstrap
+**Actions → Publish MCP Registry → Run workflow** on `main`. Use that path to bootstrap
 the first Registry entry or repair a release whose Registry job failed after
 PyPI succeeded.
 

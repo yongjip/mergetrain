@@ -93,6 +93,22 @@ or lease token.
 `deploy.verify` hooks can run arbitrary network commands. Review verify hooks
 before enabling unattended daemon deployment.
 
+## Release trust boundary
+
+Production publishing is authorized by two inputs that the release tag cannot
+define for itself: the `release.yml` workflow running at `refs/heads/main`, and
+the SSH allowed-signers policy from that main checkout. The workflow verifies
+an annotated tag, requires its peeled commit in freshly fetched `origin/main`,
+and passes the captured commit SHA to every source checkout. It also requires a
+human-published immutable GitHub Release for the same tag before build or OIDC
+publication.
+
+The GitHub `pypi` environment must allow only branch `main`; an in-workflow ref
+check is defense in depth, not a replacement for that repository setting.
+Release signing protects against tag/release authority that cannot also modify
+the trusted main policy. It does not claim to survive simultaneous compromise
+of the repository administrator, signing key, and package-index account.
+
 ## Remote deploy audit refs
 
 Every deploy atomically writes `refs/mergetrain/deploys/<sha>` alongside the

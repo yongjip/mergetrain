@@ -2,19 +2,60 @@ name: TestPyPI
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Signed release tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+
+permissions: {}
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit_sha: ${{ steps.source.outputs.commit_sha }}
+    steps:
+      - name: Require protected main workflow ref
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "test-release.yml must be dispatched with --ref main" >&2
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate requested release source
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python scripts/verify_release_source.py verify \
+            --tag "${RELEASE_TAG}" \
+            --allowed-signers .github/release-allowed-signers \
+            --github-output "${GITHUB_OUTPUT}"
+
   build:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.commit_sha }}
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       - name: Verify release metadata
-        run: python scripts/check_release.py
+        env:
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+        run: python scripts/check_release.py --tag "${RELEASE_TAG}"
       - name: Test and build distributions
         run: |
           python -m pip install --upgrade build twine
@@ -28,7 +69,8 @@ jobs:
           path: dist/
 
   publish:
-    needs: build
+    needs: [verify, build]
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
