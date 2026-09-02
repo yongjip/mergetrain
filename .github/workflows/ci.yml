@@ -122,6 +122,14 @@ jobs:
             echo "::error::the mcp extra did not install; these tests only ran as skips"
             exit 1
           fi
+      - name: Launch the built wheel as a clean stdio MCP server
+        run: |
+          python -m build --wheel
+          python -m venv /tmp/mergetrain-mcp-wheel
+          wheel="$(find dist -name 'mergetrain-*.whl' -print -quit)"
+          /tmp/mergetrain-mcp-wheel/bin/python -m pip install "${wheel}[mcp]"
+          python scripts/check_mcp_registry_launch.py --timeout 60 \
+            --command /tmp/mergetrain-mcp-wheel/bin/mergetrain mcp
 
   claude-plugin:
     # Keep the distributable plugin valid against a pinned Claude Code CLI and
@@ -166,6 +174,10 @@ jobs:
           /tmp/mergetrain-smoke/bin/python -c "import yaml"
           /tmp/mergetrain-smoke/bin/mergetrain --version
           /tmp/mergetrain-smoke/bin/mergetrain dashboard --help
+      - name: Extract and run the sdist's packaged test suite
+        env:
+          MERGETRAIN_SDIST_PYTHON: python
+        run: bash scripts/check_sdist.sh dist/*.tar.gz
 
   e2e:
     runs-on: ${{ matrix.os }}

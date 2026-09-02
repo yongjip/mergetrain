@@ -26,11 +26,13 @@ remote or push ref turns the replacement into a manual job.
 
 ## Deploy authorization changed
 
-Auto jobs bind approval to a credential-free hash of the remote URL,
-integration ref, push refs, and permanent audit-ref policy. The daemon checks
-that identity inside claim, and the runner checks the live remote again after
-gates immediately before any recovery marker or push. A mismatch finishes the
-job `blocked` with `approval_destination_changed` and `inspect` category
+Auto jobs bind approval to a credential-free hash of the fetch URL, the one
+effective push URL (including `remote.<name>.pushurl`), integration ref, push
+refs, and permanent audit-ref policy. Multiple push URLs and relative local
+push paths are rejected. The daemon checks that identity inside claim, and the
+runner resolves it again after gates immediately before any recovery marker or
+push. A mismatch finishes the job `blocked` with
+`approval_destination_changed` and `inspect` category
 `deploy_authorization_changed`. Review the new destination, then enqueue the
 fixed committed branch with `--auto` only if unattended deployment is approved
 for it.
@@ -79,6 +81,14 @@ have accepted the atomic update before the client lost the response, so the job
 is parked `needs_reconcile` with `push_status=failed` and its marker/pin intact;
 it is never made terminal `failed` and blindly pushed again. All deploy paths
 pause until `mergetrain reconcile --apply` checks the remote and resolves it.
+The marker also carries a credential-free hash of the endpoint used by the
+attempt. Reconcile fails closed if the recorded remote name now resolves to a
+different push endpoint, rather than inspecting the fetch URL or a newly
+configured `pushurl`. Markers created before v2.3.1 have no provable endpoint
+hash and remain parked after migration; reconcile reports the legacy marker
+without contacting whichever endpoint happens to be configured now. Resolve
+such an interrupted v2.3.0 deploy before upgrading, or preserve its evidence
+for explicit operator inspection.
 
 Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 

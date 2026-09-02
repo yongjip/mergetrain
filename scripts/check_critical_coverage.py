@@ -14,6 +14,7 @@ CRITICAL_MINIMUMS = {
     "src/mergetrain/atomic_push.py": 94.0,
     "src/mergetrain/command_runner.py": 85.0,
     "src/mergetrain/gate_runner.py": 94.0,
+    "src/mergetrain/git_destination.py": 94.0,
     "src/mergetrain/git_ops.py": 85.0,
     "src/mergetrain/git_runner.py": 91.0,
     "src/mergetrain/persistence/claims.py": 90.0,

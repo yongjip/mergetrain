@@ -36,6 +36,13 @@ that launched mergetrain, then preserves the inherited `PATH`. Run mergetrain
 from a reviewed virtualenv or installation because executables beside that
 interpreter can satisfy bare gate commands such as `ruff`, `mypy`, or `pytest`.
 
+Git remote configuration is also trusted deploy input. Mergetrain resolves one
+effective push URL before approval, rejects multiple or relative local
+destinations, and pins that endpoint through audit, push, and recovery checks.
+This prevents configuration drift from redirecting an approved mergetrain
+operation; it does not stop an actor who already has shell and integration
+credentials from invoking `git push` outside mergetrain.
+
 ## Secrets
 
 - Do not store provider tokens or credentials in `.mergetrain.yaml`.

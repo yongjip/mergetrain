@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -240,6 +241,12 @@ class HubDaemonNotifyIntegrationTests(unittest.TestCase):
             registry = root / "repos.json"
             repo = root / "svc"
             repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "remote", "add", "origin", str(root / "svc.git")],
+                cwd=repo,
+                check=True,
+            )
             (repo / ".mergetrain.yaml").write_text("project:\n  name: svc\n", encoding="utf-8")
             config = load_config(repo=repo)
             conn = connect(config.state.db)

@@ -13,7 +13,7 @@ from ..cli_support import (
 )
 from ..command_runner import run_command
 from ..deploy_plan import deploy_destination_sha
-from ..errors import CommandFailed, QueueError
+from ..errors import CommandFailed, MergetrainError, QueueError
 from ..git_ops import (
     git_current_branch,
     git_dirty_paths,
@@ -152,12 +152,20 @@ def cmd_retry(args: argparse.Namespace) -> int:
         head_sha = _capture_sha_or_error(
             worktree, original.branch, label="head"
         )
+        current_destination_sha = ""
+        if original.auto_deploy:
+            try:
+                current_destination_sha = deploy_destination_sha(config)
+            except MergetrainError:
+                # Retry remains available for repair, but cannot inherit an
+                # unattended approval when the endpoint is no longer provable.
+                current_destination_sha = ""
         dismissed, replacement = retry_job(
             conn,
             original.id,
             base_sha=base_sha,
             head_sha=head_sha,
-            current_approval_destination_sha=deploy_destination_sha(config),
+            current_approval_destination_sha=current_destination_sha,
         )
         next_action = _recovery_next_action(conn, config)
     finally:

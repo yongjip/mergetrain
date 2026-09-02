@@ -44,6 +44,10 @@ jobs:
           ./mcp-publisher --version
       - name: Validate the Registry manifest
         run: ./mcp-publisher validate server.json
+      - name: Install the pinned Registry runtime
+        run: python -m pip install uv==0.12.7
+      - name: Launch the exact published stdio MCP server
+        run: python scripts/check_mcp_registry_launch.py --attempts 6 --timeout 120
       - name: Authenticate with GitHub OIDC
         run: ./mcp-publisher login github-oidc
       - name: Publish the Registry manifest

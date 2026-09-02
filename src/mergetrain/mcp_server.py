@@ -430,6 +430,7 @@ class MergetrainTools:
         doctor: dict[str, Any],
         status: dict[str, Any],
         train: dict[str, Any],
+        preview: dict[str, Any] | None = None,
     ) -> str:
         """Build the deploy summary the operating contract requires.
 
@@ -441,7 +442,10 @@ class MergetrainTools:
         config = doctor.get("config") or {}
         git = config.get("git") or {}
         remote = git.get("remote") or "origin"
-        remote_url = (doctor.get("git") or {}).get("remote_url")
+        push_plan = (preview or {}).get("push_plan") or {}
+        remote_url = push_plan.get("url") or (doctor.get("git") or {}).get(
+            "remote_url"
+        )
         remote_label = f"{remote} ({remote_url})" if remote_url else str(remote)
         push_refs = [str(ref) for ref in git.get("push_refs") or []]
         gates = [
@@ -624,8 +628,10 @@ class MergetrainTools:
                     train_id=chosen,
                 )
             )
-        summary = self.deploy_summary(current_doctor, current_status, current_train)
-        command = (
+        summary = self.deploy_summary(
+            current_doctor, current_status, current_train, preview
+        )
+        command = str(preview.get("confirmed_command") or "") or (
             f"mergetrain --repo {self.repo} run-batch --deploy --train-id "
             f"{chosen} --expected-plan {plan_sha}"
         )

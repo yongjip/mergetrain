@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hmac
+import shlex
 import sys
 from collections import Counter
 from typing import Any
@@ -16,7 +17,8 @@ from ..cli_support import (
     dump_json,
 )
 from ..deploy_plan import deploy_plan_sha
-from ..errors import DeployPlanChanged, QueueError
+from ..errors import DeployPlanChanged, QueueError, redact_secrets
+from ..git_destination import resolve_git_destination
 from ..git_ops import DEPLOY_AUDIT_REF_PREFIX
 from ..git_runner import GitRunner
 from ..models import Job
@@ -228,6 +230,32 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             jobs,
             authorized=args.reuse_validated,
         )
+        destination = resolve_git_destination(config)
+        plan_sha = deploy_plan_sha(
+            config,
+            jobs,
+            reuse_validated=args.reuse_validated,
+            destination=destination,
+        )
+        confirmed_parts = [
+            "mergetrain",
+            "--repo",
+            str(config.repo),
+        ]
+        if args.config:
+            confirmed_parts.extend(["--config", str(config.config_path)])
+        if args.db:
+            confirmed_parts.extend(["--db", str(config.state.db)])
+        confirmed_parts.extend([
+            "run-batch",
+            "--deploy",
+            "--train-id",
+            str(selected["train_id"]),
+        ])
+        if args.reuse_validated:
+            confirmed_parts.append("--reuse-validated")
+        confirmed_parts.extend(["--expected-plan", plan_sha])
+        confirmed_command = shlex.join(confirmed_parts)
         payload = {
             "ok": True,
             "preview": True,
@@ -235,6 +263,9 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             "push_plan": {
                 "atomic": True,
                 "remote": config.git.remote,
+                "url": destination.display_url,
+                "fetch_url": redact_secrets(destination.fetch_url),
+                "destination_sha": destination.destination_sha,
                 "refs": [
                     {"source": "HEAD", "target": ref, "spec": f"HEAD:{ref}"}
                     for ref in config.git.push_refs
@@ -247,11 +278,8 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 },
             },
             "train_id": selected["train_id"],
-            "deploy_plan_sha": deploy_plan_sha(
-                config,
-                jobs,
-                reuse_validated=args.reuse_validated,
-            ),
+            "deploy_plan_sha": plan_sha,
+            "confirmed_command": confirmed_command,
             "reuse": reuse_explanation(
                 config,
                 jobs,
@@ -266,18 +294,23 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             targets = ", ".join(
                 f"HEAD:{ref}" for ref in config.git.push_refs
             )
+            print(f"Deploy preview for {len(jobs)} validated job(s)")
+            print(
+                f"Destination: {config.git.remote} ({destination.display_url}) "
+                f"atomically updates {targets}"
+            )
             if decision.eligible:
                 print(
-                    "preview: deploy validated commit "
-                    f"{decision.reused_validation_sha} by atomic push to "
-                    f"{config.git.remote}: {targets}"
+                    "Gate plan: reuse validated commit "
+                    f"{decision.reused_validation_sha}"
                 )
             else:
                 print(
-                    f"preview: {decision.action} full gates, then "
-                    "deploy by atomic push to "
-                    f"{config.git.remote}: {targets} - {'; '.join(decision.reasons)}"
+                    f"Gate plan: {decision.action} full gates - "
+                    f"{'; '.join(decision.reasons)}"
                 )
+            print(f"Deploy plan: {plan_sha}")
+            print(f"Confirmed command: {confirmed_command}")
         return 0
     owner = default_owner()
     lease_token = ""

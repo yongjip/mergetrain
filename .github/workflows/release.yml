@@ -27,6 +27,7 @@ jobs:
           PYTHONPATH=src python -m unittest discover -s tests
           python -m build
           python -m twine check --strict dist/*
+          MERGETRAIN_SDIST_PYTHON=python bash scripts/check_sdist.sh dist/*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: python-package-distributions

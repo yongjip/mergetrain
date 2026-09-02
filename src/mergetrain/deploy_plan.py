@@ -8,8 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .config import MergetrainConfig
-from .errors import redact_secrets
-from .git_ops import DEPLOY_AUDIT_REF_PREFIX, git_remote_url
+from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .models import Job
 from .reuse import gate_policy_sha, train_identity_sha
 
@@ -27,17 +26,7 @@ def _sha256_json(value: Any) -> str:
 def deploy_destination_sha(config: MergetrainConfig) -> str:
     """Hash the exact Git destination without persisting remote credentials."""
 
-    remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
-    return _sha256_json(
-        {
-            "version": 1,
-            "remote": config.git.remote,
-            "remote_url": remote_url,
-            "integration_ref": config.git.integration_ref,
-            "push_refs": list(config.git.push_refs),
-            "audit_ref_prefix": DEPLOY_AUDIT_REF_PREFIX,
-        }
-    )
+    return resolve_git_destination(config).destination_sha
 
 
 def deploy_plan_sha(
@@ -45,6 +34,7 @@ def deploy_plan_sha(
     jobs: Iterable[Job],
     *,
     reuse_validated: bool = False,
+    destination: ResolvedGitDestination | None = None,
 ) -> str:
     """Hash the exact train, destination, and policy shown for approval."""
 
@@ -53,7 +43,9 @@ def deploy_plan_sha(
         {
             "version": 1,
             "train_identity_sha": train_identity_sha(ordered),
-            "destination_sha": deploy_destination_sha(config),
+            "destination_sha": (
+                destination or resolve_git_destination(config)
+            ).destination_sha,
             "gate_policy_sha": gate_policy_sha(config),
             "reuse": {
                 "authorized": bool(reuse_validated),

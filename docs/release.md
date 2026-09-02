@@ -13,9 +13,12 @@ Every pull request runs:
 - dashboard unit/build checks and a headless Chromium interaction suite for
   notification permission, duplicate tabs, drill-down clicks, and feed recovery;
 - version, changelog, and security support-policy consistency checks;
-- isolated sdist and wheel builds;
+- isolated sdist and wheel builds, followed by extraction and execution of the
+  packaged sdist's own collection and test suite;
 - `twine check --strict` on both distributions; and
-- a clean-environment wheel install and CLI smoke test.
+- a clean-environment wheel install and CLI smoke test; and
+- a clean MCP-extra wheel install that starts the stdio server, initializes the
+  protocol, lists tools, and verifies the deploy input schema.
 
 The same metadata, unit, build, and strict package checks run again from the
 release tag before any job receives PyPI credentials.
@@ -28,6 +31,7 @@ PYTHON=python3.12 bash scripts/e2e.sh
 python scripts/check_release.py --tag v0.1.0
 python -m build
 python -m twine check --strict dist/*
+bash scripts/check_sdist.sh dist/mergetrain-0.1.0.tar.gz
 ```
 
 Browser automation replaces the OS notification API with a deterministic fake,
@@ -161,6 +165,8 @@ The workflow:
   release;
 - downloads a pinned `mcp-publisher` binary and verifies its SHA-256;
 - validates `server.json` against the public Registry;
+- constructs the manifest's exact `uvx --from mergetrain[mcp]==<version>`
+  command against PyPI and verifies an MCP initialize + `tools/list` handshake;
 - authenticates with short-lived GitHub Actions OIDC; and
 - publishes the manifest.
 

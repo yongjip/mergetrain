@@ -137,6 +137,21 @@ git:
 {remote}/{integration_branch}
 ```
 
+`remote` names the fetch remote used to assemble the train. Before approval,
+mergetrain separately resolves its effective push endpoint with
+`git remote get-url --push --all` from the control checkout. A split setup such
+as `origin.url = fetch-A` plus `origin.pushurl = push-B` is supported and binds
+approval to `push-B`. Exactly one effective push URL is required: multiple
+`pushurl` values fail closed because they cannot be one remote atomic
+transaction.
+
+Relative filesystem push URLs (for example `../remote.git`) are rejected;
+their meaning changes with the integration worktree's current directory. Use
+an absolute path or a `file://` URL. Absolute local paths and local file URLs
+are resolved to their canonical target before approval, so changing a symlink
+later cannot redirect the push. Network URLs and Git's SCP-like SSH form remain
+supported.
+
 Deploy mode pushes the verified commit and its content-addressed recovery audit
 ref atomically:
 
@@ -171,6 +186,14 @@ can only be created or retain the identical value. The configured remote must
 permit creation under `refs/mergetrain/deploys/`; these refs are permanent
 recovery evidence and are not payload targets configurable through
 `push_refs`.
+
+Approval summary, destination hash, audit lookup, pending marker, atomic push,
+and reconcile all use the same resolved push endpoint identity. The live raw
+URL is held only in memory and supplied to Git through a fresh random sentinel
+and transient remote alias; endpoint-matching URL rewrite rules are not
+re-applied. Credentials are not written to the queue database or command line.
+If the endpoint changes after gates or after an ambiguous push, mergetrain
+blocks instead of consulting a different repository.
 
 If `push_refs` is omitted it defaults to `integration_branch`. An explicitly
 empty list, null value, blank ref, or duplicate ref is a configuration error;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import shlex
 import shutil
@@ -13,12 +14,34 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import IO
+from typing import IO, cast
 
 from .config import MergetrainConfig
 from .errors import CancellationRequested, CommandFailed, MergetrainError, redact_secrets
 
 Pulse = Callable[[], None]
+
+
+class _RedactingLog(io.TextIOBase):
+    """Mask secrets in subprocess output without closing the caller's log."""
+
+    def __init__(self, wrapped: IO[str]):
+        self._wrapped = wrapped
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        return self._wrapped.write(redact_secrets(text))
+
+    def flush(self) -> None:
+        self._wrapped.flush()
+
+
+def redacting_log(log: IO[str] | None) -> IO[str] | None:
+    """Return a non-owning writer that masks endpoint credentials."""
+
+    return cast(IO[str], _RedactingLog(log)) if log is not None else None
 
 
 def _render_command(command: Sequence[str] | str) -> str:

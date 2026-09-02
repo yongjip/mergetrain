@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Launch the MCP command a Registry client constructs and verify stdio tools."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import queue
+import subprocess
+import threading
+import time
+from pathlib import Path
+from typing import Any, TextIO
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _argument_tokens(arguments: object) -> list[str]:
+    tokens: list[str] = []
+    if not isinstance(arguments, list):
+        return tokens
+    for argument in arguments:
+        if not isinstance(argument, dict):
+            raise ValueError("Registry arguments must be JSON objects")
+        kind = argument.get("type")
+        if kind == "positional":
+            tokens.append(str(argument["value"]))
+        elif kind == "named":
+            tokens.append(str(argument["name"]))
+            if "value" in argument:
+                tokens.append(str(argument["value"]))
+        else:
+            raise ValueError(f"unsupported Registry argument type: {kind!r}")
+    return tokens
+
+
+def registry_command(path: Path) -> list[str]:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    packages = [
+        package
+        for package in manifest.get("packages") or []
+        if package.get("registryType") == "pypi"
+        and package.get("identifier") == "mergetrain"
+    ]
+    if len(packages) != 1:
+        raise ValueError("server.json must contain one PyPI mergetrain package")
+    package = packages[0]
+    runtime = str(package.get("runtimeHint") or "")
+    if not runtime:
+        raise ValueError("the Registry package has no runtimeHint")
+    return [
+        runtime,
+        *_argument_tokens(package.get("runtimeArguments")),
+        str(package["identifier"]),
+        *_argument_tokens(package.get("packageArguments")),
+    ]
+
+
+class _LineReader:
+    def __init__(self, stream: TextIO):
+        self._items: queue.Queue[dict[str, Any] | BaseException | None] = queue.Queue()
+
+        def read() -> None:
+            try:
+                for line in stream:
+                    self._items.put(json.loads(line))
+            except BaseException as exc:
+                self._items.put(exc)
+            finally:
+                self._items.put(None)
+
+        threading.Thread(target=read, daemon=True).start()
+
+    def response(self, request_id: int, *, timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"MCP request {request_id} timed out")
+            item = self._items.get(timeout=remaining)
+            if item is None:
+                raise RuntimeError("MCP server closed stdout before replying")
+            if isinstance(item, BaseException):
+                raise RuntimeError(f"invalid MCP server stdout: {item}") from item
+            if item.get("id") == request_id:
+                return item
+
+
+def _send(stream: TextIO, payload: dict[str, Any]) -> None:
+    stream.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    stream.flush()
+
+
+def smoke(command: list[str], *, timeout: float) -> None:
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    reader = _LineReader(process.stdout)
+    stderr: list[str] = []
+
+    def read_stderr() -> None:
+        stderr.extend(process.stderr.readlines())
+
+    threading.Thread(target=read_stderr, daemon=True).start()
+    try:
+        _send(
+            process.stdin,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "mergetrain-registry-smoke", "version": "1"},
+                },
+            },
+        )
+        initialized = reader.response(1, timeout=timeout)
+        if "error" in initialized:
+            raise RuntimeError(f"MCP initialize failed: {initialized['error']}")
+        _send(
+            process.stdin,
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        )
+        _send(
+            process.stdin,
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        listed = reader.response(2, timeout=timeout)
+        if "error" in listed:
+            raise RuntimeError(f"MCP tools/list failed: {listed['error']}")
+        tools = {
+            str(tool.get("name")): tool
+            for tool in (listed.get("result") or {}).get("tools") or []
+        }
+        deploy = tools.get("mergetrain_deploy")
+        if deploy is None:
+            raise RuntimeError("MCP tools/list omitted mergetrain_deploy")
+        schema = deploy.get("inputSchema") or {}
+        properties = schema.get("properties") or {}
+        if set(properties) != {"train_id"}:
+            raise RuntimeError(
+                "mergetrain_deploy input schema must expose only train_id; "
+                f"received {sorted(properties)}"
+            )
+    finally:
+        process.stdin.close()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+    if process.returncode not in {0, -15}:
+        detail = "".join(stderr).strip()[-2000:]
+        raise RuntimeError(
+            f"MCP server exited with {process.returncode}: {detail or 'no stderr'}"
+        )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--manifest", type=Path, default=ROOT / "server.json")
+    parser.add_argument("--attempts", type=int, default=1)
+    parser.add_argument("--timeout", type=float, default=60)
+    parser.add_argument("--command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command or registry_command(args.manifest)
+    last_error: BaseException | None = None
+    for attempt in range(1, max(1, args.attempts) + 1):
+        try:
+            smoke(command, timeout=args.timeout)
+            print("MCP Registry launch OK: initialize, tools/list, deploy schema")
+            return 0
+        except BaseException as exc:
+            last_error = exc
+            if attempt < args.attempts:
+                time.sleep(min(10, 2 ** (attempt - 1)))
+    assert last_error is not None
+    print(f"MCP Registry launch failed: {last_error}")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

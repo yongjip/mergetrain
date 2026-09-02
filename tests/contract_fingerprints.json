@@ -908,6 +908,7 @@
       "ok": null
     },
     "run_batch_preview": {
+      "confirmed_command": null,
       "contract_version": null,
       "deploy_plan_sha": null,
       "jobs": {
@@ -957,6 +958,8 @@
           "spec": null,
           "target": null
         },
+        "destination_sha": null,
+        "fetch_url": null,
         "refs": {
           "[]": {
             "source": null,
@@ -964,7 +967,8 @@
             "target": null
           }
         },
-        "remote": null
+        "remote": null,
+        "url": null
       },
       "reuse": {
         "action": null,

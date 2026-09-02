@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mergetrain"
-version = "2.3.0"
+version = "2.3.1"
 description = "A local-first merge-and-push queue for coding-agent worktrees"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -88,6 +88,7 @@ module = [
   "mergetrain.command_runner",
   "mergetrain.deploy_plan",
   "mergetrain.gate_runner",
+  "mergetrain.git_destination",
   "mergetrain.git_ops",
   "mergetrain.git_runner",
   "mergetrain.persistence.*",
@@ -121,15 +122,19 @@ packages = ["src/mergetrain"]
 include = [
   "/src",
   "/tests",
+  "/benchmarks",
   "/docs",
   "/dashboard",
   "/examples",
   "/scripts",
   "/integrations",
+  "/.github/workflows",
   "/.claude-plugin",
+  "/.mergetrain.yaml",
   "/README.md",
   "/LICENSE",
   "/CHANGELOG.md",
+  "/SECURITY.md",
   "/AGENTS.md",
   "/CLAUDE.md",
   "/llms.txt",

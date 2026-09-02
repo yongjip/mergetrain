@@ -13,7 +13,7 @@ from mergetrain.daemon import (
     daemon_loop,
     daemon_tick,
 )
-from mergetrain.errors import QueueError
+from mergetrain.errors import MergetrainError, QueueError
 from mergetrain.models import Job
 from mergetrain.store import (
     claim_all_queued,
@@ -72,6 +72,39 @@ class GradeBatchTests(unittest.TestCase):
 
 
 class DaemonTests(unittest.TestCase):
+    def test_unresolvable_destination_blocks_auto_jobs_before_runner_work(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(
+                conn,
+                task="auto",
+                branch="auto",
+                auto_deploy=True,
+                approval_destination_sha="a" * 64,
+            )
+            conn.close()
+
+            def invalid_destination() -> str:
+                raise MergetrainError("multiple push URLs")
+
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail("auto job reached runner work"),
+                owner="daemon:1",
+                say=lambda _: None,
+                approval_destination_sha=invalid_destination,
+            )
+
+            self.assertEqual(outcome, "idle")
+            conn = connect(db)
+            try:
+                blocked = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(blocked.status, "blocked")
+            self.assertIn("approval_destination_changed", blocked.note)
+
     def test_validation_loop_rejects_deploy_notifier(self) -> None:
         with self.assertRaisesRegex(QueueError, "does not support"):
             daemon_loop(
@@ -486,6 +519,25 @@ class OrphanSelfHealTests(unittest.TestCase):
 
 
 class ReadOnlyTickTests(unittest.TestCase):
+    def test_idle_tick_does_not_resolve_a_deploy_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            enqueue_job(conn, task="manual", branch="manual")
+            conn.close()
+
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail("manual job was claimed"),
+                owner="daemon:1",
+                say=lambda _: None,
+                approval_destination_sha=lambda: self.fail(
+                    "an idle auto-deploy tick resolved the destination"
+                ),
+            )
+
+            self.assertEqual(outcome, "idle")
+
     def test_non_sovereign_tick_never_creates_or_migrates(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"

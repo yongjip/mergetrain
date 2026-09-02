@@ -131,7 +131,7 @@ def hub_sweep(
                 owner=owner,
                 lock_ttl_minutes=config.queue.lock_ttl_minutes,
                 say=lambda message: say(f"[{config.project.name}] {message}"),
-                approval_destination_sha=deploy_destination_sha(config),
+                approval_destination_sha=lambda: deploy_destination_sha(config),
             )
             out.update(ok=True, outcome=outcome)
             return out

@@ -139,9 +139,10 @@ kind the default and Hub daemons will deploy. `--auto` does not mean the agent
 decided to auto-deploy; it records that the caller already holds explicit
 unattended-deploy approval. The single-repo `daemon --validate-only` mode is the
 inverse queue filter: it validates only manual jobs and cannot deploy.
-Auto jobs also store a credential-free hash of the approved Git remote,
-integration ref, payload refs, and permanent audit-ref policy. A daemon restart,
-retry, or live remote rewrite cannot silently redirect that approval.
+Auto jobs also store a credential-free hash of the approved fetch endpoint,
+the effective push endpoint, integration ref, payload refs, and permanent
+audit-ref policy. A daemon restart, retry, `pushurl` change, or live URL rewrite
+cannot silently redirect that approval.
 
 See the [config reference](config.md) for how gates, verify hooks, and worktree paths are configured.
 
@@ -180,13 +181,25 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   validation_train_sha TEXT NOT NULL DEFAULT '',
   reused_validation_sha TEXT NOT NULL DEFAULT '',
   claim_token   TEXT NOT NULL DEFAULT '',
-  cancel_requested_at TEXT NOT NULL DEFAULT ''
+  cancel_requested_at TEXT NOT NULL DEFAULT '',
+  pending_deploy_sha TEXT NOT NULL DEFAULT '',
+  pending_deploy_remote TEXT NOT NULL DEFAULT '',
+  pending_deploy_refs TEXT NOT NULL DEFAULT '',
+  pending_deploy_destination_sha TEXT NOT NULL DEFAULT ''
 );
 ```
 
 Schema v12 adds `approval_destination_sha`. Legacy/blank auto approvals cannot
 be proven against a current destination, so production daemon claims fail
 closed; manual deploy commands remain explicit operator actions.
+
+Schema v13 adds the internal `pending_deploy_destination_sha`. It is a
+credential-free hash of the exact push endpoint and ref policy used for an
+interrupted push. Reconcile accepts the currently resolved endpoint only when
+that hash matches, so recovery never follows a changed `pushurl`. The field is
+intentionally omitted from the public job JSON contract. A v12 marker migrated
+with a blank hash remains parked: v2.3.1 cannot prove its historical endpoint
+from current config and will not reconcile it automatically.
 
 ### `locks`
 
@@ -364,6 +377,16 @@ git push --atomic \
   <sha>:refs/mergetrain/deploys/<sha>
 ```
 
+Before approval, the control checkout resolves `git remote get-url --push
+--all <remote>`. Mergetrain requires exactly one result, rejects relative local
+paths, canonicalizes absolute local paths, and pins the resulting raw URL in an
+in-memory destination object. Audit lookup and push each use a fresh random
+sentinel URL that Git rewrites once to that frozen endpoint through
+command-scoped configuration. Rules matching the endpoint itself therefore do
+not get a second chance to redirect it, including rules inserted between audit
+lookup and push. Split fetch and push endpoints remain valid. Raw credentials
+are neither persisted nor included in the subprocess argv or logs.
+
 The lease permits only creation or the identical existing value. Mergetrain
 never force-rewrites or deletes these remote audit refs. They remain after the
 local `refs/mergetrain/pending/<job_id>` recovery pin is cleared and let
@@ -375,7 +398,7 @@ An explicitly empty `push_refs` value is rejected while loading config; only an
 omitted field defaults to the integration branch.
 
 Human-gated deploys may carry the `deploy_plan_sha` emitted by preview. The hash
-covers the exact validated train, live destination identity, pre-push
+covers the exact validated train, resolved fetch/push destination identity, pre-push
 gate/reuse policy, and post-push verify hooks. It is checked once before claim
 and again immediately before the recovery marker and atomic push. Auto jobs use
 the narrower persisted destination identity at the same two boundaries.

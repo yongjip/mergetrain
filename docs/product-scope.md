@@ -193,8 +193,10 @@ concrete incorrect state that the current core cannot address.
   `retry`, deploy preview, MCP elicitation, and the existing `run-batch`
   command. A new approval command, token workflow, config field, mode, or MCP
   tool was rejected.
-- **Public surface change:** deploy preview adds `deploy_plan_sha`, and
-  `run-batch --deploy --expected-plan <sha>` fails closed when the selected
+- **Public surface change:** deploy preview adds `deploy_plan_sha`; v2.3.1 also
+  exposes its redacted effective push/fetch URLs, destination hash, and
+  canonical confirmed command so existing wrappers do not reconstruct safety
+  logic. `run-batch --deploy --expected-plan <sha>` fails closed when the selected
   train, destination, gate/reuse policy, or verify hooks differ. MCP supplies
   this value internally after its existing one human confirmation. Inspection
   may report `deploy_authorization_changed`. CLI enqueue now captures missing
@@ -202,12 +204,18 @@ concrete incorrect state that the current core cannot address.
   while the explicitly unsafe `--no-ready-check` escape retains direct-insert
   behavior unless SHA capture is requested.
 - **State, recovery, and security impact:** schema v12 stores only a SHA-256
-  destination identity on auto jobs, never a remote URL or credential. Retry
+  destination identity on auto jobs, never a remote URL or credential. In
+  v2.3.1 that identity uses the effective push URL, including `pushurl`, instead
+  of the fetch URL alone; one immutable resolution is shared by summary, audit,
+  and push. Schema v13 adds a credential-free endpoint hash to the pending
+  marker so reconcile cannot inspect a different repository after a crash. Retry
   inherits auto approval only when that identity still matches. Single-repo and
   Hub daemons compare it inside the claim transaction, and the runner reads the
-  live remote URL again immediately before the write-ahead marker and push.
-  Mismatches block without creating a pending-push marker or touching a remote
-  ref; permanent deploy audit evidence and reconcile semantics are unchanged.
+  live push URL once after gates, then carries that immutable endpoint through
+  audit lookup, the write-ahead marker, and push with fresh per-command sentinel
+  URLs. Mismatches block without creating a pending-push marker or touching a
+  remote ref; permanent deploy audit evidence and reconcile semantics are
+  unchanged.
 - **Success measure and simplification trigger:** regression tests change
   destinations before claim and during gates and prove zero pushes; same-target
   retry remains unattended while changed-target retry becomes manual. Keep one

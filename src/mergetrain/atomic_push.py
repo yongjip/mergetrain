@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-from .command_runner import Pulse, run_command
+from .command_runner import Pulse, redacting_log, run_command
 from .config import MergetrainConfig
 from .errors import (
     AmbiguousPush,
@@ -18,6 +18,7 @@ from .errors import (
     MergetrainError,
     PushRejected,
 )
+from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .git_ops import (
     delete_pending_ref,
     deploy_audit_ref_name,
@@ -87,11 +88,13 @@ class AtomicPush:
         audit_ref: str = "",
         audit_expected_sha: str | None = None,
         audit_expectation: AuditExpectation | None = None,
+        destination: ResolvedGitDestination | None = None,
     ) -> None:
         if not self.config.git.push_refs:
             raise MergetrainError(
                 "git.push_refs must not be empty for deploy mode"
             )
+        destination = destination or resolve_git_destination(self.config)
         target = deploy_sha or git_rev_parse(worktree, "HEAD")
         audit_ref = audit_ref or deploy_audit_ref_name(target)
         if audit_expected_sha is None:
@@ -101,21 +104,23 @@ class AtomicPush:
                 deploy_sha=target,
                 log=log,
                 pulse=pulse,
+                destination=destination,
             )
         push_args = [
             "git",
             "push",
             "--atomic",
             f"--force-with-lease={audit_ref}:{audit_expected_sha}",
-            self.config.git.remote,
+            destination.remote_alias,
         ]
-        push_args.extend(f"{target}:{ref}" for ref in self.config.git.push_refs)
-        if audit_ref not in self.config.git.push_refs:
+        push_args.extend(f"{target}:{ref}" for ref in destination.push_refs)
+        if audit_ref not in destination.push_refs:
             push_args.append(f"{target}:{audit_ref}")
         run_command(
             push_args,
             cwd=worktree,
-            log=log,
+            env=destination.command_env(),
+            log=redacting_log(log),
             pulse=pulse,
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=self.config.queue.command_timeout_seconds,
@@ -128,15 +133,18 @@ class AtomicPush:
         deploy_sha: str,
         log: IO[str] | None,
         pulse: Pulse | None = None,
+        destination: ResolvedGitDestination | None = None,
     ) -> tuple[str, str]:
         """Read the immutable audit ref and return its push lease expectation."""
 
+        destination = destination or resolve_git_destination(self.config)
         audit_ref = deploy_audit_ref_name(deploy_sha)
         reachable, current = git_remote_ref_sha(
-            worktree,
-            self.config.git.remote,
+            self.repo,
+            destination.remote_alias,
             audit_ref,
-            log=log,
+            env=destination.command_env(),
+            log=redacting_log(log),
             pulse=pulse,
             pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=self.config.queue.command_timeout_seconds,
@@ -164,6 +172,7 @@ class AtomicPush:
         pulse: Pulse | None,
         audit_ref: str,
         audit_expected_sha: str,
+        destination: ResolvedGitDestination,
         push_verified: PushVerified | None = None,
     ) -> None:
         """Persist pending intent and local pins before touching the remote."""
@@ -173,8 +182,9 @@ class AtomicPush:
             job_ids=job_ids,
             deploy_sha=deploy_sha,
             claim_token=lease_token,
-            remote=self.config.git.remote,
-            push_refs=self.config.git.push_refs,
+            remote=destination.remote_name,
+            push_refs=destination.push_refs,
+            destination_sha=destination.push_endpoint_sha,
         )
         for job_id in job_ids:
             pending_ref = pending_ref_name(job_id)
@@ -204,6 +214,7 @@ class AtomicPush:
             pulse=pulse,
             audit_ref=audit_ref,
             audit_expected_sha=audit_expected_sha,
+            destination=destination,
         )
 
     def clear_pending_refs(self, job_ids: list[int], *, log: IO[str] | None = None) -> None:
@@ -236,6 +247,7 @@ class AtomicPush:
         ownership_pulse: Pulse,
         state: PushVerifyState,
         event: EventWriter,
+        destination: ResolvedGitDestination,
         event_job_id: int | None = None,
         audit_expectation: AuditExpectation | None = None,
         push_with_marker: Callable[..., None] | None = None,
@@ -260,6 +272,7 @@ class AtomicPush:
                 deploy_sha=deploy_sha,
                 log=log,
                 pulse=ownership_pulse,
+                destination=destination,
             )
         except CancellationRequested:
             raise
@@ -288,6 +301,7 @@ class AtomicPush:
                 pulse=ownership_pulse,
                 audit_ref=audit_ref,
                 audit_expected_sha=audit_expected_sha,
+                destination=destination,
             )
         except CommandFailed as exc:
             event(

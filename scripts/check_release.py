@@ -33,6 +33,23 @@ def _security_policy_errors(text: str) -> list[str]:
     return errors
 
 
+def _readme_status_errors(text: str) -> list[str]:
+    """Reject release numbers that inevitably drift in the README status copy."""
+
+    status_section = re.search(
+        r"^## Status\s*$([\s\S]*?)(?=^## |\Z)",
+        text,
+        flags=re.MULTILINE,
+    )
+    if status_section and re.search(
+        r"\bv?\d+\.\d+\.\d+\b", status_section.group(1)
+    ):
+        return [
+            "README.md must not hard-code the latest package version; use the PyPI badge"
+        ]
+    return []
+
+
 def _project_version() -> str:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return str(data["project"]["version"])
@@ -98,27 +115,52 @@ def check_release(*, tag: str = "") -> list[str]:
             f"server.json version mismatch: expected {project_version}, "
             f"received {server.get('version')}"
         )
-    if f"mcp-name: {server_name}" not in (
-        ROOT / "README.md"
-    ).read_text(encoding="utf-8"):
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    if f"mcp-name: {server_name}" not in readme:
         errors.append(
             "README.md MCP Registry ownership marker does not match "
             f"server.json name {server_name!r}"
         )
 
+    errors.extend(_readme_status_errors(readme))
+
     packages = server.get("packages")
-    expected_package = {
-        "registryType": "pypi",
-        "identifier": "mergetrain",
-        "version": project_version,
-        "packageArguments": [{"type": "positional", "value": "mcp"}],
-        "transport": {"type": "stdio"},
-    }
-    if not isinstance(packages, list) or expected_package not in packages:
+    pypi_packages = [
+        package
+        for package in packages or []
+        if isinstance(package, dict)
+        and package.get("registryType") == "pypi"
+        and package.get("identifier") == "mergetrain"
+    ]
+    if len(pypi_packages) != 1:
         errors.append(
-            "server.json needs the exact PyPI mergetrain package, release "
-            "version, stdio transport, and fixed 'mcp' package argument"
+            "server.json needs exactly one PyPI mergetrain package"
         )
+    else:
+        package = pypi_packages[0]
+        expected_from = f"mergetrain[mcp]=={project_version}"
+        if package.get("version") != project_version:
+            errors.append(
+                "server.json PyPI package version must match the release version"
+            )
+        if package.get("runtimeHint") != "uvx":
+            errors.append("server.json PyPI package runtimeHint must be 'uvx'")
+        expected_runtime_arguments = [{
+            "type": "named",
+            "name": "--from",
+            "value": expected_from,
+        }]
+        if package.get("runtimeArguments") != expected_runtime_arguments:
+            errors.append(
+                "server.json must install the MCP extra with "
+                f"uvx --from {expected_from}"
+            )
+        if package.get("packageArguments") != [
+            {"type": "positional", "value": "mcp"}
+        ]:
+            errors.append("server.json must pass the fixed 'mcp' package argument")
+        if package.get("transport") != {"type": "stdio"}:
+            errors.append("server.json PyPI package transport must be stdio")
 
     return errors
 

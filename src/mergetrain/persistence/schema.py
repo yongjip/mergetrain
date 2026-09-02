@@ -7,7 +7,7 @@ import sqlite3
 from ..errors import QueueError
 from .transactions import immediate, utc_now
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -78,6 +78,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           conflict_with TEXT NOT NULL DEFAULT '',
           pending_deploy_remote TEXT NOT NULL DEFAULT '',
           pending_deploy_refs TEXT NOT NULL DEFAULT '',
+          pending_deploy_destination_sha TEXT NOT NULL DEFAULT '',
           supersession_id TEXT NOT NULL DEFAULT '',
           supersedes_train_id TEXT NOT NULL DEFAULT ''
         )
@@ -180,6 +181,13 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 (
                     "deploy_queue",
                     "approval_destination_sha",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+            ),
+            13: (
+                (
+                    "deploy_queue",
+                    "pending_deploy_destination_sha",
                     "TEXT NOT NULL DEFAULT ''",
                 ),
             ),

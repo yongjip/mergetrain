@@ -36,7 +36,9 @@ You send a short message from your phone. On your Mac, Claude reads [`CLAUDE.md`
 summary with "deploy / yes / go", or explicitly tell the agent to QA, deploy,
 verify, and finish a named task end-to-end. In the latter mode it should not ask
 for each opaque train ID. The `scripts/mt-deploy.sh` wrapper remains a guarded
-one-shot command: it prints what would ship and requires `--confirm`.
+one-shot command: it prints the CLI's canonical destination and deploy-plan
+hash, requires `--confirm`, then sends that exact hash back with
+`--expected-plan`.
 
 ## Phone phrasebook
 

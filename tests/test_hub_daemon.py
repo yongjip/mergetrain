@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import time
 import unittest
@@ -20,6 +21,13 @@ def make_repo(root: Path, name: str) -> Path:
 
 
 def seed_jobs(repo: Path, *, auto: bool) -> int:
+    if auto:
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(repo.parent / f"{repo.name}.git")],
+            cwd=repo,
+            check=True,
+        )
     config = load_config(repo=repo)
     conn = connect(config.state.db)
     try:

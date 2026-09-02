@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.3.1 - 2026-09-02
+
+- Bind approval, audit lookup, atomic push, and crash reconciliation to one
+  resolved Git push endpoint. Split fetch/push remotes remain supported;
+  multiple push URLs and relative filesystem push URLs now fail closed. Fresh
+  per-command sentinel URLs prevent later Git URL rewrites from redirecting the
+  frozen endpoint, absolute local paths are canonicalized, and legacy recovery
+  markers without an endpoint identity remain parked for manual inspection.
+
+- Make the MCP Registry install the optional MCP runtime through `uvx --from
+  mergetrain[mcp]`, and smoke-test the packaged stdio server before Registry
+  publication.
+
+- Replace the stale mobile deploy wrapper's duplicated safety logic with the
+  CLI's canonical preview and `--expected-plan` flow.
+
+- Ship a self-contained sdist test surface, remove the stale README release
+  number, and verify extracted source artifacts in release checks.
+
 ## 2.3.0 - 2026-09-02
 
 - Bind unattended approval to a credential-free destination identity and MCP

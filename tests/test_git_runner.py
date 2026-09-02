@@ -61,6 +61,7 @@ from mergetrain.deploy_plan import deploy_destination_sha
 from mergetrain.errors import (
     AmbiguousPush,
     CommandFailed,
+    DeployPlanChanged,
     MergeBlocked,
     PushRejected,
     redact_secrets,
@@ -202,10 +203,70 @@ def enable_persistent_validation_workspace(
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_invalid_manual_destination_is_typed_before_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="manual", branch="manual")
+                runner = GitRunner(config)
+                common = {
+                    "conn": conn,
+                    "job_ids": [job.id],
+                    "deploy_sha": "a" * 40,
+                    "lease_token": "",
+                    "worktree": repo,
+                    "log": io.StringIO(),
+                    "before_push": lambda: self.fail("push preflight ran"),
+                    "ownership_pulse": lambda: None,
+                    "state": atomic_push_module.PushVerifyState(),
+                }
+                with self.assertRaisesRegex(
+                    MergeBlocked, "deploy_destination_invalid"
+                ):
+                    runner._push_and_verify(**common)
+                with self.assertRaisesRegex(
+                    DeployPlanChanged, "confirmed destination"
+                ):
+                    runner._push_and_verify(
+                        **common,
+                        expected_plan_sha="b" * 64,
+                    )
+            finally:
+                conn.close()
+
+    def test_expected_plan_is_rechecked_with_the_pinned_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo, _marker = make_demo_repo(Path(td))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="manual", branch="feature/a")
+                with self.assertRaisesRegex(
+                    DeployPlanChanged, "confirmed train, destination"
+                ):
+                    GitRunner(config)._push_and_verify(
+                        conn,
+                        job_ids=[job.id],
+                        deploy_sha="a" * 40,
+                        lease_token="",
+                        worktree=repo,
+                        log=io.StringIO(),
+                        before_push=lambda: self.fail("push preflight ran"),
+                        ownership_pulse=lambda: None,
+                        state=atomic_push_module.PushVerifyState(),
+                        expected_plan_sha="b" * 64,
+                    )
+            finally:
+                conn.close()
+
     def test_auto_destination_change_during_gates_blocks_before_push(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _marker = make_demo_repo(root)
+            other_remote = root / "other.git"
+            git(root, "init", "--bare", str(other_remote))
             config = load_config(repo=repo)
             approved_destination = deploy_destination_sha(config)
             conn = connect(config.state.db)
@@ -232,7 +293,14 @@ class GitRunnerTests(unittest.TestCase):
 
                 def gates_then_change_destination(*args, **kwargs):  # type: ignore[no-untyped-def]
                     result = real_run_gates(*args, **kwargs)
-                    git(repo, "remote", "set-url", "origin", str(root / "other.git"))
+                    git(
+                        repo,
+                        "remote",
+                        "set-url",
+                        "--push",
+                        "origin",
+                        str(other_remote),
+                    )
                     return result
 
                 with patch.object(
@@ -255,10 +323,105 @@ class GitRunnerTests(unittest.TestCase):
 
             self.assertEqual([job.status for job in results], ["blocked"])
             self.assertIn("approval_destination_changed", results[0].note)
+            self.assertEqual(results[0].pending_deploy_sha, "")
             self.assertNotIn(
                 "a.txt",
                 git(root / "remote.git", "ls-tree", "-r", "--name-only", "main"),
             )
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "show-ref"],
+                    cwd=other_remote,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                ).stdout,
+                "",
+            )
+
+    def test_multiple_push_urls_added_during_gates_block_before_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            remote_b = root / "remote-b.git"
+            remote_c = root / "remote-c.git"
+            git(root, "init", "--bare", str(remote_b))
+            git(root, "init", "--bare", str(remote_c))
+            config = load_config(repo=repo)
+            approved_destination = deploy_destination_sha(config)
+            conn = connect(config.state.db)
+            owner = f"runner:{os.getpid()}"
+            try:
+                job = enqueue_job(
+                    conn,
+                    task="a",
+                    branch="feature/a",
+                    base_sha=git(repo, "rev-parse", "origin/main"),
+                    head_sha=git(repo, "rev-parse", "feature/a"),
+                    auto_deploy=True,
+                    approval_destination_sha=approved_destination,
+                )
+                claimed = claim_all_queued(
+                    conn,
+                    owner=owner,
+                    auto_only=True,
+                    deploy=True,
+                    approval_destination_sha=approved_destination,
+                )
+                runner = GitRunner(config)
+                real_run_gates = runner._run_gates
+
+                def gates_then_add_push_urls(*args, **kwargs):  # type: ignore[no-untyped-def]
+                    result = real_run_gates(*args, **kwargs)
+                    git(
+                        repo,
+                        "config",
+                        "--add",
+                        "remote.origin.pushurl",
+                        str(remote_b),
+                    )
+                    git(
+                        repo,
+                        "config",
+                        "--add",
+                        "remote.origin.pushurl",
+                        str(remote_c),
+                    )
+                    return result
+
+                with patch.object(
+                    runner,
+                    "_run_gates",
+                    side_effect=gates_then_add_push_urls,
+                ):
+                    results = runner.process_batch(
+                        conn,
+                        claimed,
+                        deploy=True,
+                        owner=owner,
+                        ttl_minutes=1,
+                    )
+                stored = get_job(conn, job.id)
+            finally:
+                lock = get_lock(conn)
+                if lock is not None:
+                    release_runner_lock(conn, owner=owner, token=lock.token)
+                conn.close()
+
+            self.assertEqual([result.status for result in results], ["blocked"])
+            self.assertIn("approval_destination_changed", stored.note)
+            self.assertEqual(stored.pending_deploy_sha, "")
+            for remote in (remote_b, remote_c):
+                self.assertEqual(
+                    subprocess.run(
+                        ["git", "show-ref"],
+                        cwd=remote,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    ).stdout,
+                    "",
+                )
 
     def test_parallel_gate_group_is_bounded_and_events_are_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as td:

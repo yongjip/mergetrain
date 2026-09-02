@@ -14,9 +14,10 @@ mergetrain daemon --validate-only --once
 ## Behavior
 
 - Default mode claims only `queued` jobs with `auto_deploy = 1`, then runs the
-  deploy path. The persisted destination hash must match the live remote,
-  integration ref, and push refs inside the claim transaction and immediately
-  before push. A mismatch becomes `blocked` with
+  deploy path. The persisted destination hash must match the live fetch URL,
+  effective push URL, integration ref, and push refs inside the claim
+  transaction and immediately before push. `remote.<name>.pushurl` is included;
+  multiple push URLs and relative filesystem push URLs fail closed. A mismatch becomes `blocked` with
   `approval_destination_changed`; no ref is touched. Manual queued jobs remain
   untouched.
 - `--validate-only` claims only manual jobs (`auto_deploy = 0`) and invokes the

@@ -1047,6 +1047,11 @@ class CliTests(unittest.TestCase):
             subprocess.run(
                 ["git", "branch", "-M", "feature/retry"], cwd=repo, check=True
             )
+            subprocess.run(
+                ["git", "remote", "add", "origin", str(repo / "origin.git")],
+                cwd=repo,
+                check=True,
+            )
             head = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 cwd=repo,
@@ -1448,6 +1453,13 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             db = repo / "queue.sqlite"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            push_endpoint = repo / "upstream.git"
+            subprocess.run(
+                ["git", "remote", "add", "upstream", str(push_endpoint)],
+                cwd=repo,
+                check=True,
+            )
             (repo / ".mergetrain.yaml").write_text(
                 """git:
   remote: upstream
@@ -1504,6 +1516,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(payload["deploy_plan_sha"]), 64)
             self.assertNotIn("terminology", payload)
             self.assertEqual(payload["push_plan"]["remote"], "upstream")
+            self.assertEqual(payload["push_plan"]["url"], str(push_endpoint.resolve()))
+            self.assertEqual(len(payload["push_plan"]["destination_sha"]), 64)
             self.assertEqual(
                 [item["spec"] for item in payload["push_plan"]["refs"]],
                 ["HEAD:main", "HEAD:release"],
@@ -1524,11 +1538,22 @@ class CliTests(unittest.TestCase):
             self.assertFalse(
                 payload["reuse"]["estimated_savings"]["authorizes_reuse"]
             )
+            self.assertIn(
+                f"--expected-plan {payload['deploy_plan_sha']}",
+                payload["confirmed_command"],
+            )
+            self.assertIn(f"--db {db.resolve()}", payload["confirmed_command"])
 
     def test_expected_deploy_plan_rejects_destination_change_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             db = repo / "queue.sqlite"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "remote", "add", "origin", str(repo / "origin.git")],
+                cwd=repo,
+                check=True,
+            )
             config_path = repo / ".mergetrain.yaml"
             config_path.write_text(
                 "git:\n  remote: origin\n  integration_branch: main\n  push_refs: [main]\n",

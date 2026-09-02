@@ -590,8 +590,10 @@ only and always carries `authorizes_reuse: false`; an estimate cannot enable
 reuse.
 Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
 `reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
-Preview JSON includes `push_plan.remote` and each exact `HEAD:<ref>` refspec.
-It also emits `deploy_plan_sha`, which binds the exact train, destination,
+Preview JSON includes `push_plan.remote`, the redacted effective push URL in
+`push_plan.url`, the fetch URL, destination hash, and each exact `HEAD:<ref>`
+refspec. It also emits a shell-quoted `confirmed_command` containing the train
+and plan hash for thin human wrappers. `deploy_plan_sha` binds the exact train, destination,
 gate/reuse policy, and verify hooks. Passing that value with `--expected-plan`
 checks it before claim and again before push; any change fails with
 `deploy_plan_changed` and touches no remote ref. MCP uses this path
@@ -691,6 +693,13 @@ mergetrain reconcile --apply --json   # finalize the reconciled outcome
 While any job is `needs_reconcile` (or a not-yet-split marker-bearing orphan
 exists), **all** deploy paths refuse — `run-batch --deploy`, `run-next --deploy`,
 and the `daemon` tick — since they target the same push refs.
+
+An interrupted marker written before v2.3.1 lacks the effective endpoint hash.
+Because current config cannot prove that historical destination, automatic
+reconcile leaves it parked and exits `7` without probing a remote. Operators
+should resolve pending v2.3.0 markers before upgrading; an already-migrated
+legacy marker requires explicit Git/queue forensics rather than an inferred
+current destination.
 
 Per job: the deploy sha present on **every** push ref → `deployed`
 (`push_status=succeeded`, `verify_status=unknown` — the deploy is not re-pushed

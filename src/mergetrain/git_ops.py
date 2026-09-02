@@ -74,6 +74,15 @@ def git_remote_url(path: str | Path, remote: str) -> str:
     return git_output_or_empty(["remote", "get-url", remote], cwd=path)
 
 
+def git_remote_push_urls(path: str | Path, remote: str) -> tuple[str, ...]:
+    """Return every effective push URL after Git's normal rewrite rules."""
+
+    output = git_output_or_empty(
+        ["remote", "get-url", "--push", "--all", remote], cwd=path
+    )
+    return tuple(line for line in output.splitlines() if line)
+
+
 def git_remote_exists(path: str | Path, remote: str) -> bool:
     return bool(git_remote_url(path, remote))
 
@@ -83,6 +92,7 @@ def git_remote_ref_sha(
     remote: str,
     ref: str,
     *,
+    env: dict[str, str] | None = None,
     log: IO[str] | None = None,
     pulse: Pulse | None = None,
     pulse_interval_seconds: float = 10,
@@ -93,6 +103,7 @@ def git_remote_ref_sha(
     completed = run_command(
         ["git", "ls-remote", "--refs", remote, ref],
         cwd=path,
+        env=env,
         log=log,
         check=False,
         pulse=pulse,

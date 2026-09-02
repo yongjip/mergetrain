@@ -21,7 +21,7 @@ from .atomic_push import (
 )
 from .command_runner import run_command
 from .config import GateConfig, MergetrainConfig
-from .deploy_plan import deploy_destination_sha, deploy_plan_sha
+from .deploy_plan import deploy_plan_sha
 from .errors import (
     AmbiguousPush,
     ApprovalDestinationChanged,
@@ -34,6 +34,7 @@ from .errors import (
     QueueBusy,
 )
 from .gate_runner import GateProgress, GateRunner
+from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .git_ops import (
     git_output,
     git_rev_parse,
@@ -471,6 +472,7 @@ class GitRunner:
         pulse: Pulse | None = None,
         audit_ref: str = "",
         audit_expected_sha: str | None = None,
+        destination: ResolvedGitDestination | None = None,
     ) -> None:
         self._pushes.push_verified_head(
             worktree=worktree,
@@ -480,6 +482,7 @@ class GitRunner:
             audit_ref=audit_ref,
             audit_expected_sha=audit_expected_sha,
             audit_expectation=self._audit_ref_expectation,
+            destination=destination,
         )
 
     def _audit_ref_expectation(
@@ -489,12 +492,14 @@ class GitRunner:
         deploy_sha: str,
         log: IO[str] | None,
         pulse: Pulse | None = None,
+        destination: ResolvedGitDestination | None = None,
     ) -> tuple[str, str]:
         return self._pushes.audit_ref_expectation(
             worktree=worktree,
             deploy_sha=deploy_sha,
             log=log,
             pulse=pulse,
+            destination=destination,
         )
 
     def _pending_ref(self, job_id: int) -> str:
@@ -512,6 +517,7 @@ class GitRunner:
         pulse: Pulse | None,
         audit_ref: str,
         audit_expected_sha: str,
+        destination: ResolvedGitDestination,
     ) -> None:
         self._pushes.push_with_marker(
             conn,
@@ -523,6 +529,7 @@ class GitRunner:
             pulse=pulse,
             audit_ref=audit_ref,
             audit_expected_sha=audit_expected_sha,
+            destination=destination,
             push_verified=self.push_verified_head,
         )
 
@@ -588,12 +595,29 @@ class GitRunner:
         reuse_validated: bool = False,
     ) -> None:
         current_jobs = [get_job(conn, job_id) for job_id in job_ids]
-        current_destination = deploy_destination_sha(self.config)
         approved_destinations = {
             job.approval_destination_sha
             for job in current_jobs
             if job.auto_deploy and job.approval_destination_sha
         }
+        try:
+            destination = resolve_git_destination(self.config)
+        except MergetrainError as exc:
+            if approved_destinations:
+                raise ApprovalDestinationChanged(
+                    "approval_destination_changed: unattended deploy destination "
+                    "is no longer one exact supported push endpoint; nothing was pushed"
+                ) from exc
+            if expected_plan_sha:
+                raise DeployPlanChanged(
+                    "deploy_plan_changed: the confirmed destination is no longer "
+                    "one exact supported push endpoint; nothing was pushed"
+                ) from exc
+            raise MergeBlocked(
+                "deploy_destination_invalid: deploy requires one exact supported "
+                "push endpoint; nothing was pushed"
+            ) from exc
+        current_destination = destination.destination_sha
         if approved_destinations and approved_destinations != {current_destination}:
             raise ApprovalDestinationChanged(
                 "approval_destination_changed: unattended deploy approval no "
@@ -604,6 +628,7 @@ class GitRunner:
                 self.config,
                 current_jobs,
                 reuse_validated=reuse_validated,
+                destination=destination,
             )
             if current_plan_sha != expected_plan_sha:
                 raise DeployPlanChanged(
@@ -621,6 +646,7 @@ class GitRunner:
             ownership_pulse=ownership_pulse,
             state=state,
             event=self._event,
+            destination=destination,
             event_job_id=event_job_id,
             audit_expectation=self._audit_ref_expectation,
             push_with_marker=self._push_with_marker,

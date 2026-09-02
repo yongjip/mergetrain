@@ -67,6 +67,7 @@ import mergetrain.git_runner as git_runner_module
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.errors import LockHeld, LostLease, QueueBusy
+from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import reconcile
 from mergetrain.store import (
@@ -647,11 +648,13 @@ class ContentionTranslationTests(unittest.TestCase):
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 head = git(repo, "rev-parse", "HEAD")
+                destination_sha = resolve_git_destination(config).push_endpoint_sha
                 conn.execute(
                     "UPDATE deploy_queue SET status='needs_reconcile', "
                     "pending_deploy_sha=?, pending_deploy_remote='origin', "
-                    "pending_deploy_refs='main', push_status='pending' WHERE id=?",
-                    (head, job.id),
+                    "pending_deploy_refs='main', pending_deploy_destination_sha=?, "
+                    "push_status='pending' WHERE id=?",
+                    (head, destination_sha, job.id),
                 )
                 conn.commit()
             finally:

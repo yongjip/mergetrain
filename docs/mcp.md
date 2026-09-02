@@ -99,7 +99,8 @@ argument would be the model confirming its own deploy. Instead the server
 3. asks CLI preview to hash the exact train, destination, gate/reuse policy, and
    verify hooks into `deploy_plan_sha`,
 4. builds a human-readable summary of only the selected change set: task intent,
-   member branches and recorded HEADs, destination refs, pre-push gates,
+   member branches and recorded HEADs, the effective push endpoint and refs,
+   pre-push gates,
    post-push verification, validation evidence, stale-base reassembly risk,
    `next_action`, and every blocked, failed, or reconcile-pending job from the
    uncapped `attention_jobs` view; the opaque train ID remains internal,
@@ -114,7 +115,7 @@ being deploy-eligible while the dialog was open is refused instead of shipping
 from the stale first-round snapshot. Older negotiated MCP protocols use the
 same resolver and retain their server-to-client elicitation flow.
 The CLI compares the plan again before claim and immediately before push, so a
-remote URL, push ref, gate/reuse policy, or verify-hook change after the dialog
+fetch URL, effective `pushurl`, push ref, gate/reuse policy, or verify-hook change after the dialog
 fails with `deploy_plan_changed` and touches no remote ref.
 
 Anything short of that is a refusal, and nothing is pushed:

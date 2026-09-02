@@ -176,7 +176,8 @@ def retry_job(
             SET status = 'canceled', finished_at = ?,
                 note = ?, claim_token = '', cancel_requested_at = '',
                 pending_deploy_sha = '', pending_deploy_remote = '',
-                pending_deploy_refs = '', conflict_with = ''
+                pending_deploy_refs = '', pending_deploy_destination_sha = '',
+                conflict_with = ''
             WHERE id = ? AND status = ?
             """,
             (
@@ -769,6 +770,10 @@ def mark_job(
                 pending_deploy_refs = CASE
                     WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
                     ELSE pending_deploy_refs
+                END,
+                pending_deploy_destination_sha = CASE
+                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
+                    ELSE pending_deploy_destination_sha
                 END
             WHERE {where}
             """,
@@ -792,6 +797,7 @@ def mark_job(
                 validation_train_sha,
                 reused_validation_sha,
                 conflict_with,
+                status,
                 status,
                 status,
                 status,

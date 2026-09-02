@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 from mergetrain.config import load_config
+from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import (
     deploy_audit_ref_name,
     git_ref_exists,
@@ -90,6 +91,7 @@ def _park_with_marker(conn, repo: Path, config, job_id: int, sha: str) -> None:
         claim_token="t-crash",
         remote=config.git.remote,
         push_refs=config.git.push_refs,
+        destination_sha=resolve_git_destination(config).push_endpoint_sha,
     )
     git(repo, "update-ref", pending_ref_name(job_id), sha)
     mark_job(

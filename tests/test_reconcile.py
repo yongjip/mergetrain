@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
-from mergetrain.errors import CommandFailed, QueueError
+from mergetrain.errors import CommandFailed, QueueError, RemoteUnreachable
+from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
 from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
@@ -87,11 +89,23 @@ def _stage_in_progress(conn, job_id: int, token: str, *, cancel: str = "") -> No
     conn.commit()
 
 
-def _set_needs_reconcile(conn, job_id: int, sha: str, *, cancel: str = "") -> None:
+def _set_needs_reconcile(
+    config, conn, job_id: int, sha: str, *, cancel: str = ""
+) -> None:  # type: ignore[no-untyped-def]
+    destination_sha = resolve_git_destination(config).push_endpoint_sha
     conn.execute(
         "UPDATE deploy_queue SET status='needs_reconcile', pending_deploy_sha=?, "
-        "push_status='pending', claim_token='', cancel_requested_at=? WHERE id=?",
-        (sha, cancel, job_id),
+        "pending_deploy_remote=?, pending_deploy_refs=?, "
+        "pending_deploy_destination_sha=?, push_status='pending', claim_token='', "
+        "cancel_requested_at=? WHERE id=?",
+        (
+            sha,
+            config.git.remote,
+            "\n".join(config.git.push_refs),
+            destination_sha,
+            cancel,
+            job_id,
+        ),
     )
     conn.commit()
 
@@ -114,7 +128,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             repo, config, conn, job, pending = self._prepare(root)
             try:
                 git(repo, "push", "origin", f"{pending}:main")  # the push landed
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -134,7 +148,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             root = Path(td)
             repo, config, conn, job, pending = self._prepare(root)
             try:
-                _set_needs_reconcile(conn, job.id, pending)  # never pushed
+                _set_needs_reconcile(config, conn, job.id, pending)  # never pushed
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -157,7 +171,7 @@ class ReconcileClassifierTests(unittest.TestCase):
                 audit_ref = deploy_audit_ref_name(pending)
                 git(repo, "push", "origin", f"{base}:{audit_ref}")
                 git(repo, "push", "origin", f"{pending}:main")
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -176,7 +190,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             repo, config, conn, job, pending = self._prepare(root)
             try:
                 git(repo, "push", "origin", f"{pending}:main")
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 outcome = reconcile(config, conn, apply=False)
                 unchanged = get_job(conn, job.id)
             finally:
@@ -192,7 +206,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             repo, config, conn, job, pending = self._prepare(root)
             try:
                 git(repo, "push", "origin", f"{pending}:main")
-                _set_needs_reconcile(conn, job.id, pending, cancel=utc_now())
+                _set_needs_reconcile(config, conn, job.id, pending, cancel=utc_now())
                 reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -205,7 +219,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             root = Path(td)
             repo, config, conn, job, pending = self._prepare(root)
             try:
-                _set_needs_reconcile(conn, job.id, pending, cancel=utc_now())
+                _set_needs_reconcile(config, conn, job.id, pending, cancel=utc_now())
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -236,7 +250,7 @@ class ReconcileClassifierTests(unittest.TestCase):
                 real_apply(config_arg, conn_arg, decision)
 
             try:
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 with patch(
                     "mergetrain.recovery._apply", side_effect=cancel_then_apply
                 ):
@@ -258,7 +272,7 @@ class ReconcileClassifierTests(unittest.TestCase):
                 git(repo, "update-ref", "-d", pending_ref_name(job.id))
                 git(repo, "reflog", "expire", "--expire=now", "--all")
                 git(repo, "gc", "--prune=now")
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -275,7 +289,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             repo, config, conn, job, pending = self._prepare(root)
             try:
                 git(repo, "gc", "--prune=now")  # pin ref keeps the dangling sha alive
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -304,7 +318,7 @@ class ReconcileClassifierTests(unittest.TestCase):
                 pending = _pending_commit(repo)
                 _pin(repo, job.id, pending)
                 git(repo, "push", "origin", f"{pending}:main")  # lands on main only
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -317,7 +331,7 @@ class ReconcileClassifierTests(unittest.TestCase):
             root = Path(td)
             repo, config, conn, job, pending = self._prepare(root)
             try:
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 before = get_job(conn, job.id)
                 rmtree(root / "remote.git")  # remote gone
                 from mergetrain.errors import RemoteUnreachable
@@ -330,6 +344,33 @@ class ReconcileClassifierTests(unittest.TestCase):
             # zero DB mutation — the job stays parked, exactly as before.
             self.assertEqual(after.status, "needs_reconcile")
             self.assertEqual(after.pending_deploy_sha, before.pending_deploy_sha)
+
+    def test_legacy_marker_without_endpoint_identity_stays_parked(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _repo, config, conn, job, pending = self._prepare(root)
+            try:
+                _set_needs_reconcile(config, conn, job.id, pending)
+                # Schema-v12 markers acquire this blank default during the v13
+                # migration. The current remote cannot prove their old target.
+                conn.execute(
+                    "UPDATE deploy_queue SET pending_deploy_destination_sha='' "
+                    "WHERE id=?",
+                    (job.id,),
+                )
+                conn.commit()
+                before = get_job(conn, job.id)
+                with self.assertRaisesRegex(
+                    RemoteUnreachable, "legacy pending-push marker"
+                ):
+                    reconcile(config, conn, apply=True)
+                after = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            self.assertEqual(after.status, "needs_reconcile")
+            self.assertEqual(after.pending_deploy_sha, before.pending_deploy_sha)
+            self.assertEqual(after.pending_deploy_destination_sha, "")
 
 
 class OrphanSplitTests(unittest.TestCase):
@@ -399,6 +440,7 @@ class CrashRecoveryTests(unittest.TestCase):
             pulse=None,
             audit_ref="",
             audit_expected_sha=None,
+            destination=None,
         ):
             real_push(
                 worktree=worktree,
@@ -407,6 +449,7 @@ class CrashRecoveryTests(unittest.TestCase):
                 pulse=pulse,
                 audit_ref=audit_ref,
                 audit_expected_sha=audit_expected_sha,
+                destination=destination,
             )
             raise _Crash()
 
@@ -475,6 +518,7 @@ class CrashRecoveryTests(unittest.TestCase):
                     pulse=None,
                     audit_ref="",
                     audit_expected_sha=None,
+                    destination=None,
                 ):
                     real_push(
                         worktree=worktree,
@@ -483,6 +527,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         pulse=pulse,
                         audit_ref=audit_ref,
                         audit_expected_sha=audit_expected_sha,
+                        destination=destination,
                     )
                     raise CommandFailed(
                         ["git", "push"], 1,
@@ -531,6 +576,7 @@ class CrashRecoveryTests(unittest.TestCase):
                     pulse=None,
                     audit_ref="",
                     audit_expected_sha=None,
+                    destination=None,
                 ):
                     real_push(
                         worktree=worktree,
@@ -539,6 +585,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         pulse=pulse,
                         audit_ref=audit_ref,
                         audit_expected_sha=audit_expected_sha,
+                        destination=destination,
                     )
                     control = connect(config.state.db)
                     try:
@@ -600,6 +647,7 @@ class CrashRecoveryTests(unittest.TestCase):
                     pulse=None,
                     audit_ref="",
                     audit_expected_sha=None,
+                    destination=None,
                 ):
                     real_push(
                         worktree=worktree,
@@ -608,6 +656,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         pulse=pulse,
                         audit_ref=audit_ref,
                         audit_expected_sha=audit_expected_sha,
+                        destination=destination,
                     )
                     raise CommandFailed(
                         ["git", "push"], 1,
@@ -623,6 +672,7 @@ class CrashRecoveryTests(unittest.TestCase):
                 # The marker captured the real push target.
                 self.assertEqual(parked.pending_deploy_remote, config.git.remote)
                 self.assertEqual(parked.pending_deploy_refs, "main")
+                self.assertEqual(len(parked.pending_deploy_destination_sha), 64)
             finally:
                 conn.close()
 
@@ -646,6 +696,105 @@ class CrashRecoveryTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(outcome.summary["reconciled_deployed"], 1)
+
+    def test_reconcile_requires_the_exact_endpoint_recorded_before_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            remote_b = root / "remote-b.git"
+            remote_c = root / "remote-c.git"
+            git(root, "init", "--bare", str(remote_b))
+            git(root, "init", "--bare", str(remote_c))
+            git(repo, "push", str(remote_b), "main:main")
+            git(repo, "remote", "set-url", "--push", "origin", str(remote_b))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                ttl = config.queue.lock_ttl_minutes
+                claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
+                runner = GitRunner(config)
+                real_push = runner.push_verified_head
+
+                def land_then_drop(
+                    *,
+                    worktree,
+                    deploy_sha="",
+                    log=None,
+                    pulse=None,
+                    audit_ref="",
+                    audit_expected_sha=None,
+                    destination=None,
+                ):
+                    real_push(
+                        worktree=worktree,
+                        deploy_sha=deploy_sha,
+                        log=log,
+                        pulse=pulse,
+                        audit_ref=audit_ref,
+                        audit_expected_sha=audit_expected_sha,
+                        destination=destination,
+                    )
+                    raise CommandFailed(
+                        ["git", "push"],
+                        1,
+                        stderr="fatal: the remote end hung up unexpectedly",
+                    )
+
+                with patch.object(
+                    runner, "push_verified_head", side_effect=land_then_drop
+                ):
+                    runner.process_batch(
+                        conn,
+                        claimed,
+                        deploy=True,
+                        owner=DEAD_OWNER,
+                        ttl_minutes=ttl,
+                    )
+                parked = get_job(conn, job.id)
+                self.assertEqual(parked.status, "needs_reconcile")
+                self.assertEqual(len(parked.pending_deploy_destination_sha), 64)
+
+                git(
+                    repo,
+                    "remote",
+                    "set-url",
+                    "--push",
+                    "origin",
+                    str(remote_c),
+                )
+                with self.assertRaisesRegex(
+                    RemoteUnreachable, "no longer matches the endpoint"
+                ):
+                    reconcile(config, conn, apply=True)
+                self.assertEqual(get_job(conn, job.id).status, "needs_reconcile")
+
+                git(
+                    repo,
+                    "remote",
+                    "set-url",
+                    "--push",
+                    "origin",
+                    str(remote_b),
+                )
+                outcome = reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            self.assertEqual(outcome.summary["reconciled_deployed"], 1)
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(git(remote_b, "show", "main:a.txt"), "a")
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "show-ref"],
+                    cwd=remote_c,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                ).stdout,
+                "",
+            )
 
     def test_isolation_push_site_writes_marker(self) -> None:
         # Proves the one-by-one process_one push site is instrumented too.
@@ -731,7 +880,7 @@ class DeployGateTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                _set_needs_reconcile(conn, job.id, "c" * 40)
+                _set_needs_reconcile(config, conn, job.id, "c" * 40)
             finally:
                 conn.close()
 
@@ -765,7 +914,7 @@ class DoctorNextActionTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                _set_needs_reconcile(conn, job.id, "d" * 40)
+                _set_needs_reconcile(config, conn, job.id, "d" * 40)
             finally:
                 conn.close()
             self.assertEqual(self._doctor(repo)["next_action"], "reconcile_pending_deploy")
@@ -956,7 +1105,7 @@ class CommandExitCodeTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                _set_needs_reconcile(conn, job.id, "f" * 40)
+                _set_needs_reconcile(config, conn, job.id, "f" * 40)
             finally:
                 conn.close()
             rmtree(root / "remote.git")
@@ -1117,7 +1266,7 @@ class ReviewHardeningTests(unittest.TestCase):
                 # refs/heads/main is deleted → the deploy never landed on it.
                 git(repo, "push", "origin", f"{pending}:refs/tags/main")
                 git(root / "remote.git", "update-ref", "-d", "refs/heads/main")
-                _set_needs_reconcile(conn, job.id, pending)
+                _set_needs_reconcile(config, conn, job.id, pending)
                 reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -1159,7 +1308,7 @@ class ReviewHardeningTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 parked = enqueue_job(conn, task="a", branch="feature/a")
-                _set_needs_reconcile(conn, parked.id, "c" * 40)
+                _set_needs_reconcile(config, conn, parked.id, "c" * 40)
                 auto = enqueue_job(
                     conn, task="b", branch="feature/b", auto_deploy=True
                 )

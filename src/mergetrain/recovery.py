@@ -26,6 +26,7 @@ from .errors import (
     QueueError,
     RemoteUnreachable,
 )
+from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .git_ops import (
     PENDING_REF_PREFIX,
     apply_gc,
@@ -56,26 +57,36 @@ from .store import (
 # --------------------------------------------------------------------------- #
 
 
-def _fetch(config: MergetrainConfig) -> bool:
-    """``git fetch`` the configured remote; ``True`` iff it is reachable."""
+def _fetch(config: MergetrainConfig, destination: ResolvedGitDestination) -> bool:
+    """Probe the exact recorded endpoint; ``True`` iff it is reachable."""
     completed = run_command(
-        ["git", "fetch", config.git.remote], cwd=config.repo, check=False
+        ["git", "ls-remote", destination.remote_alias],
+        cwd=config.repo,
+        env=destination.command_env(),
+        check=False,
     )
     return completed.returncode == 0
 
 
-def _localize_ref(config: MergetrainConfig, ref: str) -> None:
+def _localize_ref(
+    config: MergetrainConfig, destination: ResolvedGitDestination, ref: str
+) -> None:
     """Best-effort: bring a push ref's current remote tip into the local object
     store so ``merge-base --is-ancestor`` can resolve it. A bare ``git fetch``
     only downloads ``refs/heads/*``; a push ref under any other namespace
     (``refs/deploy/*``, a tag, …) would otherwise be a non-local object and the
     ancestry test would error. Absent refs simply no-op (``check=False``)."""
     run_command(
-        ["git", "fetch", config.git.remote, ref], cwd=config.repo, check=False
+        ["git", "fetch", destination.remote_alias, ref],
+        cwd=config.repo,
+        env=destination.command_env(),
+        check=False,
     )
 
 
-def _ls_remote(config: MergetrainConfig, ref: str) -> tuple[bool, str]:
+def _ls_remote(
+    config: MergetrainConfig, destination: ResolvedGitDestination, ref: str
+) -> tuple[bool, str]:
     """Resolve ``ref`` on the remote by **exact** name.
 
     Returns ``(reachable, remote_sha)``. A reachable remote that does not carry
@@ -87,7 +98,10 @@ def _ls_remote(config: MergetrainConfig, ref: str) -> tuple[bool, str]:
     fully-qualified ``ref``) counts; peeled ``^{}`` tag lines are skipped.
     """
     completed = run_command(
-        ["git", "ls-remote", config.git.remote, ref], cwd=config.repo, check=False
+        ["git", "ls-remote", destination.remote_alias, ref],
+        cwd=config.repo,
+        env=destination.command_env(),
+        check=False,
     )
     if completed.returncode != 0:
         return False, ""
@@ -360,16 +374,16 @@ def _summarize(decisions: list[JobDecision]) -> dict[str, int]:
 
 def _job_push_target(
     config: MergetrainConfig, job: Job
-) -> tuple[str, tuple[str, ...]]:
+) -> tuple[str, tuple[str, ...], str]:
     """The remote + push-ref set the job's interrupted push actually targeted.
 
     Read from the durable marker so reconcile asks the right remote even if the
-    config's remote or push_refs changed after the crash. A legacy marker
-    (recorded before the target was persisted) falls back to the current config
-    so old parked jobs still reconcile (#84, defect 3)."""
+    config's remote or push_refs changed after the crash. The caller rejects a
+    legacy marker whose endpoint hash is absent: current config cannot prove
+    where an older ambiguous push actually went."""
     remote = job.pending_deploy_remote or config.git.remote
     refs = unpack_push_refs(job.pending_deploy_refs) or list(config.git.push_refs)
-    return remote, tuple(refs)
+    return remote, tuple(refs), job.pending_deploy_destination_sha
 
 
 # --------------------------------------------------------------------------- #
@@ -409,20 +423,42 @@ def reconcile(
         # separate crashes can park jobs bound for different remotes/refs. Ask
         # each group's own recorded target for truth — the refs the push actually
         # used, not whatever the current config now says (#84, defect 3).
-        groups: dict[tuple[str, tuple[str, ...]], list[Job]] = {}
+        groups: dict[tuple[str, tuple[str, ...], str], list[Job]] = {}
         for job in jobs:
-            groups.setdefault(_job_push_target(config, job), []).append(job)
+            target = _job_push_target(config, job)
+            if not target[2]:
+                raise RemoteUnreachable(
+                    f"job {job.id} has a legacy pending-push marker without an "
+                    "exact destination identity; automatic reconcile is unsafe. "
+                    "Keep it parked and inspect the v2.3.0-era remote evidence "
+                    "manually before changing queue state"
+                )
+            groups.setdefault(target, []).append(job)
         decisions_by_id: dict[int, JobDecision] = {}
-        for (remote, refs), group in groups.items():
+        for (remote, refs, recorded_destination_sha), group in groups.items():
             effective = replace(
                 config, git=replace(config.git, remote=remote, push_refs=refs)
             )
-            if not _fetch(effective):
+            try:
+                destination = resolve_git_destination(effective)
+            except MergetrainError as exc:
+                raise RemoteUnreachable(
+                    f"cannot resolve the recorded push destination {remote!r} "
+                    "to reconcile; restore its exact endpoint and retry"
+                ) from exc
+            if destination.push_endpoint_sha != recorded_destination_sha:
+                raise RemoteUnreachable(
+                    f"recorded push destination {remote!r} no longer matches "
+                    "the endpoint used before the crash; restore it and retry"
+                )
+            if not _fetch(effective, destination):
                 raise RemoteUnreachable(f"cannot reach remote '{remote}' to reconcile")
             ref_shas: dict[str, str] = {}
             for ref in refs:
-                _localize_ref(effective, ref)  # bring the tip local so ancestry resolves
-                reachable, remote_sha = _ls_remote(effective, ref)
+                _localize_ref(
+                    effective, destination, ref
+                )  # bring the tip local so ancestry resolves
+                reachable, remote_sha = _ls_remote(effective, destination, ref)
                 if not reachable:
                     raise RemoteUnreachable(f"cannot ls-remote '{ref}' on '{remote}'")
                 ref_shas[ref] = remote_sha
@@ -431,7 +467,9 @@ def reconcile(
                 audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
                 if not audit_ref or audit_ref in audit_shas:
                     continue
-                reachable, audit_sha = _ls_remote(effective, audit_ref)
+                reachable, audit_sha = _ls_remote(
+                    effective, destination, audit_ref
+                )
                 if not reachable:
                     raise RemoteUnreachable(
                         f"cannot ls-remote deploy audit ref on '{remote}'"
@@ -551,10 +589,11 @@ class UnlockOutcome:
 
 
 def _remote_reachable(config: MergetrainConfig) -> bool:
-    completed = run_command(
-        ["git", "ls-remote", config.git.remote], cwd=config.repo, check=False
-    )
-    return completed.returncode == 0
+    try:
+        destination = resolve_git_destination(config)
+    except MergetrainError:
+        return False
+    return _fetch(config, destination)
 
 
 def force_unlock(

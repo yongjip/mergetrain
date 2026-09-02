@@ -541,6 +541,20 @@ class DeployGateTests(unittest.TestCase):
             self.assertIn(expected, summary)
         self.assertNotIn("abc123", summary)
 
+    def test_summary_prefers_the_effective_push_endpoint_from_preview(self) -> None:
+        summary = self.tools.deploy_summary(
+            DOCTOR,
+            STATUS,
+            TRAIN,
+            {"push_plan": {"url": "ssh://deploy@example.invalid/repo.git"}},
+        )
+
+        self.assertIn(
+            "Destination: origin (ssh://deploy@example.invalid/repo.git)",
+            summary,
+        )
+        self.assertNotIn("git@github.com:example/checkout.git", summary)
+
     def test_summary_includes_unresolved_post_push_verification(self) -> None:
         unresolved = {
             "id": 10,

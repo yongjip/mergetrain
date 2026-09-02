@@ -132,6 +132,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                     pulse=None,
                     audit_ref="",
                     audit_expected_sha=None,
+                    destination=None,
                 ):
                     # (1) the real push: from here on the remote is advanced and
                     # the deploy is irreversible.
@@ -142,6 +143,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                         pulse=pulse,
                         audit_ref=audit_ref,
                         audit_expected_sha=audit_expected_sha,
+                        destination=destination,
                     )
                     # (2) the operator runs the documented wedge remedy from a
                     # separate connection, exactly in the window before the

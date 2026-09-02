@@ -44,10 +44,17 @@ class MCPRegistryWorkflowTests(unittest.TestCase):
         self,
     ) -> None:
         validate = self.workflow.index("./mcp-publisher validate server.json")
+        launch = self.workflow.index("scripts/check_mcp_registry_launch.py")
         login = self.workflow.index("./mcp-publisher login github-oidc")
         publish = self.workflow.index("./mcp-publisher publish server.json")
+        self.assertLess(validate, launch)
+        self.assertLess(launch, login)
         self.assertLess(validate, login)
         self.assertLess(login, publish)
+
+    def test_registry_launch_uses_the_pinned_uvx_runtime(self) -> None:
+        self.assertIn("python -m pip install uv==0.12.7", self.workflow)
+        self.assertIn("--attempts 6 --timeout 120", self.workflow)
 
     def test_release_waits_for_pypi_before_calling_registry_workflow(
         self,

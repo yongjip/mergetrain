@@ -51,6 +51,7 @@ def record_pending_push(
     claim_token: str,
     remote: str = "",
     push_refs: Sequence[str] = (),
+    destination_sha: str = "",
 ) -> None:
     """Durably record intent to push ``deploy_sha`` before the remote is touched.
 
@@ -60,10 +61,10 @@ def record_pending_push(
     so a later crash can prove a push was attempted for this sha (0.3.0 Phase 1;
     see docs/proposals/0.3.0-recovery.md).
 
-    The push *target* — the remote and the normalized push-ref set — is recorded
-    alongside the sha so a later ``reconcile`` evaluates the refs the interrupted
-    push actually targeted, not whatever the current config now says (#84,
-    defect 3).
+    The push *target* — remote name, normalized push-ref set, and a
+    credential-free hash of the resolved push endpoint — is recorded alongside
+    the sha. A later ``reconcile`` therefore evaluates the refs at that exact
+    endpoint or fails closed if the configured remote no longer resolves to it.
     """
     ids = list(dict.fromkeys(int(job_id) for job_id in job_ids))
     if not ids:
@@ -76,12 +77,20 @@ def record_pending_push(
             f"""
             UPDATE deploy_queue
             SET pending_deploy_sha = ?, push_status = 'pending',
-                pending_deploy_remote = ?, pending_deploy_refs = ?
+                pending_deploy_remote = ?, pending_deploy_refs = ?,
+                pending_deploy_destination_sha = ?
             WHERE id IN ({placeholders})
               AND status = 'in_progress'
               AND claim_token = ?
             """,
-            (deploy_sha, remote, pack_push_refs(push_refs), *ids, claim_token),
+            (
+                deploy_sha,
+                remote,
+                pack_push_refs(push_refs),
+                destination_sha,
+                *ids,
+                claim_token,
+            ),
         )
         if cur.rowcount != len(ids):
             raise LostLease("pending push is no longer owned by this runner")
@@ -110,7 +119,8 @@ def clear_rejected_push(
             f"""
             UPDATE deploy_queue
             SET pending_deploy_sha = '', pending_deploy_remote = '',
-                pending_deploy_refs = '', push_status = 'failed'
+                pending_deploy_refs = '', pending_deploy_destination_sha = '',
+                push_status = 'failed'
             WHERE id IN ({placeholders})
               AND status = 'in_progress'
               AND claim_token = ?
