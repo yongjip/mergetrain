@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 
+@unittest.skipIf(os.name == "nt", "mobile convenience scripts require a POSIX shell")
 class MobileScriptIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.repo = Path(__file__).resolve().parents[1]
