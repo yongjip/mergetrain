@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -78,7 +79,9 @@ class MobileScriptIntegrationTests(unittest.TestCase):
 
     def run_script(self, name: str, *args: str) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
-        env["MERGETRAIN_BIN"] = str(self.binary)
+        # Invoke the fake through the active interpreter. Git Bash on Windows
+        # does not reliably execute an extensionless temporary shebang file.
+        env["MERGETRAIN_BIN"] = f"{sys.executable} {self.binary}"
         return subprocess.run(
             ["bash", str(self.repo / "scripts" / name), *args],
             cwd=self.repo,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -1542,7 +1543,10 @@ class CliTests(unittest.TestCase):
                 f"--expected-plan {payload['deploy_plan_sha']}",
                 payload["confirmed_command"],
             )
-            self.assertIn(f"--db {db.resolve()}", payload["confirmed_command"])
+            self.assertIn(
+                f"--db {shlex.quote(str(db.resolve()))}",
+                payload["confirmed_command"],
+            )
 
     def test_expected_deploy_plan_rejects_destination_change_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as td:
