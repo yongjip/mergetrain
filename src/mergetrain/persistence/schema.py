@@ -7,7 +7,7 @@ import sqlite3
 from ..errors import QueueError
 from .transactions import immediate, utc_now
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -60,6 +60,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           push_status TEXT NOT NULL DEFAULT 'not_run',
           verify_status TEXT NOT NULL DEFAULT 'not_run',
           auto_deploy INTEGER NOT NULL DEFAULT 0,
+          approval_destination_sha TEXT NOT NULL DEFAULT '',
           train_id TEXT NOT NULL DEFAULT '',
           train_size INTEGER NOT NULL DEFAULT 0,
           validated_at TEXT NOT NULL DEFAULT '',
@@ -175,6 +176,13 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ),
             ),
             11: (),
+            12: (
+                (
+                    "deploy_queue",
+                    "approval_destination_sha",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+            ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:

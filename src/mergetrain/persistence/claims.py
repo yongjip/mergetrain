@@ -67,6 +67,7 @@ def claim_all_queued(
     auto_only: bool = False,
     manual_only: bool = False,
     deploy: bool = False,
+    approval_destination_sha: str = "",
 ) -> list[Job]:
     if auto_only and manual_only:
         raise QueueError("auto_only and manual_only are mutually exclusive")
@@ -93,8 +94,47 @@ def claim_all_queued(
                 _release_lock_token(conn, owner=owner, token=lock.token)
                 return []
         if auto_only:
+            if approval_destination_sha:
+                mismatched = conn.execute(
+                    """
+                    SELECT id FROM deploy_queue
+                    WHERE status = 'queued' AND auto_deploy = 1
+                      AND approval_destination_sha != ?
+                    ORDER BY id ASC
+                    """,
+                    (approval_destination_sha,),
+                ).fetchall()
+                for row in mismatched:
+                    job_id = int(row["id"])
+                    note = (
+                        "approval_destination_changed: unattended deploy approval "
+                        "does not match the current remote or push refs; enqueue "
+                        "again with --auto only after approving this destination"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE deploy_queue
+                        SET status = 'blocked', finished_at = ?, note = ?
+                        WHERE id = ? AND status = 'queued' AND auto_deploy = 1
+                        """,
+                        (utc_now(), note, job_id),
+                    )
+                    _record_run_event(
+                        conn,
+                        job_id=job_id,
+                        phase="claiming",
+                        state="error",
+                        message="Unattended deploy destination changed",
+                        detail="approval_destination_changed",
+                    )
             rows = conn.execute(
-                "SELECT id FROM deploy_queue WHERE status = 'queued' AND auto_deploy = 1 ORDER BY id ASC"
+                """
+                SELECT id FROM deploy_queue
+                WHERE status = 'queued' AND auto_deploy = 1
+                  AND (? = '' OR approval_destination_sha = ?)
+                ORDER BY id ASC
+                """,
+                (approval_destination_sha, approval_destination_sha),
             ).fetchall()
         elif manual_only:
             rows = conn.execute(

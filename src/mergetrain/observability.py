@@ -709,6 +709,11 @@ def job_outcome(job: Job) -> dict[str, Any]:
             # repo-config action, not a code fix — agents branch on this
             # category instead of regexing the note.
             category = "push_rejected"
+        elif (
+            "approval_destination_changed" in lowered
+            or "deploy_plan_changed" in lowered
+        ):
+            category = "deploy_authorization_changed"
         elif "conflict" in lowered:
             category = "merge_conflict"
         elif "head changed" in lowered or "identity" in lowered:

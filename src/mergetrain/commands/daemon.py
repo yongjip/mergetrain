@@ -7,6 +7,7 @@ import sys
 
 from ..cli_support import _preflight_config, config_from_args
 from ..daemon import daemon_loop
+from ..deploy_plan import deploy_destination_sha
 from ..errors import QueueError
 from ..git_runner import GitRunner
 from ..models import Job
@@ -57,5 +58,8 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         notification_transitions=config.notify.transitions,
         notification_state_path=repo_notify_state_path(config.state.db),
         validate_only=args.validate_only,
+        approval_destination_sha=(
+            "" if args.validate_only else lambda: deploy_destination_sha(config)
+        ),
     )
     return 0

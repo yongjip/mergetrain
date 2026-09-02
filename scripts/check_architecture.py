@@ -32,6 +32,7 @@ STORE_ALLOWED = ("mergetrain.persistence",)
 GIT_RUNNER_COLLABORATORS = {
     "mergetrain.atomic_push",
     "mergetrain.command_runner",
+    "mergetrain.deploy_plan",
     "mergetrain.gate_runner",
     "mergetrain.git_ops",
     "mergetrain.reuse",

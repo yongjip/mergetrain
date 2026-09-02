@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from mergetrain.config import load_config
+from mergetrain.deploy_plan import deploy_destination_sha
 from mergetrain.hub_daemon import hub_daemon_loop, hub_sweep
 from mergetrain.registry import add_repo, load_registry, save_registry
 from mergetrain.store import connect, enqueue_job, list_jobs
@@ -28,6 +29,9 @@ def seed_jobs(repo: Path, *, auto: bool) -> int:
             branch=f"agent/{repo.name}",
             worktree_path=str(repo),
             auto_deploy=auto,
+            approval_destination_sha=(
+                deploy_destination_sha(config) if auto else ""
+            ),
         )
         return job.id
     finally:

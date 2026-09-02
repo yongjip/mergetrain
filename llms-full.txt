@@ -10,7 +10,7 @@ Agents should:
 1. Work in task-specific branches and worktrees.
 2. Commit a clean result before enqueueing.
 3. Run `mergetrain doctor --json` before deciding the next queue action.
-4. Enqueue with `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`.
+4. Enqueue with `mergetrain enqueue --task TASK --branch BRANCH`; exact SHAs are captured by default.
 5. Never push configured Git refs directly.
 6. Leave merge/test/push/verify to one runner or daemon.
 7. Use `--auto` only after explicit unattended-deploy approval.

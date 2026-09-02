@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.3.0 - 2026-09-02
+
+- Bind unattended approval to a credential-free destination identity and MCP
+  confirmation to the CLI's exact deploy-plan hash. Destination or policy
+  changes now fail closed before claim and immediately before push; retry keeps
+  auto approval only for the same destination.
+
+- Capture base and task SHAs by default for normal CLI enqueue, while retaining
+  the existing flag and explicit direct-insert escape for compatibility.
+
 ## 2.2.0 - 2026-09-02
 
 - Classify semantic conflicts consistently at every multi-job batch size.

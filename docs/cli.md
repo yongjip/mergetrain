@@ -135,7 +135,7 @@ bounded delay between steps for deterministic screen recording.
 Add a task branch to the queue.
 
 ```sh
-mergetrain enqueue --task feature-a --branch agent/feature-a --capture-sha
+mergetrain enqueue --task feature-a --branch agent/feature-a
 ```
 
 | Option | Meaning |
@@ -144,16 +144,19 @@ mergetrain enqueue --task feature-a --branch agent/feature-a --capture-sha
 | `--branch` | Task branch to merge (required). |
 | `--worktree` | Originating worktree path (defaults to cwd). |
 | `--base-sha` / `--head-sha` | Record SHAs manually. |
-| `--capture-sha` | Capture the integration ref and branch SHAs automatically. |
+| `--capture-sha` | Compatibility spelling for the default exact-SHA capture. |
 | `--note` | Free-text status note. |
 | `--auto` | Mark the job eligible for the unattended daemon (requires prior approval). |
 | `--allow-duplicate` | Allow a second active job for the same branch. |
 | `--allow-dirty` | Allow enqueue from a dirty worktree. |
 | `--allow-branch-mismatch` | Allow the worktree's current branch to differ from `--branch`. |
-| `--no-ready-check` | Skip Git readiness checks and insert directly. |
+| `--no-ready-check` | Skip readiness checks and direct-insert; default SHA capture is also skipped unless explicitly requested. |
 | `--json` | Emit the created job as JSON. |
 
 Defaults are safe: enqueue fails if the worktree is missing or dirty, if the current branch differs from `--branch`, or if the branch already has an active job.
+Missing base/head SHAs are captured automatically, so later branch movement
+cannot ride along after handoff. With `--no-ready-check`, pass `--capture-sha`
+or explicit SHAs if identity pinning is still required.
 
 ## `retry`
 
@@ -559,6 +562,7 @@ mergetrain run-batch --validate-only
 mergetrain run-batch --deploy
 mergetrain run-batch --deploy --train-id <id>
 mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
+mergetrain run-batch --deploy --train-id <id> --expected-plan <sha>
 mergetrain run-batch --deploy --train-id <id> --reuse-validated
 ```
 
@@ -587,6 +591,11 @@ reuse.
 Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
 `reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
 Preview JSON includes `push_plan.remote` and each exact `HEAD:<ref>` refspec.
+It also emits `deploy_plan_sha`, which binds the exact train, destination,
+gate/reuse policy, and verify hooks. Passing that value with `--expected-plan`
+checks it before claim and again before push; any change fails with
+`deploy_plan_changed` and touches no remote ref. MCP uses this path
+automatically after its confirmation dialog.
 Machine JSON reports `mode=deploy` and `status=deployed`.
 
 ## `supersede`

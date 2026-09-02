@@ -62,6 +62,7 @@ def enqueue_job(
     note: str = "",
     allow_duplicate: bool = False,
     auto_deploy: bool = False,
+    approval_destination_sha: str = "",
 ) -> Job:
     task = task.strip()
     branch = branch.strip()
@@ -82,10 +83,20 @@ def enqueue_job(
             """
             INSERT INTO deploy_queue (
               task, branch, worktree_path, status, base_sha, head_sha,
-              requested_at, note, auto_deploy
-            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+              requested_at, note, auto_deploy, approval_destination_sha
+            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
             """,
-            (task, branch, worktree_path, base_sha, head_sha, now, note, 1 if auto_deploy else 0),
+            (
+                task,
+                branch,
+                worktree_path,
+                base_sha,
+                head_sha,
+                now,
+                note,
+                1 if auto_deploy else 0,
+                approval_destination_sha if auto_deploy else "",
+            ),
         )
         job_id = cur.lastrowid
         assert job_id is not None  # an INSERT always assigns a rowid
@@ -98,6 +109,7 @@ def retry_job(
     *,
     base_sha: str,
     head_sha: str,
+    current_approval_destination_sha: str | None = None,
 ) -> tuple[Job, Job]:
     """Atomically dismiss a failed outcome and enqueue its fresh replacement."""
 
@@ -125,12 +137,24 @@ def retry_job(
             )
 
         now = utc_now()
+        approval_matches = (
+            current_approval_destination_sha is None
+            or (
+                bool(original.approval_destination_sha)
+                and original.approval_destination_sha
+                == current_approval_destination_sha
+            )
+        )
+        inherit_auto = original.auto_deploy and approval_matches
+        inherited_destination = (
+            original.approval_destination_sha if inherit_auto else ""
+        )
         cur = conn.execute(
             """
             INSERT INTO deploy_queue (
               task, branch, worktree_path, status, base_sha, head_sha,
-              requested_at, note, auto_deploy
-            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+              requested_at, note, auto_deploy, approval_destination_sha
+            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
             """,
             (
                 original.task,
@@ -140,7 +164,8 @@ def retry_job(
                 head_sha,
                 now,
                 original.note,
-                1 if original.auto_deploy else 0,
+                1 if inherit_auto else 0,
+                inherited_destination,
             ),
         )
         replacement_id = cur.lastrowid

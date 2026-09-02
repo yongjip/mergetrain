@@ -620,6 +620,7 @@ class StoreTests(unittest.TestCase):
         self.assertIn("conflict_with", columns)
         self.assertIn("pending_deploy_remote", columns)
         self.assertIn("pending_deploy_refs", columns)
+        self.assertIn("approval_destination_sha", columns)
         self.assertEqual(migrated.pending_deploy_remote, "")
         self.assertEqual(migrated.pending_deploy_refs, "")
         migrated_db = sqlite3.connect(db)
@@ -1236,6 +1237,73 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(jobs[0].status, "in_progress")
         release_runner_lock(conn, owner="owner:999999", token=jobs[0].claim_token)
         self.assertEqual(manual.status, "queued")
+
+    def test_auto_claim_blocks_destination_mismatch_before_runner_work(self) -> None:
+        conn = self.make_conn()
+        auto = enqueue_job(
+            conn,
+            task="auto",
+            branch="auto",
+            auto_deploy=True,
+            approval_destination_sha="approved-destination",
+        )
+
+        jobs = claim_all_queued(
+            conn,
+            owner="owner:999999",
+            auto_only=True,
+            approval_destination_sha="current-destination",
+        )
+
+        self.assertEqual(jobs, [])
+        blocked = get_job(conn, auto.id)
+        self.assertEqual(blocked.status, "blocked")
+        self.assertIn("approval_destination_changed", blocked.note)
+        self.assertIsNone(get_lock(conn))
+
+    def test_retry_inherits_auto_only_for_the_same_destination(self) -> None:
+        conn = self.make_conn()
+        original = enqueue_job(
+            conn,
+            task="same destination",
+            branch="feature/same-destination",
+            auto_deploy=True,
+            approval_destination_sha="destination-a",
+        )
+        mark_job(conn, original.id, status="failed", note="gate failed")
+
+        _dismissed, replacement = retry_job(
+            conn,
+            original.id,
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            current_approval_destination_sha="destination-a",
+        )
+
+        self.assertTrue(replacement.auto_deploy)
+        self.assertEqual(replacement.approval_destination_sha, "destination-a")
+
+    def test_retry_drops_auto_when_destination_changed(self) -> None:
+        conn = self.make_conn()
+        original = enqueue_job(
+            conn,
+            task="changed destination",
+            branch="feature/changed-destination",
+            auto_deploy=True,
+            approval_destination_sha="destination-a",
+        )
+        mark_job(conn, original.id, status="failed", note="gate failed")
+
+        _dismissed, replacement = retry_job(
+            conn,
+            original.id,
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            current_approval_destination_sha="destination-b",
+        )
+
+        self.assertFalse(replacement.auto_deploy)
+        self.assertEqual(replacement.approval_destination_sha, "")
 
     def test_manual_only_batch_claim_skips_auto_jobs(self) -> None:
         conn = self.make_conn()

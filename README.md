@@ -115,8 +115,7 @@ mergetrain init --project my-app --write
 # After an agent commits its task branch
 mergetrain enqueue \
   --task "add health check" \
-  --branch agent/health \
-  --capture-sha
+  --branch agent/health
 
 # Inspect first, then validate or deploy explicitly
 mergetrain status --json

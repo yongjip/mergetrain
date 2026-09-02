@@ -21,10 +21,13 @@ from .atomic_push import (
 )
 from .command_runner import run_command
 from .config import GateConfig, MergetrainConfig
+from .deploy_plan import deploy_destination_sha, deploy_plan_sha
 from .errors import (
     AmbiguousPush,
+    ApprovalDestinationChanged,
     CancellationRequested,
     CommandFailed,
+    DeployPlanChanged,
     LostLease,
     MergeBlocked,
     MergetrainError,
@@ -581,7 +584,32 @@ class GitRunner:
         ownership_pulse: Pulse,
         state: _PushVerifyState,
         event_job_id: int | None = None,
+        expected_plan_sha: str = "",
+        reuse_validated: bool = False,
     ) -> None:
+        current_jobs = [get_job(conn, job_id) for job_id in job_ids]
+        current_destination = deploy_destination_sha(self.config)
+        approved_destinations = {
+            job.approval_destination_sha
+            for job in current_jobs
+            if job.auto_deploy and job.approval_destination_sha
+        }
+        if approved_destinations and approved_destinations != {current_destination}:
+            raise ApprovalDestinationChanged(
+                "approval_destination_changed: unattended deploy approval no "
+                "longer matches the current remote or push refs; nothing was pushed"
+            )
+        if expected_plan_sha:
+            current_plan_sha = deploy_plan_sha(
+                self.config,
+                current_jobs,
+                reuse_validated=reuse_validated,
+            )
+            if current_plan_sha != expected_plan_sha:
+                raise DeployPlanChanged(
+                    "deploy_plan_changed: the confirmed train, destination, gates, "
+                    "reuse, or verify policy changed before push; nothing was pushed"
+                )
         self._pushes.deploy_and_verify(
             conn,
             job_ids=job_ids,
@@ -1304,6 +1332,7 @@ class GitRunner:
         owner: str | None = None,
         ttl_minutes: int = 30,
         reuse_validated: bool = False,
+        expected_plan_sha: str = "",
     ) -> list[Job]:
         jobs = list(jobs)
         if not jobs:
@@ -1785,6 +1814,8 @@ class GitRunner:
                         before_push=normal_pulse,
                         ownership_pulse=ownership_pulse,
                         state=deploy_state,
+                        expected_plan_sha=expected_plan_sha,
+                        reuse_validated=reuse_validated,
                     )
                 status = "deployed" if deploy else "validated"
                 note = deploy_state.warning or (

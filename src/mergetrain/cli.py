@@ -245,6 +245,14 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="Evaluate a validated train and reuse decision without claiming or pushing",
             )
+            p_run.add_argument(
+                "--expected-plan",
+                default="",
+                help=(
+                    "Fail closed unless the current deploy plan matches this "
+                    "SHA-256 from --preview"
+                ),
+            )
         p_run.set_defaults(func=func)
 
     p_daemon = subparsers.add_parser(

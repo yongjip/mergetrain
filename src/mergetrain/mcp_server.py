@@ -70,6 +70,7 @@ class _DeployPlan:
 
     refusal: dict[str, Any] | None = None
     train_id: str = ""
+    plan_sha: str = ""
     summary: str = ""
     command: str = ""
     can_elicit: bool = False
@@ -577,10 +578,60 @@ class MergetrainTools:
             return _DeployPlan(refusal=refusal)
         assert train is not None
         chosen = str(train.get("train_id"))
-        summary = self.deploy_summary(doctor, status, train)
-        command = f"mergetrain --repo {self.repo} run-batch --deploy --train-id {chosen}"
+        preview = await self._json(
+            [
+                "run-batch",
+                "--deploy",
+                "--preview",
+                "--train-id",
+                chosen,
+                "--json",
+            ]
+        )
+        if preview.get("ok") is False:
+            return _DeployPlan(refusal=preview)
+        plan_sha = str(preview.get("deploy_plan_sha") or "")
+        if not plan_sha:
+            return _DeployPlan(
+                refusal=_error(
+                    "deploy_plan_unavailable",
+                    "the CLI did not return a deploy plan identity; nothing was pushed",
+                    train_id=chosen,
+                )
+            )
+        # Build the displayed summary from reads taken after the core preview.
+        # If config changed between the first doctor read and preview, the human
+        # must see the newer destination the hash describes. Any change after
+        # preview is still caught by --expected-plan before claim/push.
+        current_doctor = await self.doctor()
+        current_status = await self.status(limit=50)
+        for payload in (current_doctor, current_status):
+            if payload.get("ok") is False:
+                return _DeployPlan(refusal=payload)
+        current_train, current_refusal = self.select_train(
+            current_status,
+            chosen if train_id else "",
+        )
+        if current_refusal is not None:
+            return _DeployPlan(refusal=current_refusal)
+        assert current_train is not None
+        if str(current_train.get("train_id")) != chosen:
+            return _DeployPlan(
+                refusal=_error(
+                    "deploy_plan_changed",
+                    "the selected validated train changed while its deploy plan "
+                    "was prepared; nothing was pushed",
+                    train_id=chosen,
+                )
+            )
+        summary = self.deploy_summary(current_doctor, current_status, current_train)
+        command = (
+            f"mergetrain --repo {self.repo} run-batch --deploy --train-id "
+            f"{chosen} --expected-plan {plan_sha}"
+        )
         return _DeployPlan(
             train_id=chosen,
+            plan_sha=plan_sha,
             summary=summary,
             command=command,
             can_elicit=_client_can_elicit(ctx),
@@ -610,7 +661,15 @@ class MergetrainTools:
                 command=plan.command,
             )
         return await self._json(
-            ["run-batch", "--deploy", "--train-id", plan.train_id, "--json"]
+            [
+                "run-batch",
+                "--deploy",
+                "--train-id",
+                plan.train_id,
+                "--expected-plan",
+                plan.plan_sha,
+                "--json",
+            ]
         )
 
 

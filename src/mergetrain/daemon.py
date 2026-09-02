@@ -99,6 +99,7 @@ def daemon_tick(
     say: Say = print,
     sovereign: bool = False,
     validate_only: bool = False,
+    approval_destination_sha: str = "",
 ) -> str:
     """Run one daemon pass over a single repo's queue.
 
@@ -196,6 +197,9 @@ def daemon_tick(
                 auto_only=not validate_only,
                 manual_only=validate_only,
                 deploy=not validate_only,
+                approval_destination_sha=(
+                    "" if validate_only else approval_destination_sha
+                ),
             )
             if jobs:
                 lease_token = jobs[0].claim_token
@@ -260,6 +264,7 @@ def daemon_loop(
     notification_transitions: tuple[str, ...] | None = None,
     notification_state_path: str | Path | None = None,
     validate_only: bool = False,
+    approval_destination_sha: str | Callable[[], str] = "",
 ) -> None:
     """Run a mergetrain daemon loop in auto-deploy or manual-validation mode.
 
@@ -297,6 +302,11 @@ def daemon_loop(
             if stop.is_set():
                 break
             try:
+                current_destination_sha = (
+                    approval_destination_sha()
+                    if callable(approval_destination_sha)
+                    else approval_destination_sha
+                )
                 outcome = daemon_tick(
                     db_path=db_path,
                     process_batch=process_batch,
@@ -307,6 +317,7 @@ def daemon_loop(
                     # create/migrate its own queue database.
                     sovereign=True,
                     validate_only=validate_only,
+                    approval_destination_sha=current_destination_sha,
                 )
             except Exception as exc:
                 say(f"mergetrain daemon tick error: {exc}")

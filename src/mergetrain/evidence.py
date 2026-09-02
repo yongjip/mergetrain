@@ -40,6 +40,7 @@ _NOT_LANDED_REASONS = (
     "semantic_conflict",
     "merge_conflict",
     "push_rejected",
+    "deploy_authorization_changed",
     "source_identity_mismatch",
     "validated_reuse_mismatch",
     "merge_blocked",
@@ -234,6 +235,12 @@ def _not_landed_reason(jobs: Sequence[Job]) -> str | None:
     if status == "blocked":
         if any(job.push_status == "failed" for job in relevant):
             return "push_rejected"
+        if any(
+            "approval_destination_changed" in note
+            or "deploy_plan_changed" in note
+            for note in lowered
+        ):
+            return "deploy_authorization_changed"
         if any(
             job.conflict_with or "semantic conflict" in note
             for job, note in zip(relevant, lowered, strict=True)

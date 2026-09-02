@@ -70,7 +70,7 @@ git commit -m "feature a"
 
 ```sh
 mergetrain doctor --json
-mergetrain enqueue --task "feature a" --branch codex/feature-a --capture-sha
+mergetrain enqueue --task "feature a" --branch codex/feature-a
 mergetrain status --json
 ```
 
@@ -171,7 +171,7 @@ validation daemon can build another one.
 Use `--auto` only when unattended deploy is explicitly approved:
 
 ```sh
-mergetrain enqueue --task "safe fix" --branch codex/safe-fix --capture-sha --auto
+mergetrain enqueue --task "safe fix" --branch codex/safe-fix --auto
 mergetrain daemon --interval 15
 ```
 

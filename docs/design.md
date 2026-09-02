@@ -139,6 +139,9 @@ kind the default and Hub daemons will deploy. `--auto` does not mean the agent
 decided to auto-deploy; it records that the caller already holds explicit
 unattended-deploy approval. The single-repo `daemon --validate-only` mode is the
 inverse queue filter: it validates only manual jobs and cannot deploy.
+Auto jobs also store a credential-free hash of the approved Git remote,
+integration ref, payload refs, and permanent audit-ref policy. A daemon restart,
+retry, or live remote rewrite cannot silently redirect that approval.
 
 See the [config reference](config.md) for how gates, verify hooks, and worktree paths are configured.
 
@@ -164,6 +167,7 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   log_path      TEXT NOT NULL DEFAULT '',
   note          TEXT NOT NULL DEFAULT '',
   auto_deploy   INTEGER NOT NULL DEFAULT 0,
+  approval_destination_sha TEXT NOT NULL DEFAULT '',
   train_id      TEXT NOT NULL DEFAULT '',
   train_size    INTEGER NOT NULL DEFAULT 0,
   validated_at  TEXT NOT NULL DEFAULT '',
@@ -179,6 +183,10 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   cancel_requested_at TEXT NOT NULL DEFAULT ''
 );
 ```
+
+Schema v12 adds `approval_destination_sha`. Legacy/blank auto approvals cannot
+be proven against a current destination, so production daemon claims fail
+closed; manual deploy commands remain explicit operator actions.
 
 ### `locks`
 
@@ -366,6 +374,12 @@ push.
 An explicitly empty `push_refs` value is rejected while loading config; only an
 omitted field defaults to the integration branch.
 
+Human-gated deploys may carry the `deploy_plan_sha` emitted by preview. The hash
+covers the exact validated train, live destination identity, pre-push
+gate/reuse policy, and post-push verify hooks. It is checked once before claim
+and again immediately before the recovery marker and atomic push. Auto jobs use
+the narrower persisted destination identity at the same two boundaries.
+
 Contract 2 uses the canonical `deploy` vocabulary throughout. Machine state
 remains `deployed`/`deploy_sha`. Completion proves the Git ref update only; it
 does not by itself prove or authorize a provider release.
@@ -386,7 +400,9 @@ modes](failure-modes.md#post-push-verify-failure).
 
 The daemon is a foreground runner. By default each tick checks for `queued`
 jobs with `auto_deploy = 1`; only if any exist does it claim and deploy the
-batch. `daemon --validate-only` instead checks only manual queued jobs, runs the
+batch. Before claim it atomically blocks any auto job whose persisted approved
+destination differs from the current destination. `daemon --validate-only`
+instead checks only manual queued jobs, runs the
 batch with deployment disabled, and pauses while any validated train exists.
 That pause is checked both read-only and inside the claim transaction so a
 second train cannot slip past the approval boundary. Both modes release only

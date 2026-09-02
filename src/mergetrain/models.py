@@ -32,6 +32,7 @@ class Job:
     push_status: str = "not_run"
     verify_status: str = "not_run"
     auto_deploy: bool = False
+    approval_destination_sha: str = ""
     train_id: str = ""
     train_size: int = 0
     validated_at: str = ""
@@ -71,6 +72,7 @@ class Job:
             push_status=str(row["push_status"] or "not_run"),
             verify_status=str(row["verify_status"] or "not_run"),
             auto_deploy=bool(row["auto_deploy"]),
+            approval_destination_sha=str(row["approval_destination_sha"] or ""),
             train_id=str(row["train_id"] or ""),
             train_size=int(row["train_size"] or 0),
             validated_at=str(row["validated_at"] or ""),
@@ -105,6 +107,7 @@ class Job:
         # the public job surface (keeps the contract fingerprint stable).
         data.pop("pending_deploy_remote", None)
         data.pop("pending_deploy_refs", None)
+        data.pop("approval_destination_sha", None)
         return data
 
 

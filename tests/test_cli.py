@@ -20,6 +20,7 @@ from mergetrain.cli import (
 )
 from mergetrain.config import load_config, render_default_config
 from mergetrain.contract import CONTRACT_VERSION
+from mergetrain.deploy_plan import deploy_destination_sha
 from mergetrain.errors import CommandFailed
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
@@ -967,6 +968,64 @@ class CliTests(unittest.TestCase):
             # Agents branch on error.code, not the free-text message.
             self.assertEqual(payload["error"]["code"], "duplicate_active_branch")
 
+    def test_enqueue_captures_exact_shas_without_opt_in_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("default-capture"), encoding="utf-8"
+            )
+            (repo / "app.txt").write_text("reviewed\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "reviewed"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "branch", "-M", "feature/default-capture"],
+                cwd=repo,
+                check=True,
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", head],
+                cwd=repo,
+                check=True,
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "enqueue",
+                        "--task",
+                        "default capture",
+                        "--branch",
+                        "feature/default-capture",
+                        "--worktree",
+                        str(repo),
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 0, payload)
+            self.assertEqual(payload["job"]["base_sha"], head)
+            self.assertEqual(payload["job"]["head_sha"], head)
+
     def test_retry_captures_fresh_shas_and_inherits_job_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -1010,6 +1069,7 @@ class CliTests(unittest.TestCase):
                     worktree_path=str(repo),
                     note="operator context",
                     auto_deploy=True,
+                    approval_destination_sha=deploy_destination_sha(config),
                 )
                 mark_job(conn, original.id, status="failed", note="gate failed")
             finally:
@@ -1367,7 +1427,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("rules", payload)
         self.assertEqual(
             payload["boundary"]["daemon_processes_only"],
-            "default mode deploys only jobs enqueued with --auto; --validate-only processes only manual queued jobs and pauses while any validated train exists",
+            "default mode deploys only jobs enqueued with --auto whose approved destination still matches; --validate-only processes only manual queued jobs and pauses while any validated train exists",
         )
         self.assertIn("opaque train ID", payload["boundary"]["validated_train_deploy"])
         self.assertIn("then stop", " ".join(payload["rules"]))
@@ -1441,6 +1501,7 @@ class CliTests(unittest.TestCase):
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 0)
             self.assertEqual(payload["mode"], "deploy")
+            self.assertEqual(len(payload["deploy_plan_sha"]), 64)
             self.assertNotIn("terminology", payload)
             self.assertEqual(payload["push_plan"]["remote"], "upstream")
             self.assertEqual(
@@ -1463,6 +1524,82 @@ class CliTests(unittest.TestCase):
             self.assertFalse(
                 payload["reuse"]["estimated_savings"]["authorizes_reuse"]
             )
+
+    def test_expected_deploy_plan_rejects_destination_change_before_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                "git:\n  remote: origin\n  integration_branch: main\n  push_refs: [main]\n",
+                encoding="utf-8",
+            )
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="validated",
+                    train_id="train-1",
+                    train_size=1,
+                    validated_at="2026-09-02T00:00:00Z",
+                    validation_base_sha="a" * 40,
+                    validation_sha="b" * 40,
+                    validated_head_sha="c" * 40,
+                )
+            finally:
+                conn.close()
+            preview_out = io.StringIO()
+            with redirect_stdout(preview_out):
+                self.assertEqual(
+                    main(
+                        [
+                            "--repo",
+                            str(repo),
+                            "--db",
+                            str(db),
+                            "run-batch",
+                            "--deploy",
+                            "--preview",
+                            "--train-id",
+                            "train-1",
+                            "--json",
+                        ]
+                    ),
+                    0,
+                )
+            expected = json.loads(preview_out.getvalue())["deploy_plan_sha"]
+            config_path.write_text(
+                "git:\n  remote: origin\n  integration_branch: main\n  push_refs: [release]\n",
+                encoding="utf-8",
+            )
+
+            deploy_out = io.StringIO()
+            with redirect_stdout(deploy_out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "run-batch",
+                        "--deploy",
+                        "--train-id",
+                        "train-1",
+                        "--expected-plan",
+                        expected,
+                        "--json",
+                    ]
+                )
+            payload = json.loads(deploy_out.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "deploy_plan_changed")
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, job.id).status, "validated")
+            finally:
+                conn.close()
 
     def test_removed_deploy_aliases_are_rejected(self) -> None:
         for alias in ("--integrate", "--push"):

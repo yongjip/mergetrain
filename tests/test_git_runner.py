@@ -57,6 +57,7 @@ from mergetrain.command_runner import (
     run_shell,
 )
 from mergetrain.config import load_config
+from mergetrain.deploy_plan import deploy_destination_sha
 from mergetrain.errors import (
     AmbiguousPush,
     CommandFailed,
@@ -201,6 +202,64 @@ def enable_persistent_validation_workspace(
 
 
 class GitRunnerTests(unittest.TestCase):
+    def test_auto_destination_change_during_gates_blocks_before_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            approved_destination = deploy_destination_sha(config)
+            conn = connect(config.state.db)
+            owner = f"runner:{os.getpid()}"
+            try:
+                enqueue_job(
+                    conn,
+                    task="a",
+                    branch="feature/a",
+                    base_sha=git(repo, "rev-parse", "origin/main"),
+                    head_sha=git(repo, "rev-parse", "feature/a"),
+                    auto_deploy=True,
+                    approval_destination_sha=approved_destination,
+                )
+                claimed = claim_all_queued(
+                    conn,
+                    owner=owner,
+                    auto_only=True,
+                    deploy=True,
+                    approval_destination_sha=approved_destination,
+                )
+                runner = GitRunner(config)
+                real_run_gates = runner._run_gates
+
+                def gates_then_change_destination(*args, **kwargs):  # type: ignore[no-untyped-def]
+                    result = real_run_gates(*args, **kwargs)
+                    git(repo, "remote", "set-url", "origin", str(root / "other.git"))
+                    return result
+
+                with patch.object(
+                    runner,
+                    "_run_gates",
+                    side_effect=gates_then_change_destination,
+                ):
+                    results = runner.process_batch(
+                        conn,
+                        claimed,
+                        deploy=True,
+                        owner=owner,
+                        ttl_minutes=1,
+                    )
+            finally:
+                lock = get_lock(conn)
+                if lock is not None:
+                    release_runner_lock(conn, owner=owner, token=lock.token)
+                conn.close()
+
+            self.assertEqual([job.status for job in results], ["blocked"])
+            self.assertIn("approval_destination_changed", results[0].note)
+            self.assertNotIn(
+                "a.txt",
+                git(root / "remote.git", "ls-tree", "-r", "--name-only", "main"),
+            )
+
     def test_parallel_gate_group_is_bounded_and_events_are_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

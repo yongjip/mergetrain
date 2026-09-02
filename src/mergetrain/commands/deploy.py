@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import sys
 from collections import Counter
 from typing import Any
@@ -14,7 +15,8 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
-from ..errors import QueueError
+from ..deploy_plan import deploy_plan_sha
+from ..errors import DeployPlanChanged, QueueError
 from ..git_ops import DEPLOY_AUDIT_REF_PREFIX
 from ..git_runner import GitRunner
 from ..models import Job
@@ -207,6 +209,8 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         raise QueueError("--reuse-validated requires --deploy")
     if args.preview and not deploy:
         raise QueueError("--preview requires --deploy")
+    if args.expected_plan and (not deploy or not args.train_id):
+        raise QueueError("--expected-plan requires --deploy and --train-id")
     config = config_from_args(args)
     _preflight_config(config)
     if args.preview:
@@ -243,6 +247,11 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 },
             },
             "train_id": selected["train_id"],
+            "deploy_plan_sha": deploy_plan_sha(
+                config,
+                jobs,
+                reuse_validated=args.reuse_validated,
+            ),
             "reuse": reuse_explanation(
                 config,
                 jobs,
@@ -278,6 +287,25 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
             pending = deploy_reconcile_pending(conn)
             if pending:
                 return _emit_deploy_reconcile_block(args, pending)
+            if args.expected_plan:
+                selected, selected_jobs = select_validated_train(
+                    conn, train_id=args.train_id or ""
+                )
+                if selected is None or not selected_jobs:
+                    raise DeployPlanChanged(
+                        "deploy_plan_changed: the confirmed validated train is no "
+                        "longer deploy-eligible; nothing was pushed"
+                    )
+                current_plan_sha = deploy_plan_sha(
+                    config,
+                    selected_jobs,
+                    reuse_validated=args.reuse_validated,
+                )
+                if not hmac.compare_digest(current_plan_sha, args.expected_plan):
+                    raise DeployPlanChanged(
+                        "deploy_plan_changed: the confirmed train, destination, "
+                        "gates, reuse, or verify policy changed; nothing was pushed"
+                    )
             jobs = claim_deploy_batch(
                 conn,
                 owner=owner,
@@ -298,6 +326,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
                 reuse_validated=args.reuse_validated,
+                expected_plan_sha=args.expected_plan or "",
             )
             payload = _results_payload(results)
     finally:

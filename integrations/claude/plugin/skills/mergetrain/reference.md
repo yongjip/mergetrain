@@ -32,6 +32,8 @@
 | `train_id_required` | Several validated trains exist; the human must select one. |
 | `confirmation_required` | The client cannot render the human confirmation dialog; use the returned terminal command. |
 | `deploy_not_confirmed` | The human did not complete the deploy confirmation; nothing was pushed. |
+| `deploy_plan_unavailable` | CLI preview did not provide the plan identity, so confirmation was not attempted. |
+| `deploy_plan_changed` | The selected train or confirmed deploy plan changed; refresh the summary before approval. |
 
 For CLI-originated errors passed through by the MCP server, branch on the
 returned `error.code` and follow its `next_action` when present.

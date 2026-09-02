@@ -76,6 +76,8 @@ listed here as an unexpected failure and fall back to `message`.
 | `queue_busy` | **yes** | a queue write did not happen: the database refused the writer because another process held it past `busy_timeout`. It does **not** mean nothing was pushed — the refs may already be on the remote, and the row is left as the last durable write left it for recovery to resolve. Retry, then read `status --json` |
 | `lost_lease` | **yes** | this runner no longer owns the lease it was given; re-read state and retry |
 | `merge_blocked` | no | the branch cannot be merged into the integration train |
+| `approval_destination_changed` | no | unattended approval no longer matches the live Git destination; nothing was pushed |
+| `deploy_plan_changed` | no | the confirmed train, destination, gates/reuse policy, or verify hooks changed; refresh the preview before deploying |
 | `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |
 | `push_rejected` | no | the remote refused the push on policy or permissions; the job parks `blocked` |
 | `ambiguous_push` | no | the push failed for a non-rejection reason, so the remote may have accepted it; the job parks `needs_reconcile` |
@@ -129,6 +131,8 @@ Dashboard snapshots and deploy-preview JSON may include the structured `reuse`
 explanation with `identity_checks`, per-gate actions, and
 `estimated_savings`. `eligible` is `null` when the dashboard has not performed
 an exact preview, and `estimated_savings.authorizes_reuse` is always false.
+Deploy preview also includes additive `deploy_plan_sha`; callers may pass it to
+`run-batch --deploy --expected-plan` to fail closed on a changed plan.
 
 `status` may include additive `counts`, `attention_jobs`, `jobs_limit`, and
 `jobs_truncated` fields. `jobs` remains the newest limited history, while

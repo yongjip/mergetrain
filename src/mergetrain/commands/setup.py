@@ -22,6 +22,7 @@ def agent_contract_payload() -> dict[str, Any]:
             "Do not push configured Git refs directly. Task agents hand off by enqueueing the exact committed HEAD, then stop unless separately authorized as the runner.",
             "Read doctor --json first. Use status --json --limit 10 only when job or train details are needed, and read attention_jobs before recent history.",
             "Use --auto only after explicit unattended-deployment approval from the user/operator. A bounded instruction to QA, deploy, verify, and finish end-to-end is unattended-deployment approval for that task scope; continue without repeated train-ID prompts unless the scope or destination changes or recovery needs new authority.",
+            "An auto job is bound to the approved Git destination. If the remote or push refs change, mergetrain blocks before claim or push; review the new destination before enqueueing with --auto again.",
             "Reuse validated gates only after explicit deploy.reuse configuration or --reuse-validated authorization.",
             "Let one separately authorized runner or daemon own merge, test, push, and verify; ordinary task, merge, integration, or enqueue intent is not deploy approval unless the user explicitly authorizes bounded end-to-end deployment.",
             "Fix blocked or failed work in the owning branch and commit a clean result, then run mergetrain retry <id> to dismiss the old outcome and enqueue a fresh SHA-pinned job.",
@@ -36,7 +37,7 @@ def agent_contract_payload() -> dict[str, Any]:
             "validated_gate_reuse": "disabled by default; requires deploy.reuse.enabled or --reuse-validated",
             "validated_train_supersede": "supersede atomically retires one validated train and enqueues exact replacement SHAs without inheriting validation, reuse identity, or one-shot train approval; bounded unattended authorization continues only for unchanged task scope and destination",
             "progress_observation": "events, inspect, and logs are read-only; events JSONL resumes by persisted event ID",
-            "daemon_processes_only": "default mode deploys only jobs enqueued with --auto; --validate-only processes only manual queued jobs and pauses while any validated train exists",
+            "daemon_processes_only": "default mode deploys only jobs enqueued with --auto whose approved destination still matches; --validate-only processes only manual queued jobs and pauses while any validated train exists",
             "hub_observation": "hub serves a read-only aggregate; every repo keeps its own queue, lock, and recovery state",
             "hub_daemon_processes_only": "jobs enqueued with --auto, across registered repos, through each repo's own runner and lock; concurrency caps simultaneous repos machine-wide",
             "destructive_cleanup_requires": "gc --apply; branch deletion also requires --delete-branches",
@@ -66,6 +67,7 @@ Purpose: {payload['purpose']}
 - `supersede` atomically retires a validated train and enqueues exact replacement SHAs; validation, reuse identity, and one-shot train approval never carry over. Bounded unattended authorization continues only while task scope and destination remain unchanged.
 - `events`, `inspect`, and `logs` are read-only observation commands; event JSONL resumes by ID.
 - The default daemon deploys only jobs enqueued with `--auto`. `daemon --validate-only` processes only manual queued jobs, never pushes, and pauses while any validated train exists.
+- Auto approval is bound to the Git remote, integration ref, and push refs recorded at enqueue. A destination change blocks before claim or push and requires renewed approval for that destination.
 - The hub dashboard is a read-only aggregate; every repo keeps its own queue, lock, and recovery state.
 - The hub daemon also processes only `--auto` jobs, across registered repos, through each repo's own runner and lock; `--concurrency` caps simultaneous repos machine-wide.
 - Destructive cleanup requires `gc --apply`; branch deletion also requires `--delete-branches`.

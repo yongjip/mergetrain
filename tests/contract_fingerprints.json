@@ -909,6 +909,7 @@
     },
     "run_batch_preview": {
       "contract_version": null,
+      "deploy_plan_sha": null,
       "jobs": {
         "[]": {
           "auto_deploy": null,
@@ -1195,6 +1196,7 @@
           "awaiting_deploy": null,
           "canceled": null,
           "command_timeout": null,
+          "deploy_authorization_changed": null,
           "gate_failed": null,
           "merge_blocked": null,
           "merge_conflict": null,

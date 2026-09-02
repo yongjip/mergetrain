@@ -147,6 +147,14 @@ class MergeBlocked(MergetrainError):
     """Raised when a task branch cannot be merged into the integration train."""
 
 
+class ApprovalDestinationChanged(MergeBlocked):
+    """Raised when an auto-approved job no longer targets its approved refs."""
+
+
+class DeployPlanChanged(MergeBlocked):
+    """Raised when a confirmed manual deploy plan changed before push."""
+
+
 @dataclass(slots=True)
 class CommandFailed(MergetrainError):
     """A subprocess returned a non-zero exit code."""

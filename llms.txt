@@ -18,7 +18,7 @@ Rules:
 - Every `--json` payload and the `stream_start` JSONL frame carry `contract_version` (currently 2; separate from the product version). `ok` means only "the command ran without an error envelope" — branch outcomes on `result`, repo health on `health`, failures on `error.code`. Ignore unknown keys; dispatch JSONL on `type`. See `docs/contract.md`.
 
 Core commands:
-- `mergetrain enqueue --task TASK --branch BRANCH --capture-sha`
+- `mergetrain enqueue --task TASK --branch BRANCH` (exact SHAs are captured by default)
 - `mergetrain status --json`
 - `mergetrain doctor --json`
 - `mergetrain inspect JOB_ID --json`

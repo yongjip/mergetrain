@@ -116,6 +116,13 @@ STATUS = {
     ],
 }
 
+PLAN_SHA = "f" * 64
+PREVIEW = {"ok": True, "deploy_plan_sha": PLAN_SHA}
+
+
+def is_push_call(args: list[str]) -> bool:
+    return args[:2] == ["run-batch", "--deploy"] and "--preview" not in args
+
 
 class FakeCapabilities:
     def __init__(self, *, elicitation: bool) -> None:
@@ -469,6 +476,8 @@ class DeployGateTests(unittest.TestCase):
                 return completed(json.dumps(payloads[0]))
             if args[0] == "status":
                 return completed(json.dumps(payloads[1]))
+            if "--preview" in args:
+                return completed(json.dumps(PREVIEW))
             return completed(json.dumps({"ok": True, "result": "success"}))
 
         with patch.object(MergetrainTools, "_run", new=fake_run):
@@ -486,14 +495,29 @@ class DeployGateTests(unittest.TestCase):
         ctx = FakeContext(action="accept", confirm=True)
         payload, calls = self._deploy(ctx)
         self.assertEqual(payload, {"ok": True, "result": "success"})
-        self.assertIn(["run-batch", "--deploy", "--train-id", "abc123", "--json"], calls)
+        self.assertIn(
+            [
+                "run-batch",
+                "--deploy",
+                "--train-id",
+                "abc123",
+                "--expected-plan",
+                PLAN_SHA,
+                "--json",
+            ],
+            calls,
+        )
 
     def test_the_human_sees_the_operating_contract_summary(self) -> None:
         ctx = FakeContext()
         payloads = [DOCTOR, STATUS]
 
         async def fake_run(_self: Any, args: list[str]) -> Any:
-            return completed(json.dumps(payloads[0] if args[0] == "doctor" else payloads[1]))
+            if args[0] == "doctor":
+                return completed(json.dumps(payloads[0]))
+            if args[0] == "status":
+                return completed(json.dumps(payloads[1]))
+            return completed(json.dumps(PREVIEW))
 
         with patch.object(MergetrainTools, "_run", new=fake_run):
             plan = asyncio.run(self.tools.prepare_deploy(ctx))
@@ -564,27 +588,23 @@ class DeployGateTests(unittest.TestCase):
         payload, calls = self._deploy(ctx)
         self.assertEqual(payload["error"]["code"], "confirmation_required")
         self.assertIn("run-batch --deploy --train-id abc123", payload["command"])
-        self.assertNotIn(
-            ["run-batch", "--deploy", "--train-id", "abc123", "--json"],
-            calls,
-            "a client that cannot confirm must not deploy",
-        )
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_a_declined_dialog_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="decline"))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_a_cancelled_dialog_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="cancel"))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_an_accept_with_the_box_unchecked_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="accept", confirm=False))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
         self.assertIn("unchecked", payload["error"]["message"])
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_several_pending_trains_require_an_explicit_choice(self) -> None:
         second = dict(TRAIN, train_id="def456", job_ids=[10], branches=[])
@@ -593,7 +613,7 @@ class DeployGateTests(unittest.TestCase):
         payload, calls = self._deploy(ctx, status=status)
         self.assertEqual(payload["error"]["code"], "train_id_required")
         self.assertEqual(payload["pending_train_ids"], ["abc123", "def456"])
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_an_unknown_train_id_is_refused(self) -> None:
         payload, _ = self._deploy(FakeContext(), train_id="nope")
@@ -603,7 +623,7 @@ class DeployGateTests(unittest.TestCase):
         status = dict(STATUS, validated_trains=[dict(TRAIN, deploy_eligible=False)])
         payload, calls = self._deploy(FakeContext(), status=status)
         self.assertEqual(payload["error"]["code"], "no_validated_train")
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_a_broken_read_stops_the_deploy(self) -> None:
         envelope = {
@@ -612,7 +632,7 @@ class DeployGateTests(unittest.TestCase):
         }
         payload, calls = self._deploy(FakeContext(), status=envelope)
         self.assertEqual(payload, envelope)
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_confirmation_requires_a_pydantic_accept_shape(self) -> None:
         # Guards the helper itself: anything but action=accept plus confirm=True
@@ -659,6 +679,8 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
                 except StopIteration:
                     pass
                 return current_status
+            if "--preview" in args:
+                return PREVIEW
             return {"ok": True, "result": "success"}
 
         async def confirm_deploy(_ctx: Any, params: Any) -> Any:
@@ -684,7 +706,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
         payload, calls, messages = self._call(action="accept")
         self.assertEqual(payload, {"ok": True, "result": "success"})
         self.assertEqual(
-            calls.count(["run-batch", "--deploy", "--train-id", "abc123", "--json"]),
+            sum(is_push_call(args) for args in calls),
             1,
         )
         self.assertEqual(len(messages), 1)
@@ -695,7 +717,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
         payload, calls, messages = self._call(action="accept", mode="legacy")
         self.assertEqual(payload, {"ok": True, "result": "success"})
         self.assertEqual(len(messages), 1)
-        self.assertTrue(any(args[:2] == ["run-batch", "--deploy"] for args in calls))
+        self.assertTrue(any(is_push_call(args) for args in calls))
 
     def test_decline_cancel_and_unchecked_accept_never_deploy(self) -> None:
         for action, confirm in (("decline", True), ("cancel", True), ("accept", False)):
@@ -703,7 +725,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
                 payload, calls, _ = self._call(action=action, confirm=confirm)
                 self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
                 self.assertTrue(
-                    all(args[:2] != ["run-batch", "--deploy"] for args in calls)
+                    not any(is_push_call(args) for args in calls)
                 )
 
     def test_client_without_form_elicitation_gets_terminal_fallback(self) -> None:
@@ -711,16 +733,16 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "confirmation_required")
         self.assertIn("run-batch --deploy --train-id abc123", payload["command"])
         self.assertEqual(messages, [])
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_state_change_after_confirmation_is_rechecked_and_refused(self) -> None:
         no_train = dict(STATUS, validated_trains=[])
         payload, calls, messages = self._call(
-            action="accept", statuses=[STATUS, no_train]
+            action="accept", statuses=[STATUS, STATUS, no_train]
         )
         self.assertEqual(payload["error"]["code"], "no_validated_train")
         self.assertEqual(len(messages), 1)
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
     def test_client_callback_error_is_fail_closed(self) -> None:
         from mcp import Client
@@ -737,6 +759,8 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
                 return DOCTOR
             if args[0] == "status":
                 return STATUS
+            if "--preview" in args:
+                return PREVIEW
             return {"ok": True, "result": "must not happen"}
 
         async def broken_callback(_ctx: Any, _params: Any) -> ErrorData:
@@ -751,7 +775,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
 
         with patch.object(MergetrainTools, "_json", new=fake_json):
             asyncio.run(scenario())
-        self.assertTrue(all(args[:2] != ["run-batch", "--deploy"] for args in calls))
+        self.assertFalse(any(is_push_call(args) for args in calls))
 
 
 @unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")

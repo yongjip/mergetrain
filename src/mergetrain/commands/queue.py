@@ -12,6 +12,7 @@ from ..cli_support import (
     dump_json,
 )
 from ..command_runner import run_command
+from ..deploy_plan import deploy_destination_sha
 from ..errors import CommandFailed, QueueError
 from ..git_ops import (
     git_current_branch,
@@ -80,11 +81,19 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             allow_dirty=args.allow_dirty,
             allow_branch_mismatch=args.allow_branch_mismatch,
         )
+    # Exact-SHA handoff is the safe default. Keep --capture-sha accepted for
+    # compatibility, but never let an omitted flag turn a reviewed branch into
+    # a moving target between enqueue and runner claim.
     base_sha = args.base_sha or ""
     head_sha = args.head_sha or ""
-    if args.capture_sha:
-        base_sha = base_sha or _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
-        head_sha = head_sha or _capture_sha_or_error(worktree, args.branch, label="head")
+    if args.capture_sha or not args.no_ready_check:
+        base_sha = base_sha or _capture_sha_or_error(
+            config.repo, config.git.integration_ref, label="base"
+        )
+        head_sha = head_sha or _capture_sha_or_error(
+            worktree, args.branch, label="head"
+        )
+    approval_destination_sha = deploy_destination_sha(config) if args.auto else ""
     conn = connect(config.state.db)
     try:
         job = enqueue_job(
@@ -97,6 +106,7 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             note=args.note or "",
             allow_duplicate=args.allow_duplicate,
             auto_deploy=args.auto,
+            approval_destination_sha=approval_destination_sha,
         )
     finally:
         conn.close()
@@ -147,6 +157,7 @@ def cmd_retry(args: argparse.Namespace) -> int:
             original.id,
             base_sha=base_sha,
             head_sha=head_sha,
+            current_approval_destination_sha=deploy_destination_sha(config),
         )
         next_action = _recovery_next_action(conn, config)
     finally:
