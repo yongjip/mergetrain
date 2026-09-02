@@ -118,12 +118,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_enqueue.add_argument("--task", required=True)
     p_enqueue.add_argument("--branch", required=True)
     p_enqueue.add_argument("--worktree")
-    p_enqueue.add_argument("--base-sha", default="")
-    p_enqueue.add_argument("--head-sha", default="")
+    p_enqueue.add_argument(
+        "--base-sha",
+        default="",
+        help="Compatibility-only exact base; omit for ordinary verified capture",
+    )
+    p_enqueue.add_argument(
+        "--head-sha",
+        default="",
+        help="Compatibility-only exact HEAD; omit for ordinary verified capture",
+    )
     p_enqueue.add_argument("--note", default="")
     p_enqueue.add_argument("--allow-duplicate", action="store_true")
     p_enqueue.add_argument("--auto", action="store_true")
-    p_enqueue.add_argument("--capture-sha", action="store_true")
+    p_enqueue.add_argument(
+        "--capture-sha",
+        action="store_true",
+        help="Compatibility spelling; exact SHAs are captured by default",
+    )
     p_enqueue.add_argument("--allow-dirty", action="store_true")
     p_enqueue.add_argument("--allow-branch-mismatch", action="store_true")
     p_enqueue.add_argument("--no-ready-check", action="store_true")

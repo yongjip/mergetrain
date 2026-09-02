@@ -6,9 +6,11 @@ Agents interacting with mergetrain must follow this contract.
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
-3. Do not push configured Git refs directly. Task agents hand off by enqueueing
-   the exact committed HEAD, then stop unless separately authorized as the
-   runner.
+3. Do not push configured Git refs directly. For ordinary handoff, run
+   `mergetrain enqueue` with the task, branch, and optional worktree only. Do
+   not manually copy `--base-sha`, `--head-sha`, or `--capture-sha`; mergetrain
+   captures and validates the exact commits by default. Stop after the
+   successful enqueue unless separately authorized as the runner.
 4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
    10` only when job or train details are needed, and read `attention_jobs`
    before recent history.
@@ -60,7 +62,10 @@ update; it does not authorize or prove a downstream provider release.
 `next_action` is advisory. It does not replace user approval for deploy,
 unattended auto deploy, or destructive cleanup.
 
-For a task agent, a successful exact-SHA enqueue is the terminal handoff.
+For a task agent, a successful exact-SHA enqueue is the terminal handoff. The
+ordinary command omits SHA options; explicit SHA arguments are compatibility
+inputs and a ready-checked enqueue rejects them when they do not exactly match
+the current integration ref and clean task branch.
 `run_batch_validate` and deploy-oriented next actions are runner/operator
 guidance, not permission to continue after enqueueing. The same agent may act as
 the runner when that role is separately authorized. Bounded end-to-end

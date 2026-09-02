@@ -81,12 +81,33 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             allow_dirty=args.allow_dirty,
             allow_branch_mismatch=args.allow_branch_mismatch,
         )
-    # Exact-SHA handoff is the safe default. Keep --capture-sha accepted for
-    # compatibility, but never let an omitted flag turn a reviewed branch into
-    # a moving target between enqueue and runner claim.
+    # Exact-SHA handoff is the safe default. Keep the explicit SHA arguments
+    # and --capture-sha accepted for compatibility, but ordinary ready-checked
+    # handoff always derives identity from the repository. Otherwise a copied
+    # or mistyped SHA can create a queue row that does not describe the clean
+    # branch the caller just inspected.
     base_sha = args.base_sha or ""
     head_sha = args.head_sha or ""
-    if args.capture_sha or not args.no_ready_check:
+    if not args.no_ready_check:
+        captured_base_sha = _capture_sha_or_error(
+            config.repo, config.git.integration_ref, label="base"
+        )
+        captured_head_sha = _capture_sha_or_error(
+            worktree, args.branch, label="head"
+        )
+        if base_sha and base_sha != captured_base_sha:
+            raise QueueError(
+                "--base-sha does not match the current integration ref; "
+                "omit explicit SHA options for ordinary enqueue"
+            )
+        if head_sha and head_sha != captured_head_sha:
+            raise QueueError(
+                "--head-sha does not match the clean task branch HEAD; "
+                "omit explicit SHA options for ordinary enqueue"
+            )
+        base_sha = captured_base_sha
+        head_sha = captured_head_sha
+    elif args.capture_sha:
         base_sha = base_sha or _capture_sha_or_error(
             config.repo, config.git.integration_ref, label="base"
         )

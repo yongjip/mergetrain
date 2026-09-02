@@ -143,8 +143,8 @@ mergetrain enqueue --task feature-a --branch agent/feature-a
 | `--task` | Human-readable job name (required). |
 | `--branch` | Task branch to merge (required). |
 | `--worktree` | Originating worktree path (defaults to cwd). |
-| `--base-sha` / `--head-sha` | Record SHAs manually. |
-| `--capture-sha` | Compatibility spelling for the default exact-SHA capture. |
+| `--base-sha` / `--head-sha` | Compatibility-only explicit SHAs. Omit them for ordinary handoff; ready-checked enqueue rejects values that differ from the current integration ref or clean task branch. |
+| `--capture-sha` | Compatibility spelling for the default exact-SHA capture; ordinary callers omit it. |
 | `--note` | Free-text status note. |
 | `--auto` | Bind the current destination and execution policy, then mark the job eligible for the unattended daemon (requires prior approval). |
 | `--allow-duplicate` | Allow a second active job for the same branch. |
@@ -155,8 +155,11 @@ mergetrain enqueue --task feature-a --branch agent/feature-a
 
 Defaults are safe: enqueue fails if the worktree is missing or dirty, if the current branch differs from `--branch`, or if the branch already has an active job.
 Missing base/head SHAs are captured automatically, so later branch movement
-cannot ride along after handoff. With `--no-ready-check`, pass `--capture-sha`
-or explicit SHAs if identity pinning is still required.
+cannot ride along after handoff. A normal ready-checked enqueue also rejects a
+manually supplied SHA that differs from the exact commit it captures. With
+`--no-ready-check`, pass `--capture-sha` or explicit SHAs if identity pinning is
+still required; that compatibility escape deliberately does not assert a clean
+current worktree.
 
 ## `retry`
 

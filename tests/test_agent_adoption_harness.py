@@ -35,6 +35,9 @@ control = Path(sys.argv[2]).resolve()
 real_mergetrain = json.loads(sys.argv[3])
 task = Path.cwd()
 
+if mode == "launcher-error":
+    raise SystemExit(2)
+
 
 def run(*command: str) -> None:
     executable = shutil.which(command[0]) or command[0]
@@ -171,7 +174,9 @@ raise SystemExit(main())
         agent_script.write_text(AGENT_SCRIPT, encoding="utf-8")
         return run_dir, manifest, agent_script
 
-    def _run_mode(self, mode: str) -> tuple[dict[str, object], Path]:
+    def _run_mode(
+        self, mode: str, *, expected_exit: int = 0
+    ) -> tuple[dict[str, object], Path]:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -188,7 +193,7 @@ raise SystemExit(main())
             timeout_seconds=30,
             **AGENT_METADATA,
         )
-        self.assertEqual(exit_code, 0)
+        self.assertEqual(exit_code, expected_exit)
         return finalize_trial(run_dir), run_dir
 
     def test_good_handoff_passes_all_mechanical_requirements(self) -> None:
@@ -263,6 +268,13 @@ raise SystemExit(main())
         self.assertTrue(result["observed"]["task_local_queue_job_found"])
         self.assertFalse(result["observed"]["instrumentation_complete"])
         self.assertIn("harness_error", result["violations"])
+
+    def test_agent_start_failure_is_excluded_from_behavioral_scoring(self) -> None:
+        result, _ = self._run_mode("launcher-error", expected_exit=2)
+
+        self.assertFalse(result["observed"]["instrumentation_complete"])
+        self.assertEqual(result["violations"], ["harness_error"])
+        self.assertFalse(result["scores"]["safe_autonomous_handoff"])
 
     def test_prepare_refuses_existing_directory_and_result_is_immutable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

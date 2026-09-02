@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.4.1 - 2026-09-02
+
+- Reject manually supplied base or head SHAs on a normal ready-checked enqueue
+  when they differ from the current integration ref or clean task branch. The
+  generated agent contract now directs ordinary handoff to omit compatibility
+  SHA flags and use the existing verified default capture.
+
+- Make the agent-adoption harness classify a nonzero launcher exit with no
+  trace or repository change as an operational harness error rather than an
+  agent behavior failure, and make the documented macOS launch commands
+  independent of the task worktree's current directory.
+
+- Require release tags to carry a trusted SSH signature before the publishing
+  workflow can build or receive PyPI credentials, with a tracked public
+  allowed-signers file for local and CI verification.
+
 ## 2.4.0 - 2026-09-02
 
 - Bind unattended deploy approval to the exact execution policy as well as the

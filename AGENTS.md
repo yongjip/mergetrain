@@ -7,7 +7,10 @@ worktrees.
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
-3. Do not push deploy refs directly.
+3. Do not push deploy refs directly. For ordinary handoff, use
+   `mergetrain enqueue --task <task> --branch <branch>` and let mergetrain
+   capture the exact SHAs. Do not manually copy `--base-sha`, `--head-sha`, or
+   `--capture-sha` unless a documented compatibility workflow requires it.
 4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
    10` only when job or train details are needed, and read `attention_jobs`
    before recent history.

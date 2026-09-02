@@ -1007,6 +1007,36 @@ class CliTests(unittest.TestCase):
                 check=True,
             )
 
+            def enqueue(*extra: str) -> tuple[int, dict[str, object]]:
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main(
+                        [
+                            "--repo",
+                            str(repo),
+                            "enqueue",
+                            "--task",
+                            "default capture",
+                            "--branch",
+                            "feature/default-capture",
+                            "--worktree",
+                            str(repo),
+                            *extra,
+                            "--json",
+                        ]
+                    )
+                return code, json.loads(out.getvalue())
+
+            code, payload = enqueue("--base-sha", "0" * 40)
+            self.assertEqual(code, 1, payload)
+            self.assertEqual(payload["error"]["code"], "queue_error")
+            self.assertIn("--base-sha does not match", payload["error"]["message"])
+
+            code, payload = enqueue("--head-sha", "0" * 40)
+            self.assertEqual(code, 1, payload)
+            self.assertEqual(payload["error"]["code"], "queue_error")
+            self.assertIn("--head-sha does not match", payload["error"]["message"])
+
             out = io.StringIO()
             with redirect_stdout(out):
                 code = main(
@@ -1028,6 +1058,29 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0, payload)
             self.assertEqual(payload["job"]["base_sha"], head)
             self.assertEqual(payload["job"]["head_sha"], head)
+
+            conn = connect(repo / ".mergetrain" / "queue.sqlite")
+            try:
+                self.assertEqual(len(list_jobs(conn)), 1)
+            finally:
+                conn.close()
+
+            code, payload = enqueue(
+                "--base-sha",
+                head,
+                "--head-sha",
+                head,
+                "--allow-duplicate",
+            )
+            self.assertEqual(code, 0, payload)
+            self.assertEqual(payload["job"]["base_sha"], head)
+            self.assertEqual(payload["job"]["head_sha"], head)
+
+            conn = connect(repo / ".mergetrain" / "queue.sqlite")
+            try:
+                self.assertEqual(len(list_jobs(conn)), 2)
+            finally:
+                conn.close()
 
     def test_retry_captures_fresh_shas_and_inherits_job_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1441,7 +1494,7 @@ class CliTests(unittest.TestCase):
             "default mode deploys only jobs enqueued with --auto whose approved destination and execution policy still match; --validate-only processes only manual queued jobs and pauses while any validated train exists",
         )
         self.assertIn("opaque train ID", payload["boundary"]["validated_train_deploy"])
-        self.assertIn("then stop", " ".join(payload["rules"]))
+        self.assertIn("Stop after the successful enqueue", " ".join(payload["rules"]))
         self.assertIn(
             "human-readable exact-train summary",
             payload["boundary"]["deploy_requires"],
@@ -1659,7 +1712,11 @@ class CliTests(unittest.TestCase):
             agent_contract = (repo / "AGENTS.mergetrain.md").read_text(
                 encoding="utf-8"
             )
-            self.assertIn("A task agent stops after enqueueing", agent_contract)
+            self.assertIn(
+                "A task agent uses ordinary `enqueue` without manually copied "
+                "SHA options and stops after it succeeds",
+                agent_contract,
+            )
             self.assertIn("human-readable exact-train summary", agent_contract)
             self.assertIn("never make the user repeat it", agent_contract)
             payload = json.loads(out.getvalue())
