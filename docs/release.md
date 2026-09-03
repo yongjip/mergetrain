@@ -154,6 +154,7 @@ an upload that already succeeded.
    ```sh
    python scripts/check_discovery_metadata.py
    python scripts/check_discovery_metadata.py --github-json
+   agy plugin validate .
    ```
 
    Compare the second command's description and topic set with GitHub About and

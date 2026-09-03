@@ -61,6 +61,9 @@ Done. If exceptional recovery is needed, follow its exact
 - Claude Code: install `mergetrain@mergetrain` from the
   `yongjip/mergetrain` marketplace. `/mergetrain:deploy` still requires the
   MCP client's human confirmation dialog.
+- agy: install `https://github.com/yongjip/mergetrain` as a native plugin. Its
+  skill uses the same generated protocol and its MCP configuration launches the
+  release-pinned wheel through `uvx`.
 
 See `docs/agent-contract.md`, `docs/contract.md`, and `docs/cli.md` for the
 authoritative details.

@@ -53,6 +53,31 @@ since a clean CI runner cannot exercise every local Git configuration.
 python -m pip install -e .
 ```
 
+## agy native plugin
+
+With [Antigravity CLI](https://www.agy.dev/docs/cli/plugins/) and `uv` already
+installed, add the repository as a native plugin:
+
+```sh
+agy plugin install https://github.com/yongjip/mergetrain
+```
+
+The root `plugin.json` supplies the problem-first skill and `mcp_config.json`
+launches the release-pinned `mergetrain[mcp]` package through `uvx`. The first
+tool use may download that wheel. No hosted service or provider credential is
+introduced.
+
+The agent's normal path remains `status → enqueue → stop`. The plugin does not
+grant deploy, unattended, recovery, force-unlock, or cleanup authority; if the
+client cannot render MCP deployment confirmation, it reports the ordinary
+terminal command and stops.
+
+Validate a source checkout before installing it:
+
+```sh
+agy plugin validate .
+```
+
 ## Config parser dependency
 
 PyYAML is installed automatically and `.mergetrain.yaml` is always read with

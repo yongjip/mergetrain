@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mergetrain": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mergetrain[mcp]==3.0.1",
+        "mergetrain",
+        "mcp"
+      ]
+    }
+  }
+}

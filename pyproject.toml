@@ -154,5 +154,8 @@ include = [
   "/CLAUDE.md",
   "/llms.txt",
   "/llms-full.txt",
+  "/plugin.json",
+  "/mcp_config.json",
+  "/skills",
   "/server.json",
 ]

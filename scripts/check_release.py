@@ -222,6 +222,41 @@ def check_release(*, tag: str = "") -> list[str]:
         if package.get("transport") != {"type": "stdio"}:
             errors.append("server.json PyPI package transport must be stdio")
 
+    agy_manifest_path = ROOT / "plugin.json"
+    agy_mcp_path = ROOT / "mcp_config.json"
+    try:
+        agy_manifest = json.loads(agy_manifest_path.read_text(encoding="utf-8"))
+        agy_mcp = json.loads(agy_mcp_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"agy plugin metadata is missing or invalid JSON: {exc}")
+        return errors
+
+    if set(agy_manifest) != {"$schema", "name", "description"}:
+        errors.append("plugin.json must contain only schema, name, and description")
+    if agy_manifest.get("$schema") != "https://antigravity.google/schemas/v1/plugin.json":
+        errors.append("plugin.json must use the official Antigravity v1 schema")
+    if agy_manifest.get("name") != "mergetrain":
+        errors.append("plugin.json name must be 'mergetrain'")
+
+    agy_servers = agy_mcp.get("mcpServers") if isinstance(agy_mcp, dict) else None
+    if not isinstance(agy_servers, dict) or set(agy_servers) != {"mergetrain"}:
+        errors.append("mcp_config.json must contain exactly one mergetrain server")
+    else:
+        expected_agy_server = {
+            "command": "uvx",
+            "args": [
+                "--from",
+                f"mergetrain[mcp]=={project_version}",
+                "mergetrain",
+                "mcp",
+            ],
+        }
+        if agy_servers["mergetrain"] != expected_agy_server:
+            errors.append(
+                "mcp_config.json must launch the exact release with "
+                f"uvx --from mergetrain[mcp]=={project_version} mergetrain mcp"
+            )
+
     return errors
 
 

@@ -107,6 +107,9 @@ result afterward.
 uv tool install mergetrain          # or: pipx install mergetrain
 # macOS: brew install yongjip/tap/mergetrain
 
+# agy: install the native skill + pinned MCP server
+agy plugin install https://github.com/yongjip/mergetrain
+
 cd /path/to/your/repo
 
 # Write .mergetrain.yaml plus agent instructions

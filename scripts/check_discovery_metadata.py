@@ -205,6 +205,15 @@ def check_discovery_metadata(root: Path = ROOT) -> list[str]:
             canonical["catalog_tags"],
         )
 
+        agy_manifest = _load_json(root / "plugin.json")
+        _expect(
+            errors,
+            "plugin.json",
+            "description",
+            agy_manifest.get("description"),
+            canonical["short_description"],
+        )
+
         skill = _frontmatter(
             root / "integrations/claude/plugin/skills/mergetrain/SKILL.md"
         )
@@ -213,6 +222,15 @@ def check_discovery_metadata(root: Path = ROOT) -> list[str]:
             "integrations/claude/plugin/skills/mergetrain/SKILL.md",
             "description",
             skill.get("description"),
+            canonical["skill_description"],
+        )
+
+        agy_skill = _frontmatter(root / "skills/mergetrain/SKILL.md")
+        _expect(
+            errors,
+            "skills/mergetrain/SKILL.md",
+            "description",
+            agy_skill.get("description"),
             canonical["skill_description"],
         )
 

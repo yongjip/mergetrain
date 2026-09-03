@@ -272,3 +272,39 @@ authority requirements. The Claude deploy skill remains explicit-only.
 Descriptions that do not improve held-out discovery, or that raise false
 positives, must be narrowed or removed before adding another distribution
 surface.
+
+## agy native-distribution record — 2026-09-04
+
+### Evidence
+
+Legacy Gemini CLI is no longer the active local Google agent path. The existing
+benchmark adapter and dated pilot evidence use agy, while agy's current native
+plugin format requires a root `plugin.json` and can package skills and an MCP
+server. Without that package, users must separately discover both mergetrain and
+its integration instructions before agy can select them.
+
+### Changes admitted
+
+- The repository root is an installable agy plugin with `plugin.json`.
+- `skills/mergetrain/SKILL.md` carries the same generated protocol and canonical
+  discovery description as the Claude surface.
+- `mcp_config.json` starts the existing local stdio MCP adapter from the exact
+  released wheel through `uvx`.
+- Release, discovery, and protocol checks reject manifest, version, or safety
+  drift. No hooks, rules, subagents, hosted service, or provider credentials are
+  included.
+
+### Decision cost and safety impact
+
+The installation adds one ecosystem choice but no product command, option,
+config field, state, queue behavior, or MCP tool. agy receives the same five MCP
+tools. Ordinary agents stop after enqueue, and deploy or recovery still requires
+the existing human authority. The plugin cannot silently substitute direct Git
+integration if `uvx` is unavailable.
+
+### Success measure and removal trigger
+
+The agy discovery cell must meet the shared 80% discovery, 5% false-positive,
+95% safe-handoff, and zero unauthorized-mutation gates. Remove or narrow the
+plugin if agy changes its native schema, if the pinned MCP launch cannot be
+reproduced, or if held-out trials show persistent false activation.
