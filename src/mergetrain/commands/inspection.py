@@ -19,6 +19,7 @@ from ..cli_support import (
 from ..command_runner import run_command
 from ..config import (
     MergetrainConfig,
+    gate_policy_warnings,
     is_redundant_builtin_diff_check,
 )
 from ..contract import CONTRACT_VERSION
@@ -42,7 +43,7 @@ from ..observability import (
     stats_payload,
     stream_terminal,
 )
-from ..snapshot import next_action as _doctor_next_action
+from ..snapshot import attention_reason_code, plan_next_action
 from ..store import (
     connect,
     counts,
@@ -64,9 +65,13 @@ def _validated_trains_with_integration_state(
 
     if not trains:
         return []
-    current_sha = _git_object_sha(
-        config.repo,
-        ["rev-parse", "--verify", f"{config.git.integration_ref}^{{commit}}"],
+    current_sha = (
+        _git_object_sha(
+            config.repo,
+            ["rev-parse", "--verify", f"{config.git.integration_ref}^{{commit}}"],
+        )
+        if config.repo.is_dir()
+        else ""
     )
     annotated: list[dict[str, Any]] = []
     for train in trains:
@@ -92,23 +97,38 @@ def _job_display_state(job: Job) -> str:
     if job.status == "validated":
         return "ready"
     if job.status in {"blocked", "failed", "needs_reconcile"} or (
-        job.status == "deployed" and job.verify_status == "unknown"
+        job.status == "deployed" and job.verify_status in {"failed", "unknown"}
     ):
         return "attention"
     return "done"
 
 
-def _job_summary(job: Job) -> dict[str, Any]:
+def _job_summary(
+    job: Job,
+    *,
+    attention_job_ids: set[int] | None = None,
+) -> dict[str, Any]:
     state = _job_display_state(job)
+    if (
+        attention_job_ids is not None
+        and job.status == "deployed"
+        and job.verify_status == "failed"
+        and job.id not in attention_job_ids
+    ):
+        # A later deploy supersedes this known production-health result. Keep
+        # the failed verify as immutable inspect/history evidence without
+        # presenting it as current operator work forever.
+        state = "done"
     outcome = job.status if state == "done" else None
     reason = ""
     if state == "attention":
-        reason = job.note or job.conflict_with or job.status
+        reason = job.note or job.conflict_with or attention_reason_code(job) or job.status
     return {
         "id": job.id,
         "task": job.task,
         "branch": job.branch,
         "state": state,
+        "reason_code": attention_reason_code(job) if state == "attention" else None,
         "reason": reason or None,
         "outcome": outcome,
         "updated_at": job.finished_at or job.started_at or job.requested_at,
@@ -117,6 +137,8 @@ def _job_summary(job: Job) -> dict[str, Any]:
 
 def _grouped_counts(raw: dict[str, int]) -> dict[str, int]:
     verify_unknown = raw.get("deployed_verify_unknown", 0)
+    verify_failed = raw.get("deployed_verify_failed", 0)
+    verify_attention = verify_unknown + verify_failed
     return {
         "waiting": raw.get("queued", 0),
         "running": raw.get("in_progress", 0),
@@ -125,11 +147,11 @@ def _grouped_counts(raw: dict[str, int]) -> dict[str, int]:
             raw.get("blocked", 0)
             + raw.get("failed", 0)
             + raw.get("needs_reconcile", 0)
-            + verify_unknown
+            + verify_attention
         ),
         "done": max(
             0,
-            raw.get("deployed", 0) + raw.get("canceled", 0) - verify_unknown,
+            raw.get("deployed", 0) + raw.get("canceled", 0) - verify_attention,
         ),
     }
 
@@ -153,37 +175,26 @@ def _state_summary(state: str, grouped: dict[str, int]) -> str:
     return "No active work; enqueue a clean task branch when ready"
 
 
-def _next_action_detail(code: str, attention: Sequence[Job]) -> dict[str, Any]:
-    first_id = attention[0].id if attention else None
-    mapping: dict[str, tuple[str | None, str]] = {
-        "upgrade_mergetrain": (None, "none"),
-        "unlock_wedged_runner": ("mergetrain unlock --force", "recovery"),
-        "wait_for_runner": (None, "none"),
-        "reconcile_pending_deploy": ("mergetrain reconcile --apply", "recovery"),
-        "reconcile_conflict_manual": ("mergetrain reconcile", "recovery"),
-        "fix_blocked_job": (
-            f"mergetrain inspect {first_id}" if first_id is not None else None,
-            "none",
+def _empty_counts() -> dict[str, int]:
+    return dict.fromkeys(
+        (
+            "queued",
+            "in_progress",
+            "blocked",
+            "failed",
+            "validated",
+            "needs_reconcile",
+            "deployed",
+            "canceled",
+            "auto_queued",
+            "manual_queued",
+            "in_progress_with_marker",
+            "blocked_with_marker",
+            "deployed_verify_unknown",
+            "deployed_verify_failed",
         ),
-        "verify_reconciled_deploy": (
-            f"mergetrain verify --job {first_id}" if first_id is not None else "mergetrain verify",
-            "recovery",
-        ),
-        "deploy_when_approved": ("mergetrain deploy", "deploy"),
-        "cancel_and_reenqueue_legacy_validated_jobs": (None, "runner"),
-        "run_daemon_when_approved": ("mergetrain daemon", "deploy"),
-        "validate_queued_jobs": ("mergetrain validate", "runner"),
-        "reconcile_stranded_claim": ("mergetrain reconcile --apply", "recovery"),
-        "initialize_config": ("mergetrain init --write", "none"),
-        "gc_available": ("mergetrain gc", "none"),
-        "enqueue_clean_branch": (None, "none"),
-    }
-    command, approval = mapping.get(code, (None, "none"))
-    return {
-        "code": code,
-        "command": command,
-        "requires_approval": approval,
-    }
+        0,
+    )
 
 
 def _diagnostics(
@@ -195,8 +206,10 @@ def _diagnostics(
 ) -> dict[str, Any]:
     from ..runtime import runtime_provenance
 
-    remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
-    repo_root = git_repo_root(config.repo)
+    repo_root = git_repo_root(config.repo) if config.repo.is_dir() else ""
+    remote_url = (
+        redact_secrets(git_remote_url(config.repo, config.git.remote)) if repo_root else ""
+    )
     config_drift = _config_drift(config, repo_root=repo_root)
     return {
         "version": __version__,
@@ -220,10 +233,11 @@ def _diagnostics(
         },
         "git": {
             "repo_root": repo_root,
-            "current_branch": git_current_branch(config.repo),
+            "current_branch": git_current_branch(config.repo) if repo_root else "",
             "worktree_clean": git_worktree_clean(config.repo) if repo_root else False,
             "remote_url": remote_url,
-            "remote_exists": bool(remote_url) or git_remote_exists(config.repo, config.git.remote),
+            "remote_exists": bool(repo_root)
+            and (bool(remote_url) or git_remote_exists(config.repo, config.git.remote)),
             "integration_ref": config.git.integration_ref,
             "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref)
             if repo_root
@@ -251,55 +265,80 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.limit < 1:
         raise QueueError("--limit must be 1 or greater")
     config = config_from_args(args)
-    conn = connect(config.state.db)
-    try:
-        lock = get_lock(conn)
-        validated_trains = _validated_trains_with_integration_state(
-            config,
-            validated_train_summaries(conn),
-        )
-        count_data = counts(conn)
-        recent_jobs = list_jobs(conn, limit=args.limit)
-        decision_jobs = list_attention_jobs(conn)
-        attention_jobs = [job for job in decision_jobs if _job_display_state(job) == "attention"]
-        raw_next_action = _doctor_next_action(
-            {
-                "lock": lock.to_dict() if lock else None,
-                "counts": count_data,
-                "validated_trains": validated_trains,
-                "gc": {"worktree_candidates": []},
-                "config_exists": config.config_exists,
-            },
-            config_version=config.config_version,
-        )
-        grouped = _grouped_counts(count_data)
-        system_state = _system_state(grouped)
-        repo_root = git_repo_root(config.repo)
-        if not config.config_exists:
-            health = "unconfigured"
-        elif not repo_root:
-            health = "degraded"
-        else:
-            health = "healthy"
-        payload: dict[str, Any] = {
-            "ok": True,
-            "health": health,
-            "state": system_state,
-            "summary": _state_summary(system_state, grouped),
-            "next_action": _next_action_detail(raw_next_action, attention_jobs),
-            "counts": grouped,
-            "attention_jobs": [_job_summary(job) for job in attention_jobs],
-            "recent_jobs": [_job_summary(job) for job in recent_jobs],
-        }
-        if args.diagnose:
-            payload["diagnostics"] = _diagnostics(
+    lock = None
+    validated_trains: list[dict[str, Any]] = []
+    count_data = _empty_counts()
+    recent_jobs: list[Job] = []
+    decision_jobs: list[Job] = []
+    if config.state.db.is_file():
+        conn = connect(config.state.db, read_only=True)
+        try:
+            lock = get_lock(conn)
+            validated_trains = _validated_trains_with_integration_state(
                 config,
-                lock=lock,
-                raw_counts=count_data,
-                validated_trains=validated_trains,
+                validated_train_summaries(conn),
             )
-    finally:
-        conn.close()
+            count_data = counts(conn)
+            recent_jobs = list_jobs(conn, limit=args.limit)
+            decision_jobs = list_attention_jobs(conn)
+        finally:
+            conn.close()
+
+    attention_jobs = [job for job in decision_jobs if _job_display_state(job) == "attention"]
+    attention_job_ids = {job.id for job in attention_jobs}
+    grouped = _grouped_counts(count_data)
+    system_state = _system_state(grouped)
+    repo_root = git_repo_root(config.repo) if config.repo.is_dir() else ""
+    remote_ready = bool(repo_root) and git_remote_exists(config.repo, config.git.remote)
+    integration_ref_ready = bool(repo_root) and git_ref_exists(
+        config.repo, config.git.integration_ref
+    )
+    plan = plan_next_action(
+        {
+            "lock": lock.to_dict() if lock else None,
+            "counts": count_data,
+            "validated_trains": validated_trains,
+            "gc": {"worktree_candidates": []},
+            "config_exists": config.config_exists,
+            "repo_ready": bool(repo_root),
+            "remote_ready": remote_ready,
+            "integration_ref_ready": integration_ref_ready,
+            "remote_name": config.git.remote,
+        },
+        config_version=config.config_version,
+        attention_jobs=attention_jobs,
+    )
+    if not config.config_exists:
+        health = "unconfigured"
+    elif not repo_root or not remote_ready or not integration_ref_ready:
+        health = "degraded"
+    else:
+        health = "healthy"
+    warnings = gate_policy_warnings(config) if config.config_exists else []
+    payload: dict[str, Any] = {
+        "ok": True,
+        "health": health,
+        "state": system_state,
+        "summary": _state_summary(system_state, grouped),
+        "next_action": plan.to_dict(),
+        "warnings": warnings,
+        "counts": grouped,
+        "attention_jobs": [_job_summary(job) for job in attention_jobs],
+        "recent_jobs": [
+            _job_summary(
+                job,
+                attention_job_ids=attention_job_ids,
+            )
+            for job in recent_jobs
+        ],
+    }
+    if args.diagnose:
+        payload["diagnostics"] = _diagnostics(
+            config,
+            lock=lock,
+            raw_counts=count_data,
+            validated_trains=validated_trains,
+        )
     if args.json:
         dump_json(payload)
     else:
@@ -309,6 +348,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"next: {action['command']}")
         if action["requires_approval"] != "none":
             print(f"approval: {action['requires_approval']}")
+        for warning in payload["warnings"]:
+            print(f"warning {warning['code']}: {warning['summary']}")
         for job in payload["attention_jobs"]:
             print(f"attention #{job['id']} {job['task']}: {job['reason']}")
         if args.diagnose:

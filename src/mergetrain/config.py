@@ -241,6 +241,23 @@ def effective_gates(config: MergetrainConfig) -> tuple[GateConfig, ...]:
     )
 
 
+def gate_policy_warnings(config: MergetrainConfig) -> list[dict[str, str]]:
+    """Explain a valid but intentionally minimal pre-push policy."""
+
+    if config.gates:
+        return []
+    return [
+        {
+            "code": "no_configured_gates",
+            "severity": "warning",
+            "summary": (
+                "No project gates are configured; deploy runs only the built-in "
+                "diff integrity check before push."
+            ),
+        }
+    ]
+
+
 _LEGACY_YAML_BOOLEAN = re.compile(r"^(?:yes|no|on|off)$", re.IGNORECASE)
 _AMBIGUOUS_YAML_INTEGER = re.compile(r"^[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-9]+)$")
 

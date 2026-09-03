@@ -29,6 +29,7 @@ const SERVER_NEXT_ACTIONS = [
   "reconcile_pending_deploy",
   "reconcile_conflict_manual",
   "fix_blocked_job",
+  "resolve_failed_verification",
   "verify_reconciled_deploy",
   "deploy_when_approved",
   "cancel_and_reenqueue_legacy_validated_jobs",
@@ -36,6 +37,9 @@ const SERVER_NEXT_ACTIONS = [
   "validate_queued_jobs",
   "reconcile_stranded_claim",
   "initialize_config",
+  "open_git_repository",
+  "configure_git_remote",
+  "fetch_integration_ref",
   "gc_available",
   "enqueue_clean_branch",
 ];

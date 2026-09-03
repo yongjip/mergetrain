@@ -68,7 +68,10 @@ def _validate_enqueue_worktree(
 def cmd_enqueue(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     _preflight_config(config)
-    worktree = Path(args.worktree or Path.cwd()).expanduser().resolve()
+    # ``--repo`` identifies the owning checkout for every core command.  An
+    # explicit --worktree still supports advanced handoff, but the normal path
+    # must not silently switch back to the process CWD (notably for MCP).
+    worktree = Path(args.worktree or config.repo).expanduser().resolve()
     _validate_enqueue_worktree(worktree, args.branch)
     # v3 has one enqueue path: verify a clean owning worktree and derive both
     # identities from Git. User-supplied SHAs and readiness bypasses no longer

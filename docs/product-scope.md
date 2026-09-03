@@ -198,3 +198,35 @@ guarantee. The next product investment is Tier-2 authority/recovery agent
 benchmarks, Claude Code and larger-repository pilots, and observation with
 independent developers. Onboarding or UX additions require evidence from those
 pilots; new core engine capability does not.
+
+## 3.0.1 projection-correctness record — 2026-09-03
+
+### Evidence
+
+The simplified status projection could classify a deployed job with failed
+post-push verification as Done. With mixed attention rows, aggregate counts
+selected `fix_blocked_job` while a separately sorted list supplied an unrelated
+verification job to the command. Status also recommended enqueue without a
+configured remote or resolvable integration ref, created local queue state on a
+never-used repository, and enqueue interpreted an omitted worktree from the
+process CWD instead of the explicit `--repo` boundary.
+
+### Existing fit and decision cost
+
+These are correctness defects in the existing `status` and `enqueue` verbs.
+The repair adds no command, option, config field, database schema, state group,
+approval path, or MCP tool. Additive target/reason fields and warnings make the
+already-required decision inspectable without introducing a new user choice.
+
+### Safety impact and success measure
+
+One planner now selects the action code, exact target, command, approval class,
+and stable reason together. Unknown verification and the latest deployed
+generation's known verification failure remain visible; a later deploy
+supersedes an older current-health result without deleting its inspectable
+evidence. The existing non-pushing `verify --job` path can recheck and clear a
+current failure. Git readiness fails closed before enqueue advice, a missing
+queue is observed without filesystem creation, and CLI/MCP enqueue use the
+bound repository by default. Table-driven projection, mixed-priority,
+superseded-health, zero-create status, and out-of-CWD enqueue tests must remain
+green. Remove none of these checks while contract 3 is supported.

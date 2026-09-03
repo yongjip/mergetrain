@@ -245,7 +245,7 @@ def cmd_unlock(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    """Discharge deployed jobs left verify_status='unknown' by a crash.
+    """Discharge unknown or failed verification for a deployed job.
 
     Re-runs the configured deploy.verify hooks against the recorded deploy_sha
     and records the result, or accepts an explicit --ack for hooks that cannot
@@ -258,9 +258,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
     try:
         if args.job is not None:
             job = get_job(conn, args.job)
-            if job.status != "deployed" or job.verify_status != "unknown":
+            if job.status != "deployed" or job.verify_status not in {"failed", "unknown"}:
                 raise QueueError(
-                    f"job {args.job} is not an unresolved verify "
+                    f"job {args.job} does not need verify attention "
                     f"(status={job.status}, verify_status={job.verify_status})"
                 )
             targets = [job]

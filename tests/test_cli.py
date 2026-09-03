@@ -360,12 +360,12 @@ class CliTests(unittest.TestCase):
                 stderr=subprocess.DEVNULL,
             )
             out = io.StringIO()
-        with (
-            patch("mergetrain.runtime.runtime_provenance", return_value=runtime),
-            redirect_stdout(out),
-        ):
-            code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
-        payload = json.loads(out.getvalue())
+            with (
+                patch("mergetrain.runtime.runtime_provenance", return_value=runtime),
+                redirect_stdout(out),
+            ):
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
+            payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
         self.assertEqual(payload["diagnostics"]["runtime"], runtime)
 
@@ -583,7 +583,7 @@ class CliTests(unittest.TestCase):
             diagnostics["recommendations"][0]["code"],
             "operator_config_drift",
         )
-        self.assertEqual(payload["next_action"]["code"], "enqueue_clean_branch")
+        self.assertEqual(payload["next_action"]["code"], "configure_git_remote")
 
     def test_doctor_compares_nested_repo_config_from_git_root(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -743,10 +743,103 @@ class CliTests(unittest.TestCase):
             out = io.StringIO()
             with redirect_stdout(out):
                 main(["--repo", str(repo), "status", "--json"])
+            initialized = json.loads(out.getvalue())
+            self.assertEqual(initialized["health"], "degraded")
             self.assertEqual(
-                json.loads(out.getvalue())["next_action"]["code"],
-                "enqueue_clean_branch",
+                initialized["next_action"]["code"],
+                "configure_git_remote",
             )
+
+    def test_status_without_queue_is_read_only_and_does_not_create_state(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            before = sorted(path.relative_to(repo) for path in repo.rglob("*") if ".git" not in path.parts)
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "status", "--json"])
+
+            after = sorted(path.relative_to(repo) for path in repo.rglob("*") if ".git" not in path.parts)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(before, after)
+            self.assertFalse((repo / ".mergetrain").exists())
+            self.assertEqual(payload["counts"]["waiting"], 0)
+
+    def test_status_requires_remote_and_integration_ref_before_enqueue_advice(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("readiness"), encoding="utf-8"
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "status", "--json"])
+            missing_remote = json.loads(out.getvalue())
+            self.assertEqual(missing_remote["health"], "degraded")
+            self.assertEqual(
+                missing_remote["next_action"]["code"], "configure_git_remote"
+            )
+
+            subprocess.run(["git", "remote", "add", "origin", str(repo)], cwd=repo, check=True)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "status", "--json"])
+            missing_ref = json.loads(out.getvalue())
+            self.assertEqual(missing_ref["health"], "degraded")
+            self.assertEqual(missing_ref["next_action"]["code"], "fetch_integration_ref")
+            self.assertEqual(missing_ref["next_action"]["command"], "git fetch origin")
+
+    def test_status_reports_a_configured_non_git_path_without_creating_it(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            missing_repo = root / "missing"
+            config_path = root / "config.yaml"
+            config_path.write_text(render_default_config("missing"), encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(missing_repo),
+                        "--config",
+                        str(config_path),
+                        "status",
+                        "--diagnose",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["health"], "degraded")
+            self.assertEqual(payload["next_action"]["code"], "open_git_repository")
+            self.assertFalse(missing_repo.exists())
+
+    def test_status_warns_when_only_builtin_diff_check_will_run(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("warning"), encoding="utf-8"
+            )
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "status", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["warnings"][0]["code"], "no_configured_gates")
+
+    def test_root_typo_lists_only_the_public_command_grammar(self) -> None:
+        err = io.StringIO()
+        with redirect_stderr(err), self.assertRaises(SystemExit):
+            main(["stat"])
+        message = err.getvalue()
+        for command in ("init", "status", "enqueue", "validate", "deploy", "inspect"):
+            self.assertIn(repr(command), message)
+        for hidden in ("daemon", "reconcile", "dashboard", "hub", "retry"):
+            self.assertNotIn(repr(hidden), message)
 
     def test_removed_run_next_points_to_deploy_without_claiming(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -885,6 +978,159 @@ class CliTests(unittest.TestCase):
             [job["id"] for job in payload["attention_jobs"]],
             [old_attention.id],
         )
+
+    def test_status_keeps_failed_verify_in_attention_and_plans_one_exact_target(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                verify_failed = enqueue_job(conn, task="production verify", branch="feature/v")
+                mark_job(
+                    conn,
+                    verify_failed.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="failed",
+                    train_id="train-shared",
+                    deploy_sha="shared-deploy",
+                )
+                blocked = enqueue_job(conn, task="blocked", branch="feature/b")
+                mark_job(conn, blocked.id, status="blocked", note="gate stopped")
+                verify_unknown = enqueue_job(conn, task="unknown", branch="feature/u")
+                mark_job(
+                    conn,
+                    verify_unknown.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="unknown",
+                    train_id="train-shared",
+                    deploy_sha="shared-deploy",
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["counts"]["attention"], 3)
+        self.assertEqual(payload["counts"]["done"], 0)
+        self.assertEqual(
+            payload["next_action"]["code"], "resolve_failed_verification"
+        )
+        self.assertEqual(payload["next_action"]["target_job_id"], verify_failed.id)
+        self.assertEqual(
+            payload["next_action"]["command"],
+            f"mergetrain verify --job {verify_failed.id}",
+        )
+        reasons = {job["id"]: job["reason_code"] for job in payload["attention_jobs"]}
+        self.assertEqual(reasons[verify_failed.id], "post_push_verification_failed")
+        self.assertEqual(reasons[blocked.id], "blocked")
+        self.assertEqual(reasons[verify_unknown.id], "post_push_verification_unknown")
+
+    def test_status_keeps_superseded_verify_failure_as_history_not_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                old_failure = enqueue_job(
+                    conn,
+                    task="old production verify",
+                    branch="feature/old",
+                )
+                mark_job(
+                    conn,
+                    old_failure.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="failed",
+                    train_id="train-old",
+                    deploy_sha="deploy-old",
+                )
+                current = enqueue_job(
+                    conn,
+                    task="new production deploy",
+                    branch="feature/new",
+                )
+                mark_job(
+                    conn,
+                    current.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="succeeded",
+                    train_id="train-new",
+                    deploy_sha="deploy-new",
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
+            payload = json.loads(out.getvalue())
+
+            conn = connect(db, read_only=True)
+            try:
+                persisted_failure = get_job(conn, old_failure.id)
+            finally:
+                conn.close()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["counts"]["attention"], 0)
+        self.assertEqual(payload["counts"]["done"], 2)
+        recent_by_id = {job["id"]: job for job in payload["recent_jobs"]}
+        self.assertEqual(recent_by_id[old_failure.id]["state"], "done")
+        self.assertEqual(recent_by_id[old_failure.id]["outcome"], "deployed")
+        self.assertEqual(persisted_failure.verify_status, "failed")
+
+    def test_enqueue_defaults_to_repo_instead_of_process_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=feature/repo-default", str(repo)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("repo-default"), encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "ready"], cwd=repo, check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(repo)], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "enqueue",
+                        "--task",
+                        "repo-root default",
+                        "--branch",
+                        "feature/repo-default",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(Path(payload["job"]["worktree_path"]), repo.resolve())
+        self.assertEqual(payload["job"]["status"], "queued")
 
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1561,6 +1807,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["reuse"]["evaluation"], "exact")
             self.assertEqual(payload["reuse"]["estimated_savings"]["mode"], "unavailable")
             self.assertFalse(payload["reuse"]["estimated_savings"]["authorizes_reuse"])
+            self.assertEqual(payload["warnings"][0]["code"], "no_configured_gates")
             self.assertNotIn("confirmed_command", payload)
             self.assertNotIn("train_id", payload)
 

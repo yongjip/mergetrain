@@ -439,11 +439,17 @@ class MergetrainTools:
         reuse = preview.get("reuse") or {}
         decision = reuse.get("decision") or {}
         gate_action = decision.get("action") or "run configured gates"
+        warning_lines = [
+            f"Warning: {warning.get('summary')}"
+            for warning in preview.get("warnings") or []
+            if warning.get("summary")
+        ]
         summary = "\n".join(
             [
                 f"Changes: {tasks or 'task details unavailable'}",
                 f"Destination: {destination} ({refs or 'configured refs'})",
                 f"Gate plan: {gate_action}",
+                *warning_lines,
                 "Safety: the exact train, destination, gate/reuse policy, and "
                 "verify hooks will be checked again before push",
             ]

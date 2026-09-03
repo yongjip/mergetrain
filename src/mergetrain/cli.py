@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NoReturn
 
 from . import __version__
 from .cli_support import (
@@ -60,9 +62,23 @@ __all__ = [
     "render_agent_contract",
 ]
 
+PUBLIC_COMMANDS = ("init", "status", "enqueue", "validate", "deploy", "inspect")
+
+
+class _PublicArgumentParser(argparse.ArgumentParser):
+    """Keep hidden operator commands out of root command-discovery errors."""
+
+    def error(self, message: str) -> NoReturn:
+        if self.prog == "mergetrain" and "invalid choice:" in message:
+            match = re.search(r"invalid choice: ([^ ]+)", message)
+            invalid = match.group(1) if match else "unknown"
+            choices = ", ".join(repr(command) for command in PUBLIC_COMMANDS)
+            message = f"argument command: invalid choice: {invalid} (choose from {choices})"
+        super().error(message)
+
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mergetrain")
+    parser = _PublicArgumentParser(prog="mergetrain")
     parser.add_argument("--version", action="version", version=f"mergetrain {__version__}")
     parser.add_argument("--config", help="Path to .mergetrain.yaml")
     parser.add_argument("--repo", default=str(Path.cwd()), help="Repository root or worktree path")

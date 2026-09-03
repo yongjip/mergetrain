@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.0.1 - 2026-09-03
+
+- Keep unknown post-push verification and the latest deployed generation's
+  known verification failures in Attention. Later deploys supersede an older
+  production-health result in current status without rewriting its evidence.
+  Derive the next-action code, exact job target, command, approval class, and
+  stable reason from one planner so mixed failure types cannot produce a
+  mismatched instruction. Existing `verify --job` can now re-run a failed
+  verification and clear the Attention state after success.
+
+- Make `status` a no-create observation on repositories without queue state,
+  report missing Git repositories, remotes, or integration refs as degraded,
+  and refuse to recommend enqueue until the configured base can be resolved.
+  Warn when no project gates are configured without changing deployment
+  policy.
+
+- Make omitted enqueue worktrees resolve from the explicit repository rather
+  than the process working directory, including MCP servers launched elsewhere.
+  Root command typos now list only the six permanent public verbs. Contract-3
+  fingerprints record the additive warning, target, and reason fields.
+
 ## 3.0.0 - 2026-09-03
 
 - Replace the implementation-shaped CLI with six permanent product verbs:

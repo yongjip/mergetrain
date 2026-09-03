@@ -6,12 +6,16 @@ export const NEXT_ACTION_COPY = {
   verify_reconciled_deploy: ["Verify the reconciled deploy.", "The remote landed, but post-push verification could not be proven automatically."],
   wait_for_runner: ["Wait for the current phase to finish.", "The runner will continue automatically."],
   fix_blocked_job: ["Fix the blocked branch and enqueue again.", "Commit a clean result in the owning branch first."],
+  resolve_failed_verification: ["Re-run the failed post-push verification.", "The code landed, but its health check still needs a successful result."],
   deploy_when_approved: ["Approve the exact validated train to {action}.", "Git {noun} remains an explicit CLI action."],
   cancel_and_reenqueue_legacy_validated_jobs: ["Re-enqueue the legacy validated jobs.", "A fresh train identity is required before {noun}."],
   run_daemon_when_approved: ["Start the approved {action} runner.", "Only auto-approved jobs are eligible for the daemon."],
   validate_queued_jobs: ["Start a validation run when ready.", "Nothing will be pushed during validation."],
   reconcile_stranded_claim: ["Reconcile work claimed by a runner that is gone.", "Run mergetrain reconcile --apply before another deploy."],
   initialize_config: ["Scaffold the repository config.", "Run mergetrain init: queue commands refuse to ship against guessed defaults."],
+  open_git_repository: ["Open a Git repository before continuing.", "The configured repository path is not a Git worktree."],
+  configure_git_remote: ["Configure the repository's Git remote.", "Mergetrain will not enqueue work until the configured destination exists."],
+  fetch_integration_ref: ["Fetch the configured integration branch.", "Mergetrain needs the exact base commit before it can enqueue work."],
   gc_available: ["Clean up completed worktrees.", "Review the dry run before applying cleanup."],
   enqueue_clean_branch: ["Enqueue a committed task branch.", "The queue is ready for the next clean job."],
 };
@@ -23,6 +27,10 @@ export const REMEDIAL_ACTIONS = new Set([
   "reconcile_conflict_manual",
   "verify_reconciled_deploy",
   "fix_blocked_job",
+  "resolve_failed_verification",
+  "open_git_repository",
+  "configure_git_remote",
+  "fetch_integration_ref",
 ]);
 
 export function actionCopy(value, words) {

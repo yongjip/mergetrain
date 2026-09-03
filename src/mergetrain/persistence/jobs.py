@@ -400,19 +400,40 @@ def list_attention_jobs(conn: sqlite3.Connection) -> list[Job]:
     """Return every job that may require a runner or operator decision.
 
     This intentionally has no display limit. A recent-history cap must not
-    hide an older blocked train, pending reconcile, or unresolved post-push
-    verification from the compact status view.
+    hide an older blocked train, pending reconcile, or unknown post-push
+    verification from the compact status view. A known verification failure is
+    current operator work only for the latest deployed generation; a later
+    deploy supersedes its production-health result without rewriting history.
     """
 
     rows = conn.execute(
         """
-        SELECT * FROM deploy_queue
-        WHERE status IN (
+        WITH latest_deploy AS (
+          SELECT id, train_id, deploy_sha
+          FROM deploy_queue
+          WHERE status = 'deployed'
+          ORDER BY COALESCE(
+            NULLIF(finished_at, ''), NULLIF(started_at, ''), requested_at
+          ) DESC, id DESC
+          LIMIT 1
+        )
+        SELECT queue.* FROM deploy_queue AS queue
+        WHERE queue.status IN (
           'queued', 'in_progress', 'blocked', 'failed', 'validated',
           'needs_reconcile'
         )
-        OR (status = 'deployed' AND verify_status = 'unknown')
-        ORDER BY id DESC
+        OR (queue.status = 'deployed' AND queue.verify_status = 'unknown')
+        OR (
+          queue.status = 'deployed'
+          AND queue.verify_status = 'failed'
+          AND EXISTS (
+            SELECT 1 FROM latest_deploy AS latest
+            WHERE queue.id = latest.id
+               OR (queue.train_id != '' AND queue.train_id = latest.train_id)
+               OR (queue.deploy_sha != '' AND queue.deploy_sha = latest.deploy_sha)
+          )
+        )
+        ORDER BY queue.id DESC
         """
     ).fetchall()
     return [Job.from_row(row) for row in rows]
@@ -486,9 +507,11 @@ def list_verify_unknown_jobs(conn: sqlite3.Connection) -> list[Job]:
 def resolve_verify_status(
     conn: sqlite3.Connection, job_id: int, *, verify_status: str, note: str = ""
 ) -> Job:
-    """Discharge a deployed job's unresolved post-push verify (``mergetrain
-    verify``). Only moves a deployed+unknown job to succeeded/failed — never
-    reopens a terminal job or touches its deployed status."""
+    """Resolve or recheck a deployed job's post-push verification.
+
+    Only moves a deployed+unknown/failed job to succeeded/failed — never
+    reopens a terminal job or touches its deployed status.
+    """
     if verify_status not in {"succeeded", "failed"}:
         raise QueueError(f"verify_status must be 'succeeded' or 'failed', got {verify_status!r}")
     with immediate(conn):
@@ -497,9 +520,12 @@ def resolve_verify_status(
         ).fetchone()
         if row is None:
             raise QueueError(f"job not found: {job_id}")
-        if str(row["status"]) != "deployed" or str(row["verify_status"]) != "unknown":
+        if str(row["status"]) != "deployed" or str(row["verify_status"]) not in {
+            "unknown",
+            "failed",
+        }:
             raise QueueError(
-                f"job {job_id} is not an unresolved verify (status={row['status']}, "
+                f"job {job_id} does not need verify attention (status={row['status']}, "
                 f"verify_status={row['verify_status']})"
             )
         conn.execute(
@@ -537,6 +563,15 @@ def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued", auto_onl
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
     row = conn.execute(
         """
+        WITH latest_deploy AS (
+          SELECT id, train_id, deploy_sha
+          FROM deploy_queue
+          WHERE status = 'deployed'
+          ORDER BY COALESCE(
+            NULLIF(finished_at, ''), NULLIF(started_at, ''), requested_at
+          ) DESC, id DESC
+          LIMIT 1
+        )
         SELECT
           SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
           SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
@@ -555,7 +590,17 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
           SUM(CASE WHEN status = 'blocked' AND pending_deploy_sha != ''
               THEN 1 ELSE 0 END) AS blocked_with_marker,
           SUM(CASE WHEN status = 'deployed' AND verify_status = 'unknown'
-              THEN 1 ELSE 0 END) AS deployed_verify_unknown
+              THEN 1 ELSE 0 END) AS deployed_verify_unknown,
+          SUM(CASE WHEN status = 'deployed' AND verify_status = 'failed'
+              AND EXISTS (
+                SELECT 1 FROM latest_deploy AS latest
+                WHERE deploy_queue.id = latest.id
+                   OR (deploy_queue.train_id != ''
+                       AND deploy_queue.train_id = latest.train_id)
+                   OR (deploy_queue.deploy_sha != ''
+                       AND deploy_queue.deploy_sha = latest.deploy_sha)
+              )
+              THEN 1 ELSE 0 END) AS deployed_verify_failed
         FROM deploy_queue
         """
     ).fetchone()
@@ -566,6 +611,7 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
         "in_progress_with_marker",
         "blocked_with_marker",
         "deployed_verify_unknown",
+        "deployed_verify_failed",
     )
     return {key: int(row[key] or 0) for key in keys}
 

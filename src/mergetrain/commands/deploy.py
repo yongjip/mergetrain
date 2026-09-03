@@ -15,6 +15,7 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
+from ..config import gate_policy_warnings
 from ..deploy_plan import deploy_plan_sha
 from ..errors import DeployPlanChanged, QueueError, redact_secrets
 from ..git_destination import resolve_git_destination
@@ -215,6 +216,8 @@ def _render_v3_preview(payload: dict[str, Any]) -> None:
     action = decision.get("action")
     if action:
         print(f"Gate plan: {action}")
+    for warning in payload.get("warnings", []):
+        print(f"Warning: {warning['summary']}")
     print(
         "The exact train, destination, gates, reuse policy, and verify hooks "
         "will be checked again before push."
@@ -339,6 +342,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             },
         },
         "deploy_plan_sha": plan_sha,
+        "warnings": gate_policy_warnings(config),
         "reuse": reuse_explanation(
             config,
             jobs,

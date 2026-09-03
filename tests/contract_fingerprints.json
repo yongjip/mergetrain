@@ -212,7 +212,8 @@
         "reasons": "[]",
         "reused_validation_sha": null,
         "validation_sha": null
-      }
+      },
+      "warnings": "[]?"
     },
     "dismiss": {
       "contract_version": null,
@@ -440,6 +441,7 @@
               "blocked_with_marker": null,
               "canceled": null,
               "deployed": null,
+              "deployed_verify_failed": null,
               "deployed_verify_unknown": null,
               "failed": null,
               "in_progress": null,
@@ -674,6 +676,7 @@
               "blocked_with_marker": null,
               "canceled": null,
               "deployed": null,
+              "deployed_verify_failed": null,
               "deployed_verify_unknown": null,
               "failed": null,
               "in_progress": null,
@@ -1123,12 +1126,15 @@
       "next_action": {
         "code": null,
         "command": null,
-        "requires_approval": null
+        "reason_code": null,
+        "requires_approval": null,
+        "target_job_id": null
       },
       "ok": null,
       "recent_jobs": "[]?",
       "state": null,
-      "summary": null
+      "summary": null,
+      "warnings": "[]?"
     },
     "status_diagnose": {
       "attention_jobs": "[]?",
@@ -1235,6 +1241,7 @@
           "blocked_with_marker": null,
           "canceled": null,
           "deployed": null,
+          "deployed_verify_failed": null,
           "deployed_verify_unknown": null,
           "failed": null,
           "in_progress": null,
@@ -1272,12 +1279,15 @@
       "next_action": {
         "code": null,
         "command": null,
-        "requires_approval": null
+        "reason_code": null,
+        "requires_approval": null,
+        "target_job_id": null
       },
       "ok": null,
       "recent_jobs": "[]?",
       "state": null,
-      "summary": null
+      "summary": null,
+      "warnings": "[]?"
     },
     "unlock": {
       "audit_event_id": null,

@@ -18,7 +18,7 @@ class MCPRegistryLaunchTests(unittest.TestCase):
             [
                 "uvx",
                 "--from",
-                "mergetrain[mcp]==3.0.0",
+                "mergetrain[mcp]==3.0.1",
                 "mergetrain",
                 "mcp",
             ],

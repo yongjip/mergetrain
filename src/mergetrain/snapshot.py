@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from shlex import join as shell_join
 from statistics import median
 from typing import Any
 
@@ -52,6 +55,7 @@ NEXT_ACTION_VALUES = frozenset(
         "reconcile_pending_deploy",
         "reconcile_conflict_manual",
         "fix_blocked_job",
+        "resolve_failed_verification",
         "verify_reconciled_deploy",
         "deploy_when_approved",
         "cancel_and_reenqueue_legacy_validated_jobs",
@@ -59,10 +63,114 @@ NEXT_ACTION_VALUES = frozenset(
         "validate_queued_jobs",
         "reconcile_stranded_claim",
         "initialize_config",
+        "open_git_repository",
+        "configure_git_remote",
+        "fetch_integration_ref",
         "gc_available",
         "enqueue_clean_branch",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class NextActionPlan:
+    """One internally consistent recommendation for an operator or agent."""
+
+    code: str
+    command: str | None = None
+    requires_approval: str = "none"
+    target_job_id: int | None = None
+    reason_code: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "command": self.command,
+            "requires_approval": self.requires_approval,
+            "target_job_id": self.target_job_id,
+            "reason_code": self.reason_code,
+        }
+
+
+def attention_reason_code(job: Job) -> str | None:
+    """Return a stable reason without interpreting free-form operator notes."""
+
+    if job.status == "needs_reconcile":
+        return "pending_reconcile"
+    if job.status == "blocked" and job.pending_deploy_sha:
+        return "reconcile_conflict"
+    if job.status == "deployed" and job.verify_status == "failed":
+        return "post_push_verification_failed"
+    if job.status == "deployed" and job.verify_status == "unknown":
+        return "post_push_verification_unknown"
+    if job.conflict_with:
+        return "semantic_conflict"
+    if job.status in {"blocked", "failed"}:
+        return job.status
+    return None
+
+
+def _attention_priority(job: Job) -> tuple[int, int]:
+    reason = attention_reason_code(job)
+    order = {
+        "pending_reconcile": 0,
+        "reconcile_conflict": 1,
+        # A push already happened: failed production verification takes
+        # precedence over work that never deployed.
+        "post_push_verification_failed": 2,
+        "semantic_conflict": 3,
+        "blocked": 4,
+        "failed": 5,
+        "post_push_verification_unknown": 6,
+    }
+    return (order.get(reason or "", 99), -job.id)
+
+
+def _plan_for_code(
+    code: str,
+    *,
+    job: Job | None = None,
+    remote_name: str = "origin",
+) -> NextActionPlan:
+    job_id = job.id if job else None
+    mapping: dict[str, tuple[str | None, str]] = {
+        "upgrade_mergetrain": (None, "none"),
+        "unlock_wedged_runner": ("mergetrain unlock --force", "recovery"),
+        "wait_for_runner": (None, "none"),
+        "reconcile_pending_deploy": ("mergetrain reconcile --apply", "recovery"),
+        "reconcile_conflict_manual": ("mergetrain reconcile", "recovery"),
+        "fix_blocked_job": (
+            f"mergetrain inspect {job_id}" if job_id is not None else None,
+            "none",
+        ),
+        "resolve_failed_verification": (
+            f"mergetrain verify --job {job_id}" if job_id is not None else None,
+            "recovery",
+        ),
+        "verify_reconciled_deploy": (
+            f"mergetrain verify --job {job_id}" if job_id is not None else "mergetrain verify",
+            "recovery",
+        ),
+        "deploy_when_approved": ("mergetrain deploy", "deploy"),
+        "cancel_and_reenqueue_legacy_validated_jobs": (None, "runner"),
+        "run_daemon_when_approved": ("mergetrain daemon", "deploy"),
+        "validate_queued_jobs": ("mergetrain validate", "runner"),
+        "reconcile_stranded_claim": ("mergetrain reconcile --apply", "recovery"),
+        "initialize_config": ("mergetrain init --write", "none"),
+        "open_git_repository": (None, "none"),
+        "configure_git_remote": (None, "none"),
+        "fetch_integration_ref": (shell_join(["git", "fetch", remote_name]), "none"),
+        "gc_available": ("mergetrain gc", "none"),
+        "enqueue_clean_branch": (None, "none"),
+    }
+    command, approval = mapping.get(code, (None, "none"))
+    return NextActionPlan(
+        code=code,
+        command=command,
+        requires_approval=approval,
+        target_job_id=job_id,
+        reason_code=attention_reason_code(job) if job else None,
+    )
 
 
 def _lock_expired(lock: dict[str, Any] | None) -> bool:
@@ -80,9 +188,14 @@ def _lock_expired(lock: dict[str, Any] | None) -> bool:
         return True
 
 
-def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION) -> str:
+def plan_next_action(
+    payload: dict[str, Any],
+    *,
+    config_version: int = CONFIG_VERSION,
+    attention_jobs: Sequence[Job] = (),
+) -> NextActionPlan:
     if config_version > CONFIG_VERSION:
-        return "upgrade_mergetrain"
+        return _plan_for_code("upgrade_mergetrain")
     lock = payload.get("lock")
     count_data = payload.get("counts") or {}
     liveness = lock.get("liveness") if lock else None
@@ -93,49 +206,84 @@ def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
     # cannot be auto-stolen (it may still be pushing) — the operator must run
     # `unlock --force` (0.3.0 Phase 2, RFC §7).
     if lock and expired and liveness in {"alive", "unknown"} and in_progress > 0:
-        return "unlock_wedged_runner"
+        return _plan_for_code("unlock_wedged_runner")
     if lock and liveness == "alive" and not expired:
-        return "wait_for_runner"
+        return _plan_for_code("wait_for_runner")
+
+    candidates = sorted(
+        (job for job in attention_jobs if attention_reason_code(job)),
+        key=_attention_priority,
+    )
+    selected = candidates[0] if candidates else None
+    selected_reason = attention_reason_code(selected) if selected else None
+
     # A crash may have parked jobs (needs_reconcile), or left a marker-bearing
     # orphan a dead/absent runner never got to reconcile. Deploy is hard-blocked
     # until reconcile resolves it, so this dominates the deploy/validate tail.
     if count_data.get("needs_reconcile", 0) or (
         count_data.get("in_progress_with_marker", 0) and liveness != "alive"
     ):
-        return "reconcile_pending_deploy"
+        target = selected if selected_reason == "pending_reconcile" else None
+        return _plan_for_code("reconcile_pending_deploy", job=target)
     # A blocked job that still carries its marker is a reconcile conflict needing
     # git inspection, distinct from a plain gate/assembly failure.
     if count_data.get("blocked_with_marker", 0):
-        return "reconcile_conflict_manual"
+        target = selected if selected_reason == "reconcile_conflict" else None
+        return _plan_for_code("reconcile_conflict_manual", job=target)
+    if selected_reason == "post_push_verification_failed" or count_data.get(
+        "deployed_verify_failed", 0
+    ):
+        return _plan_for_code("resolve_failed_verification", job=selected)
     if count_data.get("blocked", 0) or count_data.get("failed", 0):
-        return "fix_blocked_job"
+        target = (
+            selected
+            if selected_reason in {"semantic_conflict", "blocked", "failed"}
+            else None
+        )
+        return _plan_for_code("fix_blocked_job", job=target)
     # A reconcile-finalized deploy whose post-push verify could not be proven.
     if count_data.get("deployed_verify_unknown", 0):
-        return "verify_reconciled_deploy"
+        target = selected if selected_reason == "post_push_verification_unknown" else None
+        return _plan_for_code("verify_reconciled_deploy", job=target)
     # Work claimed by a runner that is no longer holding the lock: a crash, or a
     # run that raised after its lease was released (queue contention does this).
     # The next deploy requeues it automatically, which also clears its
     # validated-train identity -- so an approved train can quietly become a
     # different set. Name it instead of letting doctor report an idle queue.
     if not lock and in_progress:
-        return "reconcile_stranded_claim"
+        return _plan_for_code("reconcile_stranded_claim")
     # Every queue-advancing command refuses without a config -- the deploy path
     # is fail-closed on purpose -- so pointing at queue work here would send the
     # reader into a refusal. Ranked below the recovery actions above, which stay
     # available precisely because they do not need a config.
     if payload.get("config_exists") is False:
-        return "initialize_config"
+        return _plan_for_code("initialize_config")
+    if payload.get("repo_ready") is False:
+        return _plan_for_code("open_git_repository")
+    if payload.get("remote_ready") is False:
+        return _plan_for_code("configure_git_remote")
+    if payload.get("integration_ref_ready") is False:
+        return _plan_for_code(
+            "fetch_integration_ref",
+            remote_name=str(payload.get("remote_name") or "origin"),
+        )
     if payload.get("validated_trains"):
         if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
-            return "deploy_when_approved"
-        return "cancel_and_reenqueue_legacy_validated_jobs"
+            return _plan_for_code("deploy_when_approved")
+        return _plan_for_code("cancel_and_reenqueue_legacy_validated_jobs")
     if count_data.get("auto_queued", 0):
-        return "run_daemon_when_approved"
+        return _plan_for_code("run_daemon_when_approved")
     if count_data.get("queued", 0):
-        return "validate_queued_jobs"
+        return _plan_for_code("validate_queued_jobs")
     if payload.get("gc", {}).get("worktree_candidates"):
-        return "gc_available"
-    return "enqueue_clean_branch"
+        return _plan_for_code("gc_available")
+    return _plan_for_code("enqueue_clean_branch")
+
+
+def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION) -> str:
+    """Compatibility wrapper for read models that consume only the code."""
+
+    return plan_next_action(payload, config_version=config_version).code
 
 
 def refresh_dashboard_snapshot(

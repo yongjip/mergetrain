@@ -183,6 +183,37 @@ class ToolSurfaceTests(unittest.TestCase):
         self.assertEqual(args, ["enqueue", "--task", "t", "--branch", "agent/one", "--json"])
         self.assertNotIn("--auto", args)
 
+    def test_enqueue_uses_bound_repo_when_server_cwd_is_elsewhere(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td).resolve()
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=agent/one", str(repo)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
+            )
+            subprocess.run(["git", "remote", "add", "origin", str(repo)], cwd=repo, check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                "version: 2\nproject:\n  name: mcp-cwd\ngates: []\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "ready"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+
+            tools = MergetrainTools(repo=repo)
+            payload = asyncio.run(tools.enqueue(task="mcp cwd", branch="agent/one"))
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(Path(payload["job"]["worktree_path"]), repo)
+
     def test_operator_only_reads_are_not_public_methods(self) -> None:
         for name in ("doctor", "history", "stats", "agent_contract", "gc_preview"):
             self.assertFalse(hasattr(self.tools, name), name)
@@ -501,6 +532,25 @@ class DeployGateTests(unittest.TestCase):
         self.assertIn("Gate plan: rerun", shown)
         self.assertIn("checked again before push", shown)
         self.assertNotIn("abc123", shown)
+
+    def test_the_human_sees_a_missing_project_gate_warning(self) -> None:
+        preview = {
+            **PREVIEW,
+            "warnings": [
+                {
+                    "code": "no_configured_gates",
+                    "severity": "warning",
+                    "summary": "No project gates are configured.",
+                }
+            ],
+        }
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            return_value=completed(json.dumps(preview)),
+        ):
+            plan = asyncio.run(self.tools.prepare_deploy(FakeContext()))
+        self.assertIn("Warning: No project gates are configured.", plan.summary)
 
     def test_a_client_without_elicitation_is_refused_with_instructions(self) -> None:
         ctx = FakeContext(elicitation=False)

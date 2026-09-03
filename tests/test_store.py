@@ -437,7 +437,7 @@ class StoreTests(unittest.TestCase):
         queue_reads = [
             statement
             for statement in statements
-            if statement.lstrip().upper().startswith("SELECT")
+            if statement.lstrip().upper().startswith(("SELECT", "WITH"))
             and "FROM DEPLOY_QUEUE" in statement.upper()
         ]
         self.assertEqual(len(queue_reads), 1, queue_reads)

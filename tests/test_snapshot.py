@@ -2,13 +2,65 @@ from __future__ import annotations
 
 import unittest
 
-from mergetrain.snapshot import next_action
+from mergetrain.commands.inspection import _job_display_state
+from mergetrain.models import Job
+from mergetrain.snapshot import attention_reason_code, next_action
 
 PAST = "2000-01-01T00:00:00Z"  # any past ISO timestamp -> the lease is expired
 FUTURE = "2999-01-01T00:00:00Z"
 
 
 class NextActionTests(unittest.TestCase):
+    def test_job_projection_matrix_keeps_verification_failures_actionable(self) -> None:
+        cases = [
+            (Job(id=1, task="a", branch="a", status="queued"), "waiting", None),
+            (Job(id=2, task="a", branch="a", status="in_progress"), "running", None),
+            (Job(id=3, task="a", branch="a", status="validated"), "ready", None),
+            (Job(id=4, task="a", branch="a", status="blocked"), "attention", "blocked"),
+            (Job(id=5, task="a", branch="a", status="failed"), "attention", "failed"),
+            (
+                Job(
+                    id=6,
+                    task="a",
+                    branch="a",
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="failed",
+                ),
+                "attention",
+                "post_push_verification_failed",
+            ),
+            (
+                Job(
+                    id=7,
+                    task="a",
+                    branch="a",
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="unknown",
+                ),
+                "attention",
+                "post_push_verification_unknown",
+            ),
+            (
+                Job(
+                    id=8,
+                    task="a",
+                    branch="a",
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="succeeded",
+                ),
+                "done",
+                None,
+            ),
+            (Job(id=9, task="a", branch="a", status="canceled"), "done", None),
+        ]
+        for job, state, reason in cases:
+            with self.subTest(status=job.status, verify_status=job.verify_status):
+                self.assertEqual(_job_display_state(job), state)
+                self.assertEqual(attention_reason_code(job), reason)
+
     def test_every_outcome(self) -> None:
         cases = [
             (
@@ -32,6 +84,10 @@ class NextActionTests(unittest.TestCase):
             ({"lock": None, "counts": {"blocked_with_marker": 1}}, "reconcile_conflict_manual"),
             ({"lock": None, "counts": {"blocked": 1}}, "fix_blocked_job"),
             ({"lock": None, "counts": {"failed": 1}}, "fix_blocked_job"),
+            (
+                {"lock": None, "counts": {"deployed_verify_failed": 1}},
+                "resolve_failed_verification",
+            ),
             ({"lock": None, "counts": {"deployed_verify_unknown": 1}}, "verify_reconciled_deploy"),
             (
                 {

@@ -10,6 +10,7 @@
 | `reconcile_pending_deploy` | Inspect `reconcile --json`; require confirmation before applying recovery. |
 | `reconcile_conflict_manual` | Inspect the marker-bearing conflict and report the required Git repair. |
 | `fix_blocked_job` | Fix and commit in the owning branch, then use `retry <id>`. |
+| `resolve_failed_verification` | Re-run the exact failed verification job; the code is already deployed. |
 | `verify_reconciled_deploy` | Re-run verification or record an explicit acknowledgement. |
 | `deploy_when_approved` | Continue under bounded unattended approval; otherwise run `deploy` and keep identity details internal. |
 | `cancel_and_reenqueue_legacy_validated_jobs` | Explain that legacy validation lacks a deployable identity; do not cancel without approval. |
@@ -17,6 +18,9 @@
 | `validate_queued_jobs` | Run `validate`; it never pushes. |
 | `reconcile_stranded_claim` | Inspect recovery state; require confirmation before applying `reconcile --apply`. |
 | `initialize_config` | Run init in preview mode or ask before writing project files. |
+| `open_git_repository` | Open or correct the configured Git worktree before changing queue state. |
+| `configure_git_remote` | Configure the named Git remote; do not enqueue against a guessed destination. |
+| `fetch_integration_ref` | Run the supplied fetch command, then reread status before enqueueing. |
 | `gc_available` | Show the dry-run candidate list; deletion requires separate approval. |
 | `enqueue_clean_branch` | Enqueue only a committed, clean task branch; exact SHA capture is automatic. |
 

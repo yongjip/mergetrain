@@ -53,10 +53,25 @@ text.
 - `health`: `healthy`, `unconfigured`, or `degraded`;
 - `state`: `idle`, `waiting`, `running`, `ready`, or `attention`;
 - `summary`;
-- `next_action`: `code`, nullable `command`, and `requires_approval`;
+- `next_action`: `code`, nullable `command`, `requires_approval`, nullable
+  `target_job_id`, and nullable stable `reason_code`; the code, target, and
+  command are one decision and never refer to different jobs;
+- additive `warnings`, whose entries carry a stable `code`, `severity`, and
+  human-readable `summary` without changing `health` or authorizing mutation;
 - `counts`: `waiting`, `running`, `ready`, `attention`, and `done`;
 - compact `attention_jobs` and `recent_jobs`, whose `state` uses the same four
-  active values plus `done` and whose terminal detail stays in `outcome`.
+  active values plus `done`, whose terminal detail stays in `outcome`, and
+  whose actionable rows carry the same stable `reason_code` vocabulary.
+
+An unknown post-push verification remains in Attention until it is resolved. A
+known verification failure remains in Attention while it belongs to the latest
+deployed generation; a later deploy supersedes that production-health result in
+the compact current projection, while `inspect` keeps the immutable failure
+evidence. A missing configured Git remote or integration ref makes the
+repository `degraded`; status will not recommend enqueue until the base can be
+resolved. `resolve_failed_verification` points at the exact deployed job and
+uses the existing non-pushing `verify --job` recovery path. Status does not
+create a queue database when none exists.
 
 Internal queue, push, verify, and recovery states remain available through
 `inspect` and diagnostics. Consumers should not reconstruct a competing state

@@ -131,7 +131,8 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
             if version != SCHEMA_VERSION:
                 raise QueueError(
                     f"queue schema version {version} does not match supported version "
-                    f"{SCHEMA_VERSION}; run mergetrain inside that repo to migrate"
+                    f"{SCHEMA_VERSION}; run 'mergetrain gc --json' inside that repo "
+                    "to migrate local queue state"
                 )
         except sqlite3.OperationalError as exc:
             conn.close()
