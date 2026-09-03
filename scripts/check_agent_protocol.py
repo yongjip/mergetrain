@@ -11,14 +11,37 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from mergetrain.cli import render_agent_contract  # noqa: E402
+from mergetrain.cli import build_parser, render_agent_contract  # noqa: E402
 from mergetrain.snapshot import NEXT_ACTION_VALUES  # noqa: E402
 
 START = "<!-- BEGIN GENERATED: mergetrain-agent-protocol -->"
 END = "<!-- END GENERATED: mergetrain-agent-protocol -->"
 SURFACES = (
     ROOT / "CLAUDE.md",
+    ROOT / "llms.txt",
+    ROOT / "llms-full.txt",
     ROOT / "integrations/claude/plugin/skills/mergetrain/SKILL.md",
+)
+CORE_COMMANDS = ("init", "status", "enqueue", "validate", "deploy", "inspect")
+GRAMMAR_SURFACES = (
+    ROOT / "AGENTS.md",
+    ROOT / "CLAUDE.md",
+    ROOT / "README.md",
+    ROOT / "llms.txt",
+    ROOT / "llms-full.txt",
+    ROOT / "docs/agent-contract.md",
+    ROOT / "docs/quickstart.md",
+    ROOT / "integrations/claude/plugin/skills/deploy/SKILL.md",
+    ROOT / "integrations/claude/plugin/skills/mergetrain/SKILL.md",
+    ROOT / "scripts/mt-status.sh",
+    ROOT / "scripts/mt-validate.sh",
+    ROOT / "scripts/mt-deploy.sh",
+)
+REMOVED_GRAMMAR = (
+    re.compile(r"\bmergetrain\s+(?:doctor|run-batch|run-next|recover|agent-contract)\b"),
+    re.compile(
+        r"\bmergetrain_(?:doctor|history|stats|agent_contract|gc_preview|events|logs)\b"
+    ),
 )
 
 
@@ -85,6 +108,39 @@ def check_reference_tables() -> list[str]:
     return errors
 
 
+def check_product_grammar() -> list[str]:
+    errors: list[str] = []
+    help_text = build_parser().format_help()
+    section = help_text.split("core commands:\n", 1)[-1]
+    visible = re.findall(r"^    ([a-z][a-z-]+)\s{2,}", section, flags=re.MULTILINE)
+    if tuple(visible) != CORE_COMMANDS:
+        errors.append(
+            "default CLI help must expose exactly the six core commands in "
+            f"lifecycle order; received {visible}"
+        )
+
+    for path in GRAMMAR_SURFACES:
+        text = path.read_text(encoding="utf-8")
+        for pattern in REMOVED_GRAMMAR:
+            match = pattern.search(text)
+            if match:
+                errors.append(f"{path}: removed grammar remains: {match.group(0)}")
+
+    deploy_skill = (
+        ROOT / "integrations/claude/plugin/skills/deploy/SKILL.md"
+    ).read_text(encoding="utf-8")
+    for forbidden in ("$ARGUMENTS", "train_id"):
+        if forbidden in deploy_skill:
+            errors.append(
+                "the Claude deploy skill must not accept a model/user train "
+                f"selector: found {forbidden}"
+            )
+    for required in ("mergetrain_status", "mergetrain_deploy"):
+        if required not in deploy_skill:
+            errors.append(f"the Claude deploy skill is missing {required}")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -106,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             errors.append(f"{path}: generated agent protocol is stale")
 
     errors.extend(check_reference_tables())
+    errors.extend(check_product_grammar())
     if errors:
         for error in errors:
             print(error, file=sys.stderr)

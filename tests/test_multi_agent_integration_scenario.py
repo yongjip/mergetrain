@@ -15,7 +15,7 @@ from benchmarks.multi_agent_integration.scenario import (
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PROMO_TEST = '''from decimal import Decimal
+PROMO_TEST = """from decimal import Decimal
 import unittest
 from checkout import discount_amount
 
@@ -23,9 +23,9 @@ from checkout import discount_amount
 class PromoTests(unittest.TestCase):
     def test_discount_is_fifteen_at_threshold(self) -> None:
         self.assertEqual(discount_amount(Decimal("100")), Decimal("15.00"))
-'''
+"""
 
-SHIPPING_TEST = '''from decimal import Decimal
+SHIPPING_TEST = """from decimal import Decimal
 import unittest
 from checkout import shipping_fee
 
@@ -33,16 +33,16 @@ from checkout import shipping_fee
 class ShippingTests(unittest.TestCase):
     def test_shipping_is_free(self) -> None:
         self.assertEqual(shipping_fee(Decimal("100")), Decimal("0.00"))
-'''
+"""
 
-REFERENCE_TEST = '''import unittest
+REFERENCE_TEST = """import unittest
 from checkout import format_order_reference
 
 
 class ReferenceTests(unittest.TestCase):
     def test_reference_is_padded(self) -> None:
         self.assertEqual(format_order_reference(42), "ORD-000042")
-'''
+"""
 
 
 class MultiAgentIntegrationScenarioTests(unittest.TestCase):
@@ -50,7 +50,7 @@ class MultiAgentIntegrationScenarioTests(unittest.TestCase):
         launcher = root / "mergetrain_under_test.py"
         launcher.write_text(
             f"""import sys
-sys.path.insert(0, {str(ROOT / 'src')!r})
+sys.path.insert(0, {str(ROOT / "src")!r})
 from mergetrain.cli import main
 raise SystemExit(main())
 """,
@@ -71,7 +71,7 @@ raise SystemExit(main())
     ) -> None:
         self._run(["git", "add", "."], cwd=worktree)
         self._run(["git", "commit", "-m", f"test: complete {task}"], cwd=worktree)
-        self._run([*launcher, "doctor", "--json"], cwd=worktree)
+        self._run([*launcher, "status", "--json"], cwd=worktree)
         self._run(
             [
                 *launcher,
@@ -80,7 +80,6 @@ raise SystemExit(main())
                 task,
                 "--branch",
                 branch,
-                "--capture-sha",
                 "--json",
             ],
             cwd=worktree,
@@ -106,9 +105,7 @@ raise SystemExit(main())
                 promo_source.replace('return _money("10") if', 'return _money("15") if'),
                 encoding="utf-8",
             )
-            (promo / "tests" / "test_promo_discount.py").write_text(
-                PROMO_TEST, encoding="utf-8"
-            )
+            (promo / "tests" / "test_promo_discount.py").write_text(PROMO_TEST, encoding="utf-8")
             self._commit_and_enqueue(
                 worktree=promo,
                 launcher=launcher,
@@ -134,10 +131,8 @@ raise SystemExit(main())
 
             reference = Path(tasks["reference"]["worktree"])
             reference_source = (reference / "checkout.py").read_text(encoding="utf-8")
-            addition = '''\n\ndef format_order_reference(order_id: int) -> str:\n    if not 1 <= order_id <= 999999:\n        raise ValueError("order_id must be between 1 and 999999")\n    return f"ORD-{order_id:06d}"\n'''
-            (reference / "checkout.py").write_text(
-                reference_source + addition, encoding="utf-8"
-            )
+            addition = """\n\ndef format_order_reference(order_id: int) -> str:\n    if not 1 <= order_id <= 999999:\n        raise ValueError("order_id must be between 1 and 999999")\n    return f"ORD-{order_id:06d}"\n"""
+            (reference / "checkout.py").write_text(reference_source + addition, encoding="utf-8")
             (reference / "tests" / "test_order_reference.py").write_text(
                 REFERENCE_TEST, encoding="utf-8"
             )

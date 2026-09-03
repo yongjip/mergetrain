@@ -13,7 +13,7 @@ from .transactions import immediate
 def deploy_reconcile_pending(conn: sqlite3.Connection) -> int:
     """Count jobs that make a deploy unsafe: parked reconciles plus not-yet-split
     marker-bearing orphans. A deploy targets the same push refs, so every deploy
-    entrypoint (``run-batch``, ``run-next``, and the daemon) must refuse while
+    entrypoint (``deploy`` and the daemon) must refuse while
     this is non-zero (0.3.0 Phase 2, decision Q4)."""
     active = active_runner_lock(conn)
     active_token = active.token if active is not None else ""

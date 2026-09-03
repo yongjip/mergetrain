@@ -676,7 +676,8 @@ def select_validated_train(
         if len(deployable) > 1:
             ids = ", ".join(str(summary["train_id"]) for summary in deployable)
             raise QueueError(
-                f"multiple validated trains are ready; pass --train-id with one of: {ids}"
+                "multiple validated trains predate the v3 single-Ready invariant; "
+                f"select one with the migration-only deploy --train-id option: {ids}"
             )
         selected = deployable[0] if deployable else None
         if selected is None and summaries:

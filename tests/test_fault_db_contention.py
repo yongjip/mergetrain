@@ -209,9 +209,7 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
             wrapper, state = _contend_on_first(holder, target_status)
             with patch("mergetrain.git_runner.mark_job", wrapper):
                 try:
-                    GitRunner(config).process_batch(
-                        conn, claimed, deploy=True, owner=owner
-                    )
+                    GitRunner(config).process_batch(conn, claimed, deploy=True, owner=owner)
                 except (LockHeld, LostLease, QueueBusy) as exc:
                     # Acceptable: a classified, retryable QueueError. The CLI
                     # maps these to error.code lock_held / lost_lease and the
@@ -370,9 +368,7 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
                 # the one that landed, and the note keeps the contention visible
                 # instead of silently swallowing it.
                 self.assertEqual(final.push_status, "succeeded")
-                self.assertEqual(
-                    final.deploy_sha, git(root / "remote.git", "rev-parse", "main")
-                )
+                self.assertEqual(final.deploy_sha, git(root / "remote.git", "rev-parse", "main"))
                 self.assertIn("post-push completion warning", final.note)
                 # A finalized deploy drops its recovery markers, otherwise every
                 # later deploy entrypoint would refuse on a phantom reconcile.
@@ -675,7 +671,7 @@ class ContentionTranslationTests(unittest.TestCase):
 
 
 class ProcessOneContentionTests(unittest.TestCase):
-    """process_one has its own QueueBusy clause, and it is the one run-next uses.
+    """process_one has its own QueueBusy clause, and it is the one validate uses.
 
     Everything else in this module drives process_batch, so the two clauses could
     drift apart -- an adversarial review found process_one's entered by no test at
@@ -697,9 +693,7 @@ class ProcessOneContentionTests(unittest.TestCase):
             conn.execute(f"PRAGMA busy_timeout = {CONTENDED_BUSY_TIMEOUT_MS}")
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                claimed = claim_next_job(
-                    conn, owner=f"runner:{os.getpid()}", deploy=True
-                )
+                claimed = claim_next_job(conn, owner=f"runner:{os.getpid()}", deploy=True)
                 self.assertIsNotNone(claimed)
                 holder = _WriteLockHolder(config.state.db)
                 real_mark_job = git_runner_module.mark_job
@@ -785,7 +779,7 @@ class ContentionContractTests(unittest.TestCase):
                 patch.object(deploy_commands, "connect", fast_connect),
                 redirect_stdout(out),
             ):
-                code = main(["--repo", str(repo), "run-batch", "--deploy", "--json"])
+                code = main(["--repo", str(repo), "validate", "--json"])
             holder.assert_clean()
 
             payload = json.loads(out.getvalue())
@@ -805,9 +799,7 @@ class ContentionContractTests(unittest.TestCase):
                 conn.close()
             self.assertNotEqual(final.status, "failed")
             self.assertEqual(final.push_status, "not_run")
-            self.assertEqual(
-                git(root / "remote.git", "rev-parse", "main"), remote_before
-            )
+            self.assertEqual(git(root / "remote.git", "rev-parse", "main"), remote_before)
 
 
 if __name__ == "__main__":  # pragma: no cover

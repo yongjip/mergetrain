@@ -70,19 +70,18 @@ New installs should simply use `mergetrain` without the extra.
 
 ```sh
 mergetrain --version
-mergetrain version --json
-mergetrain agent-contract --json
+mergetrain status --diagnose --json
 ```
 
-`--version` remains a stable one-line compatibility check. `version --json`
-also identifies the imported package path, wheel/editable install mode, and Git
-commit/dirty state when those facts can be discovered safely. This is useful for
-detecting a stale editable install that has the same semantic version as a
+`--version` is the stable one-line compatibility check. Diagnostic status also
+identifies the imported package path, wheel/editable install mode, and Git
+commit/dirty state when those facts can be discovered safely. This is useful
+for detecting a stale editable install that has the same semantic version as a
 released wheel.
 
 ## From source without installing
 
 ```sh
 PYTHONPATH=src python -m mergetrain --version
-PYTHONPATH=src python -m mergetrain doctor --json
+PYTHONPATH=src python -m mergetrain status --diagnose --json
 ```

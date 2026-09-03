@@ -23,8 +23,7 @@ verifying an exact validation identity.
 Start with read-only commands:
 
 ```sh
-mergetrain doctor --json
-mergetrain status --json
+mergetrain status --diagnose --json
 mergetrain stats --json
 ```
 
@@ -45,7 +44,7 @@ mergetrain stats --json
 | `trains.terminal_land_rate` | deployed trains over deployed + blocked + failed + canceled trains | compare with legacy `land_rate` to expose cancellation/supersession cost |
 | `batching.jobs_per_run` | claimed jobs per retained runner invocation | compare actual batches with the intended two-to-five-job starting heuristic |
 | `batching.estimated_savings` | conservative gate executions and seconds avoided by successful multi-job runs | weigh observed savings against validation failure and conflict rates |
-| `recovery.operation_counts` | operator `reconcile` and `recover` invocations since the selected evidence baseline | investigate repeated recovery before treating it as normal operating cost |
+| `recovery.operation_counts` | operator `reconcile` invocations plus retained historical `recover` evidence since the selected baseline | investigate repeated recovery before treating it as normal operating cost |
 
 Recommendations require at least three timed samples and include their evidence.
 Treat them as leads, not commands. Runner events retain the newest 5,000 rows,
@@ -196,16 +195,9 @@ because a build tool has one.
 ## Reuse validation only under an explicit policy
 
 Validated-gate reuse is more aggressive than a warm cache. Keep
-`deploy.reuse.enabled: false` unless the repository owner has accepted the
-policy. For a one-off authorized decision, preview it without changing state:
-
-```sh
-mergetrain run-batch --deploy \
-  --train-id <id> \
-  --reuse-validated \
-  --preview \
-  --json
-```
+`deploy.reuse.enabled: false` unless the repository owner has accepted and
+committed the policy. v3 deliberately has no one-off reuse switch. Use
+`mergetrain deploy --json` to inspect the exact non-pushing decision.
 
 Safe reuse needs a short age limit, environment fingerprints for compilers,
 SDKs, container images, and other non-Git inputs, plus
@@ -222,7 +214,7 @@ The runner reads configuration from the checkout where mergetrain is invoked.
 For self-hosting repositories, an old or locally edited `.mergetrain.yaml` can
 silently select different gates from the integration branch.
 
-`doctor --json` compares the local configuration bytes with the configuration
+`status --diagnose --json` compares the local configuration bytes with the configuration
 at the locally known integration ref and reports:
 
 - `config_drift.state=in_sync` when the blobs match;
@@ -241,11 +233,11 @@ deploy refs themselves.
 
 Fast recovery avoids repeating failed manual work:
 
-1. Read `doctor --json` or `status --json` and follow `next_action`.
+1. Read `status --json` and follow `next_action`.
 2. Fix a blocked or failed job in its owning worktree and commit the result.
 3. Run `mergetrain retry <job-id>` to dismiss the old outcome and capture fresh
    SHAs.
-4. After a crash or ambiguous push, run `reconcile`/`recover` before another
+4. After a crash or ambiguous push, run `reconcile --apply` before another
    deploy.
 
 Do not bypass a failed row with a duplicate enqueue. That loses failure
@@ -267,7 +259,7 @@ A false skip is more expensive than a cold run.
 
 ## Adoption checklist
 
-- [ ] `doctor --json` is healthy and config drift is understood.
+- [ ] `status --diagnose --json` is healthy and config drift is understood.
 - [ ] One runner owns all integration and deploy work.
 - [ ] Gates are ordered from cheap/high-signal to expensive.
 - [ ] The test runner uses safe internal parallelism.

@@ -251,5 +251,5 @@ the cron and succeeds, so a release never fails over tap plumbing.
 - Local SQLite queue and one lease-fenced runner for coding-agent worktrees.
 - Exact validated-train identity with approval-gated, atomic deploys.
 - Configurable gates, post-push verification, cancellation, and crash recovery.
-- JSON-first agent contract, doctor, status, and garbage collection.
+- JSON-first status, generated agent instructions, inspection, and garbage collection.
 - Loopback-only, read-only live dashboard with runner and gate explanations.

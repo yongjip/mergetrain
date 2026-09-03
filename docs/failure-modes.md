@@ -135,7 +135,7 @@ indistinguishable from a crash at the same instant — deliberately, because tha
 is a state the recovery machinery already understands. What the row looks like
 depends only on how far the deploy got before the contention:
 
-| Contention hit | Row is left | `recover` / the next claim resolves it to |
+| Contention hit | Row is left | `reconcile --apply` / the next claim resolves it to |
 |---|---|---|
 | before the write-ahead marker | `in_progress`, no marker, remote untouched | `queued` |
 | after the marker, push outcome unknown | `in_progress` with its marker and pin ref | `needs_reconcile`, then the remote decides |
@@ -151,17 +151,15 @@ Two consequences worth knowing:
   did not happen". The refs may well be on the remote; read `status --json` and,
   if the row carries a marker, run `reconcile`.
 - A row left `in_progress` with no runner lock is a stranded claim.
-  `doctor` reports `next_action: recover_stranded_claim`; `mergetrain recover`
-  clears it.
+  `status` reports `next_action.code: reconcile_stranded_claim`;
+  `mergetrain reconcile --apply` clears it.
 
   Recovering it **dissolves any validated-train identity it carried**, on
   purpose: a requeued row asserting a validation it no longer holds would
-  collateral-block unrelated auto deploys. The consequence is that a bare
-  `run-batch --deploy` afterwards gates and ships whatever is queued *now* as a
-  new train — which may not be the set that was approved. Two things guard that:
-  the requeue writes the dissolution into the job's `note`, naming the train and
-  saying to validate and re-approve; and retrying with the original
-  `--train-id` fails closed rather than silently shipping a different set.
+  collateral-block unrelated auto deploys. A later `deploy` validates the
+  current queued set and presents a new exact plan, so the dissolved identity
+  cannot silently inherit approval. The requeue also records the dissolution
+  and prior train in the job note.
 
 ## Stale lock
 
@@ -184,8 +182,7 @@ Reclaim rules when another runner tries to acquire:
 Inspect with:
 
 ```sh
-mergetrain doctor --json
-mergetrain status --json
+mergetrain status --diagnose --json
 mergetrain inspect <job-id> --json
 mergetrain events --job <job-id> --after <last-event-id> --follow --jsonl
 ```

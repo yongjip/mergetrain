@@ -1,809 +1,177 @@
 # CLI reference
 
-All commands share global options, which may appear **before or after** the subcommand (the parser normalizes their position, since agents often misplace them):
-
-```sh
-mergetrain --config <path> --repo <repo> --db <sqlite> <command>
-mergetrain doctor --json --repo /path/to/repo      # equivalent to:
-mergetrain --repo /path/to/repo doctor --json
-```
-
-| Global option | Meaning |
-|---|---|
-| `--config` | Path to `.mergetrain.yaml` (defaults to `<repo>/.mergetrain.yaml`). |
-| `--repo` | Repository root or worktree path (defaults to the current directory). |
-| `--db` | Override the SQLite DB path from config. |
-| `--version` | Print the version and exit. |
-
-`--version` keeps its stable one-line output (`mergetrain X.Y.Z`). Use the
-`version` command when you also need to identify the code that was imported.
-
-Command summary:
+mergetrain 3 has one small public grammar. The six core verbs shown by
+`mergetrain --help` are:
 
 ```text
-mergetrain init [--project NAME] [--write] [--force]
-mergetrain agent-contract [--json]
-mergetrain version [--json]
-mergetrain demo [--dir PATH] [--keep] [--pause]
-mergetrain enqueue --task TASK --branch BRANCH [options]
-mergetrain retry JOB_ID [--rebase] [--json]
-mergetrain supersede --train-id ID --replacement TASK BRANCH WORKTREE [--replacement ...] [--json]
-mergetrain status [--json] [--limit N]
-mergetrain events [--job ID | --train-id ID] [--after EVENT_ID] [--follow] [--jsonl]
-mergetrain inspect JOB_ID [--event-limit N] [--json]
-mergetrain history [--since TIMESTAMP] [--limit N] [--json]
-mergetrain stats [--since TIMESTAMP] [--json]
-mergetrain logs JOB_ID [--follow] [--tail N]
-mergetrain doctor [--json]
-mergetrain dashboard [--host HOST] [--port PORT] [--allow-remote] [--preview]
-mergetrain mcp
-mergetrain run-next  (--validate-only | --deploy) [--keep-worktree] [--json]
-mergetrain run-batch (--validate-only | --deploy) [--train-id ID] [--keep-worktree] [--json]
-mergetrain daemon [--validate-only] [--interval SECONDS] [--once] [--notify] [--keep-worktree]
-mergetrain gc [--json] [--apply] [--delete-branches]
-mergetrain reconcile [--apply] [--json]
-mergetrain recover [--gc] [--json]
-mergetrain unlock [--force] [--json]
-mergetrain cancel JOB_ID [--note NOTE] [--json]
-mergetrain dismiss [JOB_ID | --all] [--note NOTE] [--json]
-mergetrain verify [--job ID] [--ack succeeded|failed] [--json]
-mergetrain hub [add|remove|status|daemon] [--host HOST] [--port PORT] [--allow-remote] [--registry PATH]
+init  status  enqueue  validate  deploy  inspect
 ```
+
+Global options may appear before or after the command:
+
+```sh
+mergetrain --repo /path/to/repo status --json
+mergetrain status --json --repo /path/to/repo
+```
+
+Use `mergetrain --version` for the installed release. Add `--json` where
+available for the versioned machine contract.
 
 ## `init`
 
-Print or write starter config and agent instructions.
-
 ```sh
-mergetrain init --project demo            # print config to stdout
-mergetrain init --project demo --write    # write files into the repo
+mergetrain init [--project NAME]
+mergetrain init [--project NAME] --write
+mergetrain init --refresh-instructions
 ```
 
-`--write` creates `.mergetrain.yaml`, `AGENTS.mergetrain.md`, and
-`CLAUDE.mergetrain.md`. Existing files are not overwritten without `--force`.
-The sidecars are not automatically discovered; link them from the repository's
-root `AGENTS.md` and/or `CLAUDE.md`. Refresh either sidecar later with the
-existing `mergetrain agent-contract` output instead of using `init --force`,
-which also regenerates config. See [quickstart](quickstart.md#1-initialize-config)
-and the [config reference](config.md).
-
-## `agent-contract`
-
-Print the short operating rules an agent must follow.
-
-```sh
-mergetrain agent-contract
-mergetrain agent-contract --json
-```
-
-`--json` emits `name`, `purpose`, `rules`, and `boundary`. See [agent contract](agent-contract.md).
-
-## `version`
-
-Show the semantic version plus installed-package provenance:
-
-```sh
-mergetrain version
-mergetrain version --json
-```
-
-The structured `runtime` object contains `distribution_version`, the actual
-`package_path`, `install_mode` (`wheel`, `editable`, or `unknown`), optional
-`source_path`, optional `source_commit`, and optional `source_dirty`. Editable
-mode is identified from the installed distribution's PEP 610 `direct_url.json`;
-paths are not classified by naming convention. A VCS install can report the
-commit recorded by PEP 610 even when the installed wheel has no Git checkout.
-Unavailable metadata is returned as `null` or `unknown`, never as a command
-failure.
-
-## `demo`
-
-Run a local-only walkthrough of the complete train lifecycle:
-
-```sh
-uvx mergetrain demo
-mergetrain demo --dir /tmp/mt-demo --keep
-mergetrain demo --pause
-```
-
-The command bootstraps a disposable Python project, a local bare Git remote,
-and four clean agent worktrees. Every branch passes alone; two branches form a
-semantic conflict only when combined, so the real runner bisects the four-job
-train, records `conflict_with`, keeps the two compatible jobs as one validated
-train, and atomically deploys exactly that survivor train after an explicit
-`--train-id` step. The walkthrough prints the real CLI commands and JSON output,
-including why its internal `result: partial` validation exits 1 before the final
-`result: success`.
-
-The sandbox never reads or writes the invoking repository or user Git config,
-and its remote is a local path, so the walkthrough uses no network. Git 2.32 or
-newer is required for config isolation.
-
-| Option | Meaning |
-|---|---|
-| `--dir PATH` | Use an absent or empty sandbox directory instead of a generated temporary one. |
-| `--keep` | Preserve a successful sandbox and print status/dashboard follow-up commands. |
-| `--pause` | Wait for Enter between the nine narrated steps. |
-
-Successful demos clean up automatically unless `--keep` is set. Any failed or
-interrupted demo is always preserved and prints `status --json` and
-`dashboard --preview` recovery hints. `MERGETRAIN_DEMO_STEP_DELAY` adds a
-bounded delay between steps for deterministic screen recording.
-
-## `enqueue`
-
-Add a task branch to the queue.
-
-```sh
-mergetrain enqueue --task feature-a --branch agent/feature-a
-```
-
-| Option | Meaning |
-|---|---|
-| `--task` | Human-readable job name (required). |
-| `--branch` | Task branch to merge (required). |
-| `--worktree` | Originating worktree path (defaults to cwd). |
-| `--base-sha` / `--head-sha` | Compatibility-only explicit SHAs. Omit them for ordinary handoff; ready-checked enqueue rejects values that differ from the current integration ref or clean task branch. |
-| `--capture-sha` | Compatibility spelling for the default exact-SHA capture; ordinary callers omit it. |
-| `--note` | Free-text status note. |
-| `--auto` | Bind the current destination and execution policy, then mark the job eligible for the unattended daemon (requires prior approval). |
-| `--allow-duplicate` | Allow a second active job for the same branch. |
-| `--allow-dirty` | Allow enqueue from a dirty worktree. |
-| `--allow-branch-mismatch` | Allow the worktree's current branch to differ from `--branch`. |
-| `--no-ready-check` | Skip readiness checks and direct-insert; default SHA capture is also skipped unless explicitly requested. |
-| `--json` | Emit the created job as JSON. |
-
-Defaults are safe: enqueue fails if the worktree is missing or dirty, if the current branch differs from `--branch`, or if the branch already has an active job.
-Missing base/head SHAs are captured automatically, so later branch movement
-cannot ride along after handoff. A normal ready-checked enqueue also rejects a
-manually supplied SHA that differs from the exact commit it captures. With
-`--no-ready-check`, pass `--capture-sha` or explicit SHAs if identity pinning is
-still required; that compatibility escape deliberately does not assert a clean
-current worktree.
-
-## `retry`
-
-Replace a fixed `blocked`/`failed` job with a fresh queue job without retyping
-its metadata:
-
-```sh
-mergetrain retry 12 --json
-mergetrain retry 12 --rebase
-```
-
-The replacement inherits the original task, note, worktree, and branch, and
-always captures fresh integration/base and branch/head SHAs. It inherits
-`--auto` eligibility only when both the destination and execution-policy hashes
-still match; otherwise the replacement is manual and needs fresh approval.
-Dismissal and insertion are one SQLite transaction. `--json` returns the new
-`job` plus the `dismissed_job` it replaced — singular and an object, unlike
-`dismiss`, whose `dismissed` is an array. With `--rebase`, Git fetch
-and rebase run first; any fetch error or rebase conflict leaves the old queue row
-untouched. The worktree must be clean and checked out on the job's branch.
+Without `--write`, prints the minimal config. With `--write`, creates
+`.mergetrain.yaml`, `AGENTS.mergetrain.md`, and `CLAUDE.mergetrain.md` and
+refuses to overwrite any existing file. `--refresh-instructions` rewrites only
+the two generated sidecars.
 
 ## `status`
 
-Print queue and lock state.
-
 ```sh
-mergetrain status --json
-mergetrain status --json --limit 50  # explicit deeper history
+mergetrain status [--limit N] [--json]
+mergetrain status --diagnose [--json]
 ```
 
-`--json` returns `ok`, `db`, `lock`, `counts`, `jobs`, `attention_jobs`,
-`jobs_limit`, `jobs_truncated`, and `validated_trains`. `jobs` remains the newest
-`--limit` rows (default 10). `attention_jobs` is uncapped and separately keeps
-every queued, running, blocked, failed, reconcile-pending, validated, or
-post-push-verify-unknown job visible even when it is older than recent history.
-Each validated-train entry also reports `current_integration_sha` and nullable
-`integration_changed_since_validation`. A true value leaves `deploy_eligible`
-unchanged but warns that deploy will reassemble and evaluate its configured
-gate policy before push. This is a read-only observation of the local
-integration ref; `status` does not fetch the remote. Deploy performs its own
-fetch before rebuilding, so this diagnostic never replaces deploy-time safety.
+This is the single state entry point. It returns:
 
-## `events`
+- `health`: `healthy`, `unconfigured`, or `degraded`;
+- `state`: `idle`, `waiting`, `running`, `ready`, or `attention`;
+- a human summary and exact `next_action` object;
+- grouped counts, action-required jobs, and recent compact job summaries.
 
-Read the retained structured runner events once, or follow a job/train without
-polling process lists:
+`--diagnose` adds configuration, Git, runtime provenance, lock, validated-train,
+and cleanup detail. Routine agents should not request it.
+
+## `enqueue`
 
 ```sh
-mergetrain events --job 42 --after 0 --follow --jsonl
-mergetrain events --train-id <id> --after 183 --follow --jsonl
+mergetrain enqueue --task TEXT --branch BRANCH [--worktree PATH] [--note TEXT] [--json]
 ```
 
-`--job` includes that job's own events plus shared batch phases such as fetch and
-gating. `--train-id` includes the full train. Without a scope, one-shot mode
-shows recent repository events and follow mode continues until interrupted.
+Enqueue always verifies a clean, matching task worktree and captures the exact
+integration and task commits. SHA inputs and readiness bypasses do not exist in
+the v3 interface.
 
-The `--jsonl` framing contract is one compact JSON object followed by one newline:
+`--auto` is intentionally hidden. Use it only after explicit bounded approval
+to validate, deploy, and verify the named task unattended. The approval is
+bound to the exact destination and execution policy; any later change blocks.
 
-- `type=stream_start` is the first frame on every connect or resume. It carries
-  the stream's `contract_version` and does not consume an event ID.
-- `type=event` is a persisted event. Its integer `id` is the resume cursor. It
-  includes phase/state, optional job and gate index/name, elapsed seconds, and
-  the latest lease heartbeat visible when read. A path-aware gate with no
-  matching train path uses `state=skipped` and the stable detail
-  `no changed paths matched configured paths`.
-- `type=heartbeat` is an ephemeral follow-only liveness frame emitted when the
-  persisted runner heartbeat advances during a long command. It does not consume
-  an event ID.
-- `type=stream_end` is the final scoped-follow frame. `reason` is `success`,
-  `failure`, `canceled`, `lost_lease`, or `interrupted`.
+## `validate`
 
-`--after N` is exclusive. `--after 0` starts at the oldest retained event;
-reconnect with the last `type=event.id` already processed. Events are bounded to
-the newest 5,000 database rows. Without `--after`, the command returns the latest
-`--limit` rows (default/max 200). Heartbeat frames are intentionally not replayed.
+```sh
+mergetrain validate [--json]
+```
 
-A scoped follower exits `0` on validation/deploy success, `1` on failure,
-cancellation, or lost lease, and `130` after an interrupt. It drains persisted
-events before the final frame. Existing `run-batch --json` remains a single final
-JSON document; JSONL progress is a separate command and never shares that stdout.
+Claims queued work in FIFO order, builds one isolated train, and runs combined
+gates. It never pushes. Compatible jobs become Ready; semantic-conflict members
+are attributed and moved to Attention together.
+
+## `deploy`
+
+```sh
+mergetrain deploy
+mergetrain deploy --json
+```
+
+This is the complete manual path:
+
+1. validate queued work when no Ready train exists;
+2. use the one eligible Ready train;
+3. show the tasks, destination, refs, and gate policy;
+4. require `y` or `yes` in an interactive terminal;
+5. recheck the exact plan, apply the configured gate-reuse policy, atomically
+   push, and run verify hooks.
+
+The user never supplies a train ID, plan hash, or preview mode. `deploy --json`
+is non-pushing: it may validate queued work, then returns
+`result: "confirmation_required"` and the exact plan. MCP owns the supported
+non-interactive confirm-and-execute flow.
+
+`validate` pauses while a Ready train exists. This single-Ready invariant keeps
+train selection out of the normal v3 workflow. A database carried forward with
+multiple pre-v3 Ready trains can use the migration-only
+`deploy --train-id ID` option after `status --diagnose`; new automation must not
+depend on that option.
 
 ## `inspect`
 
-Return one stable snapshot for a job and its train:
-
 ```sh
-mergetrain inspect 42 --json
+mergetrain inspect JOB_ID [--event-limit N] [--json]
 ```
 
-The JSON contains `job`, `progress`, `outcome`, `train`, and recent `events`.
-`progress` names the current phase, gate index/total/name, elapsed time, latest
-heartbeat, lease liveness, and lost-lease state. `outcome` has a stable severity,
-category, nullable `failure_category`, and `warning_categories`. A train snapshot
-aggregates status counts and per-job failure/warning categories, so callers do
-not need to classify free-text notes.
+Returns one job's full record, current progress, latest run, train outcome, and
+bounded events. Start with `status`; inspect only a job that needs evidence.
 
-## `history`
+## Advanced operator commands
 
-Read recent durable train/job history without opening the queue for writes:
+These commands remain callable for automation, evidence, or exceptional state,
+but are hidden from the default help and are not part of the six-verb product
+grammar.
 
-```sh
-mergetrain history --limit 50 --json
-mergetrain history --since 2026-07-01T00:00:00Z
+| Need | Command |
+| --- | --- |
+| Validate manual jobs continuously | `daemon --validate-only` |
+| Deploy pre-approved auto jobs | `daemon` |
+| Resolve stranded or ambiguous push state | `reconcile [--apply]` |
+| Repair a failed job from its owning branch | `retry JOB_ID [--rebase]` |
+| Replace an exact validated train | `supersede --train-id ID --replacement TASK BRANCH WORKTREE` |
+| Cancel or dismiss work | `cancel JOB_ID`, `dismiss JOB_ID`, `dismiss --all` |
+| Resolve post-push verification | `verify [--job ID] [--ack succeeded|failed]` |
+| Clear a wedged runner lock | `unlock [--force]` |
+| Preview or apply cleanup | `gc [--apply] [--delete-branches]` |
+| Stream evidence | `events`, `logs`, `history`, `stats` |
+| Local read-only UI | `dashboard` |
+| Multi-repository read/daemon | `hub` |
+| Disposable walkthrough | `demo` |
+| stdio MCP adapter | `mcp` |
+
+The state response tells the operator which exceptional command is appropriate.
+Do not memorize this table or infer recovery from raw SQLite state.
+
+## Removed v2 interfaces
+
+v3 deliberately rejects old spellings with `error.code: "removed_interface"`
+and an exact replacement:
+
+| Removed | Replacement |
+| --- | --- |
+| `doctor` | `status --diagnose` |
+| `run-batch --validate-only`, `run-next --validate-only` | `validate` |
+| `run-batch --deploy`, `run-next --deploy` | `deploy` |
+| `recover` | `reconcile --apply` |
+| `version` | `--version` |
+| `agent-contract` | `init --refresh-instructions` |
+| enqueue SHA/readiness/duplicate flags | automatic exact-SHA readiness checks |
+| deploy `--preview`, `--reuse-validated` | `deploy --json`, config policy |
+
+There are no compatibility aliases. Keeping both grammars would preserve the
+very ambiguity v3 removes.
+
+## Exit and JSON rules
+
+- `0`: command completed; for execution commands also inspect `result`.
+- `1`: an expected operational failure or an execution result that did not ship.
+- `2`: invalid or removed interface, or interactive confirmation unavailable.
+- `130`: interrupted.
+- Recovery commands may use additional documented exit codes.
+
+Every JSON object has top-level `contract_version`. Failures use one envelope:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "queue_error",
+    "message": "...",
+    "retryable": false
+  }
+}
 ```
 
-Jobs sharing a non-empty `train_id` remain one complete item even at the limit;
-legacy/single jobs use `job:<id>`. Each item includes status, queue wait
-(`queue_seconds`), `duration_seconds`, structured outcome, member jobs, and
-retained gate runs — each gate row carrying its own `duration_seconds`.
-`--since` accepts ISO-8601 timestamps and is inclusive.
-
-## `stats`
-
-Aggregate the same read-only history:
-
-```sh
-mergetrain stats --since 2026-07-01T00:00:00Z --json
-```
-
-The payload reports
-`trains{total,landed,blocked,failed,canceled,open,terminal,not_landed,status_counts,finished,land_rate,terminal_land_rate}`,
-`jobs{total,status_counts}`, `median_duration_seconds` and
-`p95_duration_seconds`, `average_queue_seconds`, and per-gate `state_counts`
-with `timed_runs`, `median_seconds`, and `p95_seconds`.
-
-The additive product-evidence blocks are:
-
-- `outcomes.not_landed_reason_counts`: one mutually exclusive current/history
-  reason for each train that is not deployed. Structured conflict and push
-  fields take precedence; retained notes provide the legacy fallback.
-- `outcomes.conflicts`: merge- and semantic-conflict counts and rates. The
-  explicit `terminal_trains` field is the denominator.
-- `validation.runs`: retained validation claims split into `succeeded`,
-  `partial`, `failed`, `canceled`, and `incomplete`. `failure_rate` is
-  `runs_with_failure / failure_rate_denominator`; canceled and incomplete
-  claims are visible but excluded from that denominator.
-- `validation.trains`: trains with durable `validated_at` evidence, including
-  deployment, pending, terminal-without-deploy, and superseded counts.
-  `deployment_rate` uses every observed validated train; the additional
-  `resolved_deployment_rate` excludes still-pending trains.
-- `batching`: reconstructed claimed jobs per run and the observed multi-job
-  rate. `estimated_savings` is a labeled counterfactual: for successfully
-  completed multi-job runs only, each timed successful gate is multiplied by
-  `claimed_jobs - 1`. It does not count failed, partial, reused, skipped, or
-  untimed gates, and it is not a wall-clock benchmark.
-- `recovery`: append-only `reconcile`/`recover` invocation counts for the
-  selected window, split by operation, apply mode, and terminal state. A
-  started invocation with no terminal event is counted as `incomplete` rather
-  than silently discarded. `tracking_started_at` is the durable schema-v11
-  baseline. `history_complete` is true for a database created with schema 11;
-  for an upgraded database it becomes true when `--since` is at or after that
-  baseline.
-- `evidence_gaps`: metrics that cannot be reconstructed truthfully from current
-  durable records. Pre-baseline `recover`/`reconcile` frequency remains unknown
-  and is never inferred from mutable job notes. Use `--since` at or after
-  `recovery.tracking_started_at` for a complete operation-frequency window.
-
-Each outcome/validation/batching/recovery block names its source. Queue history
-is unbounded, runner events retain the newest 5,000 rows, and recovery operation
-events are unbounded from their explicit tracking baseline.
-
-`latency` attributes queue wait, approval wait, validation/deploy runner
-duration, and fetch/assembly/gate/push/verify phases. Its `coverage` reports
-retained event counts, the 5,000-row limit, complete runs, and runs with job
-identity; incomplete histories are never reported as zero-duration samples.
-`current` repeats gate timing and latency for the latest 20 complete claim-token
-runs inside the selected `--since` range, with the actual window boundaries and
-sample count. Incomplete runs never displace a completed run from this window.
-Evidence-backed `recommendations` use `current`, while the established top-level
-aggregates continue to describe the full selected history. Slow-gate advice
-requires at least three recent timed samples. Approval wait is treated as human
-dwell: its p95 remains visible, but advice requires a recent median of at least
-15 minutes that also exceeds the deploy-run median. `finished`
-counts deployed + blocked + failed — every train that reached an end state,
-excluding canceled and still-open ones — and is the denominator of `land_rate`;
-it is deliberately not called `completed`, which is configured human vocabulary
-for the success end state alone. `terminal_land_rate` uses deployed + blocked +
-failed + canceled, making the effect of cancellation/supersession visible
-without changing the established `land_rate` contract. Queue
-rows are not automatically pruned, so their history is unbounded. Gate timing
-and phase attribution are explicitly marked as covering the latest 5,000
-retained runner events; they never pretend an older truncated event tail is
-complete. A `--since` boundary can likewise leave a retained run incomplete if
-its claim or terminal event falls outside the window. See
-[efficient operation](best-practices.md) for how to act on each timing without
-weakening gates.
-
-## `logs`
-
-Read the explicit local runner log for one job:
-
-```sh
-mergetrain logs 42 --tail 200
-mergetrain logs 42 --follow --tail 20
-```
-
-The default is the latest 200 existing lines. `--tail 0` prints no existing
-lines before following. The runner stores `log_path` as soon as processing starts,
-so a follower can attach during a long gate. Follow ends with the same success/
-failure/cancellation/lost-lease exit policy as `events`. Log paths are confined
-to configured `state.logs`; this command never reads an arbitrary path from a
-modified queue database.
-
-## `doctor`
-
-Diagnose config, queue, Git remote, integration ref, GC candidates, and the next safe action.
-
-```sh
-mergetrain doctor --json
-```
-
-Key JSON fields: `ok`, `version`, `runtime`, `config`, `config_exists`, `db`,
-`db_existed_before`, `state.logs`, `state.worktree_root`,
-`state.validation_workspace` (mode, derived path, existence, initialization,
-cache key, and declared paths), `git.repo_root`, `git.current_branch`,
-`git.worktree_clean`, `git.remote_url`, `git.remote_exists`,
-`git.integration_ref`, `git.integration_ref_exists`, `config_drift`,
-`recommendations`, `lock`, `counts`, `validated_trains`,
-`gc.worktree_candidates`, and `next_action`. `runtime` has the same provenance
-contract as `version --json`.
-
-`config_drift` compares the local config blob with the config at the locally
-known integration ref without fetching or changing either checkout. A
-`drifted` state adds an `operator_config_drift` warning; missing refs/configs
-and an outside-repo `--config` path are explicit non-comparable states. The
-warning is advisory and does not replace `next_action`.
-
-A `validated_train_base_changed` warning means a pending validated train used a
-different integration base. Its evidence lists the affected jobs and branches;
-deploy remains fail-closed and reruns assembly and gates against the current
-integration ref.
-
-`next_action` is one of:
-
-- `unlock_wedged_runner` — an expired lease is held by an owner that still looks alive with in-progress work; run `unlock --force` (0.3.0).
-- `wait_for_runner` — a live runner already holds the lock.
-- `reconcile_pending_deploy` — a crash or ambiguous push response left jobs
-  `needs_reconcile` (or a marker-bearing orphan); resolve with `reconcile`
-  before deploying (0.3.0).
-- `reconcile_conflict_manual` — `reconcile` left a job `blocked` with its marker; git inspection is required (0.3.0).
-- `fix_blocked_job` — there are `blocked`/`failed` jobs to resolve first.
-- `verify_reconciled_deploy` — a reconciled deploy landed but its post-push verify could not be proven (`verify_status='unknown'`); run `mergetrain verify` to re-run the `deploy.verify` hooks against the recorded `deploy_sha` (or `mergetrain verify --ack succeeded|failed` for hooks that cannot be re-run). This clears the state.
-- `deploy_validated_train_when_approved` — an exact validated train is waiting for explicit deploy approval.
-- `cancel_and_reenqueue_legacy_validated_jobs` — pre-migration validated jobs lack safe train identity.
-- `run_daemon_or_run_batch_deploy_when_approved` — auto-approved jobs are queued.
-- `run_batch_validate` — manual jobs are queued; validate them.
-- `recover_stranded_claim` — a job is `in_progress` but no runner holds the lock: a crashed runner, or a run that raised after releasing its lease (queue contention does this). Run `mergetrain recover`. Left alone, the next deploy requeues it automatically and clears its validated-train identity, so an approved train can become a different set; retry an approved deploy with its `--train-id`, which fails closed instead.
-- `initialize_config` — the repository has no `.mergetrain.yaml`. Every queue-advancing command (`enqueue`, `run-batch`, `run-next`, the daemons) refuses without one rather than shipping against guessed defaults, so this outranks the queue actions above; recovery and read-only commands still work. Run `mergetrain init --write`.
-- `gc_available` — only cleanup remains.
-- `enqueue_clean_branch` — the queue is empty.
-- `upgrade_mergetrain` — the config declares a `version:` newer than this binary supports; this **overrides** the action above, and `doctor --json` also sets `config_version_supported` to the highest version this binary understands. Upgrade mergetrain before acting.
-
-`next_action` is **advisory**; it never substitutes for a destructive action or deploy consent.
-
-The `counts` map also carries derived recovery signals — `needs_reconcile`,
-`in_progress_with_marker`, `blocked_with_marker`, and `deployed_verify_unknown`
-— all computed from local DB state (no remote call).
-
-## `dashboard`
-
-Serve the single-repository live status dashboard:
-
-```sh
-mergetrain dashboard
-# http://127.0.0.1:8765/
-```
-
-The UI is deliberately read-only. It shows queue order, the active runner phase,
-heartbeat and lease freshness, recent structured events, blocked history, and the
-same advisory next action used by `doctor`. Server-sent events deliver live
-snapshots; the client falls back to two-second polling if the stream is
-interrupted. The connection indicator is distinct from runner ownership, and the
-current-check panel explains the active gate, scope, command template, and elapsed
-time. When comparable local history exists, the running banner shows a
-median-based ETA and the train shows per-gate duration bars; missing samples are
-reported as "building history", not guessed. Activity can switch between compact
-and expanded density and reveal older events incrementally. Phone-sized screens
-reduce the first read to state, next action, and attention. The tab title and
-favicon carry the current state and attention count.
-
-| Option | Meaning |
-|---|---|
-| `--host` | Bind host (default `127.0.0.1`). |
-| `--port` | Bind port (default `8765`; `0` selects an available port). |
-| `--allow-remote` | Required acknowledgement when binding outside `127.0.0.1`, `localhost`, or `::1`. |
-| `--preview` | Label the connected database as synthetic preview data. This does not generate fixtures. |
-
-Remote binding expands access to queue metadata and status notes. Prefer the
-loopback default; there are no authentication or TLS layers in this local tool.
-
-## `mcp`
-
-Serve the queue to coding agents over the Model Context Protocol on stdio:
-
-```sh
-mergetrain mcp                       # this repository
-mergetrain --repo /path/to/svc mcp   # another one
-```
-
-Needs the optional extra (`pip install 'mergetrain[mcp]'`); without it the
-command prints the install hint and exits 1. Register it with
-`claude mcp add mergetrain -- mergetrain mcp`, or the Codex/Gemini equivalent.
-
-Each tool shells out to the matching `--json` command and returns that payload
-verbatim, so there is no second contract. The tool surface is smaller than the
-CLI on purpose: `daemon`, `enqueue --auto`, `gc --apply`, `gc --delete-branches`,
-`cancel`, `unlock`, `dismiss` and the recovery mutations are not exposed and have
-no reachable parameter, and `mergetrain_deploy` requires a client-rendered human
-accept — refusing with `confirmation_required` and the terminal command when the
-client cannot show one. Full tool table and refusal codes in
-[docs/mcp.md](mcp.md).
-
-## `hub`
-
-Serve the same dashboard in multi-repo mode, aggregating every registered
-repo on one read-only board with a per-repo drill-down:
-
-```sh
-mergetrain hub add ~/projects/app   # register (requires .mergetrain.yaml)
-mergetrain hub add ~/projects/app --no-daemon   # keep on the board, never sweep
-mergetrain hub status [--json]
-mergetrain hub                      # serve http://127.0.0.1:8765/
-mergetrain hub remove ~/projects/app
-```
-
-`--daemon/--no-daemon` upserts hub-daemon eligibility for the repo (re-run
-`add` to flip an existing entry). Excluded repos stay on the dashboard and in
-`hub status`, but every `hub daemon` sweep reports them `excluded`.
-
-| Option | Meaning |
-|---|---|
-| `--host` / `--port` / `--allow-remote` | Same semantics as `dashboard`. |
-| `--registry` | Override the roster file (default `$XDG_CONFIG_HOME/mergetrain/repos.json`, or the `MERGETRAIN_HUB_REGISTRY` environment variable). |
-
-The hub owns no queue state: each repo entry is read from that repo's own
-config and SQLite database, opened read-only — observing a repo never creates
-or migrates anything inside it, and one broken repo renders as an isolated
-error card. The registry is re-read on every snapshot, so `hub add`/`hub
-remove` show up live. Full contract in [hub.md](./hub.md).
-
-### `hub status`
-
-One machine-wide read of every registered repo's queue — the coordinator-agent
-counterpart of the hub dashboard:
-
-```sh
-mergetrain hub status [--json] [--summary] [--registry PATH]
-```
-
-Human mode prints one line per repo (nonzero counts, runner liveness, and the
-advisory next action); `--json` emits the same aggregate payload the hub
-dashboard serves, per-repo errors isolated. `--summary --json` emits only each
-repo's counts, public lock, validated trains, and next action; it does not load
-dashboard jobs, events, reuse analysis, progress, or ETA history. Human mode
-uses this compact read internally.
-
-### `hub daemon`
-
-Run the auto-only daemon across every registered repo:
-
-```sh
-mergetrain hub daemon [--interval 15] [--concurrency 1] [--notify] [--once [--json]] [--keep-worktree] [--registry PATH]
-```
-
-`--notify` sends each repo's configured transitions through its optional JSON
-webhook. Delivery is persisted and transition-deduplicated. Interactive desktop
-alerts are enabled in the open Hub page and do not require this flag. If a
-transition needs delivery for a repo without `notify.webhook_url`, the daemon
-prints one warning instead of silently implying that a headless backend exists.
-
-Each repo is processed by the same per-tick policy as the single-repo
-`daemon` — only `--auto` jobs, behind that repo's own lock, gates, and
-reconcile pauses. `--concurrency` caps how many repos may run gates at the
-same time machine-wide (default `1`: strictly serial). `--once` runs a
-single sweep; with `--json` it prints one outcome per repo
-(`processed:<n>` / `idle` / `skipped` / `reconcile_paused` / `error`).
-
-## `run-next`
-
-Process exactly one queued job. Requires `--validate-only` or `--deploy`.
-
-```sh
-mergetrain run-next --validate-only
-mergetrain run-next --deploy
-```
-
-`--keep-worktree` leaves the temporary integration worktree in place for inspection. See [Design → Runner behavior](design.md#runner-behavior).
-
-Validated jobs are deployed through `run-batch --deploy` so train identity is
-preserved, including when the train contains only one job. That is **enforced**:
-while any deploy-eligible validated train is pending, `run-next` with a push mode
-refuses with `error.code: validated_train_pending`, listing the pending
-`train_id`s and setting `next_action: deploy_validated_train_when_approved`.
-`run-next` claims the next *queued* job, so it would push a different commit and
-move the integration ref out from under the exact train a human approved. Deploy
-the train, or dismiss it first if you mean to ship something else.
-
-## `run-batch`
-
-Validate all currently queued jobs as one merge train, or deploy an exact
-validated train. Requires `--validate-only` or `--deploy`.
-
-```sh
-mergetrain run-batch --validate-only
-mergetrain run-batch --deploy
-mergetrain run-batch --deploy --train-id <id>
-mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
-mergetrain run-batch --deploy --train-id <id> --expected-plan <sha>
-mergetrain run-batch --deploy --train-id <id> --reuse-validated
-```
-
-After validation, plain `--deploy` selects the only pending validated train and
-leaves newer queued jobs untouched. If more than one train is pending, deployment
-fails safely until `--train-id` selects one. The runner verifies every validated
-task HEAD, rebuilds on the current integration ref, and evaluates the configured
-gate policy before push. The default path reruns gates; explicitly authorized
-validated-gate reuse can reuse only an unchanged safety identity.
-Changed task HEADs block the whole validated train. During initial validation,
-conflicts still block only the offending job. A one-job gate failure is
-reprocessed directly; multi-job failures use subset probes so individually
-failing branches and semantic conflicts (`conflict_with`) are classified the
-same way regardless of batch size. See [Design → Batch](design.md#batch--merge-train-run-batch).
-
-Validated-gate reuse is disabled by default. `--reuse-validated` authorizes the
-configured policy for that command; `deploy.reuse.enabled: true` is the persistent
-alternative. `--preview` does not claim, gate, or push, but configured fingerprint
-commands still run so the decision matches a real deploy.
-Its JSON `reuse` object reports `authorized`, `eligible`, `action`, mismatch
-`reasons`, exact `identity_checks`, a per-gate plan, `validation_sha`, and the
-exact `reused_validation_sha` when safe. `estimated_savings` includes the
-history-derived seconds, sample count, coverage, and confidence. It is advisory
-only and always carries `authorizes_reuse: false`; an estimate cannot enable
-reuse.
-Deploy JSON also exposes `reused_validation_shas`, and every reused job retains
-`reused_validation_sha`. A mismatch reruns all gates unless policy says `fail`.
-Preview JSON includes `push_plan.remote`, the redacted effective push URL in
-`push_plan.url`, the fetch URL, destination hash, and each exact `HEAD:<ref>`
-refspec. It also emits a shell-quoted `confirmed_command` containing the train
-and plan hash for thin human wrappers. `deploy_plan_sha` binds the exact train, destination,
-gate/reuse policy, and verify hooks. Passing that value with `--expected-plan`
-checks it before claim and again before push; any change fails with
-`deploy_plan_changed` and touches no remote ref. MCP uses this path
-automatically after its confirmation dialog.
-Machine JSON reports `mode=deploy` and `status=deployed`.
-
-## `supersede`
-
-Atomically retire one validated train and enqueue an exact replacement train
-from clean task worktrees:
-
-```sh
-mergetrain supersede \
-  --train-id <validated-train-id> \
-  --replacement "update API" codex/api /path/to/api-worktree \
-  --replacement "update docs" codex/docs /path/to/docs-worktree \
-  --note "combined release" \
-  --json
-```
-
-Each `--replacement` takes exactly `TASK BRANCH WORKTREE`. mergetrain verifies
-the worktree's current branch, requires a clean tree, and captures its exact
-HEAD plus the current integration-base SHA. In one SQLite transaction it marks
-every member of the old train `canceled`, preserves its validation evidence for
-audit, and creates manual queued replacement jobs linked by `supersession_id`
-and `supersedes_train_id`. The new rows never inherit validation, validated-gate
-reuse identity, `--auto`, or deploy approval. A partial write rolls back.
-
-The command refuses a non-validated or partial train, duplicate/active
-replacement branches, and a live runner lock. `status`, `events`, and `inspect`
-show both sides of the relationship. Validate the new train and obtain fresh
-approval for its new train ID before deployment.
-
-## `daemon`
-
-Run a foreground auto-deploy worker by default, or a manual-queue validation
-worker with `--validate-only`.
-
-```sh
-mergetrain daemon --interval 15
-mergetrain daemon --once
-mergetrain daemon --once --notify
-mergetrain daemon --validate-only --interval 15
-mergetrain daemon --validate-only --once
-```
-
-Default mode claims and deploys only jobs enqueued with `--auto` whose bound
-destination and execution-policy identities still match.
-`--validate-only` claims only manual queued jobs, invokes no push or post-push
-verify, and pauses while any validated train exists. Starting that mode
-authorizes merge and gates, not deployment; deploy still requires approval for
-the exact displayed train. `--validate-only` and `--notify` are incompatible,
-and `hub daemon` remains auto-deploy-only.
-
-In default mode, `--notify` uses the same persisted
-landed/blocked/reconcile/error transition dedup as `hub daemon`, plus the
-provider-neutral webhook configured under `notify`. Browser alerts are instead
-owned by the open dashboard page. With no `notify.webhook_url`, the command
-prints a startup warning because `--notify` has no headless delivery backend.
-See the [daemon guide](daemon.md) and [config reference](config.md#notify).
-
-## `gc`
-
-Clean up temporary worktrees and, optionally, terminal branches. Dry-run by default.
-
-```sh
-mergetrain gc --json                              # dry run
-mergetrain gc --apply --json                      # remove temp worktrees
-mergetrain gc --apply --delete-branches --json    # also delete terminal branches
-```
-
-Branch deletion only targets branches of `deployed`/`canceled` jobs and never
-deletes a validated-but-not-deployed branch or a protected ref (`push_refs`, the
-integration branch, or the currently checked-out branch).
-
-`gc --apply` also sweeps stale `refs/mergetrain/pending/*` pin refs (0.3.0): a pin
-whose owning job is terminal/failed/missing is deleted (reported under
-`result.swept_pending_refs`), while a `blocked` (reconcile-conflict forensics) or
-`needs_reconcile` job keeps its pin.
-
-It deliberately does not delete remote `refs/mergetrain/deploys/*` audit refs.
-Those content-addressed refs are permanent recovery evidence for payload refs
-that may later be force-rewritten.
-
-## `reconcile`
-
-Resolve every `needs_reconcile` job against the **remote** after a crash or
-ambiguous push response (0.3.0).
-Reads the durable per-job `pending_deploy_sha` marker written before the push,
-then asks the remote (`git fetch` + `ls-remote` + `merge-base --is-ancestor`)
-whether the deploy actually landed. **Never pushes.** Dry-run by default.
-
-```sh
-mergetrain reconcile --json           # dry run: classify, write nothing
-mergetrain reconcile --apply --json   # finalize the reconciled outcome
-```
-
-While any job is `needs_reconcile` (or a not-yet-split marker-bearing orphan
-exists), **all** deploy paths refuse — `run-batch --deploy`, `run-next --deploy`,
-and the `daemon` tick — since they target the same push refs.
-
-An interrupted marker written before v2.3.1 lacks the effective endpoint hash.
-Because current config cannot prove that historical destination, automatic
-reconcile leaves it parked and exits `7` without probing a remote. Operators
-should resolve pending v2.3.0 markers before upgrading; an already-migrated
-legacy marker requires explicit Git/queue forensics rather than an inferred
-current destination.
-
-Per job: the deploy sha present on **every** push ref → `deployed`
-(`push_status=succeeded`, `verify_status=unknown` — the deploy is not re-pushed
-and verify is not re-run); present on **none** → `queued` (or `canceled` if a
-cancel had raced the push), unless the matching
-`refs/mergetrain/deploys/<sha>` audit ref proves it landed before the payload
-refs were rewritten; present on **some** refs, proven rewritten by that audit
-ref, carrying a mismatched audit ref, or unresolvable → `blocked` (human Git
-inspection). JSON exposes `audit_ref`, `audit_ref_sha`, and
-`audit_ref_present`. Exit codes: `0` resolved/nothing to do · `2`
-usage/config · `3` lock held by a live runner (retryable) · `7` remote
-unreachable (nothing changed) · `10` ≥1 job left `blocked`.
-
-## `recover`
-
-One-button restart heal: split a previous runner's orphaned `in_progress` jobs
-(marker-aware) and then `reconcile --apply`. Never ships queued or validated work
-— there is no deploy as a side effect. Same exit codes as `reconcile`.
-
-```sh
-mergetrain recover --json          # split orphans + reconcile
-mergetrain recover --gc --json     # also remove crashed worktrees
-```
-
-## `unlock`
-
-Clear a wedged runner lock. Without `--force` only a dead/absent owner's lock is
-cleared. With `--force` the remote is confirmed reachable **first** (unreachable
-→ abort, change nothing), then the lock is deleted and orphans are split; it
-never itself writes `deployed`/`failed` and appends an append-only audit event.
-
-```sh
-mergetrain unlock --json           # clear a dead owner's lock
-mergetrain unlock --force --json   # steal a live/unknown owner's lock
-```
-
-Exit codes: `0` cleared · `2` usage/config · `4` refused (owner alive, no
-`--force`) · `5` no lock · `7` remote unreachable during the forced classify.
-
-## `cancel`
-
-Cancel a non-terminal queue item. Terminal items cannot be cancelled.
-
-```sh
-mergetrain cancel 12 --note "replaced by rebased branch"
-```
-
-Canceling one member of a validated train cancels every still-validated member
-of that train so a partial copy of the approved train cannot later deploy. For
-an `in_progress` train, cancel records `cancel_requested_at` for every job with
-the same claim token. The runner notices the request during its heartbeat,
-terminates the active subprocess group, and records the final `canceled` state.
-
-## `dismiss`
-
-Non-destructively clear a superseded `blocked`/`failed` job. A blocked/failed job
-never lands and never self-clears, so it keeps `doctor`'s `next_action` pinned to
-`fix_blocked_job` (hiding a ready validated train) and blocks re-enqueue of its
-branch. `dismiss` moves it to the terminal `canceled` state; it refuses
-`queued`/`in_progress` work (use `cancel` for that) and never touches git or the
-remote, so it is safe to run unattended.
-
-```sh
-mergetrain dismiss 12 --note "fixed on a rebased branch"
-mergetrain dismiss --all      # every blocked/failed job
-```
-
-`--all` selects every eligible row directly from the queue; it is not limited by
-the default `status --limit` display window.
-
-## `verify`
-
-Discharge deployed jobs a crash left with `verify_status='unknown'` — reconcile
-can prove a push landed but not that the post-push `deploy.verify` hooks ran, so
-it parks the job at `verify_reconciled_deploy`. `verify` clears that.
-
-```sh
-mergetrain verify                 # re-run deploy.verify against every unresolved deploy_sha
-mergetrain verify --job 12        # resolve one job
-mergetrain verify --ack succeeded # record the outcome without re-running (non-repeatable hooks)
-```
-
-Without `--ack`, `verify` re-runs the configured `deploy.verify` hooks against the
-recorded `deploy_sha` and records `succeeded`/`failed`; `--ack succeeded|failed`
-records the result without re-running.
-
-## Exit codes
-
-`0` every requested job shipped — **including** a train that landed but whose
-post-push verify only warned (`result:"warning"`) · `1` a job blocked/failed, or
-an expected config/queue/command error · `2` usage error · `130` interrupted
-(`Ctrl-C`). Exit `1` never means "did not ship" on its own — read `result`. In
-JSON mode, run results include `ok`, `result` (`success`, `warning`, `partial`,
-or `failed`), per-status `counts`, `push_counts`, `verify_counts`,
-`reused_validation_shas`, and `jobs`. Each job exposes `push_status` (`not_run`,
-`succeeded`, or `failed`) and `verify_status` (`not_run`, `not_configured`,
-`succeeded`, or `failed`). A successful push followed by a failed verify keeps
-`status=deployed` and returns `result=warning` with `ok=true` — the run executed
-and the train already shipped, so the exit code is `0`. Human output prints the
-same push/verify facts next to each affected job. Expected exceptions are emitted
-as `{"ok": false, "error": {"code", "message", "retryable"}}`.
+See [the machine contract](contract.md) for the long-lived v3 compatibility
+policy and [failure modes](failure-modes.md) before applying recovery commands.

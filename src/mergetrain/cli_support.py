@@ -75,10 +75,10 @@ def config_from_args(args: argparse.Namespace) -> MergetrainConfig:
 def _preflight_config(config: MergetrainConfig) -> None:
     """Fail closed before any state-shipping work (#44, #84 defect 6).
 
-    Enforced on the deploy-capable paths — ``enqueue``/``run-batch``/
-    ``run-next`` and both daemons — never inside ``load_config``, so a version
+    Enforced on the deploy-capable paths — ``enqueue``/``validate``/``deploy``
+    and both daemons — never inside ``load_config``, so a version
     mismatch or a missing file after a rollback can still run
-    ``reconcile``/``recover``/``unlock`` and every read-only command.
+    ``reconcile``/``unlock`` and every read-only command.
 
     Two configs are unsafe to ship against:
 

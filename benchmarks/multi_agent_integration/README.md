@@ -22,7 +22,7 @@ python -m benchmarks.multi_agent_integration.scenario prepare \
 
 Launch three fresh agents concurrently, one in each worktree, using the matching
 file in `/tmp/mt-multi-agent/prompts/`. The prompts deliberately require a clean
-commit, `doctor --json`, exact-HEAD enqueue, and a stop before deploy. Model and
+commit, `status --json`, exact-HEAD enqueue, and a stop before deploy. Model and
 permission provenance belong in the dated pilot note; the harness is
 provider-neutral and does not launch an agent product itself.
 

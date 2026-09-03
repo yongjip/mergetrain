@@ -53,11 +53,11 @@ NEXT_ACTION_VALUES = frozenset(
         "reconcile_conflict_manual",
         "fix_blocked_job",
         "verify_reconciled_deploy",
-        "deploy_validated_train_when_approved",
+        "deploy_when_approved",
         "cancel_and_reenqueue_legacy_validated_jobs",
-        "run_daemon_or_run_batch_deploy_when_approved",
-        "run_batch_validate",
-        "recover_stranded_claim",
+        "run_daemon_when_approved",
+        "validate_queued_jobs",
+        "reconcile_stranded_claim",
         "initialize_config",
         "gc_available",
         "enqueue_clean_branch",
@@ -80,9 +80,7 @@ def _lock_expired(lock: dict[str, Any] | None) -> bool:
         return True
 
 
-def next_action(
-    payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
-) -> str:
+def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION) -> str:
     if config_version > CONFIG_VERSION:
         return "upgrade_mergetrain"
     lock = payload.get("lock")
@@ -120,7 +118,7 @@ def next_action(
     # validated-train identity -- so an approved train can quietly become a
     # different set. Name it instead of letting doctor report an idle queue.
     if not lock and in_progress:
-        return "recover_stranded_claim"
+        return "reconcile_stranded_claim"
     # Every queue-advancing command refuses without a config -- the deploy path
     # is fail-closed on purpose -- so pointing at queue work here would send the
     # reader into a refusal. Ranked below the recovery actions above, which stay
@@ -129,12 +127,12 @@ def next_action(
         return "initialize_config"
     if payload.get("validated_trains"):
         if any(train.get("deploy_eligible") for train in payload["validated_trains"]):
-            return "deploy_validated_train_when_approved"
+            return "deploy_when_approved"
         return "cancel_and_reenqueue_legacy_validated_jobs"
     if count_data.get("auto_queued", 0):
-        return "run_daemon_or_run_batch_deploy_when_approved"
+        return "run_daemon_when_approved"
     if count_data.get("queued", 0):
-        return "run_batch_validate"
+        return "validate_queued_jobs"
     if payload.get("gc", {}).get("worktree_candidates"):
         return "gc_available"
     return "enqueue_clean_branch"
@@ -151,9 +149,7 @@ def refresh_dashboard_snapshot(
         pid_suffix = str(lock["owner"]).rsplit(":", 1)[-1]
         lock["liveness"] = owner_liveness(f"local:{pid_suffix}")
     refreshed["generated_at"] = utc_now()
-    refreshed["next_action"] = next_action(
-        refreshed, config_version=config_version
-    )
+    refreshed["next_action"] = next_action(refreshed, config_version=config_version)
     return refreshed
 
 
@@ -280,9 +276,7 @@ def _phase_duration_samples(
     samples: dict[str, list[tuple[int, float]]] = defaultdict(list)
     for (_, phase), phase_events in grouped.items():
         ordered = sorted(phase_events, key=lambda event: event.id)
-        started = next(
-            (event for event in ordered if event.state == "active"), None
-        )
+        started = next((event for event in ordered if event.state == "active"), None)
         finished = next(
             (
                 event
@@ -300,9 +294,7 @@ def _phase_duration_samples(
     return samples
 
 
-def _current_phase_started_at(
-    run_events: list[RunEvent], phase: str
-) -> str:
+def _current_phase_started_at(run_events: list[RunEvent], phase: str) -> str:
     return next(
         (
             event.created_at
@@ -323,9 +315,7 @@ def _eta_payload(
     calculated_at: str,
 ) -> dict[str, Any]:
     token = next((job.claim_token for job in selected_jobs if job.claim_token), "")
-    run_events = [
-        event for event in events if token and event.claim_token == token
-    ]
+    run_events = [event for event in events if token and event.claim_token == token]
     phase_samples = _phase_duration_samples(events, exclude_token=token)
     phases: list[dict[str, Any]] = []
     phase_estimates: dict[str, tuple[int, float | None]] = {}
@@ -340,21 +330,15 @@ def _eta_payload(
             }
         )
 
-    historical_events = [
-        event for event in events if not token or event.claim_token != token
-    ]
+    historical_events = [event for event in events if not token or event.claim_token != token]
     gate_samples: dict[str, list[tuple[int, float]]] = defaultdict(list)
     for ordinal, run in enumerate(_gate_runs(historical_events), start=1):
         duration = run.get("duration_seconds")
         if duration is None:
             continue
-        gate_samples[str(run["name"])].append(
-            (ordinal, float(duration))
-        )
+        gate_samples[str(run["name"])].append((ordinal, float(duration)))
 
-    progress_gates = {
-        str(gate.get("name")): gate for gate in progress.get("gates", [])
-    }
+    progress_gates = {str(gate.get("name")): gate for gate in progress.get("gates", [])}
     gates: list[dict[str, Any]] = []
     gate_remaining: list[float | None] = []
     gate_sample_counts: list[int] = []
@@ -363,9 +347,7 @@ def _eta_payload(
         current = progress_gates.get(name, {})
         state = str(current.get("state") or "waiting")
         started_at = str(current.get("started_at") or "")
-        current_elapsed = (
-            elapsed_seconds(started_at, calculated_at) if started_at else None
-        )
+        current_elapsed = elapsed_seconds(started_at, calculated_at) if started_at else None
         if state in {"success", "reused", "skipped"}:
             remaining: float | None = 0.0
         elif estimate is None:
@@ -394,8 +376,7 @@ def _eta_payload(
     used_sample_counts: list[int] = []
     current_phase = str(progress.get("phase") or "")
     deploying = any(
-        job.status == "in_progress" and bool(job.train_id)
-        for job in selected_jobs
+        job.status == "in_progress" and bool(job.train_id) for job in selected_jobs
     ) or current_phase in {"pushing", "verifying", "complete"}
     target_phases = list(ESTIMATE_PHASES[:3])
     if deploying:
@@ -421,14 +402,8 @@ def _eta_payload(
                 continue
             if phase == current_phase:
                 started_at = _current_phase_started_at(run_events, phase)
-                current_elapsed = (
-                    elapsed_seconds(started_at, calculated_at)
-                    if started_at
-                    else None
-                )
-                remaining_parts.append(
-                    round(max(0.0, estimate - float(current_elapsed or 0.0)), 3)
-                )
+                current_elapsed = elapsed_seconds(started_at, calculated_at) if started_at else None
+                remaining_parts.append(round(max(0.0, estimate - float(current_elapsed or 0.0)), 3))
             else:
                 remaining_parts.append(estimate)
             used_sample_counts.append(sample_count)
@@ -438,8 +413,10 @@ def _eta_payload(
     expected_at = ""
     if estimated_remaining is not None:
         expected_at = (
-            _parse_utc(calculated_at) + timedelta(seconds=estimated_remaining)
-        ).isoformat(timespec="seconds").replace("+00:00", "Z")
+            (_parse_utc(calculated_at) + timedelta(seconds=estimated_remaining))
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z")
+        )
     has_history = any(item["sample_count"] for item in (*phases, *gates))
     return {
         "basis": "median_recent_completed_runs",
@@ -509,13 +486,15 @@ def _progress(
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "duration_seconds": (
-                    elapsed_seconds(started_at, finished_at)
-                    if started_at and finished_at
-                    else None
+                    elapsed_seconds(started_at, finished_at) if started_at and finished_at else None
                 ),
             }
             gate_events[gate_index] = latest_gate
-        if event.phase == "gating" and event.state == "success" and event.message == "All train gates passed":
+        if (
+            event.phase == "gating"
+            and event.state == "success"
+            and event.message == "All train gates passed"
+        ):
             all_gates_passed = True
         phase_completed = event.state == "success" and event.phase in PHASES
         if event.phase == "gating" and not all_gates_passed:
@@ -553,19 +532,12 @@ def _progress(
                 "command": observed["command"] if observed else "",
                 "started_at": observed["started_at"] if observed else "",
                 "finished_at": observed["finished_at"] if observed else "",
-                "duration_seconds": (
-                    observed["duration_seconds"] if observed else None
-                ),
+                "duration_seconds": (observed["duration_seconds"] if observed else None),
             }
         )
 
     current_gate = None
-    if (
-        latest
-        and latest.phase == "gating"
-        and latest_gate
-        and latest_gate["state"] == "active"
-    ):
+    if latest and latest.phase == "gating" and latest_gate and latest_gate["state"] == "active":
         current_gate = latest_gate
 
     started_at = next((job.started_at for job in selected_jobs if job.started_at), "")
@@ -603,7 +575,7 @@ def build_dashboard_snapshot(
         recent_jobs = list_jobs(conn, limit=job_limit)
         selected_jobs, selection = _selected_jobs(conn)
         history_events = list_history_events(conn)
-        raw_events = history_events[-max(1, min(int(event_limit), 200)):]
+        raw_events = history_events[-max(1, min(int(event_limit), 200)) :]
         lock = _public_lock(get_lock(conn))
         configured_gates = effective_gates(config)
         gate_names = ("diff-check", *(gate.name for gate in configured_gates))
@@ -620,7 +592,11 @@ def build_dashboard_snapshot(
                 "preview": preview,
                 "gate_count": len(gate_names),
                 "gates": [
-                    {"index": index, "name": name, "kind": "built-in" if index == 1 else "configured"}
+                    {
+                        "index": index,
+                        "name": name,
+                        "kind": "built-in" if index == 1 else "configured",
+                    }
                     for index, name in enumerate(gate_names, start=1)
                 ],
                 "verify_count": len(config.deploy.verify),
@@ -630,9 +606,7 @@ def build_dashboard_snapshot(
                     "on_mismatch": config.deploy.reuse.on_mismatch,
                     "fingerprint_count": len(config.deploy.reuse.fingerprints),
                     "always_rerun_gates": [
-                        gate.name
-                        for gate in configured_gates
-                        if gate.always_rerun_on_deploy
+                        gate.name for gate in configured_gates if gate.always_rerun_on_deploy
                     ],
                 },
             },
@@ -666,9 +640,7 @@ def build_dashboard_snapshot(
             gate_names=gate_names,
             calculated_at=payload["generated_at"],
         )
-        payload["next_action"] = next_action(
-            payload, config_version=config.config_version
-        )
+        payload["next_action"] = next_action(payload, config_version=config.config_version)
         return payload
     finally:
         conn.close()

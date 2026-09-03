@@ -47,9 +47,7 @@ notify:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             config_path = repo / ".mergetrain.yaml"
-            config_path.write_text(
-                "notify:\n  webhook_url: file:///tmp/hook\n", encoding="utf-8"
-            )
+            config_path.write_text("notify:\n  webhook_url: file:///tmp/hook\n", encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "http or https"):
                 load_config(repo=repo)
             config_path.write_text(
@@ -62,7 +60,10 @@ notify:
     def test_generated_yaml_loads_with_required_parser(self) -> None:
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")
-        self.assertEqual(data["git"]["push_refs"], ["main"])
+        self.assertNotIn("git", data)
+        self.assertNotIn("state", data)
+        self.assertNotIn("queue", data)
+        self.assertNotIn("deploy", data)
         self.assertNotIn("agent", data)
         self.assertNotIn("terminology", data)
         self.assertEqual(data["gates"], [])
@@ -116,9 +117,7 @@ terminology:
             config_path = repo / ".mergetrain.yaml"
             for removed in ("agent", "terminology"):
                 with self.subTest(removed=removed):
-                    config_path.write_text(
-                        f"version: 2\n{removed}: {{}}\n", encoding="utf-8"
-                    )
+                    config_path.write_text(f"version: 2\n{removed}: {{}}\n", encoding="utf-8")
                     with self.assertRaisesRegex(ConfigError, "removed top-level key"):
                         load_config(repo=repo)
 
@@ -210,9 +209,7 @@ terminology:
             (control / ".mergetrain.yaml").write_text(
                 render_default_config("demo"), encoding="utf-8"
             )
-            subprocess.run(
-                ["git", "add", ".mergetrain.yaml"], cwd=control, check=True
-            )
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=control, check=True)
             subprocess.run(
                 ["git", "commit", "-m", "initialize"],
                 cwd=control,
@@ -232,9 +229,7 @@ terminology:
             self.assertEqual(task_config.state, control_config.state)
             self.assertEqual(task_config.repo, task)
             self.assertEqual(task_config.config_path, task / ".mergetrain.yaml")
-            self.assertEqual(
-                task_config.state.db, control / ".mergetrain" / "queue.sqlite"
-            )
+            self.assertEqual(task_config.state.db, control / ".mergetrain" / "queue.sqlite")
             overridden = load_config(repo=task, db_override="override.sqlite")
             self.assertEqual(overridden.state.db, task / "override.sqlite")
 
@@ -242,9 +237,7 @@ terminology:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td).resolve()
             (repo / ".git").write_text("gitdir: missing\n", encoding="utf-8")
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
 
             config = load_config(repo=repo)
 
@@ -448,9 +441,7 @@ gates:
         for config_text, message in invalid:
             with self.subTest(message=message), tempfile.TemporaryDirectory() as td:
                 repo = Path(td)
-                (repo / ".mergetrain.yaml").write_text(
-                    config_text, encoding="utf-8"
-                )
+                (repo / ".mergetrain.yaml").write_text(config_text, encoding="utf-8")
                 with self.assertRaisesRegex(ConfigError, message):
                     load_config(repo=repo)
 

@@ -30,11 +30,11 @@ const SERVER_NEXT_ACTIONS = [
   "reconcile_conflict_manual",
   "fix_blocked_job",
   "verify_reconciled_deploy",
-  "deploy_validated_train_when_approved",
+  "deploy_when_approved",
   "cancel_and_reenqueue_legacy_validated_jobs",
-  "run_daemon_or_run_batch_deploy_when_approved",
-  "run_batch_validate",
-  "recover_stranded_claim",
+  "run_daemon_when_approved",
+  "validate_queued_jobs",
+  "reconcile_stranded_claim",
   "initialize_config",
   "gc_available",
   "enqueue_clean_branch",
@@ -43,7 +43,7 @@ const SERVER_NEXT_ACTIONS = [
 test("every server next_action has dashboard copy", () => {
   assert.deepEqual(Object.keys(NEXT_ACTION_COPY).sort(), SERVER_NEXT_ACTIONS.sort());
   assert.deepEqual(
-    actionCopy("deploy_validated_train_when_approved", { action: "integrate", noun: "integration" }),
+    actionCopy("deploy_when_approved", { action: "integrate", noun: "integration" }),
     ["Approve the exact validated train to integrate.", "Git integration remains an explicit CLI action."],
   );
 });

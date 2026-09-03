@@ -58,7 +58,7 @@ therefore requires a fresh approved enqueue instead of silently weakening QA.
   secrets.
 
 Structured surfaces apply one best-effort redaction policy to expected error
-messages, persisted job notes, status JSON, `doctor` remote URLs, and dashboard
+messages, persisted job notes, status JSON, diagnostic remote URLs, and dashboard
 snapshots. MCP diagnostics synthesized when a CLI child does not return its JSON
 contract use the same policy; valid CLI JSON remains contract-owned and is not
 rewritten by the adapter. It masks sensitive `NAME=value` assignments,
@@ -174,7 +174,7 @@ the configured command template; obvious token/password assignments and flags ar
 masked by the same policy described above, but command authors should never
 embed credentials directly in gate configuration.
 
-Runtime provenance from `version` and `doctor` is intentionally CLI-only because
+Runtime provenance from `status --diagnose` is intentionally CLI-only because
 it can include an imported package path, editable source path, and source-control
 state. The dashboard snapshot and remotely bindable dashboard API do not include
 that provenance object.

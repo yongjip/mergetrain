@@ -34,9 +34,9 @@ class DemoAssetTests(unittest.TestCase):
         self.assertIn("Wait+Screen@120s /Demo complete:/", tape)
 
     def test_workflow_pins_the_recorder_and_uploads_the_result(self) -> None:
-        workflow = (
-            self.repo / ".github" / "workflows" / "demo-gif.yml"
-        ).read_text(encoding="utf-8")
+        workflow = (self.repo / ".github" / "workflows" / "demo-gif.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("permissions:\n  contents: read", workflow)
         # The recorder's dependencies are installed by pinned version and
         # verified by checksum, so a moved release cannot change the render.
@@ -56,8 +56,7 @@ class DemoAssetTests(unittest.TestCase):
     def test_readme_embeds_the_generated_gif(self) -> None:
         readme = (self.repo / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "https://raw.githubusercontent.com/yongjip/mergetrain/main/"
-            "docs/images/demo.gif",
+            "https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/demo.gif",
             readme,
         )
 
@@ -195,7 +194,7 @@ class DemoTests(unittest.TestCase):
                 code = main(["demo", "--brief", "--dir", str(sandbox)])
             self.assertEqual(code, 0, err.getvalue())
             rendered = out.getvalue()
-            self.assertIn("ready: health=true clean=true", rendered)
+            self.assertIn("ready: health=healthy clean=true", rendered)
             self.assertIn("result: partial", rendered)
             self.assertIn("conflict_with: #2", rendered)
             self.assertIn("outcome: merge_conflict", rendered)
@@ -307,9 +306,7 @@ class DemoConfigTests(unittest.TestCase):
         walkthrough = self._walkthrough("crlf", make_repo=False)
         walkthrough._bootstrap()
         walkthrough._commit_seed()
-        walkthrough._make_agent_branch(
-            "agent/probe", {"app/probe.py": "PROBE = 1\n"}
-        )
+        walkthrough._make_agent_branch("agent/probe", {"app/probe.py": "PROBE = 1\n"})
 
         for ref, path in (
             ("main", "app/config.py"),

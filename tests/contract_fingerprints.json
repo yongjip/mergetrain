@@ -1,5 +1,5 @@
 {
-  "contract_version": 2,
+  "contract_version": 3,
   "surfaces": {
     "_jsonl_frames": {
       "event": {
@@ -66,27 +66,6 @@
         "type": null
       }
     },
-    "agent_contract": {
-      "boundary": {
-        "daemon_processes_only": null,
-        "deploy_requires": null,
-        "destructive_cleanup_requires": null,
-        "hub_daemon_processes_only": null,
-        "hub_observation": null,
-        "machine_contract": null,
-        "progress_observation": null,
-        "recovery_after_crash": null,
-        "validate_requires": null,
-        "validated_gate_reuse": null,
-        "validated_train_deploy": null,
-        "validated_train_supersede": null
-      },
-      "contract_version": null,
-      "name": null,
-      "ok": null,
-      "purpose": null,
-      "rules": "[]"
-    },
     "cancel": {
       "contract_version": null,
       "job": {
@@ -124,6 +103,116 @@
         "worktree_path": null
       },
       "ok": null
+    },
+    "deploy_preview": {
+      "contract_version": null,
+      "deploy_plan_sha": null,
+      "jobs": {
+        "[]": {
+          "auto_deploy": null,
+          "base_sha": null,
+          "branch": null,
+          "cancel_requested_at": null,
+          "conflict_with": null,
+          "deploy_sha": null,
+          "finished_at": null,
+          "head_sha": null,
+          "id": null,
+          "log_path": null,
+          "note": null,
+          "pending_deploy_sha": null,
+          "push_status": null,
+          "requested_at": null,
+          "reused_validation_sha": null,
+          "started_at": null,
+          "status": null,
+          "supersedes_train_id": null,
+          "supersession_id": null,
+          "task": null,
+          "train_id": null,
+          "train_size": null,
+          "validated_at": null,
+          "validated_head_sha": null,
+          "validation_base_sha": null,
+          "validation_environment_sha": null,
+          "validation_gate_policy_sha": null,
+          "validation_sha": null,
+          "validation_train_sha": null,
+          "validation_tree_sha": null,
+          "verify_status": null,
+          "worktree_path": null
+        }
+      },
+      "ok": null,
+      "push_plan": {
+        "atomic": null,
+        "audit_ref": {
+          "retention": null,
+          "source": null,
+          "spec": null,
+          "target": null
+        },
+        "destination_sha": null,
+        "fetch_url": null,
+        "refs": {
+          "[]": {
+            "source": null,
+            "spec": null,
+            "target": null
+          }
+        },
+        "remote": null,
+        "url": null
+      },
+      "result": null,
+      "reuse": {
+        "action": null,
+        "authorized": null,
+        "eligible": null,
+        "estimated_savings": {
+          "authorizes_reuse": null,
+          "basis": null,
+          "candidate_gate_count": null,
+          "confidence": null,
+          "coverage": null,
+          "mode": null,
+          "sample_count": null,
+          "sample_limit_per_gate": null,
+          "seconds": null,
+          "timed_gate_count": null
+        },
+        "evaluation": null,
+        "gates": {
+          "[]": {
+            "action": null,
+            "always_rerun_on_deploy": null,
+            "name": null,
+            "parallel_group": null,
+            "reason_code": null,
+            "scope": {
+              "kind": null,
+              "paths": "[]?"
+            },
+            "timing": {
+              "median_seconds": null,
+              "sample_count": null
+            },
+            "workers": null
+          }
+        },
+        "identity_checks": {
+          "[]": {
+            "actual": null,
+            "code": null,
+            "detail": null,
+            "expected": null,
+            "status": null
+          }
+        },
+        "reasons": "[]",
+        "reused_validation_sha": null,
+        "validation_sha": null
+      }
     },
     "dismiss": {
       "contract_version": null,
@@ -165,139 +254,6 @@
       },
       "next_action": null,
       "ok": null
-    },
-    "doctor": {
-      "config": {
-        "config_exists": null,
-        "config_path": null,
-        "config_version": null,
-        "deploy": {
-          "reuse": {
-            "enabled": null,
-            "fingerprints": "[]?",
-            "max_age_minutes": null,
-            "on_mismatch": null
-          },
-          "verify": "[]?"
-        },
-        "gate_parallelism": {
-          "max_workers": null,
-          "timeout_seconds": null
-        },
-        "gates": {
-          "[]": {
-            "always_rerun_on_deploy": null,
-            "name": null,
-            "run": null
-          }
-        },
-        "git": {
-          "integration_branch": null,
-          "integration_ref": null,
-          "push_refs": "[]",
-          "remote": null
-        },
-        "notify": {
-          "timeout_seconds": null,
-          "transitions": "[]",
-          "webhook_configured": null
-        },
-        "project": {
-          "name": null
-        },
-        "queue": {
-          "command_timeout_seconds": null,
-          "daemon_interval_seconds": null,
-          "heartbeat_interval_seconds": null,
-          "lock_ttl_minutes": null
-        },
-        "repo": null,
-        "state": {
-          "db": null,
-          "logs": null,
-          "validation_workspace": {
-            "cache_key": null,
-            "cache_paths": "[]?",
-            "mode": null,
-            "path": null
-          },
-          "worktree_root": null
-        }
-      },
-      "config_drift": {
-        "comparable": null,
-        "integration": {
-          "blob_sha": null,
-          "config_exists": null,
-          "ref": null,
-          "ref_exists": null
-        },
-        "local": {
-          "blob_sha": null,
-          "exists": null,
-          "path": null
-        },
-        "matches": null,
-        "state": null
-      },
-      "config_exists": null,
-      "contract_version": null,
-      "counts": {
-        "auto_queued": null,
-        "blocked": null,
-        "blocked_with_marker": null,
-        "canceled": null,
-        "deployed": null,
-        "deployed_verify_unknown": null,
-        "failed": null,
-        "in_progress": null,
-        "in_progress_with_marker": null,
-        "manual_queued": null,
-        "needs_reconcile": null,
-        "queued": null,
-        "validated": null
-      },
-      "db": null,
-      "db_existed_before": null,
-      "gc": {
-        "worktree_candidates": "[]?"
-      },
-      "git": {
-        "current_branch": null,
-        "integration_ref": null,
-        "integration_ref_exists": null,
-        "remote_exists": null,
-        "remote_url": null,
-        "repo_root": null,
-        "worktree_clean": null
-      },
-      "health": null,
-      "lock": null,
-      "next_action": null,
-      "ok": null,
-      "recommendations": "[]?",
-      "runtime": {
-        "distribution_version": null,
-        "install_mode": null,
-        "package_path": null,
-        "source_commit": null,
-        "source_dirty": null,
-        "source_path": null
-      },
-      "state": {
-        "logs": null,
-        "validation_workspace": {
-          "cache_key": null,
-          "cache_paths": "[]?",
-          "exists": null,
-          "initialized": null,
-          "mode": null,
-          "path": null
-        },
-        "worktree_root": null
-      },
-      "validated_trains": "[]?",
-      "version": null
     },
     "enqueue": {
       "contract_version": null,
@@ -817,23 +773,6 @@
         "requeued": null
       }
     },
-    "recover": {
-      "contract_version": null,
-      "gc": null,
-      "next_action": null,
-      "ok": null,
-      "reconcile": {
-        "applied": null,
-        "jobs": "[]?",
-        "summary": {
-          "canceled": null,
-          "conflicts": null,
-          "reconciled_deployed": null,
-          "requeued": null
-        }
-      },
-      "result": null
-    },
     "retry": {
       "contract_version": null,
       "dismissed_job": {
@@ -906,130 +845,6 @@
       },
       "next_action": null,
       "ok": null
-    },
-    "run_batch_preview": {
-      "confirmed_command": null,
-      "contract_version": null,
-      "deploy_plan_sha": null,
-      "jobs": {
-        "[]": {
-          "auto_deploy": null,
-          "base_sha": null,
-          "branch": null,
-          "cancel_requested_at": null,
-          "conflict_with": null,
-          "deploy_sha": null,
-          "finished_at": null,
-          "head_sha": null,
-          "id": null,
-          "log_path": null,
-          "note": null,
-          "pending_deploy_sha": null,
-          "push_status": null,
-          "requested_at": null,
-          "reused_validation_sha": null,
-          "started_at": null,
-          "status": null,
-          "supersedes_train_id": null,
-          "supersession_id": null,
-          "task": null,
-          "train_id": null,
-          "train_size": null,
-          "validated_at": null,
-          "validated_head_sha": null,
-          "validation_base_sha": null,
-          "validation_environment_sha": null,
-          "validation_gate_policy_sha": null,
-          "validation_sha": null,
-          "validation_train_sha": null,
-          "validation_tree_sha": null,
-          "verify_status": null,
-          "worktree_path": null
-        }
-      },
-      "mode": null,
-      "ok": null,
-      "preview": null,
-      "push_plan": {
-        "atomic": null,
-        "audit_ref": {
-          "retention": null,
-          "source": null,
-          "spec": null,
-          "target": null
-        },
-        "destination_sha": null,
-        "fetch_url": null,
-        "refs": {
-          "[]": {
-            "source": null,
-            "spec": null,
-            "target": null
-          }
-        },
-        "remote": null,
-        "url": null
-      },
-      "reuse": {
-        "action": null,
-        "authorized": null,
-        "eligible": null,
-        "estimated_savings": {
-          "authorizes_reuse": null,
-          "basis": null,
-          "candidate_gate_count": null,
-          "confidence": null,
-          "coverage": null,
-          "mode": null,
-          "sample_count": null,
-          "sample_limit_per_gate": null,
-          "seconds": null,
-          "timed_gate_count": null
-        },
-        "evaluation": null,
-        "gates": {
-          "[]": {
-            "action": null,
-            "always_rerun_on_deploy": null,
-            "name": null,
-            "parallel_group": null,
-            "reason_code": null,
-            "scope": {
-              "kind": null,
-              "paths": "[]?"
-            },
-            "timing": {
-              "median_seconds": null,
-              "sample_count": null
-            },
-            "workers": null
-          }
-        },
-        "identity_checks": {
-          "[]": {
-            "actual": null,
-            "code": null,
-            "detail": null,
-            "expected": null,
-            "status": null
-          }
-        },
-        "reasons": "[]",
-        "reused_validation_sha": null,
-        "validation_sha": null
-      },
-      "train_id": null
-    },
-    "run_batch_validate": {
-      "contract_version": null,
-      "counts": {},
-      "jobs": "[]?",
-      "note": null,
-      "ok": null,
-      "push_counts": {},
-      "result": null,
-      "reused_validation_shas": "[]?",
-      "verify_counts": {}
     },
     "stats": {
       "average_queue_seconds": null,
@@ -1298,28 +1113,171 @@
       "attention_jobs": "[]?",
       "contract_version": null,
       "counts": {
-        "auto_queued": null,
-        "blocked": null,
-        "blocked_with_marker": null,
-        "canceled": null,
-        "deployed": null,
-        "deployed_verify_unknown": null,
-        "failed": null,
-        "in_progress": null,
-        "in_progress_with_marker": null,
-        "manual_queued": null,
-        "needs_reconcile": null,
-        "queued": null,
-        "validated": null
+        "attention": null,
+        "done": null,
+        "ready": null,
+        "running": null,
+        "waiting": null
       },
-      "db": null,
-      "jobs": "[]?",
-      "jobs_limit": null,
-      "jobs_truncated": null,
-      "lock": null,
-      "next_action": null,
+      "health": null,
+      "next_action": {
+        "code": null,
+        "command": null,
+        "requires_approval": null
+      },
       "ok": null,
-      "validated_trains": "[]?"
+      "recent_jobs": "[]?",
+      "state": null,
+      "summary": null
+    },
+    "status_diagnose": {
+      "attention_jobs": "[]?",
+      "contract_version": null,
+      "counts": {
+        "attention": null,
+        "done": null,
+        "ready": null,
+        "running": null,
+        "waiting": null
+      },
+      "diagnostics": {
+        "config": {
+          "config_exists": null,
+          "config_path": null,
+          "config_version": null,
+          "deploy": {
+            "reuse": {
+              "enabled": null,
+              "fingerprints": "[]?",
+              "max_age_minutes": null,
+              "on_mismatch": null
+            },
+            "verify": "[]?"
+          },
+          "gate_parallelism": {
+            "max_workers": null,
+            "timeout_seconds": null
+          },
+          "gates": {
+            "[]": {
+              "always_rerun_on_deploy": null,
+              "name": null,
+              "run": null
+            }
+          },
+          "git": {
+            "integration_branch": null,
+            "integration_ref": null,
+            "push_refs": "[]",
+            "remote": null
+          },
+          "notify": {
+            "timeout_seconds": null,
+            "transitions": "[]",
+            "webhook_configured": null
+          },
+          "project": {
+            "name": null
+          },
+          "queue": {
+            "command_timeout_seconds": null,
+            "daemon_interval_seconds": null,
+            "heartbeat_interval_seconds": null,
+            "lock_ttl_minutes": null
+          },
+          "repo": null,
+          "state": {
+            "db": null,
+            "logs": null,
+            "validation_workspace": {
+              "cache_key": null,
+              "cache_paths": "[]?",
+              "mode": null,
+              "path": null
+            },
+            "worktree_root": null
+          }
+        },
+        "config_drift": {
+          "comparable": null,
+          "integration": {
+            "blob_sha": null,
+            "config_exists": null,
+            "ref": null,
+            "ref_exists": null
+          },
+          "local": {
+            "blob_sha": null,
+            "exists": null,
+            "path": null
+          },
+          "matches": null,
+          "state": null
+        },
+        "config_exists": null,
+        "db": null,
+        "gc": {
+          "worktree_candidates": "[]?"
+        },
+        "git": {
+          "current_branch": null,
+          "integration_ref": null,
+          "integration_ref_exists": null,
+          "remote_exists": null,
+          "remote_url": null,
+          "repo_root": null,
+          "worktree_clean": null
+        },
+        "lock": null,
+        "raw_counts": {
+          "auto_queued": null,
+          "blocked": null,
+          "blocked_with_marker": null,
+          "canceled": null,
+          "deployed": null,
+          "deployed_verify_unknown": null,
+          "failed": null,
+          "in_progress": null,
+          "in_progress_with_marker": null,
+          "manual_queued": null,
+          "needs_reconcile": null,
+          "queued": null,
+          "validated": null
+        },
+        "recommendations": "[]?",
+        "runtime": {
+          "distribution_version": null,
+          "install_mode": null,
+          "package_path": null,
+          "source_commit": null,
+          "source_dirty": null,
+          "source_path": null
+        },
+        "state": {
+          "logs": null,
+          "validation_workspace": {
+            "cache_key": null,
+            "cache_paths": "[]?",
+            "exists": null,
+            "initialized": null,
+            "mode": null,
+            "path": null
+          },
+          "worktree_root": null
+        },
+        "validated_trains": "[]?",
+        "version": null
+      },
+      "health": null,
+      "next_action": {
+        "code": null,
+        "command": null,
+        "requires_approval": null
+      },
+      "ok": null,
+      "recent_jobs": "[]?",
+      "state": null,
+      "summary": null
     },
     "unlock": {
       "audit_event_id": null,
@@ -1332,6 +1290,17 @@
       "prior_owner": null,
       "reason": null
     },
+    "validate": {
+      "contract_version": null,
+      "counts": {},
+      "jobs": "[]?",
+      "note": null,
+      "ok": null,
+      "push_counts": {},
+      "result": null,
+      "reused_validation_shas": "[]?",
+      "verify_counts": {}
+    },
     "verify": {
       "contract_version": null,
       "next_action": null,
@@ -1343,19 +1312,6 @@
         }
       },
       "result": null
-    },
-    "version": {
-      "contract_version": null,
-      "ok": null,
-      "runtime": {
-        "distribution_version": null,
-        "install_mode": null,
-        "package_path": null,
-        "source_commit": null,
-        "source_dirty": null,
-        "source_path": null
-      },
-      "version": null
     }
   }
 }

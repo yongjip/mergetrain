@@ -9,11 +9,10 @@ worktrees.
 2. Commit all changes before enqueueing.
 3. Do not push deploy refs directly. For ordinary handoff, use
    `mergetrain enqueue --task <task> --branch <branch>` and let mergetrain
-   capture the exact SHAs. Do not manually copy `--base-sha`, `--head-sha`, or
-   `--capture-sha` unless a documented compatibility workflow requires it.
-4. Read `mergetrain doctor --json` first. Use `mergetrain status --json --limit
-   10` only when job or train details are needed, and read `attention_jobs`
-   before recent history.
+   capture and validate the exact SHAs.
+4. Read `mergetrain status --json` first and follow its structured
+   `next_action`. Use `status --diagnose` only for configuration, Git, runtime,
+   or lock detail, and `inspect <job-id>` only for job evidence.
 5. Use `--auto` only after explicit unattended-deploy approval. A bounded
    instruction to QA, deploy, verify, and finish end-to-end grants that approval
    for the named task and destination; do not ask for each opaque train ID.
@@ -38,7 +37,7 @@ worktrees.
 python -m pytest -q -n auto --cov=mergetrain --cov-report=term-missing --cov-report=json:.coverage.json
 python scripts/check_critical_coverage.py .coverage.json
 PYTHONPATH=src python -m unittest discover -s tests
-PYTHONPATH=src python -m mergetrain agent-contract --json
+PYTHONPATH=src python -m mergetrain status --diagnose --json
 PYTHONPATH=src python -m mergetrain init --project demo
 python scripts/check_architecture.py
 ```

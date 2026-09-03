@@ -45,9 +45,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
         # --apply must never destroy a worktree a running deploy is inside).
         lock = get_lock(conn)
         protect_worktrees = (
-            [lock.worktree_path]
-            if lock and lock.worktree_path and lock.liveness != "dead"
-            else []
+            [lock.worktree_path] if lock and lock.worktree_path and lock.liveness != "dead" else []
         )
         protected = set(config.git.push_refs) | {
             config.git.integration_branch,
@@ -103,9 +101,7 @@ def _emit_recovery_error(
     args: argparse.Namespace, message: str, exit_code: int, *, error_code: str
 ) -> int:
     if getattr(args, "json", False):
-        dump_json(
-            _error_payload(error_code, message, retryable=exit_code in (3, 7))
-        )
+        dump_json(_error_payload(error_code, message, retryable=exit_code in (3, 7)))
     else:
         print(f"mergetrain: {message}", file=sys.stderr)
     return exit_code
@@ -145,7 +141,14 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         applied=bool(args.apply),
     )
     try:
-        outcome = reconcile(config, conn, apply=args.apply)
+        # v3 has one recovery entrypoint. Applying reconciliation first heals
+        # safely recoverable dead-owner claims, then classifies pending pushes
+        # against the remote. Cleanup and non-repeatable verify remain separate
+        # explicit operations.
+        if args.apply:
+            outcome = recover(config, conn, gc=False, apply=True).reconcile
+        else:
+            outcome = reconcile(config, conn, apply=False)
         next_action = _recovery_next_action(conn, config)
     except LockHeld as exc:
         _finish_recovery_evidence(
@@ -202,92 +205,6 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         )
         for job in outcome.jobs:
             print(f"  #{job['job_id']} {job['decision']}: {job['reason']}")
-        print(f"next action: {next_action}")
-    return outcome.exit_code
-
-
-def cmd_recover(args: argparse.Namespace) -> int:
-    try:
-        config = config_from_args(args)
-    except ConfigError as exc:
-        return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
-    conn = connect(config.state.db)
-    operation = start_recovery_operation(
-        conn,
-        operation="recover",
-        applied=True,
-    )
-    try:
-        outcome = recover(config, conn, gc=args.gc, apply=True)
-        next_action = _recovery_next_action(conn, config)
-    except LockHeld as exc:
-        _finish_recovery_evidence(
-            conn,
-            operation.invocation_id,
-            state="lock_held",
-            detail={"error_code": "lock_held", "gc_requested": bool(args.gc)},
-        )
-        return _emit_recovery_error(args, str(exc), 3, error_code="lock_held")
-    except RemoteUnreachable as exc:
-        _finish_recovery_evidence(
-            conn,
-            operation.invocation_id,
-            state="remote_unreachable",
-            detail={
-                "error_code": "remote_unreachable",
-                "gc_requested": bool(args.gc),
-            },
-        )
-        return _emit_recovery_error(args, str(exc), 7, error_code="remote_unreachable")
-    except Exception as exc:
-        _finish_recovery_evidence(
-            conn,
-            operation.invocation_id,
-            state="error",
-            detail={
-                "error_type": type(exc).__name__,
-                "gc_requested": bool(args.gc),
-            },
-        )
-        raise
-    else:
-        _finish_recovery_evidence(
-            conn,
-            operation.invocation_id,
-            state=(
-                "conflict" if outcome.reconcile.summary.get("conflicts") else "success"
-            ),
-            detail={
-                "gc_applied": outcome.gc is not None,
-                "gc_requested": bool(args.gc),
-                "summary": outcome.reconcile.summary,
-            },
-        )
-    finally:
-        conn.close()
-    reconciled = outcome.reconcile
-    payload = {
-        "ok": True,
-        "result": "conflict" if reconciled.summary.get("conflicts") else "success",
-        "reconcile": {
-            "applied": reconciled.applied,
-            "jobs": reconciled.jobs,
-            "summary": reconciled.summary,
-        },
-        "gc": outcome.gc,
-        "next_action": next_action,
-    }
-    if args.json:
-        dump_json(payload)
-    else:
-        summary = reconciled.summary
-        print(
-            f"recover: {summary['reconciled_deployed']} deployed, "
-            f"{summary['requeued']} requeued, {summary['canceled']} canceled, "
-            f"{summary['conflicts']} conflict(s)"
-        )
-        if outcome.gc is not None:
-            print(f"gc: removed {len(outcome.gc.get('removed_worktrees', []))} worktree(s)")
         print(f"next action: {next_action}")
     return outcome.exit_code
 
@@ -358,9 +275,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 log_path = config.state.logs / f"verify-{job.id}.log"
                 config.state.logs.mkdir(parents=True, exist_ok=True)
                 with log_path.open("w", encoding="utf-8") as log:
-                    passed = GitRunner(config).reverify_deploy(
-                        deploy_sha=job.deploy_sha, log=log
-                    )
+                    passed = GitRunner(config).reverify_deploy(deploy_sha=job.deploy_sha, log=log)
                 outcome = "succeeded" if passed else "failed"
                 note = f"verify re-run against {job.deploy_sha}: {outcome}"
             updated = resolve_verify_status(conn, job.id, verify_status=outcome, note=note)
@@ -368,11 +283,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         next_action = _recovery_next_action(conn, config)
     finally:
         conn.close()
-    result = (
-        "failed"
-        if any(item["verify_status"] == "failed" for item in resolved)
-        else "success"
-    )
+    result = "failed" if any(item["verify_status"] == "failed" for item in resolved) else "success"
     payload = {
         "ok": True,
         "result": result,

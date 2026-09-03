@@ -154,15 +154,26 @@ def smoke(
             str(tool.get("name")): tool
             for tool in (listed.get("result") or {}).get("tools") or []
         }
+        expected_tools = {
+            "mergetrain_status",
+            "mergetrain_inspect",
+            "mergetrain_validate",
+            "mergetrain_enqueue",
+            "mergetrain_deploy",
+        }
+        if set(tools) != expected_tools:
+            raise RuntimeError(
+                "MCP tools/list must expose the five stable v3 tools; "
+                f"received {sorted(tools)}"
+            )
         deploy = tools.get("mergetrain_deploy")
-        if deploy is None:
-            raise RuntimeError("MCP tools/list omitted mergetrain_deploy")
+        assert deploy is not None
         schema = deploy.get("inputSchema") or {}
         properties = schema.get("properties") or {}
-        if set(properties) != {"train_id"}:
+        if properties or schema.get("required"):
             raise RuntimeError(
-                "mergetrain_deploy input schema must expose only train_id; "
-                f"received {sorted(properties)}"
+                "mergetrain_deploy must not accept model-supplied selection or "
+                f"approval inputs; received properties={sorted(properties)}"
             )
     except BaseException as exc:
         request_error = exc
@@ -216,7 +227,7 @@ def main() -> int:
                     timeout=args.timeout,
                     env=isolated_uv_environment(Path(td)),
                 )
-            print("MCP Registry launch OK: initialize, tools/list, deploy schema")
+            print("MCP Registry launch OK: initialize, five tools, deploy schema")
             return 0
         except BaseException as exc:
             last_error = exc

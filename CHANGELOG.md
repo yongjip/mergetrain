@@ -1,5 +1,48 @@
 # Changelog
 
+## 3.0.0 - 2026-09-03
+
+- Replace the implementation-shaped CLI with six permanent product verbs:
+  `init`, `status`, `enqueue`, `validate`, `deploy`, and `inspect`. `status
+  --diagnose` absorbs doctor, `validate` and `deploy` absorb runner modes, and
+  `reconcile --apply` absorbs safe stranded-claim recovery. Removed v2
+  invocations fail with the typed `removed_interface` error and an exact
+  migration command; no compatibility aliases remain.
+
+- Make `deploy` the complete human workflow. It validates queued work when
+  needed and renders the sole exact Ready train's tasks, destination, refs, and
+  gate policy, confirms interactively, then rechecks the private plan identity
+  before atomic push and verification. Direct validation pauses while one train
+  is Ready, removing routine train selection. `deploy --json` is
+  non-pushing, and human-facing paths no longer ask for train IDs, SHAs, plan
+  hashes, preview modes, or one-shot reuse switches.
+
+- Project internal queue detail into five status groups—Waiting, Running,
+  Ready, Attention, and Done—with one structured next action. Keep specialist
+  evidence, daemon, repair, recovery, cleanup, dashboard, Hub, demo, and MCP
+  commands callable but out of default help.
+
+- Reduce the default MCP surface from twelve tools to five and fold bounded
+  event/log reads into inspect detail. MCP deploy retains client-side human
+  elicitation and exact plan revalidation while its fallback shows only the
+  ordinary interactive deploy command.
+
+- Generate a minimal config containing only schema version, project name, and
+  gates, and reduce generated task-agent instructions to five core rules. Full
+  runtime defaults and all exact-SHA, lease, combined-gate, conflict,
+  destination/policy binding, atomic-push, and recovery guarantees remain.
+
+- Synchronize `llms.txt`, `llms-full.txt`, Claude instructions, plugin skills,
+  quickstart, and convenience scripts with the v3 grammar. The protocol checker
+  now fails CI if those high-signal surfaces reintroduce removed commands or if
+  default help stops exposing exactly the six verbs in lifecycle order.
+
+- Establish contract 3 as the long-lived interface: the six CLI names, five
+  MCP tools, config-schema-2 readability, error envelope, and existing JSON
+  meanings are frozen; 3.x evolves additively and has no planned successor
+  grammar. Add contract fingerprints and installed-wheel E2E coverage for the
+  simplified surface.
+
 ## 2.4.2 - 2026-09-02
 
 - Root production publishing in the protected `main` workflow and signer

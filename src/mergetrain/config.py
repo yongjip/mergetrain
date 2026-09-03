@@ -146,17 +146,12 @@ class MergetrainConfig:
 
     @property
     def validation_worktree_path(self) -> Path:
-        return (
-            self.state.worktree_root
-            / f"{self.project.name}-validation-workspace"
-        )
+        return self.state.worktree_root / f"{self.project.name}-validation-workspace"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         workspace = data["state"].pop("validation_workspace")
-        data["state"] = {
-            key: str(value) for key, value in data["state"].items()
-        }
+        data["state"] = {key: str(value) for key, value in data["state"].items()}
         workspace["cache_paths"] = list(workspace["cache_paths"])
         workspace["path"] = str(self.validation_worktree_path)
         data["state"]["validation_workspace"] = workspace
@@ -226,9 +221,7 @@ def is_redundant_builtin_diff_check(
     ):
         return False
     expanded = gate.run.replace("${integration_ref}", integration_ref)
-    expected = BUILTIN_DIFF_CHECK_TEMPLATE.replace(
-        "${integration_ref}", integration_ref
-    )
+    expected = BUILTIN_DIFF_CHECK_TEMPLATE.replace("${integration_ref}", integration_ref)
     try:
         return shlex.split(expanded) == shlex.split(expected)
     except ValueError:
@@ -249,9 +242,7 @@ def effective_gates(config: MergetrainConfig) -> tuple[GateConfig, ...]:
 
 
 _LEGACY_YAML_BOOLEAN = re.compile(r"^(?:yes|no|on|off)$", re.IGNORECASE)
-_AMBIGUOUS_YAML_INTEGER = re.compile(
-    r"^[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-9]+)$"
-)
+_AMBIGUOUS_YAML_INTEGER = re.compile(r"^[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-9]+)$")
 
 
 def _validate_yaml_text(text: str) -> None:
@@ -280,9 +271,7 @@ def _validate_yaml_text(text: str) -> None:
         seen.add(identity)
         if isinstance(node, ScalarNode) and node.style is None:
             if _LEGACY_YAML_BOOLEAN.fullmatch(node.value):
-                raise ConfigError(
-                    "ambiguous YAML boolean; use true/false or quote it as a string"
-                )
+                raise ConfigError("ambiguous YAML boolean; use true/false or quote it as a string")
             if _AMBIGUOUS_YAML_INTEGER.fullmatch(node.value):
                 raise ConfigError(
                     "ambiguous YAML integer; use an unprefixed decimal value or quote it"
@@ -351,60 +340,7 @@ def render_default_config(project_name: str = "example-app") -> str:
 project:
   name: {project_name}
 
-state:
-  db: .mergetrain/queue.sqlite
-  logs: .mergetrain/logs
-  worktree_root: .mergetrain/worktrees
-  validation_workspace:
-    mode: ephemeral
-    cache_key: ""
-    cache_paths: []
-
-git:
-  remote: origin
-  integration_branch: main
-  push_refs:
-    - main
-
-queue:
-  lock_ttl_minutes: 30
-  daemon_interval_seconds: 15
-  heartbeat_interval_seconds: 10
-  command_timeout_seconds: 3600
-
-notify:
-  # Optional provider-neutral JSON webhook; this URL may contain a secret.
-  webhook_url: ""
-  transitions:
-    - landed
-    - blocked
-    - needs_reconcile
-    - daemon_paused
-  timeout_seconds: 10
-
-gate_parallelism:
-  # Sequential by default. Increase only for gates explicitly grouped below.
-  max_workers: 1
-  # Optional total wall-clock ceiling for the configured gate plan.
-  # timeout_seconds: 1800
-
 gates: []
-  # mergetrain always runs its built-in diff-check first.
-  # Add service-specific checks here, for example:
-  # - name: tests
-  #   run: python -m unittest discover -s tests
-
-deploy:
-  verify: []
-  reuse:
-    enabled: false
-    max_age_minutes: 60
-    on_mismatch: rerun
-    fingerprints: []
-  # Add post-push checks here, for example:
-  # verify:
-  #   - name: live-health
-  #     run: curl -fsS https://example.invalid/health
 """
 
 
@@ -442,30 +378,22 @@ def _as_gate_list(
             raise ConfigError(f"{key}[{index}] requires name and run")
         always_rerun = item.get("always_rerun_on_deploy", False)
         if not isinstance(always_rerun, bool):
-            raise ConfigError(
-                f"{key}[{index}].always_rerun_on_deploy must be true or false"
-            )
+            raise ConfigError(f"{key}[{index}].always_rerun_on_deploy must be true or false")
         raw_paths = item.get("paths")
         paths: tuple[str, ...] = ()
         if raw_paths is not None:
             if not allow_paths:
                 raise ConfigError(f"{key}[{index}].paths is unsupported")
             if not isinstance(raw_paths, list) or not raw_paths:
-                raise ConfigError(
-                    f"{key}[{index}].paths must be a non-empty list"
-                )
+                raise ConfigError(f"{key}[{index}].paths must be a non-empty list")
             parsed_paths: list[str] = []
             for path_index, pattern in enumerate(raw_paths):
                 if not isinstance(pattern, str):
-                    raise ConfigError(
-                        f"{key}[{index}].paths[{path_index}] must be a string"
-                    )
+                    raise ConfigError(f"{key}[{index}].paths[{path_index}] must be a string")
                 try:
                     parsed_paths.append(validate_gate_path_pattern(pattern))
                 except ValueError as exc:
-                    raise ConfigError(
-                        f"{key}[{index}].paths[{path_index}] {exc}"
-                    ) from exc
+                    raise ConfigError(f"{key}[{index}].paths[{path_index}] {exc}") from exc
             if len(set(parsed_paths)) != len(parsed_paths):
                 raise ConfigError(f"{key}[{index}].paths must not contain duplicates")
             paths = tuple(parsed_paths)
@@ -486,20 +414,14 @@ def _as_gate_list(
         if allow_parallel:
             raw_group = item.get("parallel_group", "")
             if not isinstance(raw_group, str):
-                raise ConfigError(
-                    f"{key}[{index}].parallel_group must be a string"
-                )
+                raise ConfigError(f"{key}[{index}].parallel_group must be a string")
             parallel_group = raw_group.strip()
             if "parallel_group" in item and not parallel_group:
-                raise ConfigError(
-                    f"{key}[{index}].parallel_group must be a non-empty string"
-                )
+                raise ConfigError(f"{key}[{index}].parallel_group must be a non-empty string")
             raw_needs = item.get("needs")
             if raw_needs is not None:
                 if not isinstance(raw_needs, list) or not raw_needs:
-                    raise ConfigError(
-                        f"{key}[{index}].needs must be a non-empty list"
-                    )
+                    raise ConfigError(f"{key}[{index}].needs must be a non-empty list")
                 parsed_needs = [
                     _nonempty_string(
                         dependency,
@@ -508,18 +430,12 @@ def _as_gate_list(
                     for dependency_index, dependency in enumerate(raw_needs)
                 ]
                 if len(set(parsed_needs)) != len(parsed_needs):
-                    raise ConfigError(
-                        f"{key}[{index}].needs must not contain duplicates"
-                    )
+                    raise ConfigError(f"{key}[{index}].needs must not contain duplicates")
                 needs = tuple(parsed_needs)
-            workers = _positive_int(
-                item.get("workers", 1), key=f"{key}[{index}].workers"
-            )
+            workers = _positive_int(item.get("workers", 1), key=f"{key}[{index}].workers")
             raw_timeout = item.get("timeout_seconds")
             if raw_timeout is not None:
-                timeout_seconds = _positive_int(
-                    raw_timeout, key=f"{key}[{index}].timeout_seconds"
-                )
+                timeout_seconds = _positive_int(raw_timeout, key=f"{key}[{index}].timeout_seconds")
         gates.append(
             GateConfig(
                 name=name,
@@ -585,9 +501,7 @@ def _validation_cache_path(value: Any, *, key: str) -> str:
         or any(part in {"", ".", "..", ".git"} for part in pure.parts)
         or re.match(r"^[A-Za-z]:", path)
     ):
-        raise ConfigError(
-            f"{key} must be a normalized repository-relative POSIX directory path"
-        )
+        raise ConfigError(f"{key} must be a normalized repository-relative POSIX directory path")
     if any(character in path for character in "*?["):
         raise ConfigError(f"{key} does not support glob patterns")
     return pure.as_posix()
@@ -679,9 +593,7 @@ def load_config(
         raise ConfigError("state.validation_workspace must be a mapping")
     workspace_mode = str(workspace_data.get("mode", "ephemeral")).strip()
     if workspace_mode not in {"ephemeral", "persistent"}:
-        raise ConfigError(
-            "state.validation_workspace.mode must be 'ephemeral' or 'persistent'"
-        )
+        raise ConfigError("state.validation_workspace.mode must be 'ephemeral' or 'persistent'")
     cache_key_value = workspace_data.get("cache_key", "")
     if not isinstance(cache_key_value, str):
         raise ConfigError("state.validation_workspace.cache_key must be a string")
@@ -690,20 +602,14 @@ def load_config(
     if not isinstance(cache_paths_value, list):
         raise ConfigError("state.validation_workspace.cache_paths must be a list")
     cache_paths = tuple(
-        _validation_cache_path(
-            value, key=f"state.validation_workspace.cache_paths[{index}]"
-        )
+        _validation_cache_path(value, key=f"state.validation_workspace.cache_paths[{index}]")
         for index, value in enumerate(cache_paths_value)
     )
     if len(set(cache_paths)) != len(cache_paths):
-        raise ConfigError(
-            "state.validation_workspace.cache_paths must not contain duplicates"
-        )
+        raise ConfigError("state.validation_workspace.cache_paths must not contain duplicates")
     if workspace_mode == "persistent":
         if not cache_key:
-            raise ConfigError(
-                "state.validation_workspace.cache_key is required in persistent mode"
-            )
+            raise ConfigError("state.validation_workspace.cache_key is required in persistent mode")
         if not cache_paths:
             raise ConfigError(
                 "state.validation_workspace.cache_paths must not be empty in persistent mode"
@@ -739,9 +645,7 @@ def load_config(
         git_data.get("integration_branch", "main"), key="git.integration_branch"
     )
     push_refs = (
-        _push_refs(git_data["push_refs"])
-        if "push_refs" in git_data
-        else (integration_branch,)
+        _push_refs(git_data["push_refs"]) if "push_refs" in git_data else (integration_branch,)
     )
     git = GitConfig(
         remote=_nonempty_string(git_data.get("remote", "origin"), key="git.remote"),
@@ -794,9 +698,7 @@ def load_config(
         transition = _nonempty_string(value, key=f"notify.transitions[{index}]")
         if transition not in NOTIFY_TRANSITIONS:
             allowed = ", ".join(NOTIFY_TRANSITIONS)
-            raise ConfigError(
-                f"notify.transitions[{index}] must be one of: {allowed}"
-            )
+            raise ConfigError(f"notify.transitions[{index}] must be one of: {allowed}")
         if transition not in transitions:
             transitions.append(transition)
     notify = NotifyConfig(
@@ -838,15 +740,11 @@ def load_config(
         reuse_value.get("fingerprints", []), key="deploy.reuse.fingerprints"
     )
     if any(item.always_rerun_on_deploy for item in fingerprints):
-        raise ConfigError(
-            "deploy.reuse.fingerprints do not support always_rerun_on_deploy"
-        )
+        raise ConfigError("deploy.reuse.fingerprints do not support always_rerun_on_deploy")
     deploy = DeployConfig(
         verify=_as_gate_list(deploy_data.get("verify", []), key="deploy.verify"),
         reuse=ReuseConfig(
-            enabled=_boolean(
-                reuse_value.get("enabled", False), key="deploy.reuse.enabled"
-            ),
+            enabled=_boolean(reuse_value.get("enabled", False), key="deploy.reuse.enabled"),
             max_age_minutes=_positive_int(
                 reuse_value.get("max_age_minutes", 60),
                 key="deploy.reuse.max_age_minutes",
@@ -861,14 +759,9 @@ def load_config(
         allow_paths=True,
         allow_parallel=True,
     )
-    gate_names = [
-        gate.name
-        for gate in (*gates, *deploy.verify, *deploy.reuse.fingerprints)
-    ]
+    gate_names = [gate.name for gate in (*gates, *deploy.verify, *deploy.reuse.fingerprints)]
     if len(set(gate_names)) != len(gate_names):
-        raise ConfigError(
-            "gate, deploy.verify, and deploy.reuse.fingerprint names must be unique"
-        )
+        raise ConfigError("gate, deploy.verify, and deploy.reuse.fingerprint names must be unique")
     configured_names: set[str] = set()
     closed_groups: set[str] = set()
     current_group = ""
@@ -888,9 +781,7 @@ def load_config(
                     "the built-in diff-check or an earlier configured gate"
                 )
         if gate.workers > gate_parallelism.max_workers:
-            raise ConfigError(
-                f"gates[{index}].workers exceeds gate_parallelism.max_workers"
-            )
+            raise ConfigError(f"gates[{index}].workers exceeds gate_parallelism.max_workers")
         configured_names.add(gate.name)
 
     return MergetrainConfig(
@@ -922,9 +813,7 @@ def _read_config_version(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 
     raw = data.get("version", 1)
     if isinstance(raw, bool) or not isinstance(raw, int):
-        raise ConfigError(
-            f"config 'version' must be an integer, got {raw!r}"
-        )
+        raise ConfigError(f"config 'version' must be an integer, got {raw!r}")
     if raw < 1:
         raise ConfigError(f"config 'version' must be >= 1, got {raw}")
     data = {key: value for key, value in data.items() if key != "version"}
@@ -933,10 +822,7 @@ def _read_config_version(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     elif raw == CONFIG_VERSION:
         removed = sorted({"agent", "terminology"}.intersection(data))
         if removed:
-            raise ConfigError(
-                "config version 2 removed top-level key(s): "
-                + ", ".join(removed)
-            )
+            raise ConfigError("config version 2 removed top-level key(s): " + ", ".join(removed))
     return raw, data
 
 

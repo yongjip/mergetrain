@@ -47,77 +47,36 @@ def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
 def _validate_enqueue_worktree(
     worktree: Path,
     branch: str,
-    *,
-    allow_dirty: bool = False,
-    allow_branch_mismatch: bool = False,
 ) -> None:
     if not worktree.exists():
         raise QueueError(f"worktree does not exist: {worktree}")
     if not git_repo_root(worktree):
         raise QueueError(f"not a git worktree: {worktree}")
-    if not allow_dirty and not git_worktree_clean(worktree):
+    if not git_worktree_clean(worktree):
         dirty = git_dirty_paths(worktree)
         hint = f" ({', '.join(dirty)})" if dirty else ""
         raise QueueError(
-            f"worktree has uncommitted changes{hint}; commit or stash them, "
-            "or pass --allow-dirty. (mergetrain's own .mergetrain/ state is "
+            f"worktree has uncommitted changes{hint}; commit or stash them. "
+            "(mergetrain's own .mergetrain/ state is "
             "self-ignored — if it appears here, upgrade mergetrain.)"
         )
     current = git_current_branch(worktree)
-    if not allow_branch_mismatch and current != branch:
-        raise QueueError(
-            f"current branch {current!r} does not match --branch {branch!r}"
-        )
+    if current != branch:
+        raise QueueError(f"current branch {current!r} does not match --branch {branch!r}")
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     _preflight_config(config)
     worktree = Path(args.worktree or Path.cwd()).expanduser().resolve()
-    if not args.no_ready_check:
-        _validate_enqueue_worktree(
-            worktree,
-            args.branch,
-            allow_dirty=args.allow_dirty,
-            allow_branch_mismatch=args.allow_branch_mismatch,
-        )
-    # Exact-SHA handoff is the safe default. Keep the explicit SHA arguments
-    # and --capture-sha accepted for compatibility, but ordinary ready-checked
-    # handoff always derives identity from the repository. Otherwise a copied
-    # or mistyped SHA can create a queue row that does not describe the clean
-    # branch the caller just inspected.
-    base_sha = args.base_sha or ""
-    head_sha = args.head_sha or ""
-    if not args.no_ready_check:
-        captured_base_sha = _capture_sha_or_error(
-            config.repo, config.git.integration_ref, label="base"
-        )
-        captured_head_sha = _capture_sha_or_error(
-            worktree, args.branch, label="head"
-        )
-        if base_sha and base_sha != captured_base_sha:
-            raise QueueError(
-                "--base-sha does not match the current integration ref; "
-                "omit explicit SHA options for ordinary enqueue"
-            )
-        if head_sha and head_sha != captured_head_sha:
-            raise QueueError(
-                "--head-sha does not match the clean task branch HEAD; "
-                "omit explicit SHA options for ordinary enqueue"
-            )
-        base_sha = captured_base_sha
-        head_sha = captured_head_sha
-    elif args.capture_sha:
-        base_sha = base_sha or _capture_sha_or_error(
-            config.repo, config.git.integration_ref, label="base"
-        )
-        head_sha = head_sha or _capture_sha_or_error(
-            worktree, args.branch, label="head"
-        )
+    _validate_enqueue_worktree(worktree, args.branch)
+    # v3 has one enqueue path: verify a clean owning worktree and derive both
+    # identities from Git. User-supplied SHAs and readiness bypasses no longer
+    # exist, so the queue row always describes the branch that was inspected.
+    base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
+    head_sha = _capture_sha_or_error(worktree, args.branch, label="head")
     approval_destination_sha = deploy_destination_sha(config) if args.auto else ""
-    approval_execution_policy_sha = (
-        deploy_execution_policy_sha(config) if args.auto else ""
-    )
+    approval_execution_policy_sha = deploy_execution_policy_sha(config) if args.auto else ""
     conn = connect(config.state.db)
     try:
         job = enqueue_job(
@@ -128,7 +87,7 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             base_sha=base_sha,
             head_sha=head_sha,
             note=args.note or "",
-            allow_duplicate=args.allow_duplicate,
+            allow_duplicate=False,
             auto_deploy=args.auto,
             approval_destination_sha=approval_destination_sha,
             approval_execution_policy_sha=approval_execution_policy_sha,
@@ -171,12 +130,8 @@ def cmd_retry(args: argparse.Namespace) -> int:
             run_command(["git", "rebase", config.git.integration_ref], cwd=worktree)
             _validate_enqueue_worktree(worktree, original.branch)
 
-        base_sha = _capture_sha_or_error(
-            config.repo, config.git.integration_ref, label="base"
-        )
-        head_sha = _capture_sha_or_error(
-            worktree, original.branch, label="head"
-        )
+        base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
+        head_sha = _capture_sha_or_error(worktree, original.branch, label="head")
         current_destination_sha = ""
         current_execution_policy_sha = ""
         if original.auto_deploy:
@@ -220,9 +175,7 @@ def cmd_supersede(args: argparse.Namespace) -> int:
 
     config = config_from_args(args)
     _preflight_config(config)
-    base_sha = _capture_sha_or_error(
-        config.repo, config.git.integration_ref, label="base"
-    )
+    base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
     replacements: list[SupersedeReplacement] = []
     for task, branch, worktree_value in args.replacement:
         worktree = Path(worktree_value).expanduser().resolve()
@@ -263,24 +216,15 @@ def cmd_supersede(args: argparse.Namespace) -> int:
         "ok": True,
         "supersession_id": result["supersession_id"],
         "superseded_train_id": result["superseded_train_id"],
-        "superseded_jobs": [
-            job.to_dict() for job in result["superseded_jobs"]
-        ],
-        "replacement_jobs": [
-            job.to_dict() for job in result["replacement_jobs"]
-        ],
+        "superseded_jobs": [job.to_dict() for job in result["superseded_jobs"]],
+        "replacement_jobs": [job.to_dict() for job in result["replacement_jobs"]],
         "next_action": next_action,
     }
     if args.json:
         dump_json(payload)
     else:
-        replacement_ids = ", ".join(
-            str(job["id"]) for job in payload["replacement_jobs"]
-        )
-        print(
-            f"superseded train {payload['superseded_train_id']} "
-            f"with job(s) {replacement_ids}"
-        )
+        replacement_ids = ", ".join(str(job["id"]) for job in payload["replacement_jobs"])
+        print(f"superseded train {payload['superseded_train_id']} with job(s) {replacement_ids}")
         print(f"next action: {next_action}")
     return 0
 

@@ -6,6 +6,22 @@ Default config file name:
 .mergetrain.yaml
 ```
 
+`mergetrain init` writes only the policy a new project must choose:
+
+```yaml
+version: 2
+
+project:
+  name: example-app
+
+gates: []
+```
+
+Add at least one meaningful gate before production deployment. Everything else
+on this page is optional. Omitted values use safe code defaults: `origin`,
+`main`, local `.mergetrain/` state, sequential gates, ephemeral validation,
+no notifications, no reuse, and no verify hooks.
+
 ## Parser support
 
 PyYAML is a required dependency, and mergetrain always uses `safe_load` for
@@ -38,8 +54,8 @@ declares either removed key is rejected so stale policy cannot appear active.
 A file whose `version:` is **newer**
 than this binary understands is recorded — not rejected — at load, so recovery
 still works on an older binary. Command-scoped enforcement surfaces the mismatch
-instead: `doctor` reports `config_version_supported` (the highest version this
-binary understands) and a `next_action` of `upgrade_mergetrain`. Upgrade
+instead: `status --diagnose` reports the supported version and a `next_action`
+of `upgrade_mergetrain`. Upgrade
 mergetrain before deploying.
 
 ## `project`
@@ -111,7 +127,7 @@ cache directories before gates run. Gate tree-integrity checks, SHA-pinned train
 identity, and push behavior are unchanged; generated cache files are never added
 or pushed by mergetrain.
 
-`doctor --json` reports the mode, derived path, existence, initialization state,
+`status --diagnose --json` reports the mode, derived path, existence, initialization state,
 key, and declared cache paths. `gc` protects the workspace while persistent mode
 is configured. To remove it, switch back to `mode: ephemeral`, inspect
 `gc --json`, then explicitly run `gc --apply`.
@@ -254,7 +270,7 @@ For headless webhook delivery, `transitions` selects `landed`,
 `blocked`/partial, `needs_reconcile`, and daemon error/pause messages. A disabled
 transition is recorded as settled so enabling it later does not replay old
 history. `timeout_seconds` must be positive, and the URL must use HTTP(S).
-Treat `webhook_url` as a secret: doctor/config JSON reports only
+Treat `webhook_url` as a secret: diagnostic config JSON reports only
 `webhook_configured`, never the URL. Delivery errors likewise omit the
 credential-bearing URL.
 
@@ -298,7 +314,7 @@ that gate still runs against the exact restored validation commit.
 
 mergetrain always runs one built-in `diff-check` before configured gates. Older
 generated configs may still contain the same gate explicitly; that exact
-default is ignored at runtime and `doctor` recommends removing it. A customized
+default is ignored at runtime and `status --diagnose` recommends removing it. A customized
 gate is never discarded merely because it uses the same name.
 
 An optional non-empty `paths` list scopes a pre-push gate to the assembled
@@ -364,21 +380,21 @@ deploy:
 ```
 
 Validated-gate reuse is opt-in. Set `enabled: true` for configuration-level
-authorization or pass `run-batch --deploy --reuse-validated` for one deploy.
+authorization. There is no per-deploy reuse switch in v3.
 Reuse requires the recorded integration base, task heads, train membership,
 validation commit/tree, gate policy, environment fingerprints, and validation
 age to match. `on_mismatch: rerun` performs the normal full reassembly and gate
 run; `fail` blocks before push. The default remains full gate rerun.
 
-`run-batch --deploy --preview --json` and the dashboard expose the same
+`deploy --json` and the dashboard expose the same
 structured reuse explanation: authorization, exact identity checks and mismatch
 facts, the action for each gate (`reuse`, `rerun`, `skip`, or a conditional
 preview state), and `estimated_savings`. Savings use up to 20 successful timing
 samples per gate and report sample count, history coverage, and confidence.
 They are an advisory sum of per-gate medians, not a promise of wall-clock time;
-`estimated_savings.authorizes_reuse` is always `false`. Only explicit config or
-`--reuse-validated`, followed by a matching exact identity check, can authorize
-reuse. `always_rerun_on_deploy`, path-scoped skips, and fail-closed path
+`estimated_savings.authorizes_reuse` is always `false`. Only the committed reuse
+policy, followed by a matching exact identity check, can authorize reuse.
+`always_rerun_on_deploy`, path-scoped skips, and fail-closed path
 discovery are represented separately rather than counted as reused work.
 
 Each fingerprint command must print one stable, opaque, non-empty line of at

@@ -10,7 +10,7 @@ usage pattern to gather the soak's evidence-based exit criteria quickly:
   - one of those on a real repository that is not mergetrain itself
   - every unplanned operator intervention (unlock/reconcile/dismiss/retry/
     manual git surgery) logged and classified as a bug or a docs gap; the
-    harness's planned retry/dismiss/recover actions are labeled ``expected``
+    harness's planned retry/dismiss/reconcile actions are labeled ``expected``
   - exactly one deliberate crash-recovery exercise against a real remote
   - a readout via `mergetrain stats --json`
 
@@ -81,15 +81,7 @@ SOAK_SENTINEL = ".mergetrain-soak-target.json"
 SOAK_STATE_VERSION = 1
 SOAK_PURPOSE = "mergetrain-soak-target"
 MIN_LANDED_TRAINS = 20
-ATTENTION_COUNTS = (
-    "queued",
-    "validated",
-    "in_progress",
-    "needs_reconcile",
-    "blocked",
-    "failed",
-    "deployed_verify_unknown",
-)
+ACTIVE_STATE_COUNTS = ("waiting", "running", "ready", "attention")
 INTERVENTION_CLASSIFICATIONS = {"expected", "bug", "docs_gap"}
 CRASH_STATUSES = {
     "pending",
@@ -165,9 +157,7 @@ class Logger:
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise SoakError(
-                        f"{self.log_path}:{line_number}: invalid JSONL: {exc}"
-                    ) from exc
+                    raise SoakError(f"{self.log_path}:{line_number}: invalid JSONL: {exc}") from exc
                 if record.get("intervention"):
                     self.interventions.append(record)
         self._fh = self.log_path.open("a", encoding="utf-8")
@@ -194,14 +184,12 @@ class Logger:
         ]
 
 
-def run(cmd: list[str], *, cwd: Path, timeout: int = 120, check: bool = False) -> subprocess.CompletedProcess:
-    proc = subprocess.run(
-        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout
-    )
+def run(
+    cmd: list[str], *, cwd: Path, timeout: int = 120, check: bool = False
+) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
     if check and proc.returncode != 0:
-        raise SoakError(
-            f"command failed rc={proc.returncode}: {' '.join(cmd)}\n{proc.stderr}"
-        )
+        raise SoakError(f"command failed rc={proc.returncode}: {' '.join(cmd)}\n{proc.stderr}")
     return proc
 
 
@@ -212,9 +200,7 @@ def normalize_baseline(value: str) -> str:
         raise SoakError("--baseline must be an ISO-8601 timestamp") from exc
     if parsed.tzinfo is None:
         raise SoakError("--baseline must include a timezone")
-    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
-        "+00:00", "Z"
-    )
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def github_repo_slug(origin: str) -> str:
@@ -269,18 +255,14 @@ def _read_json_document(raw: str, *, source: str) -> Any:
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(
-        json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temporary, path)
 
 
 def validate_evidence_path(repo: Path, path: Path) -> None:
     resolved = path.resolve()
     root = repo.resolve()
-    if resolved.is_relative_to(root) and not resolved.is_relative_to(
-        root / ".mergetrain"
-    ):
+    if resolved.is_relative_to(root) and not resolved.is_relative_to(root / ".mergetrain"):
         raise SoakError(
             f"evidence path {resolved} would dirty the target; keep it under "
             f"{root / '.mergetrain'} or outside the clone"
@@ -294,25 +276,19 @@ def load_state(
     baseline: str,
 ) -> dict[str, Any]:
     if path.exists():
-        state = _read_json_document(
-            path.read_text(encoding="utf-8"), source=str(path)
-        )
+        state = _read_json_document(path.read_text(encoding="utf-8"), source=str(path))
         if not isinstance(state, dict):
             raise SoakError(f"{path}: state must be a JSON object")
         if state.get("version") != SOAK_STATE_VERSION:
-            raise SoakError(
-                f"{path}: unsupported state version {state.get('version')!r}"
-            )
+            raise SoakError(f"{path}: unsupported state version {state.get('version')!r}")
         if state.get("repository") != repository:
             raise SoakError(
-                f"{path}: repository is {state.get('repository')!r}, expected "
-                f"{repository!r}"
+                f"{path}: repository is {state.get('repository')!r}, expected {repository!r}"
             )
         persisted_baseline = normalize_baseline(str(state.get("baseline", "")))
         if baseline and normalize_baseline(baseline) != persisted_baseline:
             raise SoakError(
-                f"{path}: --baseline differs from persisted baseline "
-                f"{persisted_baseline}"
+                f"{path}: --baseline differs from persisted baseline {persisted_baseline}"
             )
         state["baseline"] = persisted_baseline
         if state.get("crash_status") not in CRASH_STATUSES:
@@ -326,9 +302,7 @@ def load_state(
         return state
 
     if not baseline:
-        raise SoakError(
-            f"{path} does not exist; the first run requires an explicit --baseline"
-        )
+        raise SoakError(f"{path} does not exist; the first run requires an explicit --baseline")
     state = {
         "version": SOAK_STATE_VERSION,
         "repository": repository,
@@ -358,9 +332,7 @@ def record_recovery(
     kind: str,
     batch_no: int,
 ) -> None:
-    state["recovery_events"].append(
-        {"kind": kind, "batch_no": batch_no, "ts": now_iso()}
-    )
+    state["recovery_events"].append({"kind": kind, "batch_no": batch_no, "ts": now_iso()})
     save_state(state_path, state)
 
 
@@ -425,34 +397,59 @@ class MT:
             )
         return payload
 
-    def doctor(self, scenario: str) -> dict[str, Any]:
-        return self.call("doctor", scenario=scenario)
+    def diagnose(self, scenario: str) -> dict[str, Any]:
+        payload = self.call("status", "--diagnose", scenario=scenario)
+        return {**payload, **payload.get("diagnostics", {})}
 
     def status(self, scenario: str) -> dict[str, Any]:
-        return self.call("status", scenario=scenario)
+        return self.call("status", "--limit", "200", scenario=scenario)
+
+    def inspect(self, job_id: int, scenario: str) -> dict[str, Any]:
+        return self.call("inspect", str(job_id), scenario=scenario)
 
     def stats(self, scenario: str, *, since: str) -> dict[str, Any]:
         return self.call("stats", "--since", since, scenario=scenario)
 
-    def version(self, scenario: str) -> dict[str, Any]:
-        return self.call("version", scenario=scenario)
-
     def enqueue(self, *, task: str, branch: str, scenario: str) -> dict[str, Any]:
-        return self.call(
-            "enqueue",
-            "--task", task,
-            "--branch", branch,
-            "--worktree", str(self.repo),
-            "--capture-sha",
-            "--allow-branch-mismatch",
-            scenario=scenario,
-        )
+        original = run(
+            ["git", "branch", "--show-current"], cwd=self.repo, check=True
+        ).stdout.strip()
+        run(["git", "switch", "-q", branch], cwd=self.repo, check=True)
+        try:
+            return self.call(
+                "enqueue",
+                "--task",
+                task,
+                "--branch",
+                branch,
+                "--worktree",
+                str(self.repo),
+                scenario=scenario,
+            )
+        finally:
+            if original:
+                run(["git", "switch", "-q", original], cwd=self.repo, check=True)
 
     def validate_only(self, scenario: str) -> dict[str, Any]:
-        return self.call("run-batch", "--validate-only", scenario=scenario, expect_ok=True)
+        return self.call("validate", scenario=scenario, expect_ok=True)
+
+    def deploy_plan(self, scenario: str) -> dict[str, Any]:
+        preview = self.call("deploy", scenario=scenario)
+        if preview.get("result") != "confirmation_required":
+            raise SoakError(f"deploy did not produce a confirmable plan: {preview}")
+        if not preview.get("deploy_plan_sha"):
+            raise SoakError(f"deploy plan identity is missing: {preview}")
+        return preview
 
     def deploy(self, scenario: str, timeout: int | None = None) -> dict[str, Any]:
-        return self.call("run-batch", "--deploy", scenario=scenario, timeout=timeout)
+        preview = self.deploy_plan(scenario)
+        return self.call(
+            "deploy",
+            "--expected-plan",
+            str(preview["deploy_plan_sha"]),
+            scenario=scenario,
+            timeout=timeout,
+        )
 
     def verify(self, job_id: int, *, scenario: str) -> dict[str, Any]:
         result = self.call(
@@ -462,9 +459,7 @@ class MT:
             scenario=scenario,
         )
         if result.get("result") != "success":
-            raise SoakError(
-                f"post-reconcile verify failed for job {job_id}: {result}"
-            )
+            raise SoakError(f"post-reconcile verify failed for job {job_id}: {result}")
         return result
 
     def retry(
@@ -479,7 +474,8 @@ class MT:
         if rebase:
             args.append("--rebase")
         return self.call(
-            *args, scenario=scenario,
+            *args,
+            scenario=scenario,
             intervention={
                 "type": "retry",
                 "job_id": job_id,
@@ -499,7 +495,11 @@ class MT:
         reason: str,
     ) -> dict[str, Any]:
         return self.call(
-            "dismiss", str(job_id), "--note", note, scenario=scenario,
+            "dismiss",
+            str(job_id),
+            "--note",
+            note,
+            scenario=scenario,
             intervention={
                 "type": "dismiss",
                 "job_id": job_id,
@@ -510,18 +510,29 @@ class MT:
             },
         )
 
-    def recover(self, scenario: str, *, reason: str) -> subprocess.CompletedProcess:
-        # recover/reconcile use a bespoke, non-generic exit-code table
+    def reconcile(self, scenario: str, *, reason: str) -> subprocess.CompletedProcess:
+        # Reconcile uses a bespoke, non-generic exit-code table
         # (0/2/3/4/5/7/10), so this bypasses call()'s ok:true assumption and
         # lets the caller branch on the real exit code.
-        cmd = [self.binary, "--repo", str(self.repo), "recover", "--json"]
+        cmd = [
+            self.binary,
+            "--repo",
+            str(self.repo),
+            "reconcile",
+            "--apply",
+            "--json",
+        ]
         proc = run(cmd, cwd=self.repo, timeout=self.timeout)
         payload = json.loads(proc.stdout) if proc.stdout.strip() else None
         self.log.event(
-            event="cli_call", scenario=scenario, cmd=cmd, returncode=proc.returncode,
-            json=payload, stderr_tail=proc.stderr[-2000:] if proc.stderr else "",
+            event="cli_call",
+            scenario=scenario,
+            cmd=cmd,
+            returncode=proc.returncode,
+            json=payload,
+            stderr_tail=proc.stderr[-2000:] if proc.stderr else "",
             intervention={
-                "type": "recover",
+                "type": "reconcile",
                 "planned": True,
                 "classification": "expected",
                 "reason": reason,
@@ -533,6 +544,7 @@ class MT:
 
 
 # --- git helpers against the soak-target clone -----------------------------
+
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return run(["git", *args], cwd=repo, check=check)
@@ -561,12 +573,8 @@ def validate_target_repository(repo: Path, *, confirmed_repository: str) -> str:
 
     dirty = git(repo, "status", "--porcelain", "--untracked-files=all").stdout
     if dirty.strip():
-        paths = ", ".join(
-            line[3:] for line in dirty.splitlines()[:8] if len(line) > 3
-        )
-        raise SoakError(
-            f"target worktree must be clean before soak; dirty paths: {paths}"
-        )
+        paths = ", ".join(line[3:] for line in dirty.splitlines()[:8] if len(line) > 3)
+        raise SoakError(f"target worktree must be clean before soak; dirty paths: {paths}")
     for evidence_name in (
         ".mergetrain/soak-state.json",
         ".mergetrain/soak-log.jsonl",
@@ -597,9 +605,7 @@ def validate_target_repository(repo: Path, *, confirmed_repository: str) -> str:
     )
 
     git(repo, "fetch", "-q", "origin")
-    remote_sentinel = git(
-        repo, "show", f"origin/main:{SOAK_SENTINEL}"
-    ).stdout
+    remote_sentinel = git(repo, "show", f"origin/main:{SOAK_SENTINEL}").stdout
     validate_sentinel(
         _read_json_document(
             remote_sentinel,
@@ -628,8 +634,7 @@ def validate_target_shape(repo: Path) -> None:
     tests = repo / "tests"
     if not core.is_file() or not tests.is_dir():
         raise SoakError(
-            "target must contain src/soaktarget/core.py and tests/; see the "
-            "soak harness docstring"
+            "target must contain src/soaktarget/core.py and tests/; see the soak harness docstring"
         )
     if _ADD_BODY_RE.search(core.read_text(encoding="utf-8")) is None:
         raise SoakError(
@@ -646,21 +651,20 @@ def validate_mergetrain_runtime(
     allow_non_wheel: bool,
     require_idle: bool,
 ) -> dict[str, Any]:
-    version = mt.version(scenario="preflight")
-    if version.get("version") != expected_version:
+    state = mt.diagnose(scenario="preflight")
+    diagnosis = state.get("diagnostics", {})
+    if diagnosis.get("version") != expected_version:
         raise SoakError(
-            f"mergetrain version is {version.get('version')!r}; expected "
-            f"{expected_version!r}"
+            f"mergetrain version is {diagnosis.get('version')!r}; expected {expected_version!r}"
         )
-    install_mode = version.get("runtime", {}).get("install_mode")
+    install_mode = diagnosis.get("runtime", {}).get("install_mode")
     if not allow_non_wheel and install_mode != "wheel":
         raise SoakError(
             f"mergetrain install_mode is {install_mode!r}; the real soak requires "
             "the published wheel (use --allow-non-wheel only for harness development)"
         )
 
-    doctor = mt.doctor(scenario="preflight")
-    config = doctor.get("config", {})
+    config = diagnosis.get("config", {})
     git_config = config.get("git", {})
     if (
         git_config.get("remote") != "origin"
@@ -668,24 +672,28 @@ def validate_mergetrain_runtime(
         or git_config.get("push_refs") != ["main"]
     ):
         raise SoakError(
-            "target config must use remote=origin, integration_branch=main, "
-            "and push_refs=[main]"
+            "target config must use remote=origin, integration_branch=main, and push_refs=[main]"
         )
     gate_names = {gate.get("name") for gate in config.get("gates", [])}
     if not {"ruff", "tests"}.issubset(gate_names):
         raise SoakError("target config must include named `ruff` and `tests` gates")
     if not config.get("deploy", {}).get("verify"):
         raise SoakError("target config must include at least one post-push verify hook")
-    if config.get("agent", {}).get("require_clean_worktree_before_enqueue") is not True:
-        raise SoakError("target config must require a clean worktree before enqueue")
-
     if require_idle:
-        if doctor.get("lock") is not None:
+        if diagnosis.get("lock") is not None:
             raise SoakError("target has a live or stale runner lock; inspect it first")
-        counts = doctor.get("counts", {})
+        counts = diagnosis.get("raw_counts", {})
         attention = {
             name: int(counts.get(name, 0))
-            for name in ATTENTION_COUNTS
+            for name in (
+                "queued",
+                "validated",
+                "in_progress",
+                "needs_reconcile",
+                "blocked",
+                "failed",
+                "deployed_verify_unknown",
+            )
             if int(counts.get(name, 0))
         }
         if attention:
@@ -693,10 +701,10 @@ def validate_mergetrain_runtime(
                 f"target queue is not at a clean checkpoint: {attention}; "
                 "triage it and record the intervention before resuming"
             )
-        if doctor.get("git", {}).get("worktree_clean") is not True:
-            raise SoakError("doctor reports the target worktree is dirty")
+        if diagnosis.get("git", {}).get("worktree_clean") is not True:
+            raise SoakError("status reports the target worktree is dirty")
     validate_target_shape(repo)
-    return doctor
+    return state
 
 
 def sync_main(repo: Path) -> None:
@@ -737,6 +745,7 @@ def write_success_change(n: int, namespace: str):
             f"        self.assertEqual(item_{n}(1), {n + 1})\n",
             encoding="utf-8",
         )
+
     return _mutate
 
 
@@ -750,12 +759,11 @@ def write_gatefail_change(n: int, namespace: str, fixed: bool = False):
             # A real, unforced ruff F401 (unused import) -- fails only the
             # ruff gate, not tests, so the failure is attributable to one gate.
             src.write_text(GATEFAIL_SNIPPET, encoding="utf-8")
+
     return _mutate
 
 
-_ADD_BODY_RE = re.compile(
-    r"(def add\(a: int, b: int\) -> int:\n)(    .*\n)"
-)
+_ADD_BODY_RE = re.compile(r"(def add\(a: int, b: int\) -> int:\n)(    .*\n)")
 
 
 def write_conflicting_change(label: str, batch_no: int):
@@ -769,6 +777,7 @@ def write_conflicting_change(label: str, batch_no: int):
     match) so this stays correct even if a previous soak run already left a
     different contested body here.
     """
+
     def _mutate(repo: Path) -> None:
         core = repo / "src" / "soaktarget" / "core.py"
         text = core.read_text(encoding="utf-8")
@@ -779,19 +788,19 @@ def write_conflicting_change(label: str, batch_no: int):
         # Include the batch number so a later conflict scenario never tries
         # to commit the same winner/loser text already present on main.
         replacement = f"    return a + b  # batch {batch_no} {label} contested\n"
-        new_text, count = _ADD_BODY_RE.subn(
-            lambda m: m.group(1) + replacement, text, count=1
-        )
+        new_text, count = _ADD_BODY_RE.subn(lambda m: m.group(1) + replacement, text, count=1)
         if count != 1:
             raise SoakError(
                 "conflict scenario: could not find add()'s body in core.py "
                 "to mutate (has core.py's add() signature changed?)"
             )
         core.write_text(new_text, encoding="utf-8")
+
     return _mutate
 
 
 # --- crash exercise ---------------------------------------------------------
+
 
 def _ps_snapshot() -> list[tuple[int, int, str]]:
     proc = subprocess.run(
@@ -844,9 +853,12 @@ def run_crash_exercise(
     was missed and the caller should retry.
     """
     if os.name != "posix":
-        log.note("crash", "not POSIX; skipping the crash exercise (mirrors "
-                  "tests/test_fault_push_kill.py's own POSIX-only guard -- "
-                  "this needs real process-group semantics)")
+        log.note(
+            "crash",
+            "not POSIX; skipping the crash exercise (mirrors "
+            "tests/test_fault_push_kill.py's own POSIX-only guard -- "
+            "this needs real process-group semantics)",
+        )
         raise SoakError("the deliberate crash exercise requires POSIX")
 
     n = f"soak-{namespace}-crash-{batch_no}"
@@ -856,13 +868,27 @@ def run_crash_exercise(
         n,
         write_success_change(10_000 + batch_no, namespace),
     )
-    mt.enqueue(task=n, branch=n, scenario="crash")
+    queued = mt.enqueue(task=n, branch=n, scenario="crash")
+    crash_job_id = int(queued["job"]["id"])
     mt.validate_only(scenario="crash")
 
-    cmd = [mt.binary, "--repo", str(repo), "run-batch", "--deploy", "--json"]
+    preview = mt.deploy_plan(scenario="crash")
+    cmd = [
+        mt.binary,
+        "--repo",
+        str(repo),
+        "deploy",
+        "--expected-plan",
+        str(preview["deploy_plan_sha"]),
+        "--json",
+    ]
     proc = subprocess.Popen(
-        cmd, cwd=str(repo), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, start_new_session=True,
+        cmd,
+        cwd=str(repo),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
     )
     log.event(event="crash_launch", scenario="crash", cmd=cmd, pid=proc.pid)
 
@@ -884,13 +910,23 @@ def run_crash_exercise(
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
-        out, err = proc.communicate() if proc.stdout is None else (
-            proc.stdout.read() if proc.stdout else "", proc.stderr.read() if proc.stderr else ""
+        out, err = (
+            proc.communicate()
+            if proc.stdout is None
+            else (
+                proc.stdout.read() if proc.stdout else "",
+                proc.stderr.read() if proc.stderr else "",
+            )
         )
-        log.note("crash", f"attempt {batch_no}: missed -- process exited before a "
-                  f"push descendant was observed (rc={proc.returncode}); its own "
-                  f"run, if it completed, still counts toward trains.landed")
-        log.event(event="crash_missed", scenario="crash", stdout_tail=out[-500:], stderr_tail=err[-500:])
+        log.note(
+            "crash",
+            f"attempt {batch_no}: missed -- process exited before a "
+            f"push descendant was observed (rc={proc.returncode}); its own "
+            f"run, if it completed, still counts toward trains.landed",
+        )
+        log.event(
+            event="crash_missed", scenario="crash", stdout_tail=out[-500:], stderr_tail=err[-500:]
+        )
         return None
 
     # The push client was alive at snapshot time -- kill its own process
@@ -902,19 +938,25 @@ def run_crash_exercise(
     try:
         pgid = os.getpgid(push_pid)
         if pgid != push_pid:
-            log.note("crash", f"push pid {push_pid} pgid {pgid} != pid; killing "
-                      f"the group anyway, this only affects whether other members "
-                      f"of the same group also die")
+            log.note(
+                "crash",
+                f"push pid {push_pid} pgid {pgid} != pid; killing "
+                f"the group anyway, this only affects whether other members "
+                f"of the same group also die",
+            )
         kill_ts = now_iso()
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
-        log.note("crash", f"attempt {batch_no}: lost the race -- push pid "
-                  f"{push_pid} already exited between observing it and killing "
-                  f"it; its own run, if it completed, still counts toward "
-                  f"trains.landed")
+        log.note(
+            "crash",
+            f"attempt {batch_no}: lost the race -- push pid "
+            f"{push_pid} already exited between observing it and killing "
+            f"it; its own run, if it completed, still counts toward "
+            f"trains.landed",
+        )
         log.event(event="crash_missed", scenario="crash", reason="race_lost", push_pid=push_pid)
         return None
     try:
@@ -928,34 +970,41 @@ def run_crash_exercise(
         proc.wait(timeout=5)
     log.event(event="crash_kill", scenario="crash", push_pid=push_pid, pgid=pgid, ts=kill_ts)
 
-    remote_before = git(
-        repo, "ls-remote", "origin", "refs/heads/main"
-    ).stdout.strip()
-    log.event(event="crash_remote_snapshot", scenario="crash", when="immediately_after_kill",
-              ls_remote=remote_before)
+    remote_before = git(repo, "ls-remote", "origin", "refs/heads/main").stdout.strip()
+    log.event(
+        event="crash_remote_snapshot",
+        scenario="crash",
+        when="immediately_after_kill",
+        ls_remote=remote_before,
+    )
 
-    doctor_before = mt.doctor(scenario="crash")
-    recover_proc = mt.recover(
+    diagnosis_before = mt.diagnose(scenario="crash")
+    reconcile_proc = mt.reconcile(
         scenario="crash",
         reason="deliberate crash-recovery exercise against the confirmed remote",
     )
-    if recover_proc.returncode == 3:
-        raise SoakError("recover reported the lock still held by a live runner "
-                         "right after we killed it -- investigate before retrying")
-    if recover_proc.returncode == 7:
-        log.note("crash", "recover: remote unreachable, nothing changed -- will "
-                  "retry recover on the next loop iteration via the normal flow")
-    if recover_proc.returncode == 10:
-        log.note("crash", "recover left >=1 job BLOCKED for human inspection -- "
-                  "this needs manual triage, not further automation")
+    if reconcile_proc.returncode == 3:
+        raise SoakError(
+            "reconcile reported the lock still held by a live runner "
+            "right after we killed it -- investigate before retrying"
+        )
+    if reconcile_proc.returncode == 7:
+        log.note(
+            "crash",
+            "reconcile: remote unreachable, nothing changed -- will "
+            "retry reconciliation on the next loop iteration",
+        )
+    if reconcile_proc.returncode == 10:
+        log.note(
+            "crash",
+            "reconcile left >=1 job BLOCKED for human inspection -- "
+            "this needs manual triage, not further automation",
+        )
 
-    status_after = mt.status(scenario="crash")
-    remote_after = git(
-        repo, "ls-remote", "origin", "refs/heads/main"
-    ).stdout.strip()
+    inspected = mt.inspect(crash_job_id, scenario="crash")
+    remote_after = git(repo, "ls-remote", "origin", "refs/heads/main").stdout.strip()
     remote_after_sha = remote_after.split()[0] if remote_after else ""
-    jobs = status_after.get("jobs", [])
-    crash_job = next((j for j in jobs if j.get("branch") == n), None)
+    crash_job = inspected.get("job")
     final_status = crash_job.get("status") if crash_job else "unknown"
     crash_head_sha = crash_job.get("head_sha", "") if crash_job else ""
 
@@ -970,16 +1019,26 @@ def run_crash_exercise(
         else False
     )
     log.event(
-        event="crash_verdict", scenario="crash",
-        doctor_before=doctor_before, recover_exit_code=recover_proc.returncode,
-        recover_json=json.loads(recover_proc.stdout) if recover_proc.stdout.strip() else None,
-        final_job_status=final_status, remote_before=remote_before, remote_after=remote_after,
-        really_landed=really_landed, verdict_matches=verdict_matches,
+        event="crash_verdict",
+        scenario="crash",
+        diagnosis_before=diagnosis_before,
+        reconcile_exit_code=reconcile_proc.returncode,
+        reconcile_json=(
+            json.loads(reconcile_proc.stdout) if reconcile_proc.stdout.strip() else None
+        ),
+        final_job_status=final_status,
+        remote_before=remote_before,
+        remote_after=remote_after,
+        really_landed=really_landed,
+        verdict_matches=verdict_matches,
     )
-    log.note("crash", f"exercise complete: final job status={final_status}, "
-              f"really landed on remote={really_landed}, verdict {'MATCHES' if verdict_matches else 'MISMATCH -- BUG'} "
-              f"(remote before-kill={remote_before!r} after-recover={remote_after!r}, "
-              f"recover exit={recover_proc.returncode})")
+    log.note(
+        "crash",
+        f"exercise complete: final job status={final_status}, "
+        f"really landed on remote={really_landed}, verdict {'MATCHES' if verdict_matches else 'MISMATCH -- BUG'} "
+        f"(remote before-kill={remote_before!r} after-reconcile={remote_after!r}, "
+        f"reconcile exit={reconcile_proc.returncode})",
+    )
     if not verdict_matches:
         raise SoakError(
             f"crash exercise verdict MISMATCH: mergetrain reported job "
@@ -993,12 +1052,13 @@ def run_crash_exercise(
         "job_id": crash_job.get("id") if crash_job else None,
         "final_status": final_status,
         "really_landed": really_landed,
-        "recover_exit_code": recover_proc.returncode,
+        "reconcile_exit_code": reconcile_proc.returncode,
         "resolved": final_status in {"deployed", "queued"},
     }
 
 
 # --- scenarios ---------------------------------------------------------------
+
 
 def scenario_success(
     mt: MT,
@@ -1026,8 +1086,9 @@ def scenario_success(
     deployed = mt.deploy(scenario="success")
     if deployed["result"] not in ("success", "warning"):
         raise SoakError(f"success scenario failed to deploy cleanly: {deployed}")
-    log.note("success", f"batch {batch_no}: {len(branches)} job(s) landed "
-              f"(result={deployed['result']})")
+    log.note(
+        "success", f"batch {batch_no}: {len(branches)} job(s) landed (result={deployed['result']})"
+    )
 
 
 def scenario_gatefail(
@@ -1096,11 +1157,15 @@ def scenario_conflict(
     blocked = [j for j in (by_id[job_a["id"]], by_id[job_b["id"]]) if j["status"] == "blocked"]
     validated = [j for j in (by_id[job_a["id"]], by_id[job_b["id"]]) if j["status"] == "validated"]
     if not blocked or not validated:
-        raise SoakError(f"conflict scenario did not produce one blocked + one "
-                         f"validated job: {by_id}")
+        raise SoakError(
+            f"conflict scenario did not produce one blocked + one validated job: {by_id}"
+        )
     loser = blocked[0]
-    log.note("conflict", f"job {loser['id']} correctly blocked "
-              f"(conflict_with={loser.get('conflict_with')!r}): {loser['note'][:120]}")
+    log.note(
+        "conflict",
+        f"job {loser['id']} correctly blocked "
+        f"(conflict_with={loser.get('conflict_with')!r}): {loser['note'][:120]}",
+    )
 
     winner_deploy = mt.deploy(scenario="conflict")  # lands the winner, advancing main
     if winner_deploy["result"] not in ("success", "warning"):
@@ -1122,26 +1187,26 @@ def scenario_conflict(
         raise SoakError(f"conflict scenario's resubmission did not validate cleanly: {result}")
     loser_deploy = mt.deploy(scenario="conflict")
     if loser_deploy["result"] not in ("success", "warning"):
-        raise SoakError(f"conflict scenario's resubmitted loser failed to deploy cleanly: {loser_deploy}")
+        raise SoakError(
+            f"conflict scenario's resubmitted loser failed to deploy cleanly: {loser_deploy}"
+        )
     log.note("conflict", f"batch {batch_no}: winner + resubmitted loser both landed")
     return True
 
 
 # --- main loop ---------------------------------------------------------------
 
+
 def build_schedule() -> list[str]:
-    return (
-        ["success", "success", "gatefail", "success", "conflict", "success", "crash"]
-        + ["success"] * 60
-    )
+    return ["success", "success", "gatefail", "success", "conflict", "success", "crash"] + [
+        "success"
+    ] * 60
 
 
-def _attention_counts(doctor: dict[str, Any]) -> dict[str, int]:
-    counts = doctor.get("counts", {})
+def _attention_counts(diagnosis: dict[str, Any]) -> dict[str, int]:
+    counts = diagnosis.get("counts", {})
     return {
-        name: int(counts.get(name, 0))
-        for name in ATTENTION_COUNTS
-        if int(counts.get(name, 0))
+        name: int(counts.get(name, 0)) for name in ACTIVE_STATE_COUNTS if int(counts.get(name, 0))
     }
 
 
@@ -1149,14 +1214,14 @@ def evaluate_criteria(
     stats: dict[str, Any],
     log: Logger,
     state: dict[str, Any],
-    doctor: dict[str, Any],
+    diagnosis: dict[str, Any],
     *,
     repository: str,
 ) -> dict[str, Any]:
     trains = stats.get("trains", {})
     landed = int(trains.get("landed", 0))
     untriaged = log.untriaged_interventions()
-    attention = _attention_counts(doctor)
+    attention = _attention_counts(diagnosis)
     criteria = {
         "landed": landed,
         "minimum_landed_met": landed >= MIN_LANDED_TRAINS,
@@ -1165,14 +1230,13 @@ def evaluate_criteria(
         "non_mergetrain_repository": repository != PROJECT_REPO,
         "crash_status": state["crash_status"],
         "crash_met": (
-            state["crash_status"] == "completed"
-            and not state.get("crash_queue_pending", False)
+            state["crash_status"] == "completed" and not state.get("crash_queue_pending", False)
         ),
         "interventions": len(log.interventions),
         "untriaged_interventions": len(untriaged),
         "interventions_triaged": not untriaged,
         "attention": attention,
-        "operational_clear": doctor.get("lock") is None and not attention,
+        "operational_clear": diagnosis.get("lock") is None and not attention,
     }
     criteria["complete"] = all(
         (
@@ -1192,16 +1256,14 @@ def write_report(
     stats: dict[str, Any],
     log: Logger,
     state: dict[str, Any],
-    doctor: dict[str, Any],
+    diagnosis: dict[str, Any],
     *,
     repository: str,
     repo: Path,
     session_target: int,
     skip_crash: bool,
 ) -> dict[str, Any]:
-    criteria = evaluate_criteria(
-        stats, log, state, doctor, repository=repository
-    )
+    criteria = evaluate_criteria(stats, log, state, diagnosis, repository=repository)
     landed = criteria["landed"]
     lines = [
         "# mergetrain soak run report",
@@ -1350,44 +1412,22 @@ def main() -> int:
     if args.target_landed <= 0 or args.max_batches <= 0:
         raise SoakError("--target-landed and --max-batches must be positive")
     if not args.skip_crash and args.target_landed < MIN_LANDED_TRAINS:
-        raise SoakError(
-            f"a full soak must target at least {MIN_LANDED_TRAINS} landed trains"
-        )
+        raise SoakError(f"a full soak must target at least {MIN_LANDED_TRAINS} landed trains")
     if not args.skip_crash and os.name != "posix":
         raise SoakError("the deliberate crash exercise requires POSIX")
-    if args.record_intervention is None and (
-        args.classification or args.reason or args.issue_url
-    ):
-        raise SoakError(
-            "--classification, --reason, and --issue-url require "
-            "--record-intervention"
-        )
+    if args.record_intervention is None and (args.classification or args.reason or args.issue_url):
+        raise SoakError("--classification, --reason, and --issue-url require --record-intervention")
 
     repo = args.repo.resolve()
     if repo == MERGETRAIN_REPO.resolve():
         raise SoakError(
-            f"refusing mergetrain's own repo ({MERGETRAIN_REPO}); use a "
-            "dedicated throwaway target"
+            f"refusing mergetrain's own repo ({MERGETRAIN_REPO}); use a dedicated throwaway target"
         )
-    repository = validate_target_repository(
-        repo, confirmed_repository=args.confirm_repo
-    )
+    repository = validate_target_repository(repo, confirmed_repository=args.confirm_repo)
 
-    state_path = (
-        args.state.resolve()
-        if args.state
-        else repo / ".mergetrain" / "soak-state.json"
-    )
-    log_path = (
-        args.log.resolve()
-        if args.log
-        else repo / ".mergetrain" / "soak-log.jsonl"
-    )
-    report_path = (
-        args.report.resolve()
-        if args.report
-        else repo / ".mergetrain" / "soak-report.md"
-    )
+    state_path = args.state.resolve() if args.state else repo / ".mergetrain" / "soak-state.json"
+    log_path = args.log.resolve() if args.log else repo / ".mergetrain" / "soak-log.jsonl"
+    report_path = args.report.resolve() if args.report else repo / ".mergetrain" / "soak-report.md"
     for path in (state_path, log_path, report_path):
         validate_evidence_path(repo, path)
 
@@ -1420,12 +1460,12 @@ def main() -> int:
         if args.record_intervention is not None:
             _record_manual_intervention(args, log)
             stats = mt.stats(scenario="intervention", since=state["baseline"])
-            doctor = mt.doctor(scenario="intervention")
+            diagnosis = mt.diagnose(scenario="intervention")
             if (
                 state["crash_status"] == "needs_triage"
                 and isinstance(state.get("crash_verdict"), dict)
-                and doctor.get("lock") is None
-                and not _attention_counts(doctor)
+                and diagnosis.get("lock") is None
+                and not _attention_counts(diagnosis)
             ):
                 state["crash_status"] = "completed"
                 state["crash_queue_pending"] = False
@@ -1440,7 +1480,7 @@ def main() -> int:
                 stats,
                 log,
                 state,
-                doctor,
+                diagnosis,
                 repository=repository,
                 repo=repo,
                 session_target=args.target_landed,
@@ -1471,10 +1511,8 @@ def main() -> int:
         executed = 0
         while executed < args.max_batches and schedule_index < len(schedule):
             stats = mt.stats(scenario="loop", since=state["baseline"])
-            doctor = mt.doctor(scenario="loop")
-            criteria = evaluate_criteria(
-                stats, log, state, doctor, repository=repository
-            )
+            diagnosis = mt.diagnose(scenario="loop")
+            criteria = evaluate_criteria(stats, log, state, diagnosis, repository=repository)
             if _session_goal_met(
                 criteria,
                 target_landed=args.target_landed,
@@ -1487,9 +1525,7 @@ def main() -> int:
             else:
                 kind = schedule[schedule_index]
                 schedule_index += 1
-            if kind == "crash" and (
-                args.skip_crash or state["crash_status"] == "completed"
-            ):
+            if kind == "crash" and (args.skip_crash or state["crash_status"] == "completed"):
                 continue
             if kind == "crash" and int(state["crash_attempts"]) >= 3:
                 state["crash_status"] = "failed"
@@ -1535,9 +1571,7 @@ def main() -> int:
                     if not isinstance(job_id, int):
                         state["crash_status"] = "needs_triage"
                         save_state(state_path, state)
-                        raise SoakError(
-                            "recovered deploy has no job id for post-crash verify"
-                        )
+                        raise SoakError("recovered deploy has no job id for post-crash verify")
                     try:
                         mt.verify(job_id, scenario="crash-verify")
                     except BaseException:
@@ -1546,9 +1580,7 @@ def main() -> int:
                         raise
                     outcome["verify_status"] = "succeeded"
                 state["crash_queue_pending"] = outcome["final_status"] == "queued"
-                state["crash_status"] = (
-                    "completed" if outcome["resolved"] else "needs_triage"
-                )
+                state["crash_status"] = "completed" if outcome["resolved"] else "needs_triage"
                 record_recovery(
                     state,
                     state_path,
@@ -1565,9 +1597,7 @@ def main() -> int:
                 continue
 
             if kind == "gatefail":
-                if scenario_gatefail(
-                    mt, repo, log, state["namespace"], batch_no
-                ):
+                if scenario_gatefail(mt, repo, log, state["namespace"], batch_no):
                     record_recovery(
                         state,
                         state_path,
@@ -1575,9 +1605,7 @@ def main() -> int:
                         batch_no=batch_no,
                     )
             elif kind == "conflict":
-                if scenario_conflict(
-                    mt, repo, log, state["namespace"], batch_no
-                ):
+                if scenario_conflict(mt, repo, log, state["namespace"], batch_no):
                     record_recovery(
                         state,
                         state_path,
@@ -1585,20 +1613,15 @@ def main() -> int:
                         batch_no=batch_no,
                     )
             else:
-                scenario_success(
-                    mt, repo, log, state["namespace"], batch_no
-                )
+                scenario_success(mt, repo, log, state["namespace"], batch_no)
                 if state.get("crash_queue_pending", False):
-                    status = mt.status(scenario="crash-settle")
-                    branch = state.get("crash_verdict", {}).get("branch")
-                    crash_job = next(
-                        (
-                            job
-                            for job in status.get("jobs", [])
-                            if job.get("branch") == branch
-                        ),
-                        None,
+                    crash_job_id = state.get("crash_verdict", {}).get("job_id")
+                    inspected = (
+                        mt.inspect(int(crash_job_id), scenario="crash-settle")
+                        if isinstance(crash_job_id, int)
+                        else {}
                     )
+                    crash_job = inspected.get("job")
                     if (
                         crash_job
                         and crash_job.get("status") == "deployed"
@@ -1614,13 +1637,13 @@ def main() -> int:
                         )
 
         stats = mt.stats(scenario="final", since=state["baseline"])
-        doctor = mt.doctor(scenario="final")
+        diagnosis = mt.diagnose(scenario="final")
         criteria = write_report(
             report_path,
             stats,
             log,
             state,
-            doctor,
+            diagnosis,
             repository=repository,
             repo=repo,
             session_target=args.target_landed,

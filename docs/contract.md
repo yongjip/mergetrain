@@ -1,210 +1,182 @@
-# The machine-readable contract
+# Machine contract and compatibility policy
 
-mergetrain is built so a coding agent can **read JSON and act instead of
-guessing**. That only works if the JSON shape is stable and versioned. This
-page is the contract: what every machine-readable surface guarantees, how it is
-versioned, and what counts as a breaking change.
+mergetrain is designed for coding agents and scripts that read state instead of
+guessing. The checked-in contract fingerprints fail CI whenever a JSON surface
+changes without an explicit compatibility decision.
 
-It is enforced, not aspirational — a checked-in golden fingerprint
-(`tests/contract_fingerprints.json`) fails CI if any surface's shape changes
-without a deliberate version decision.
+## Independent versions
 
-## Three version numbers, kept separate
+| Version | Location | Governs |
+| --- | --- | --- |
+| Product | `mergetrain --version` and `status --diagnose` | packaged release |
+| `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
+| Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-| Number | Where | Governs |
-|---|---|---|
-| `contract_version` | top of every `--json` payload / HTTP snapshot; the `stream_start` JSONL frame | the shape of machine-readable output |
-| config `version:` | `.mergetrain.yaml` | the schema of the config file |
-| `__version__` | `version` / `doctor` payloads | the product release |
+mergetrain 3.0 uses machine contract **3** and config schema **2**. They move
+only when their own boundary changes; neither is tied to the SQLite schema.
 
-`contract_version` (currently **2**) and the config `version` (currently **2**)
-are deliberately distinct from the product `__version__`. A patch release that
-changes no output shape never reads as a contract change, and vice versa. Each
-is a single forward-only integer, matching the SQLite `SCHEMA_VERSION` and the
-hub `REGISTRY_VERSION`.
+## Contract 3 envelope
 
-## Where the number lives
+Every one-shot JSON response carries top-level `contract_version`. Nested job
+or repository objects are not stamped; the outer response owns the version.
 
-- **One-shot `--json`** — a top-level `contract_version` on the outer object
-  (`doctor`, `status`, `version`, `inspect`, `enqueue`, `run-batch`, `gc`,
-  `reconcile`/`recover`/`unlock`, `hub status`, `agent-contract`, …). Nested
-  sub-objects (a job dict, an embedded per-repo snapshot) are **not** stamped —
-  the outer frame owns the number.
-- **HTTP `/api/snapshot`** — stamped at the boundary; a hub payload carries one
-  top-level number and its embedded per-repo snapshots stay bare.
-- **`events --jsonl`** — a `stream_start` frame carrying `contract_version` is
-  emitted on every connect (including an `--after` resume, which may be a
-  different binary). The `event`, `heartbeat`, and `stream_end` frames do not
-  carry it. **Dispatch JSONL on `type`.**
+`ok` means only that the command produced a normal response. Execution outcome
+is separate:
 
-## The envelope (contract 2)
+- `validate` and completed deploy execution use `result` values
+  `success`, `warning`, `partial`, or `failed`;
+- `deploy --json` returns `result: "confirmation_required"` and never pushes;
+- `status` uses `health` and `state`, not `ok`, for repository condition;
+- advanced commands document their own `result` values.
 
-- **`ok` means exactly one thing:** the command executed without raising an
-  error envelope. It is *not* a health verdict and *not* an outcome grade.
-  - For `run-next` and `run-batch`, read `result`
-    (`success`/`warning`/`partial`/`failed`) for the run outcome — a completed
-    deploy with a post-push verify warning is `ok:true, result:"warning"`.
-  - Other `result` fields are command-specific legacy surfaces:
-    `verify` uses `success`/`failed`, `reconcile` and `recover` use
-    `success`/`conflict`, and `gc` carries `null` for a dry run or the applied
-    cleanup detail object. Consumers must dispatch by command before reading
-    these values; normalizing them would require a contract-version bump.
-  - Read `health` (on `doctor`) for the repo-configured-and-git-present verdict.
-  - Read `removed` (on `hub remove`) for found-or-not.
-- **`next_action`** is present on both `doctor` and `status` — the two reads an
-  agent is told to take before acting — plus the recovery commands.
-- **One failure shape everywhere:** `{ok:false, error:{code,message,retryable},
-  next_action?}`. Branch on `error.code`. (The deploy-while-reconcile block is
-  `error.code:"reconcile_pending_deploy"` with a top-level `next_action` and
-  `needs_reconcile` count.)
-  JSONL failures carry the same `ok:false` and `error` object inside a terminal
-  `stream_end` frame, so a stream that emitted `stream_start` always terminates
-  with a machine-readable record.
+All failures use one shape:
+
+```json
+{
+  "contract_version": 3,
+  "ok": false,
+  "error": {
+    "code": "queue_error",
+    "message": "human-readable detail",
+    "retryable": false
+  }
+}
+```
+
+`next_action` may accompany the envelope. Branch on `error.code`, not message
+text.
+
+## Stable state projection
+
+`status --json` is the one state entry point. Its stable top-level concepts are:
+
+- `health`: `healthy`, `unconfigured`, or `degraded`;
+- `state`: `idle`, `waiting`, `running`, `ready`, or `attention`;
+- `summary`;
+- `next_action`: `code`, nullable `command`, and `requires_approval`;
+- `counts`: `waiting`, `running`, `ready`, `attention`, and `done`;
+- compact `attention_jobs` and `recent_jobs`, whose `state` uses the same four
+  active values plus `done` and whose terminal detail stays in `outcome`.
+
+Internal queue, push, verify, and recovery states remain available through
+`inspect` and diagnostics. Consumers should not reconstruct a competing state
+machine from those fields.
+
+`next_action.code` and other enum-like values may grow. Consumers must preserve
+unknown values, show their accompanying summary/message, and avoid mutation if
+they do not understand the required action.
+
+## JSONL streams
+
+`events --jsonl` emits a `stream_start` record carrying `contract_version` on
+every connection, including resumed connections. `event`, `heartbeat`, and
+`stream_end` records do not repeat it. Dispatch every record by `type`; persist
+only event IDs as resume cursors.
 
 ## `error.code` vocabulary
 
-Branching on `error.code` only works if the codes are enumerated, so here they
-are. Most are the snake-cased name of the raising error class; treat any code not
-listed here as an unexpected failure and fall back to `message`.
-
-| `error.code` | `retryable` | Means |
+| `error.code` | `retryable` | Meaning |
 | --- | --- | --- |
-| `config_error` | no | `.mergetrain.yaml` is missing, unparseable, invalid, or declares a `version` this build does not support |
-| `queue_error` | no | a queue or lock precondition failed (nothing to run, bad job id, terminal job) |
-| `duplicate_active_branch` | no | that branch already has a non-terminal job queued |
-| `lock_held` | **yes** | another runner owns the queue lock; retry after it finishes |
-| `queue_busy` | **yes** | a queue write did not happen: the database refused the writer because another process held it past `busy_timeout`. It does **not** mean nothing was pushed — the refs may already be on the remote, and the row is left as the last durable write left it for recovery to resolve. Retry, then read `status --json` |
-| `lost_lease` | **yes** | this runner no longer owns the lease it was given; re-read state and retry |
-| `merge_blocked` | no | the branch cannot be merged into the integration train |
-| `approval_destination_changed` | no | unattended approval no longer matches the live Git destination; nothing was pushed |
-| `approval_execution_policy_changed` | no | unattended approval no longer matches the live gates, reuse policy, command timeout, or verify hooks; nothing was pushed |
-| `deploy_plan_changed` | no | the confirmed train, destination, gates/reuse policy, or verify hooks changed; refresh the preview before deploying |
-| `command_failed` | no | a gate, verify hook, or git subprocess exited non-zero |
-| `push_rejected` | no | the remote refused the push on policy or permissions; the job parks `blocked` |
-| `ambiguous_push` | no | the push failed for a non-rejection reason, so the remote may have accepted it; the job parks `needs_reconcile` |
-| `remote_unreachable` | **yes** | `reconcile` could not reach the remote to establish deploy truth; retry when connectivity returns |
+| `ambiguous_push` | no | the remote may have accepted a push; reconcile before another deploy |
+| `approval_destination_changed` | no | unattended approval no longer matches the exact destination |
+| `approval_execution_policy_changed` | no | unattended approval no longer matches gates, timeout, reuse, fingerprints, or verify policy |
 | `cancellation_requested` | no | the active train was asked to stop |
-| `reconcile_pending_deploy` | no | a deploy was refused because jobs are pending reconcile; carries `next_action` and a `needs_reconcile` count |
-| `validated_train_pending` | no | `run-next` with a push mode was refused because a validated train is pending; carries `next_action` and `pending_train_ids`. Use `run-batch --deploy --train-id <id>` |
-| `interrupted` | no | `Ctrl-C`; exit code `130` |
-| `mergetrain_error` | no | an expected failure with no more specific class |
+| `command_failed` | no | a gate, verify hook, or Git command failed |
+| `config_error` | no | configuration is absent, invalid, or too new for a state-changing command |
+| `deploy_plan_changed` | no | the confirmed exact plan changed before push |
+| `duplicate_active_branch` | no | the branch already has active queued work |
+| `interrupted` | no | the process received an interrupt; exit 130 |
+| `lock_held` | yes | another live runner owns the queue lease |
+| `lost_lease` | yes | this runner no longer owns its lease |
+| `merge_blocked` | no | the branch cannot be merged into the assembled train |
+| `mergetrain_error` | no | an expected failure has no more specific code |
+| `push_rejected` | no | remote policy or permissions rejected the push |
+| `queue_busy` | yes | SQLite could not complete a write before its timeout; reread state because a push may already have happened |
+| `queue_error` | no | a queue, job, or runner precondition failed |
+| `reconcile_pending_deploy` | no | deployment is blocked until pending remote truth is reconciled |
+| `remote_unreachable` | yes | recovery cannot yet inspect the pinned remote endpoint |
+| `removed_interface` | no | a v2 command or option was used; the message gives the v3 replacement |
+| `validated_train_pending` | no | validation paused because one exact train already awaits deploy approval |
 
-Retryable means only that the same call may succeed later without operator
-intervention. Everything else needs a decision — read `message` and, when
-present, `next_action`.
+`retryable` is authoritative for that response. Do not derive it from the code.
 
-`retryable` comes from two rules, which is worth knowing because they can
-disagree for the same class: the generic handler marks `LockHeld`, `LostLease`
-and `QueueBusy` retryable, while the recovery commands (`reconcile`, `recover`,
-`unlock`) mark their exit-code 3 and 7 failures retryable — which is why
-`lock_held` and `remote_unreachable` are retryable there. A consumer should read
-the flag rather than infer it from the code.
+MCP may additionally return adapter refusals such as
+`confirmation_required`, `deploy_not_confirmed`, `cli_timeout`,
+`cli_output_unreadable`, and `log_unavailable`. They do not occur on CLI
+output.
 
-The MCP server adds refusal codes of its own for the surface it guards
-(`confirmation_required`, `deploy_not_confirmed`, `train_id_required`,
-`train_not_found`, `no_validated_train`, `cli_timeout`,
-`cli_output_unreadable`, `log_unavailable`); see [mcp.md](mcp.md). They never
-appear on CLI output.
+## Long-lived v3 compatibility policy
 
-## Compatibility policy
+Version 3 is intended to be the final product grammar. There is no planned v4.
+The following promises apply indefinitely across 3.x releases:
 
-**Additive changes do not bump `contract_version`.** Consumers **must ignore
-unknown keys** and **must dispatch JSONL on `type`**. Additive means: a new key
-on a payload, a new optional field, a new JSONL frame type, a new command, a new
-`next_action` value.
+1. The six public CLI verbs—`init`, `status`, `enqueue`, `validate`, `deploy`,
+   and `inspect`—will not be removed, renamed, or repurposed.
+2. Existing public options keep their meaning. A new optional flag cannot make
+   an old invocation more permissive or introduce a push.
+3. Contract-3 JSON evolves additively: existing keys, types, meanings, failure
+   envelope, and exit semantics are preserved.
+4. Consumers ignore unknown object keys and tolerate unknown enum values. An
+   unknown safety or next-action value must fail closed for mutation.
+5. The five MCP tool names and their required inputs remain stable:
+   `mergetrain_status`, `mergetrain_inspect`, `mergetrain_enqueue`,
+   `mergetrain_validate`, and `mergetrain_deploy`.
+6. Config schema 2 remains readable throughout 3.x. New settings are optional
+   and receive safe code defaults; unknown settings are never silently treated
+   as authorization.
+7. New capability must fit an existing verb or an advanced operator surface.
+   Adding another public core command requires measured repeated need and a
+   product-scope review.
 
-The optional `paths` array on top-level gate configuration and the `skipped`
-gate event state are additive contract changes. Consumers must continue to
-ignore unknown configuration keys and event state values. A skipped gate
-includes the stable detail `no changed paths matched configured paths`.
+An incompatible change is permitted only when continuing the old behavior
+would itself violate a safety guarantee. Such a release must fail the unsafe
+operation closed, document the migration, bump the affected machine contract,
+and provide a direct diagnostic. Convenience or naming preference is not a
+reason to break v3.
 
-The optional `parallel_group`, `needs`, `workers`, and `timeout_seconds` fields
-on top-level gates plus the top-level `gate_parallelism` object are additive.
-Parallel terminal gate events may use `failure` or `canceled` states; their
-declaration-order indexes remain stable even when commands finish in a different
-order.
+## Additive changes
 
-Public job objects may include `supersession_id` and `supersedes_train_id`.
-They link an atomically retired validated train to freshly queued replacement
-jobs; they do not imply that validation or deploy approval transferred.
+The following do not change `contract_version`:
 
-Dashboard snapshots and deploy-preview JSON may include the structured `reuse`
-explanation with `identity_checks`, per-gate actions, and
-`estimated_savings`. `eligible` is `null` when the dashboard has not performed
-an exact preview, and `estimated_savings.authorizes_reuse` is always false.
-Deploy preview also includes additive `deploy_plan_sha`; callers may pass it to
-`run-batch --deploy --expected-plan` to fail closed on a changed plan.
+- a new optional key;
+- a new enum value that old consumers can safely treat as unknown;
+- a new JSONL frame type;
+- more human-readable diagnostic text;
+- a new advanced command that does not change existing invocations.
 
-`status` may include additive `counts`, `attention_jobs`, `jobs_limit`, and
-`jobs_truncated` fields. `jobs` remains the newest limited history, while
-`attention_jobs` is the uncapped action-required view. `hub status --summary`
-is a separately fingerprinted compact view whose repo entries carry `summary`
-instead of a full dashboard `snapshot`.
+Removing or renaming a key, changing a type or meaning, changing whether an
+invocation can push, changing exit semantics, or changing stream resume rules
+is incompatible.
 
-Validated-train entries on `status` and `doctor` may include
-`current_integration_sha` and `integration_changed_since_validation`. The
-latter is `true` or `false` when the current ref and recorded validation base
-are comparable, otherwise `null`. A true value is diagnostic and does not
-change `deploy_eligible`. The observation uses the local integration ref and
-does not imply that a remote fetch occurred. Doctor may add the
-`validated_train_base_changed` recommendation.
+## Too-new configuration
 
-`stats` may include additive `current.window`, `current.gates`, and
-`current.latency` objects. Established top-level aggregates retain their
-selected-history meaning; automatic recommendations use the latest 20 complete
-claim-token runs disclosed by `current.window`.
-
-**Breaking changes bump `contract_version`** (a deliberate, reviewed decision):
-removing or renaming a key, changing a value's type or meaning, changing the
-`ok`/`result` semantics, changing exit codes, or changing the JSONL frame or
-resume model.
-
-For the config file: adding an optional key does not bump the config `version`
-(unknown keys are tolerated). Bump only when an existing key's meaning changes
-or a key becomes required — i.e. when an older binary would misread a newer
-file. Both versions are forward-only; there is no down-migration.
-
-Contract 2 removes presentation-only `human_vocabulary` and `terminology`
-objects, the no-op `agent` config object, deploy spelling aliases, and the
-redundant `hub list` surface. Version-1 config files migrate in memory; version-2
-files reject the removed top-level keys.
-
-### How a too-new config is handled
-
-If a `.mergetrain.yaml` declares a `version:` newer than the running binary
-understands, the **state-shipping path fails closed**: `enqueue`, `run-batch`,
-and `run-next` refuse with a `config_error` envelope. **Recovery and read-only
-commands stay permissive** — `reconcile`, `recover`, `unlock`, `status`,
-`doctor`, `inspect`, `gc` (dry-run) all still run, so a rollback can never lock
-you out of crash recovery. `doctor` reports `next_action: upgrade_mergetrain`
-and `config_version_supported`.
+State-changing paths (`enqueue`, `validate`, `deploy`, and daemons) reject a
+config version newer than the running binary understands. Read-only inspection
+and recovery remain available so a rollback cannot lock an operator out of
+remote-truth reconciliation. `status --diagnose` reports the mismatch and the
+safe next action.
 
 ## Enforcement
 
-`tests/test_contract_fingerprints.py` captures a recursive key-set of each
-surface and compares it to the checked-in `tests/contract_fingerprints.json`.
-Any shape change fails CI and is classified — added keys are additive
-(regenerate the golden with `MERGETRAIN_REGEN_FINGERPRINTS=1` and note it in the
-changelog); removed or renamed keys are breaking and require bumping
-`contract_version` first. It cannot detect a same-keys value-meaning change;
-that residual rests on review.
+`tests/test_contract_fingerprints.py` captures recursive key sets for all core
+JSON payloads, advanced machine surfaces, the failure envelope, and every JSONL
+frame. It also compares the implemented error-code set with the table above.
 
-Coverage is **every payload a command can emit**, currently 25 surfaces plus the
-JSONL frames: `doctor`, `status`, `version`, `agent_contract`, `init`, `enqueue`,
-`retry`, `inspect`, `history`, `stats`, `gc`, `run_batch_validate`,
-`run_batch_preview`, `reconcile`, `recover`, `unlock`, `verify`, `dismiss`,
-`cancel`, `gc_applied`, `hub_status`, `hub_status_summary`, `hub_add`, `hub_remove`,
-`failure_envelope`,
-and `_jsonl_frames`. A new `--json` payload must be added to `SURFACES` in the
-same change that introduces it, or the gate silently does not cover it. Run
-results share one builder, so `run_batch_validate` also pins `run-batch --deploy`
-and `run-next`.
+Coverage is currently 22 surfaces: `status_diagnose`, `status`, `enqueue`,
+`validate`, `gc`, `reconcile`, `unlock`, `verify`, `dismiss`, `retry`, `cancel`,
+`hub_status`, `hub_status_summary`, `gc_applied`, `hub_add`, `hub_remove`,
+`init`, `deploy_preview`, `inspect`, `history`, `stats`, and
+`failure_envelope`, plus `_jsonl_frames`.
 
-## Compatibility enforcement
+Run results share one builder, so the validation fingerprint also protects the
+executed deployment-result shape.
 
-Contract 2 permits **additive-only changes within the contract major**. This is
-a machine-consumer compatibility boundary, not a product-feature freeze: owner
-evidence may justify a bounded new capability, but breaking JSON or JSONL
-semantics still requires a conscious contract-version decision. The fingerprint
-gate makes key-shape changes visible; semantic changes remain a review
-responsibility.
+An additive shape change requires review, a changelog note, and deliberate
+golden regeneration. A removal or rename fails CI and is rejected unless it
+meets the safety-exception policy. Semantic stability that key fingerprints
+cannot detect is covered by focused contract tests and review.
+
+The v2-to-v3 break is intentionally concentrated in 3.0: ambiguous command
+aliases, manually copied SHA inputs, human train IDs, separate doctor state,
+and duplicate preview/reuse switches were removed together. From 3.0 onward,
+the compatibility direction is additive and boring by design.

@@ -20,8 +20,8 @@ from .commands.daemon import cmd_daemon
 from .commands.deploy import (
     _results_payload,
     _run_exit_code,
-    cmd_run_batch,
-    cmd_run_next,
+    cmd_deploy,
+    cmd_validate,
 )
 from .commands.hub import (
     cmd_dashboard,
@@ -32,7 +32,6 @@ from .commands.hub import (
     cmd_hub_status,
 )
 from .commands.inspection import (
-    cmd_doctor,
     cmd_events,
     cmd_history,
     cmd_inspect,
@@ -47,28 +46,20 @@ from .commands.queue import (
     cmd_retry,
     cmd_supersede,
 )
-from .commands.recovery import cmd_gc, cmd_reconcile, cmd_recover, cmd_unlock, cmd_verify
-from .commands.setup import (
-    agent_contract_payload,
-    cmd_agent_contract,
-    cmd_demo,
-    cmd_init,
-    cmd_mcp,
-    cmd_version,
-    render_agent_contract,
-)
+from .commands.recovery import cmd_gc, cmd_reconcile, cmd_unlock, cmd_verify
+from .commands.setup import cmd_demo, cmd_init, cmd_mcp, render_agent_contract
 from .errors import CommandFailed, ConfigError, MergetrainError, QueueError
 
 __all__ = [
     "_job_result_line",
     "_results_payload",
     "_run_exit_code",
-    "agent_contract_payload",
     "config_from_args",
     "main",
     "normalize_global_options",
     "render_agent_contract",
 ]
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mergetrain")
@@ -76,25 +67,42 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help="Path to .mergetrain.yaml")
     parser.add_argument("--repo", default=str(Path.cwd()), help="Repository root or worktree path")
     parser.add_argument("--db", help="Override SQLite DB path")
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(
+        dest="command",
+        metavar="{init,status,enqueue,validate,deploy,inspect}",
+        title="core commands",
+    )
 
+    # Register the durable product grammar first and in lifecycle order. Hidden
+    # operator commands are configured below but never disturb default help.
     p_init = subparsers.add_parser("init", help="Print or write starter config and agent docs")
+    p_status = subparsers.add_parser("status", help="Show queue state and the next action")
+    p_enqueue = subparsers.add_parser(
+        "enqueue", help="Add a task branch to the integration queue"
+    )
+    p_validate = subparsers.add_parser(
+        "validate", help="Assemble and test queued work without pushing"
+    )
+    p_deploy = subparsers.add_parser(
+        "deploy", help="Validate if needed, approve one exact plan, and push"
+    )
+    p_inspect = subparsers.add_parser(
+        "inspect", help="Inspect one job, its latest run, and train outcome"
+    )
+
     p_init.add_argument("--project", help="Project name for config and worktree prefixes")
-    p_init.add_argument("--write", action="store_true", help="Write .mergetrain.yaml and agent docs")
-    p_init.add_argument("--force", action="store_true", help="Overwrite generated files")
+    init_mode = p_init.add_mutually_exclusive_group()
+    init_mode.add_argument(
+        "--write", action="store_true", help="Write .mergetrain.yaml and agent docs"
+    )
+    init_mode.add_argument(
+        "--refresh-instructions",
+        action="store_true",
+        help="Refresh generated agent docs without touching config",
+    )
     p_init.set_defaults(func=cmd_init)
 
-    p_contract = subparsers.add_parser("agent-contract", help="Print agent operating contract")
-    p_contract.add_argument("--json", action="store_true")
-    p_contract.set_defaults(func=cmd_agent_contract)
-
-    p_version = subparsers.add_parser("version", help="Show version and installed package provenance")
-    p_version.add_argument("--json", action="store_true")
-    p_version.set_defaults(func=cmd_version)
-
-    p_demo = subparsers.add_parser(
-        "demo", help="Run a local-only semantic-conflict walkthrough"
-    )
+    p_demo = subparsers.add_parser("demo")
     p_demo.add_argument(
         "--dir",
         dest="directory",
@@ -109,43 +117,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_demo.set_defaults(func=cmd_demo)
 
-    p_mcp = subparsers.add_parser(
-        "mcp", help="Serve the queue to coding agents over MCP (stdio)"
-    )
+    p_mcp = subparsers.add_parser("mcp")
     p_mcp.set_defaults(func=cmd_mcp)
 
-    p_enqueue = subparsers.add_parser("enqueue", help="Add a task branch to the integration queue")
     p_enqueue.add_argument("--task", required=True)
     p_enqueue.add_argument("--branch", required=True)
     p_enqueue.add_argument("--worktree")
-    p_enqueue.add_argument(
-        "--base-sha",
-        default="",
-        help="Compatibility-only exact base; omit for ordinary verified capture",
-    )
-    p_enqueue.add_argument(
-        "--head-sha",
-        default="",
-        help="Compatibility-only exact HEAD; omit for ordinary verified capture",
-    )
     p_enqueue.add_argument("--note", default="")
-    p_enqueue.add_argument("--allow-duplicate", action="store_true")
-    p_enqueue.add_argument("--auto", action="store_true")
-    p_enqueue.add_argument(
-        "--capture-sha",
-        action="store_true",
-        help="Compatibility spelling; exact SHAs are captured by default",
-    )
-    p_enqueue.add_argument("--allow-dirty", action="store_true")
-    p_enqueue.add_argument("--allow-branch-mismatch", action="store_true")
-    p_enqueue.add_argument("--no-ready-check", action="store_true")
+    p_enqueue.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     p_enqueue.add_argument("--json", action="store_true")
     p_enqueue.set_defaults(func=cmd_enqueue)
 
-    p_retry = subparsers.add_parser(
-        "retry",
-        help="Dismiss a fixed blocked/failed job and enqueue a fresh SHA-pinned job",
-    )
+    p_retry = subparsers.add_parser("retry")
     p_retry.add_argument("job_id", type=int)
     p_retry.add_argument(
         "--rebase",
@@ -155,13 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_retry.add_argument("--json", action="store_true")
     p_retry.set_defaults(func=cmd_retry)
 
-    p_supersede = subparsers.add_parser(
-        "supersede",
-        help=(
-            "Atomically retire a validated train and enqueue SHA-pinned "
-            "replacement work"
-        ),
-    )
+    p_supersede = subparsers.add_parser("supersede")
     p_supersede.add_argument("--train-id", required=True)
     p_supersede.add_argument(
         "--replacement",
@@ -169,23 +146,22 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=3,
         required=True,
         metavar=("TASK", "BRANCH", "WORKTREE"),
-        help=(
-            "Replacement task, branch, and clean owning worktree; repeat for "
-            "a replacement set"
-        ),
+        help=("Replacement task, branch, and clean owning worktree; repeat for a replacement set"),
     )
     p_supersede.add_argument("--note", default="")
     p_supersede.add_argument("--json", action="store_true")
     p_supersede.set_defaults(func=cmd_supersede)
 
-    p_status = subparsers.add_parser("status", help="Show queue and lock status")
     p_status.add_argument("--json", action="store_true")
     p_status.add_argument("--limit", type=int, default=10)
+    p_status.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="Include configuration, Git, runtime, and lock diagnostics",
+    )
     p_status.set_defaults(func=cmd_status)
 
-    p_events = subparsers.add_parser(
-        "events", help="Read or follow structured runner events"
-    )
+    p_events = subparsers.add_parser("events")
     event_scope = p_events.add_mutually_exclusive_group()
     event_scope.add_argument("--job", dest="job_id", type=int, help="Scope to one job run history")
     event_scope.add_argument("--train-id", help="Scope to one validated train")
@@ -200,76 +176,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_events.add_argument("--poll-interval", type=float, default=0.5)
     p_events.set_defaults(func=cmd_events)
 
-    p_inspect = subparsers.add_parser(
-        "inspect", help="Inspect one job, its latest run, and train outcome"
-    )
     p_inspect.add_argument("job_id", type=int)
     p_inspect.add_argument("--event-limit", type=int, default=100)
     p_inspect.add_argument("--json", action="store_true")
     p_inspect.set_defaults(func=cmd_inspect)
 
-    p_history = subparsers.add_parser(
-        "history", help="Show retained train/job history and gate outcomes"
-    )
+    p_history = subparsers.add_parser("history")
     p_history.add_argument("--since", default="", help="ISO-8601 lower time bound")
     p_history.add_argument("--limit", type=int, default=50)
     p_history.add_argument("--json", action="store_true")
     p_history.set_defaults(func=cmd_history)
 
-    p_stats = subparsers.add_parser(
-        "stats",
-        help="Aggregate outcomes, validation, batching, latency, and gate timing",
-    )
+    p_stats = subparsers.add_parser("stats")
     p_stats.add_argument("--since", default="", help="ISO-8601 lower time bound")
     p_stats.add_argument("--json", action="store_true")
     p_stats.set_defaults(func=cmd_stats)
 
-    p_logs = subparsers.add_parser("logs", help="Read or follow one job's runner log")
+    p_logs = subparsers.add_parser("logs")
     p_logs.add_argument("job_id", type=int)
     p_logs.add_argument("--follow", action="store_true")
     p_logs.add_argument("--tail", type=int, default=200)
     p_logs.add_argument("--poll-interval", type=float, default=0.5)
     p_logs.set_defaults(func=cmd_logs)
 
-    p_doctor = subparsers.add_parser("doctor", help="Diagnose config, queue, git, and next action")
-    p_doctor.add_argument("--json", action="store_true")
-    p_doctor.set_defaults(func=cmd_doctor)
+    p_validate.add_argument("--keep-worktree", action="store_true", help=argparse.SUPPRESS)
+    p_validate.add_argument("--json", action="store_true")
+    p_validate.set_defaults(func=cmd_validate)
 
-    for name, func, help_text in [
-        ("run-next", cmd_run_next, "Process one queued job"),
-        ("run-batch", cmd_run_batch, "Validate queued jobs or push an exact validated train"),
-    ]:
-        p_run = subparsers.add_parser(name, help=help_text)
-        mode = p_run.add_mutually_exclusive_group(required=True)
-        mode.add_argument("--validate-only", action="store_true")
-        mode.add_argument("--deploy", action="store_true")
-        p_run.add_argument("--keep-worktree", action="store_true")
-        p_run.add_argument("--json", action="store_true")
-        if name == "run-batch":
-            p_run.add_argument("--train-id", help="Push one exact validated train")
-            p_run.add_argument(
-                "--reuse-validated",
-                action="store_true",
-                help="Explicitly authorize the configured validated-gate reuse policy",
-            )
-            p_run.add_argument(
-                "--preview",
-                action="store_true",
-                help="Evaluate a validated train and reuse decision without claiming or pushing",
-            )
-            p_run.add_argument(
-                "--expected-plan",
-                default="",
-                help=(
-                    "Fail closed unless the current deploy plan matches this "
-                    "SHA-256 from --preview"
-                ),
-            )
-        p_run.set_defaults(func=func)
+    p_deploy.add_argument("--keep-worktree", action="store_true", help=argparse.SUPPRESS)
+    p_deploy.add_argument("--json", action="store_true")
+    p_deploy.add_argument("--expected-plan", default="", help=argparse.SUPPRESS)
+    p_deploy.add_argument("--train-id", default="", help=argparse.SUPPRESS)
+    p_deploy.set_defaults(func=cmd_deploy)
 
-    p_daemon = subparsers.add_parser(
-        "daemon", help="Run foreground auto-deploy or manual-validation daemon"
-    )
+    p_daemon = subparsers.add_parser("daemon")
     p_daemon.add_argument("--interval", type=int)
     p_daemon.add_argument("--once", action="store_true")
     p_daemon.add_argument(
@@ -285,34 +225,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_daemon.add_argument("--keep-worktree", action="store_true")
     p_daemon.set_defaults(func=cmd_daemon)
 
-    p_gc = subparsers.add_parser("gc", help="Clean temporary worktrees and optionally terminal branches")
+    p_gc = subparsers.add_parser("gc")
     p_gc.add_argument("--json", action="store_true")
     p_gc.add_argument("--apply", action="store_true")
     p_gc.add_argument("--delete-branches", action="store_true")
     p_gc.set_defaults(func=cmd_gc)
 
-    p_reconcile = subparsers.add_parser(
-        "reconcile",
-        help="Resolve crashed pending-deploy jobs against the remote (default: dry-run)",
-    )
-    p_reconcile.add_argument(
-        "--apply", action="store_true", help="Write the reconciled outcome"
-    )
+    p_reconcile = subparsers.add_parser("reconcile")
+    p_reconcile.add_argument("--apply", action="store_true", help="Write the reconciled outcome")
     p_reconcile.add_argument("--json", action="store_true")
     p_reconcile.set_defaults(func=cmd_reconcile)
 
-    p_recover = subparsers.add_parser(
-        "recover", help="Restart heal: split orphans, then reconcile --apply"
-    )
-    p_recover.add_argument(
-        "--gc", action="store_true", help="Also remove crashed worktrees"
-    )
-    p_recover.add_argument("--json", action="store_true")
-    p_recover.set_defaults(func=cmd_recover)
-
-    p_unlock = subparsers.add_parser(
-        "unlock", help="Clear a wedged runner lock"
-    )
+    p_unlock = subparsers.add_parser("unlock")
     p_unlock.add_argument(
         "--force",
         action="store_true",
@@ -321,26 +245,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_unlock.add_argument("--json", action="store_true")
     p_unlock.set_defaults(func=cmd_unlock)
 
-    p_cancel = subparsers.add_parser("cancel", help="Cancel a non-terminal queue item")
+    p_cancel = subparsers.add_parser("cancel")
     p_cancel.add_argument("job_id", type=int)
     p_cancel.add_argument("--note", default="")
     p_cancel.add_argument("--json", action="store_true")
     p_cancel.set_defaults(func=cmd_cancel)
 
-    p_dismiss = subparsers.add_parser(
-        "dismiss",
-        help="Clear a superseded blocked/failed job (non-destructive; not for queued/in-progress)",
-    )
+    p_dismiss = subparsers.add_parser("dismiss")
     p_dismiss.add_argument("job_id", type=int, nargs="?", help="Job to dismiss (or use --all)")
     p_dismiss.add_argument("--all", action="store_true", help="Dismiss every blocked/failed job")
     p_dismiss.add_argument("--note", default="")
     p_dismiss.add_argument("--json", action="store_true")
     p_dismiss.set_defaults(func=cmd_dismiss)
 
-    p_verify = subparsers.add_parser(
-        "verify",
-        help="Discharge deployed jobs left verify_status='unknown' by a crash",
-    )
+    p_verify = subparsers.add_parser("verify")
     p_verify.add_argument("--job", type=int, help="Resolve one job (default: all unresolved)")
     p_verify.add_argument(
         "--ack",
@@ -350,9 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_verify.add_argument("--json", action="store_true")
     p_verify.set_defaults(func=cmd_verify)
 
-    p_dashboard = subparsers.add_parser(
-        "dashboard", help="Serve the local read-only live dashboard"
-    )
+    p_dashboard = subparsers.add_parser("dashboard")
     p_dashboard.add_argument("--host", default="127.0.0.1")
     p_dashboard.add_argument("--port", type=int, default=8765)
     p_dashboard.add_argument(
@@ -367,10 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_dashboard.set_defaults(func=cmd_dashboard)
 
-    p_hub = subparsers.add_parser(
-        "hub",
-        help="Serve one read-only dashboard over every registered repo",
-    )
+    p_hub = subparsers.add_parser("hub")
     p_hub.add_argument("--host", default="127.0.0.1")
     p_hub.add_argument("--port", type=int, default=8765)
     p_hub.add_argument(
@@ -429,24 +342,89 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_hub_daemon.add_argument("--keep-worktree", action="store_true")
     p_hub_daemon.add_argument("--registry", help="Override the hub registry file path")
-    p_hub_daemon.add_argument("--json", action="store_true", help="With --once, print sweep outcomes as JSON")
+    p_hub_daemon.add_argument(
+        "--json", action="store_true", help="With --once, print sweep outcomes as JSON"
+    )
     p_hub_daemon.set_defaults(func=cmd_hub_daemon)
     return parser
 
 
+_REMOVED_COMMANDS = {
+    "doctor": "mergetrain status --diagnose",
+    "recover": "mergetrain reconcile --apply",
+    "version": "mergetrain --version",
+    "agent-contract": "mergetrain init --refresh-instructions",
+}
+
+_REMOVED_ENQUEUE_FLAGS = {
+    "--base-sha",
+    "--head-sha",
+    "--capture-sha",
+    "--no-ready-check",
+    "--allow-dirty",
+    "--allow-branch-mismatch",
+    "--allow-duplicate",
+}
+
+
+def _command_token(argv: Sequence[str]) -> str | None:
+    index = 0
+    while index < len(argv):
+        value = argv[index]
+        if value in {"--config", "--repo", "--db"}:
+            index += 2
+            continue
+        if value == "--version":
+            return None
+        if value.startswith("-"):
+            index += 1
+            continue
+        return value
+    return None
+
+
+def _migration_error(raw: Sequence[str], command: str | None) -> str | None:
+    if command in _REMOVED_COMMANDS:
+        return f"v3 removed '{command}'; use {_REMOVED_COMMANDS[command]}"
+    if command in {"run-batch", "run-next"}:
+        replacement = "mergetrain deploy" if "--deploy" in raw else "mergetrain validate"
+        return f"v3 removed '{command}'; use {replacement}"
+    removed_enqueue = sorted(_REMOVED_ENQUEUE_FLAGS.intersection(raw))
+    if command == "enqueue" and removed_enqueue:
+        return (
+            f"v3 removed enqueue option {removed_enqueue[0]}; exact SHAs and "
+            "readiness are always verified"
+        )
+    removed_deploy = {
+        "--preview": "run 'mergetrain deploy --json' to obtain a non-pushing plan",
+        "--reuse-validated": "configure deploy.reuse.enabled instead",
+    }
+    if command == "deploy":
+        for option, replacement in removed_deploy.items():
+            if option in raw:
+                return f"v3 removed deploy option {option}; {replacement}"
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+    normalized = normalize_global_options(raw)
+    migration_error = _migration_error(raw, _command_token(normalized))
+    if migration_error:
+        if "--json" in raw:
+            dump_json(_error_payload("removed_interface", migration_error))
+        else:
+            print(f"mergetrain: {migration_error}", file=sys.stderr)
+        return 2
     parser = build_parser()
-    args = parser.parse_args(normalize_global_options(raw))
+    args = parser.parse_args(normalized)
     if not hasattr(args, "func"):
         parser.print_help(sys.stderr)
         return 2
     try:
         return int(args.func(args))
     except KeyboardInterrupt:
-        error_payload = _error_payload(
-            "interrupted", "interrupted", retryable=False
-        )
+        error_payload = _error_payload("interrupted", "interrupted", retryable=False)
         if getattr(args, "json", False):
             # Route through the single builder so Ctrl-C emits the same
             # {code,message,retryable} shape as every other failure — a consumer

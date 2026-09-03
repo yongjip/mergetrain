@@ -90,5 +90,5 @@
       {"index": 2, "name": "unit", "state": "success", "sample_count": 3, "median_seconds": 30, "elapsed_seconds": null, "remaining_seconds": 0}
     ]
   },
-  "next_action": "deploy_validated_train_when_approved"
+  "next_action": "deploy_when_approved"
 }

@@ -158,9 +158,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                     finally:
                         control.close()
 
-                with patch.object(
-                    runner, "push_verified_head", side_effect=land_then_steal
-                ):
+                with patch.object(runner, "push_verified_head", side_effect=land_then_steal):
                     # The runner must not quietly "succeed" here: its lease is
                     # gone, so its finalize has to fail loudly and retryably.
                     with self.assertRaises(LostLease):
@@ -203,9 +201,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                 # And the event stream never claimed completion either.
                 phases = {
                     event.phase
-                    for event in list_run_events(
-                        conn, claim_token=lease_token, limit=200
-                    )
+                    for event in list_run_events(conn, claim_token=lease_token, limit=200)
                 }
                 self.assertIn("pushing", phases)
                 self.assertNotIn("complete", phases)
@@ -219,9 +215,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                 # prove the push landed but not that verify ran.
                 before = git(remote, "rev-parse", "main")
                 spy = _GitSpy()
-                with patch.object(
-                    recovery_module, "run_command", side_effect=spy
-                ):
+                with patch.object(recovery_module, "run_command", side_effect=spy):
                     outcome = reconcile(config, conn, apply=True)
                 after = git(remote, "rev-parse", "main")
                 healed = get_job(conn, job.id)
@@ -261,24 +255,47 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
             finally:
                 conn.close()
 
+            validated_out = io.StringIO()
+            with redirect_stdout(validated_out):
+                self.assertEqual(
+                    main(["--repo", str(repo), "validate", "--json"]),
+                    0,
+                )
+            preview_out = io.StringIO()
+            with redirect_stdout(preview_out):
+                self.assertEqual(
+                    main(["--repo", str(repo), "deploy", "--json"]),
+                    0,
+                )
+            plan_sha = json.loads(preview_out.getvalue())["deploy_plan_sha"]
+
             real_push = GitRunner.push_verified_head
 
             def land_then_steal(runner_self, **kwargs):
                 real_push(runner_self, **kwargs)
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    code = main(
-                        ["--repo", str(repo), "unlock", "--force", "--json"]
-                    )
+                    code = main(["--repo", str(repo), "unlock", "--force", "--json"])
                 unlock_payloads.append((code, json.loads(out.getvalue())))
 
             out = io.StringIO()
             with patch.object(
-                GitRunner, "push_verified_head", autospec=True,
+                GitRunner,
+                "push_verified_head",
+                autospec=True,
                 side_effect=land_then_steal,
             ):
                 with redirect_stdout(out):
-                    code = main(["--repo", str(repo), "run-batch", "--deploy", "--json"])
+                    code = main(
+                        [
+                            "--repo",
+                            str(repo),
+                            "deploy",
+                            "--expected-plan",
+                            plan_sha,
+                            "--json",
+                        ]
+                    )
             payload = json.loads(out.getvalue())
 
             self.assertEqual(code, 1)
@@ -289,9 +306,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
             unlock_code, unlock_payload = unlock_payloads[0]
             self.assertEqual(unlock_code, 0)
             self.assertTrue(unlock_payload["cleared"])
-            self.assertEqual(
-                unlock_payload["lock_context"]["in_progress_with_marker"], 1
-            )
+            self.assertEqual(unlock_payload["lock_context"]["in_progress_with_marker"], 1)
             # unlock itself never renders a deploy verdict; it points at reconcile.
             self.assertEqual(unlock_payload["next_action"], "reconcile_pending_deploy")
 
@@ -305,12 +320,13 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
             self.assertNotEqual(parked.pending_deploy_sha, "")
             self.assertEqual(git(remote, "rev-parse", "main"), parked.pending_deploy_sha)
 
-            # The wedge is now the operator's to resolve, and doctor says so.
+            # The wedge is now the operator's to resolve, and status says so.
             out = io.StringIO()
             with redirect_stdout(out):
-                main(["--repo", str(repo), "doctor", "--json"])
+                main(["--repo", str(repo), "status", "--json"])
             self.assertEqual(
-                json.loads(out.getvalue())["next_action"], "reconcile_pending_deploy"
+                json.loads(out.getvalue())["next_action"]["code"],
+                "reconcile_pending_deploy",
             )
 
 

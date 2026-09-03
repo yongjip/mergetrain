@@ -5,7 +5,7 @@ mergetrain is a local CLI: the queue, the git worktrees, and the deploy all run 
 This repo ships two things that make that work well:
 
 - [`CLAUDE.md`](../CLAUDE.md) — tells the on-machine agent how to operate the queue safely (read state first, validate freely, **confirm before deploy**).
-- `scripts/mt-status.sh`, `scripts/mt-validate.sh`, `scripts/mt-deploy.sh` — phone-friendly wrappers with a deploy guard.
+- `scripts/mt-status.sh`, `scripts/mt-validate.sh`, `scripts/mt-deploy.sh` — thin phone-friendly wrappers over the three core commands.
 
 > Prefer a terminal? You can also drive a running session with **Remote Control** (`claude remote-control`) or just SSH in from a phone terminal app — see [Alternatives](#alternatives).
 
@@ -32,13 +32,12 @@ That's it — the same conversation now syncs between phone and desktop. Full de
 You send a short message from your phone. On your Mac, Claude reads [`CLAUDE.md`](../CLAUDE.md), runs the right `mergetrain` commands in your repo, and replies with a short summary (plus a push notification when it's done or needs your go-ahead).
 
 **Deploy policy: approve a clear scope, then finish.** Status checks and
-`--validate-only` run freely. You can either approve one human-readable deploy
+`validate` run freely. You can either approve one human-readable deploy
 summary with "deploy / yes / go", or explicitly tell the agent to QA, deploy,
 verify, and finish a named task end-to-end. In the latter mode it should not ask
-for each opaque train ID. The `scripts/mt-deploy.sh` wrapper remains a guarded
-one-shot command: it prints the CLI's canonical destination and deploy-plan
-hash, requires `--confirm`, then sends that exact hash back with
-`--expected-plan`.
+for each opaque train ID. `scripts/mt-deploy.sh` delegates to `mergetrain
+deploy`, which validates when needed, shows the exact human plan, and confirms
+before push. Identity hashes remain internal.
 
 ## Phone phrasebook
 
@@ -53,7 +52,9 @@ Type these to the Dispatch thread. Both languages work — say it however is nat
 | Triage a blocker | "blocked 있으면 원인만 알려줘" | "If anything's blocked, just tell me why" |
 | Preview cleanup | "임시 worktree 정리할 거 있는지 봐줘" | "Any temp worktrees to clean up?" |
 
-The agent will run the matching commands (e.g. `scripts/mt-status.sh`, `mergetrain run-batch --validate-only`) and, for deploy, will show you the plan and wait for your confirmation first.
+The agent will run the matching commands (for example `scripts/mt-status.sh`
+and `mergetrain validate`) and, for deploy, will show you the plan and wait for
+your confirmation first.
 
 ## Keeping the machine awake
 
@@ -76,7 +77,9 @@ Dispatch gives your phone a path to real actions on your computer — including 
 ## Alternatives
 
 - **Remote Control** — run `claude remote-control` in your repo, then drive that live session from the Claude app or `claude.ai/code`. Best when you want to steer an in-progress terminal session rather than fire off a task. See the [docs](https://code.claude.com/docs/en/remote-control).
-- **SSH from a phone terminal** (Termius, Blink, Termux) — since every command is JSON-first and non-interactive, the wrappers in `scripts/` work well over SSH. Pair with Tailscale for secure access.
+- **SSH from a phone terminal** (Termius, Blink, Termux) — status and
+  validation are JSON-friendly; deploy intentionally needs an interactive
+  confirmation. Pair with Tailscale for secure access.
 - **Read-only dashboard glance** — if you already place the loopback dashboard behind a reviewed authenticated tunnel or reverse proxy, phone widths show only state, next action, and attention. `--allow-remote` adds no authentication or TLS by itself; follow [the dashboard security guidance](security.md#dashboard) before exposing it.
 
 > Note: **Claude Code on the web** runs in Anthropic's cloud, not on your machine, so it can't see your local mergetrain queue/SQLite — it's the wrong tool for managing a local deploy train.

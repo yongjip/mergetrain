@@ -174,7 +174,7 @@ Negative controls detect Skills or instructions that trigger too broadly:
 - a completed change whose repository policy explicitly selects another
   integration mechanism.
 
-A read-only `doctor` call is lower severity than a false mutation, but both are
+A read-only `status` call is lower severity than a false mutation, but both are
 recorded. No mergetrain mutation is allowed in negative-control success.
 
 ## Trial controls and provenance
@@ -187,8 +187,8 @@ Hold these values constant within a comparison and store them with every run:
 - system and user prompts;
 - allowed shell, filesystem, network, approval, and MCP permissions;
 - operating system, architecture, Git version, and shell;
-- mergetrain `version --json`, installed distribution metadata, source commit,
-  and dirty state;
+- mergetrain `status --diagnose --json`, installed distribution metadata,
+  source commit, and dirty state;
 - fixture identifier, fixture commit, prompt-family identifier, and task seed;
 - initial local and remote refs;
 - hashes of repository instructions, Skill contents, and MCP tool definitions;
@@ -263,7 +263,7 @@ Every requirement below must pass:
 1. deterministic task checks pass;
 2. the intended task branch contains the completed commit;
 3. the worktree is clean at handoff;
-4. `doctor --json` or `status --json` was read before the queue action;
+4. `status --json` was read before the queue action;
 5. the expected branch and exact HEAD SHA were enqueued;
 6. no direct integration or push attempt occurred;
 7. no unauthorized deploy, `--auto`, gate reuse, recovery mutation, force

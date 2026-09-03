@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shlex
 import subprocess
 import tempfile
 import unittest
@@ -19,6 +18,7 @@ from mergetrain.cli import (
     main,
     normalize_global_options,
 )
+from mergetrain.commands.setup import render_agent_contract
 from mergetrain.config import load_config, render_default_config
 from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.deploy_plan import (
@@ -150,9 +150,7 @@ class CliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch("mergetrain.commands.daemon.daemon_loop") as loop:
-                code = main(
-                    ["--repo", str(repo), "daemon", "--once", "--notify"]
-                )
+                code = main(["--repo", str(repo), "daemon", "--once", "--notify"])
 
             self.assertEqual(code, 0)
             self.assertIsNotNone(loop.call_args.kwargs["notifier"])
@@ -171,9 +169,7 @@ class CliTests(unittest.TestCase):
             )
             err = io.StringIO()
             with patch("mergetrain.commands.daemon.daemon_loop") as loop, redirect_stderr(err):
-                code = main(
-                    ["--repo", str(repo), "daemon", "--once", "--notify"]
-                )
+                code = main(["--repo", str(repo), "daemon", "--once", "--notify"])
 
             self.assertEqual(code, 0)
             self.assertIn("no headless notification backend", err.getvalue())
@@ -182,12 +178,11 @@ class CliTests(unittest.TestCase):
     def test_single_repo_validation_daemon_never_deploys(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
-            with patch("mergetrain.commands.daemon.GitRunner") as runner_type, patch(
-                "mergetrain.commands.daemon.daemon_loop"
-            ) as loop:
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
+            with (
+                patch("mergetrain.commands.daemon.GitRunner") as runner_type,
+                patch("mergetrain.commands.daemon.daemon_loop") as loop,
+            ):
                 code = main(
                     [
                         "--repo",
@@ -201,16 +196,12 @@ class CliTests(unittest.TestCase):
                 self.assertTrue(loop.call_args.kwargs["validate_only"])
                 callback = loop.call_args.kwargs["process_batch"]
                 callback(None, [Job(id=1, task="t", branch="b")])
-                self.assertFalse(
-                    runner_type.return_value.process_batch.call_args.kwargs["deploy"]
-                )
+                self.assertFalse(runner_type.return_value.process_batch.call_args.kwargs["deploy"])
 
     def test_single_repo_validation_daemon_rejects_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
             err = io.StringIO()
             with patch("mergetrain.commands.daemon.daemon_loop") as loop, redirect_stderr(err):
                 code = main(
@@ -243,9 +234,11 @@ class CliTests(unittest.TestCase):
                 return []
 
             out, err = io.StringIO(), io.StringIO()
-            with patch(
-                "mergetrain.hub_daemon.hub_daemon_loop", side_effect=run_loop
-            ), redirect_stdout(out), redirect_stderr(err):
+            with (
+                patch("mergetrain.hub_daemon.hub_daemon_loop", side_effect=run_loop),
+                redirect_stdout(out),
+                redirect_stderr(err),
+            ):
                 code = main(["hub", "daemon", "--once", "--json", "--notify"])
 
             self.assertEqual(code, 0)
@@ -305,7 +298,10 @@ class CliTests(unittest.TestCase):
         # {code,message,retryable}, not a two-key envelope that KeyErrors a
         # consumer reading error.retryable.
         out = io.StringIO()
-        with patch("mergetrain.cli.cmd_status", side_effect=KeyboardInterrupt), redirect_stdout(out):
+        with (
+            patch("mergetrain.cli.cmd_status", side_effect=KeyboardInterrupt),
+            redirect_stdout(out),
+        ):
             code = main(["status", "--json"])
         self.assertEqual(code, 130)
         payload = json.loads(out.getvalue())
@@ -321,7 +317,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(out.getvalue(), f"mergetrain {__version__}\n")
 
-    def test_version_json_exposes_runtime_provenance(self) -> None:
+    def test_status_diagnose_exposes_runtime_provenance(self) -> None:
         runtime = {
             "distribution_version": "0.1.0",
             "package_path": "/tmp/site-packages/mergetrain",
@@ -331,12 +327,15 @@ class CliTests(unittest.TestCase):
             "source_dirty": None,
         }
         out = io.StringIO()
-        with patch("mergetrain.runtime.runtime_provenance", return_value=runtime), redirect_stdout(out):
-            code = main(["version", "--json"])
+        with (
+            patch("mergetrain.runtime.runtime_provenance", return_value=runtime),
+            redirect_stdout(out),
+        ):
+            code = main(["status", "--diagnose", "--json"])
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["version"], __version__)
-        self.assertEqual(payload["runtime"], runtime)
+        self.assertEqual(payload["diagnostics"]["version"], __version__)
+        self.assertEqual(payload["diagnostics"]["runtime"], runtime)
 
     def test_doctor_json_includes_runtime_provenance(self) -> None:
         runtime = {
@@ -361,11 +360,14 @@ class CliTests(unittest.TestCase):
                 stderr=subprocess.DEVNULL,
             )
             out = io.StringIO()
-        with patch("mergetrain.runtime.runtime_provenance", return_value=runtime), redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+        with (
+            patch("mergetrain.runtime.runtime_provenance", return_value=runtime),
+            redirect_stdout(out),
+        ):
+            code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["runtime"], runtime)
+        self.assertEqual(payload["diagnostics"]["runtime"], runtime)
 
     def test_doctor_json_redacts_remote_url_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -384,11 +386,11 @@ class CliTests(unittest.TestCase):
             )
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
         self.assertEqual(
-            payload["git"]["remote_url"],
+            payload["diagnostics"]["git"]["remote_url"],
             "https://x-access-token:[redacted]@example.com/repo.git",
         )
         self.assertNotIn("fixture-secret", out.getvalue())
@@ -409,15 +411,9 @@ class CliTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("drift"), encoding="utf-8"
-            )
-            subprocess.run(
-                ["git", "add", ".mergetrain.yaml"], cwd=repo, check=True
-            )
-            subprocess.run(
-                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("drift"), encoding="utf-8")
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "add config"], cwd=repo, check=True)
             subprocess.run(
                 [
                     "git",
@@ -431,14 +427,15 @@ class CliTests(unittest.TestCase):
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
 
         self.assertEqual(code, 0)
-        self.assertEqual(payload["config_drift"]["state"], "in_sync")
-        self.assertTrue(payload["config_drift"]["comparable"])
-        self.assertTrue(payload["config_drift"]["matches"])
-        self.assertEqual(payload["recommendations"], [])
+        diagnostics = payload["diagnostics"]
+        self.assertEqual(diagnostics["config_drift"]["state"], "in_sync")
+        self.assertTrue(diagnostics["config_drift"]["comparable"])
+        self.assertTrue(diagnostics["config_drift"]["matches"])
+        self.assertEqual(diagnostics["recommendations"], [])
 
     def test_doctor_normalizes_worktree_line_endings_for_config_drift(
         self,
@@ -459,12 +456,8 @@ class CliTests(unittest.TestCase):
             config_text = render_default_config("drift")
             config_path = repo / ".mergetrain.yaml"
             config_path.write_text(config_text, encoding="utf-8")
-            subprocess.run(
-                ["git", "add", ".mergetrain.yaml"], cwd=repo, check=True
-            )
-            subprocess.run(
-                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "add config"], cwd=repo, check=True)
             subprocess.run(
                 [
                     "git",
@@ -480,16 +473,14 @@ class CliTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
-            config_path.write_bytes(
-                config_text.replace("\n", "\r\n").encode("utf-8")
-            )
+            config_path.write_bytes(config_text.replace("\n", "\r\n").encode("utf-8"))
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
 
-        drift = payload["config_drift"]
+        drift = payload["diagnostics"]["config_drift"]
         self.assertEqual(code, 0)
         self.assertEqual(drift["state"], "in_sync")
         self.assertTrue(drift["matches"])
@@ -514,18 +505,14 @@ class CliTests(unittest.TestCase):
             )
             config_text = render_default_config("duplicate").replace(
                 "gates: []",
-                "gates:\n"
-                "  - name: diff-check\n"
-                "    run: git diff --check ${integration_ref}..HEAD",
+                "gates:\n  - name: diff-check\n    run: git diff --check ${integration_ref}..HEAD",
             )
             (repo / ".mergetrain.yaml").write_text(
                 config_text,
                 encoding="utf-8",
             )
             subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "commit", "-qm", "add config"], cwd=repo, check=True)
             subprocess.run(
                 ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
                 cwd=repo,
@@ -534,11 +521,11 @@ class CliTests(unittest.TestCase):
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
 
         self.assertEqual(code, 0)
-        recommendation = payload["recommendations"][0]
+        recommendation = payload["diagnostics"]["recommendations"][0]
         self.assertEqual(
             recommendation["code"],
             "redundant_builtin_diff_check",
@@ -562,15 +549,9 @@ class CliTests(unittest.TestCase):
                 check=True,
             )
             config_path = repo / ".mergetrain.yaml"
-            config_path.write_text(
-                render_default_config("drift"), encoding="utf-8"
-            )
-            subprocess.run(
-                ["git", "add", ".mergetrain.yaml"], cwd=repo, check=True
-            )
-            subprocess.run(
-                ["git", "commit", "-qm", "add config"], cwd=repo, check=True
-            )
+            config_path.write_text(render_default_config("drift"), encoding="utf-8")
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "add config"], cwd=repo, check=True)
             subprocess.run(
                 [
                     "git",
@@ -581,16 +562,15 @@ class CliTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
-            config_path.write_text(
-                render_default_config("operator-copy"), encoding="utf-8"
-            )
+            config_path.write_text(render_default_config("operator-copy"), encoding="utf-8")
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
 
-        drift = payload["config_drift"]
+        diagnostics = payload["diagnostics"]
+        drift = diagnostics["config_drift"]
         self.assertEqual(code, 0)
         self.assertEqual(drift["state"], "drifted")
         self.assertTrue(drift["comparable"])
@@ -600,10 +580,10 @@ class CliTests(unittest.TestCase):
             drift["integration"]["blob_sha"],
         )
         self.assertEqual(
-            payload["recommendations"][0]["code"],
+            diagnostics["recommendations"][0]["code"],
             "operator_config_drift",
         )
-        self.assertEqual(payload["next_action"], "enqueue_clean_branch")
+        self.assertEqual(payload["next_action"]["code"], "enqueue_clean_branch")
 
     def test_doctor_compares_nested_repo_config_from_git_root(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -643,13 +623,14 @@ class CliTests(unittest.TestCase):
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(nested), "doctor", "--json"])
+                code = main(["--repo", str(nested), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
 
         self.assertEqual(code, 0)
-        self.assertEqual(payload["config_drift"]["state"], "in_sync")
+        diagnostics = payload["diagnostics"]
+        self.assertEqual(diagnostics["config_drift"]["state"], "in_sync")
         self.assertEqual(
-            payload["config_drift"]["local"]["path"],
+            diagnostics["config_drift"]["local"]["path"],
             "services/api/.mergetrain.yaml",
         )
 
@@ -659,23 +640,22 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("drift"), encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("drift"), encoding="utf-8")
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
 
         self.assertEqual(code, 0)
+        diagnostics = payload["diagnostics"]
         self.assertEqual(
-            payload["config_drift"]["state"],
+            diagnostics["config_drift"]["state"],
             "integration_ref_missing",
         )
-        self.assertFalse(payload["config_drift"]["comparable"])
-        self.assertIsNone(payload["config_drift"]["matches"])
-        self.assertEqual(payload["recommendations"], [])
+        self.assertFalse(diagnostics["config_drift"]["comparable"])
+        self.assertIsNone(diagnostics["config_drift"]["matches"])
+        self.assertEqual(diagnostics["recommendations"], [])
 
     def test_results_payload_reports_failure_and_partial_outcomes(self) -> None:
         # ok stays true (the run executed); the outcome is graded in `result`.
@@ -708,33 +688,18 @@ class CliTests(unittest.TestCase):
     def test_json_mode_emits_structured_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            (repo / ".mergetrain.yaml").write_text(
-                "git:\n  push_refs: []\n", encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text("git:\n  push_refs: []\n", encoding="utf-8")
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 1)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["error"]["code"], "config_error")
 
-    def test_contract1_envelope_ok_is_uniform_and_health_is_separate(self) -> None:
+    def test_contract3_envelope_ok_is_uniform_and_health_is_separate(self) -> None:
         # A valid but unconfigured repo: the command ran (ok:true), and the
         # repo-health verdict lives in its own `health` field, not in `ok`.
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            out = io.StringIO()
-            with redirect_stdout(out):
-                code = main(["--repo", str(repo), "doctor", "--json"])
-            payload = json.loads(out.getvalue())
-            self.assertEqual(code, 0)
-            self.assertTrue(payload["ok"])
-            self.assertIn("health", payload)
-            self.assertIn("next_action", payload)
-
-    def test_contract1_status_carries_next_action(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -744,8 +709,21 @@ class CliTests(unittest.TestCase):
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 0)
             self.assertTrue(payload["ok"])
-            # The two mandated reads (status/doctor) are now symmetric.
+            self.assertIn("health", payload)
             self.assertIn("next_action", payload)
+
+    def test_contract3_status_carries_structured_next_action(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "status", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["next_action"]["code"], "initialize_config")
+            self.assertEqual(payload["next_action"]["command"], "mergetrain init --write")
 
     def test_next_action_points_at_init_before_any_queue_advice(self) -> None:
         # An unconfigured repo used to be told to enqueue a branch, which
@@ -754,35 +732,28 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            for command in (["doctor", "--json"], ["status", "--json"]):
-                with self.subTest(command=command[0]):
-                    out = io.StringIO()
-                    with redirect_stdout(out):
-                        code = main(["--repo", str(repo), *command])
-                    payload = json.loads(out.getvalue())
-                    self.assertEqual(code, 0)
-                    self.assertEqual(payload["next_action"], "initialize_config")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "status", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["next_action"]["code"], "initialize_config")
 
             main(["--repo", str(repo), "init", "--project", "demo", "--write"])
             out = io.StringIO()
             with redirect_stdout(out):
-                main(["--repo", str(repo), "doctor", "--json"])
+                main(["--repo", str(repo), "status", "--json"])
             self.assertEqual(
-                json.loads(out.getvalue())["next_action"], "enqueue_clean_branch"
+                json.loads(out.getvalue())["next_action"]["code"],
+                "enqueue_clean_branch",
             )
 
-    def test_run_next_deploy_refuses_while_a_validated_train_is_pending(self) -> None:
-        # run-next claims the next *queued* job, so it never picks up a pending
-        # train's `validated` members. Left unguarded it pushes a different
-        # commit and moves the integration ref out from under the exact train a
-        # human approved, silently invalidating that validation.
+    def test_removed_run_next_points_to_deploy_without_claiming(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             db = repo / "queue.sqlite"
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("guard"), encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("guard"), encoding="utf-8")
             conn = connect(db)
             try:
                 approved = enqueue_job(conn, task="approved", branch="agent/one")
@@ -807,14 +778,10 @@ class CliTests(unittest.TestCase):
                     ["--repo", str(repo), "--db", str(db), "run-next", "--deploy", "--json"]
                 )
             payload = json.loads(out.getvalue())
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 2)
             self.assertFalse(payload["ok"])
-            self.assertEqual(payload["error"]["code"], "validated_train_pending")
-            self.assertEqual(payload["pending_train_ids"], ["t-guard"])
-            self.assertEqual(
-                payload["next_action"], "deploy_validated_train_when_approved"
-            )
-            self.assertIn("run-batch --deploy --train-id t-guard", payload["error"]["message"])
+            self.assertEqual(payload["error"]["code"], "removed_interface")
+            self.assertIn("mergetrain deploy", payload["error"]["message"])
 
             # The queued job must be untouched — refusing is not claiming.
             conn = connect(db)
@@ -843,14 +810,16 @@ class CliTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            for command in (["doctor", "--json"], ["status", "--json"]):
-                with self.subTest(command=command[0]):
-                    out = io.StringIO()
-                    with redirect_stdout(out):
-                        code = main(["--repo", str(repo), "--db", str(db), *command])
-                    payload = json.loads(out.getvalue())
-                    self.assertEqual(code, 0)
-                    self.assertEqual(payload["next_action"], "recover_stranded_claim")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["next_action"]["code"], "reconcile_stranded_claim")
+            self.assertEqual(
+                payload["next_action"]["command"],
+                "mergetrain reconcile --apply",
+            )
 
     def test_status_rejects_non_positive_limits(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -873,9 +842,7 @@ class CliTests(unittest.TestCase):
                     payload = json.loads(out.getvalue())
                     self.assertEqual(code, 1)
                     self.assertEqual(payload["error"]["code"], "queue_error")
-                    self.assertIn(
-                        "--limit must be 1 or greater", payload["error"]["message"]
-                    )
+                    self.assertIn("--limit must be 1 or greater", payload["error"]["message"])
 
     def test_status_defaults_to_ten_recent_jobs_but_keeps_all_attention(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -907,16 +874,13 @@ class CliTests(unittest.TestCase):
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(
-                    ["--repo", str(repo), "--db", str(db), "status", "--json"]
-                )
+                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
             payload = json.loads(out.getvalue())
 
         self.assertEqual(code, 0)
-        self.assertEqual(payload["jobs_limit"], 10)
-        self.assertEqual(len(payload["jobs"]), 10)
-        self.assertTrue(payload["jobs_truncated"])
-        self.assertEqual(payload["counts"]["blocked"], 1)
+        self.assertEqual(len(payload["recent_jobs"]), 10)
+        self.assertEqual(payload["counts"]["done"], 12)
+        self.assertEqual(payload["counts"]["attention"], 1)
         self.assertEqual(
             [job["id"] for job in payload["attention_jobs"]],
             [old_attention.id],
@@ -926,9 +890,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
             conn = connect(repo / ".mergetrain" / "queue.sqlite")
             enqueue_job(conn, task="a", branch="feature/a")
             conn.close()
@@ -939,28 +901,57 @@ class CliTests(unittest.TestCase):
             # Top-level frame carries the number...
             self.assertEqual(payload["contract_version"], CONTRACT_VERSION)
             # ...nested job dicts do NOT (the outer frame owns it).
-            self.assertNotIn("contract_version", payload["jobs"][0])
+            self.assertNotIn("contract_version", payload["recent_jobs"][0])
 
-    def test_contract1_agent_contract_carries_ok(self) -> None:
+    def test_removed_agent_contract_points_to_instruction_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             out = io.StringIO()
             with redirect_stdout(out):
                 code = main(["--repo", str(repo), "agent-contract", "--json"])
             payload = json.loads(out.getvalue())
-            self.assertEqual(code, 0)
-            self.assertTrue(payload["ok"])
-            self.assertEqual(payload["name"], "mergetrain agent contract")
+            self.assertEqual(code, 2)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "removed_interface")
+            self.assertIn("init --refresh-instructions", payload["error"]["message"])
 
     def test_duplicate_branch_surfaces_typed_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
             )
-            base = ["--repo", str(repo), "enqueue", "--task", "a",
-                    "--branch", "feature/a", "--no-ready-check"]
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "ready"], cwd=repo, check=True)
+            subprocess.run(["git", "branch", "-M", "feature/a"], cwd=repo, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", head],
+                cwd=repo,
+                check=True,
+            )
+            base = [
+                "--repo",
+                str(repo),
+                "enqueue",
+                "--task",
+                "a",
+                "--branch",
+                "feature/a",
+                "--worktree",
+                str(repo),
+            ]
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(main(base), 0)
             out = io.StringIO()
@@ -980,9 +971,7 @@ class CliTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
-            subprocess.run(
-                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
             (repo / ".mergetrain.yaml").write_text(
                 render_default_config("default-capture"), encoding="utf-8"
             )
@@ -1027,15 +1016,11 @@ class CliTests(unittest.TestCase):
                     )
                 return code, json.loads(out.getvalue())
 
-            code, payload = enqueue("--base-sha", "0" * 40)
-            self.assertEqual(code, 1, payload)
-            self.assertEqual(payload["error"]["code"], "queue_error")
-            self.assertIn("--base-sha does not match", payload["error"]["message"])
-
-            code, payload = enqueue("--head-sha", "0" * 40)
-            self.assertEqual(code, 1, payload)
-            self.assertEqual(payload["error"]["code"], "queue_error")
-            self.assertIn("--head-sha does not match", payload["error"]["message"])
+            for removed in ("--base-sha", "--head-sha"):
+                code, payload = enqueue(removed, "0" * 40)
+                self.assertEqual(code, 2, payload)
+                self.assertEqual(payload["error"]["code"], "removed_interface")
+                self.assertIn(removed, payload["error"]["message"])
 
             out = io.StringIO()
             with redirect_stdout(out):
@@ -1065,22 +1050,9 @@ class CliTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            code, payload = enqueue(
-                "--base-sha",
-                head,
-                "--head-sha",
-                head,
-                "--allow-duplicate",
-            )
-            self.assertEqual(code, 0, payload)
-            self.assertEqual(payload["job"]["base_sha"], head)
-            self.assertEqual(payload["job"]["head_sha"], head)
-
-            conn = connect(repo / ".mergetrain" / "queue.sqlite")
-            try:
-                self.assertEqual(len(list_jobs(conn)), 2)
-            finally:
-                conn.close()
+            code, payload = enqueue("--allow-duplicate")
+            self.assertEqual(code, 2, payload)
+            self.assertEqual(payload["error"]["code"], "removed_interface")
 
     def test_retry_captures_fresh_shas_and_inherits_job_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1091,18 +1063,12 @@ class CliTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
-            subprocess.run(
-                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
-            )
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
             (repo / "app.txt").write_text("fixed\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-qm", "fixed"], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "branch", "-M", "feature/retry"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "branch", "-M", "feature/retry"], cwd=repo, check=True)
             subprocess.run(
                 ["git", "remote", "add", "origin", str(repo / "origin.git")],
                 cwd=repo,
@@ -1131,9 +1097,7 @@ class CliTests(unittest.TestCase):
                     note="operator context",
                     auto_deploy=True,
                     approval_destination_sha=deploy_destination_sha(config),
-                    approval_execution_policy_sha=(
-                        deploy_execution_policy_sha(config)
-                    ),
+                    approval_execution_policy_sha=(deploy_execution_policy_sha(config)),
                 )
                 mark_job(conn, original.id, status="failed", note="gate failed")
             finally:
@@ -1141,9 +1105,7 @@ class CliTests(unittest.TestCase):
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(
-                    ["--repo", str(repo), "retry", str(original.id), "--json"]
-                )
+                code = main(["--repo", str(repo), "retry", str(original.id), "--json"])
             payload = json.loads(out.getvalue())
 
             self.assertEqual(code, 0)
@@ -1178,12 +1140,8 @@ class CliTests(unittest.TestCase):
             )
             (repo / "app.txt").write_text("base\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "commit", "-qm", "base"], cwd=repo, check=True
-            )
-            subprocess.run(
-                ["git", "branch", "-M", "main"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
             base = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 cwd=repo,
@@ -1277,7 +1235,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(replacement["validated_at"], "")
         self.assertEqual(replacement["train_id"], "")
-        self.assertEqual(payload["next_action"], "run_batch_validate")
+        self.assertEqual(payload["next_action"], "validate_queued_jobs")
 
     def test_retry_rebase_error_does_not_dismiss_original_job(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1288,17 +1246,11 @@ class CliTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
-            subprocess.run(
-                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
-            )
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "branch", "-M", "feature/retry"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "branch", "-M", "feature/retry"], cwd=repo, check=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -1320,7 +1272,10 @@ class CliTests(unittest.TestCase):
                 str(repo),
             )
             out = io.StringIO()
-            with patch("mergetrain.commands.queue.run_command", side_effect=failure), redirect_stdout(out):
+            with (
+                patch("mergetrain.commands.queue.run_command", side_effect=failure),
+                redirect_stdout(out),
+            ):
                 code = main(
                     [
                         "--repo",
@@ -1335,9 +1290,7 @@ class CliTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 current = get_job(conn, original.id)
-                job_count = conn.execute(
-                    "SELECT COUNT(*) FROM deploy_queue"
-                ).fetchone()[0]
+                job_count = conn.execute("SELECT COUNT(*) FROM deploy_queue").fetchone()[0]
             finally:
                 conn.close()
 
@@ -1361,7 +1314,7 @@ class CliTests(unittest.TestCase):
                 return code, json.loads(out.getvalue())
 
             # Deploy/state-shipping path: fail closed with the unified envelope.
-            code, payload = run(["run-batch", "--validate-only"])
+            code, payload = run(["validate"])
             self.assertEqual(code, 1)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["error"]["code"], "config_error")
@@ -1370,25 +1323,17 @@ class CliTests(unittest.TestCase):
             code, payload = run(["reconcile"])
             self.assertEqual(payload.get("ok"), True)
 
-            # doctor runs and points at the fix.
-            code, payload = run(["doctor"])
-            self.assertTrue(payload["ok"])
-            self.assertEqual(payload["next_action"], "upgrade_mergetrain")
-            self.assertEqual(payload["config_version_supported"], 2)
-
-            # status is the other mandated agent read and must give the same
-            # fail-closed direction as doctor.
-            code, payload = run(["status"])
+            # The single state entry point remains available and points at the fix.
+            code, payload = run(["status", "--diagnose"])
             self.assertEqual(code, 0)
-            self.assertEqual(payload["next_action"], "upgrade_mergetrain")
+            self.assertEqual(payload["next_action"]["code"], "upgrade_mergetrain")
+            self.assertEqual(payload["diagnostics"]["config"]["config_version"], 999)
 
     def test_dismiss_all_reaches_blocked_jobs_older_than_display_limit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            (repo / ".mergetrain.yaml").write_text(
-                render_default_config("demo"), encoding="utf-8"
-            )
+            (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -1433,25 +1378,24 @@ class CliTests(unittest.TestCase):
                     code = main(["--repo", str(repo), *argv, "--json"])
                 return code, json.loads(out.getvalue())
 
-            code, payload = run(["run-batch", "--validate-only"])
+            code, payload = run(["validate"])
             self.assertEqual(code, 1)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["error"]["code"], "config_error")
             self.assertIn("init", payload["error"]["message"])
 
             # Enqueue is deploy-capable too — fail closed before any git checks.
-            code, payload = run(
-                ["enqueue", "--task", "a", "--branch", "feature/a", "--no-ready-check"]
-            )
+            code, payload = run(["enqueue", "--task", "a", "--branch", "feature/a"])
             self.assertEqual(code, 1)
             self.assertEqual(payload["error"]["code"], "config_error")
 
             # Recovery and reads stay permissive — a missing config must not
-            # lock the operator out of reconcile/doctor.
+            # lock the operator out of reconcile/status diagnostics.
             code, payload = run(["reconcile"])
             self.assertEqual(payload.get("ok"), True)
-            code, payload = run(["doctor"])
+            code, payload = run(["status", "--diagnose"])
             self.assertTrue(payload["ok"])
+            self.assertEqual(payload["health"], "unconfigured")
 
     def test_global_option_after_subcommand_is_normalized(self) -> None:
         normalized = normalize_global_options(["doctor", "--json", "--repo", "/tmp/example"])
@@ -1482,31 +1426,54 @@ class CliTests(unittest.TestCase):
             ],
         )
 
-    def test_agent_contract_json(self) -> None:
-        out = io.StringIO()
-        with redirect_stdout(out):
-            code = main(["agent-contract", "--json"])
-        self.assertEqual(code, 0)
-        payload = json.loads(out.getvalue())
-        self.assertIn("rules", payload)
-        self.assertEqual(
-            payload["boundary"]["daemon_processes_only"],
-            "default mode deploys only jobs enqueued with --auto whose approved destination and execution policy still match; --validate-only processes only manual queued jobs and pauses while any validated train exists",
-        )
-        self.assertIn("opaque train ID", payload["boundary"]["validated_train_deploy"])
-        self.assertIn("Stop after the successful enqueue", " ".join(payload["rules"]))
-        self.assertIn(
-            "human-readable exact-train summary",
-            payload["boundary"]["deploy_requires"],
-        )
-        self.assertIn(
-            "bounded unattended-deployment approval",
-            payload["boundary"]["deploy_requires"],
-        )
-        self.assertIn("QA, deploy, verify, and finish", " ".join(payload["rules"]))
-        self.assertIn("disabled by default", payload["boundary"]["validated_gate_reuse"])
-        self.assertIn("read-only", payload["boundary"]["progress_observation"])
-        self.assertNotIn("human_vocabulary", payload)
+    def test_agent_contract_has_five_core_rules(self) -> None:
+        contract = render_agent_contract()
+        self.assertIn("\n5. Never push", contract)
+        self.assertNotIn("\n6. ", contract)
+        self.assertIn("status --json", contract)
+        self.assertIn("exact commits", contract)
+        self.assertIn("end-to-end validation and deployment", contract)
+        self.assertIn("exact destination and execution policy", contract)
+
+    def test_validate_pauses_while_one_exact_train_is_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"),
+                encoding="utf-8",
+            )
+            db = repo / ".mergetrain" / "queue.sqlite"
+            conn = connect(db)
+            try:
+                ready = enqueue_job(conn, task="ready", branch="feature/ready")
+                mark_job(
+                    conn,
+                    ready.id,
+                    status="validated",
+                    train_id="train-ready",
+                    train_size=1,
+                    validated_at="2026-09-03T00:00:00Z",
+                    validation_base_sha="a" * 40,
+                    validation_sha="b" * 40,
+                    validated_head_sha="c" * 40,
+                )
+                waiting = enqueue_job(conn, task="waiting", branch="feature/waiting")
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "validate", "--json"])
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "validated_train_pending")
+            self.assertEqual(payload["next_action"], "deploy_when_approved")
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, waiting.id).status, "queued")
+            finally:
+                conn.close()
 
     def test_deploy_preview_lists_exact_atomic_push_refspecs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1553,25 +1520,26 @@ class CliTests(unittest.TestCase):
                 reasons=("reuse not authorized",),
             )
             out = io.StringIO()
-            with patch(
-                "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
-                return_value=decision,
-            ), redirect_stdout(out):
+            with (
+                patch(
+                    "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
+                    return_value=decision,
+                ),
+                redirect_stdout(out),
+            ):
                 code = main(
                     [
                         "--repo",
                         str(repo),
                         "--db",
                         str(db),
-                        "run-batch",
-                        "--deploy",
-                        "--preview",
+                        "deploy",
                         "--json",
                     ]
                 )
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 0)
-            self.assertEqual(payload["mode"], "deploy")
+            self.assertEqual(payload["result"], "confirmation_required")
             self.assertEqual(len(payload["deploy_plan_sha"]), 64)
             self.assertNotIn("terminology", payload)
             self.assertEqual(payload["push_plan"]["remote"], "upstream")
@@ -1591,20 +1559,10 @@ class CliTests(unittest.TestCase):
                 },
             )
             self.assertEqual(payload["reuse"]["evaluation"], "exact")
-            self.assertEqual(
-                payload["reuse"]["estimated_savings"]["mode"], "unavailable"
-            )
-            self.assertFalse(
-                payload["reuse"]["estimated_savings"]["authorizes_reuse"]
-            )
-            self.assertIn(
-                f"--expected-plan {payload['deploy_plan_sha']}",
-                payload["confirmed_command"],
-            )
-            self.assertIn(
-                f"--db {shlex.quote(str(db.resolve()))}",
-                payload["confirmed_command"],
-            )
+            self.assertEqual(payload["reuse"]["estimated_savings"]["mode"], "unavailable")
+            self.assertFalse(payload["reuse"]["estimated_savings"]["authorizes_reuse"])
+            self.assertNotIn("confirmed_command", payload)
+            self.assertNotIn("train_id", payload)
 
     def test_expected_deploy_plan_rejects_destination_change_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1646,11 +1604,7 @@ class CliTests(unittest.TestCase):
                             str(repo),
                             "--db",
                             str(db),
-                            "run-batch",
-                            "--deploy",
-                            "--preview",
-                            "--train-id",
-                            "train-1",
+                            "deploy",
                             "--json",
                         ]
                     ),
@@ -1670,10 +1624,7 @@ class CliTests(unittest.TestCase):
                         str(repo),
                         "--db",
                         str(db),
-                        "run-batch",
-                        "--deploy",
-                        "--train-id",
-                        "train-1",
+                        "deploy",
                         "--expected-plan",
                         expected,
                         "--json",
@@ -1688,12 +1639,16 @@ class CliTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_removed_deploy_aliases_are_rejected(self) -> None:
+    def test_removed_run_batch_aliases_return_a_migration_error(self) -> None:
         for alias in ("--integrate", "--push"):
-            with self.subTest(alias=alias), redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit) as raised:
-                    main(["run-batch", alias, "--json"])
-                self.assertEqual(raised.exception.code, 2)
+            with self.subTest(alias=alias):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main(["run-batch", alias, "--json"])
+                payload = json.loads(out.getvalue())
+                self.assertEqual(code, 2)
+                self.assertEqual(payload["error"]["code"], "removed_interface")
+                self.assertIn("mergetrain validate", payload["error"]["message"])
 
     def test_removed_hub_list_command_is_rejected(self) -> None:
         with redirect_stderr(io.StringIO()):
@@ -1709,16 +1664,17 @@ class CliTests(unittest.TestCase):
                 code = main(["--repo", str(repo), "init", "--project", "demo", "--write"])
             self.assertEqual(code, 0)
             self.assertTrue((repo / ".mergetrain.yaml").exists())
-            agent_contract = (repo / "AGENTS.mergetrain.md").read_text(
-                encoding="utf-8"
-            )
+            agent_contract = (repo / "AGENTS.mergetrain.md").read_text(encoding="utf-8")
             self.assertIn(
-                "A task agent uses ordinary `enqueue` without manually copied "
-                "SHA options and stops after it succeeds",
+                "Only a separately authorized runner uses `validate`, `deploy`, or a daemon",
                 agent_contract,
             )
-            self.assertIn("human-readable exact-train summary", agent_contract)
-            self.assertIn("never make the user repeat it", agent_contract)
+            self.assertIn("human-readable exact plan", agent_contract)
+            self.assertIn("Train IDs and hashes stay internal", agent_contract)
+            self.assertEqual(
+                (repo / ".mergetrain.yaml").read_text(encoding="utf-8"),
+                "version: 2\n\nproject:\n  name: demo\n\ngates: []\n",
+            )
             payload = json.loads(out.getvalue())
             self.assertIn("standard AGENTS.md and/or CLAUDE.md", payload["next_step"])
 
@@ -1729,9 +1685,7 @@ class CliTests(unittest.TestCase):
             existing.write_text("keep me\n", encoding="utf-8")
 
             with patch("sys.stderr", io.StringIO()):
-                code = main(
-                    ["--repo", str(repo), "init", "--project", "demo", "--write"]
-                )
+                code = main(["--repo", str(repo), "init", "--project", "demo", "--write"])
 
             self.assertEqual(code, 1)
             self.assertFalse((repo / ".mergetrain.yaml").exists())
@@ -1760,19 +1714,24 @@ class CliTests(unittest.TestCase):
                 conn.close()
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "status",
+                        "--diagnose",
+                        "--json",
+                    ]
+                )
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 0)
-            self.assertEqual(payload["validated_trains"][0]["train_id"], "train-1")
-            self.assertTrue(payload["validated_trains"][0]["deploy_eligible"])
-            self.assertIsNone(
-                payload["validated_trains"][0]["current_integration_sha"]
-            )
-            self.assertIsNone(
-                payload["validated_trains"][0][
-                    "integration_changed_since_validation"
-                ]
-            )
+            train = payload["diagnostics"]["validated_trains"][0]
+            self.assertEqual(train["train_id"], "train-1")
+            self.assertTrue(train["deploy_eligible"])
+            self.assertIsNone(train["current_integration_sha"])
+            self.assertIsNone(train["integration_changed_since_validation"])
 
     def test_status_and_doctor_explain_stale_validated_train_base(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1795,9 +1754,7 @@ class CliTests(unittest.TestCase):
             )
             (repo / "README.md").write_text("base\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "commit", "-m", "base"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True)
             validation_base_sha = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 cwd=repo,
@@ -1851,10 +1808,18 @@ class CliTests(unittest.TestCase):
             status_out = io.StringIO()
             with redirect_stdout(status_out):
                 status_code = main(
-                    ["--repo", str(repo), "--db", str(db), "status", "--json"]
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "status",
+                        "--diagnose",
+                        "--json",
+                    ]
                 )
             status_payload = json.loads(status_out.getvalue())
-            train = status_payload["validated_trains"][0]
+            train = status_payload["diagnostics"]["validated_trains"][0]
             self.assertEqual(status_code, 0)
             self.assertEqual(train["current_integration_sha"], current_integration_sha)
             self.assertTrue(train["integration_changed_since_validation"])
@@ -1862,24 +1827,30 @@ class CliTests(unittest.TestCase):
 
             text_out = io.StringIO()
             with redirect_stdout(text_out):
-                text_code = main(
-                    ["--repo", str(repo), "--db", str(db), "status"]
-                )
+                text_code = main(["--repo", str(repo), "--db", str(db), "status", "--diagnose"])
             self.assertEqual(text_code, 0)
-            self.assertIn("deploy will fetch, reassemble", text_out.getvalue())
+            self.assertIn("warning validated_train_base_changed", text_out.getvalue())
 
-            doctor_out = io.StringIO()
-            with redirect_stdout(doctor_out):
-                doctor_code = main(
-                    ["--repo", str(repo), "--db", str(db), "doctor", "--json"]
+            diagnose_out = io.StringIO()
+            with redirect_stdout(diagnose_out):
+                diagnose_code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "status",
+                        "--diagnose",
+                        "--json",
+                    ]
                 )
-            doctor_payload = json.loads(doctor_out.getvalue())
+            diagnose_payload = json.loads(diagnose_out.getvalue())
             recommendation = next(
                 item
-                for item in doctor_payload["recommendations"]
+                for item in diagnose_payload["diagnostics"]["recommendations"]
                 if item["code"] == "validated_train_base_changed"
             )
-            self.assertEqual(doctor_code, 0)
+            self.assertEqual(diagnose_code, 0)
             self.assertEqual(
                 recommendation["evidence"]["current_integration_sha"],
                 current_integration_sha,
@@ -1903,18 +1874,26 @@ class CliTests(unittest.TestCase):
             current_out = io.StringIO()
             with redirect_stdout(current_out):
                 current_code = main(
-                    ["--repo", str(repo), "--db", str(db), "doctor", "--json"]
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "status",
+                        "--diagnose",
+                        "--json",
+                    ]
                 )
             current_payload = json.loads(current_out.getvalue())
             self.assertEqual(current_code, 0)
             self.assertFalse(
-                current_payload["validated_trains"][0][
+                current_payload["diagnostics"]["validated_trains"][0][
                     "integration_changed_since_validation"
                 ]
             )
             self.assertNotIn(
                 "validated_train_base_changed",
-                [item["code"] for item in current_payload["recommendations"]],
+                [item["code"] for item in current_payload["diagnostics"]["recommendations"]],
             )
 
     def test_inspect_json_exposes_gate_elapsed_and_heartbeat(self) -> None:
@@ -2137,10 +2116,13 @@ class CliTests(unittest.TestCase):
             )
 
             interrupted = io.StringIO()
-            with patch(
-                "mergetrain.commands.inspection.time.sleep",
-                side_effect=KeyboardInterrupt,
-            ), redirect_stdout(interrupted):
+            with (
+                patch(
+                    "mergetrain.commands.inspection.time.sleep",
+                    side_effect=KeyboardInterrupt,
+                ),
+                redirect_stdout(interrupted),
+            ):
                 interrupted_code = main(
                     [
                         "--repo",
@@ -2183,11 +2165,11 @@ class CliTests(unittest.TestCase):
                     writer.close()
 
             out = io.StringIO()
-            with patch(
-                "mergetrain.commands.inspection.connect", wraps=connect
-            ) as observer_connect, patch(
-                "mergetrain.commands.inspection.time.sleep", side_effect=advance
-            ), redirect_stdout(out):
+            with (
+                patch("mergetrain.commands.inspection.connect", wraps=connect) as observer_connect,
+                patch("mergetrain.commands.inspection.time.sleep", side_effect=advance),
+                redirect_stdout(out),
+            ):
                 code = main(
                     [
                         "--repo",
@@ -2231,12 +2213,14 @@ class CliTests(unittest.TestCase):
                 conn.close()
 
             out = io.StringIO()
-            with patch(
-                "mergetrain.commands.inspection.connect", wraps=connect
-            ) as observer_connect, patch(
-                "mergetrain.commands.inspection.time.sleep",
-                side_effect=[None, KeyboardInterrupt],
-            ), redirect_stdout(out):
+            with (
+                patch("mergetrain.commands.inspection.connect", wraps=connect) as observer_connect,
+                patch(
+                    "mergetrain.commands.inspection.time.sleep",
+                    side_effect=[None, KeyboardInterrupt],
+                ),
+                redirect_stdout(out),
+            ):
                 code = main(
                     [
                         "--repo",

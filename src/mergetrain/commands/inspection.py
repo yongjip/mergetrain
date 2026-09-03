@@ -18,7 +18,6 @@ from ..cli_support import (
 )
 from ..command_runner import run_command
 from ..config import (
-    CONFIG_VERSION,
     MergetrainConfig,
     is_redundant_builtin_diff_check,
 )
@@ -85,6 +84,169 @@ def _validated_trains_with_integration_state(
     return annotated
 
 
+def _job_display_state(job: Job) -> str:
+    if job.status == "queued":
+        return "waiting"
+    if job.status == "in_progress":
+        return "running"
+    if job.status == "validated":
+        return "ready"
+    if job.status in {"blocked", "failed", "needs_reconcile"} or (
+        job.status == "deployed" and job.verify_status == "unknown"
+    ):
+        return "attention"
+    return "done"
+
+
+def _job_summary(job: Job) -> dict[str, Any]:
+    state = _job_display_state(job)
+    outcome = job.status if state == "done" else None
+    reason = ""
+    if state == "attention":
+        reason = job.note or job.conflict_with or job.status
+    return {
+        "id": job.id,
+        "task": job.task,
+        "branch": job.branch,
+        "state": state,
+        "reason": reason or None,
+        "outcome": outcome,
+        "updated_at": job.finished_at or job.started_at or job.requested_at,
+    }
+
+
+def _grouped_counts(raw: dict[str, int]) -> dict[str, int]:
+    verify_unknown = raw.get("deployed_verify_unknown", 0)
+    return {
+        "waiting": raw.get("queued", 0),
+        "running": raw.get("in_progress", 0),
+        "ready": raw.get("validated", 0),
+        "attention": (
+            raw.get("blocked", 0)
+            + raw.get("failed", 0)
+            + raw.get("needs_reconcile", 0)
+            + verify_unknown
+        ),
+        "done": max(
+            0,
+            raw.get("deployed", 0) + raw.get("canceled", 0) - verify_unknown,
+        ),
+    }
+
+
+def _system_state(grouped: dict[str, int]) -> str:
+    for state in ("attention", "running", "ready", "waiting"):
+        if grouped[state]:
+            return state
+    return "idle"
+
+
+def _state_summary(state: str, grouped: dict[str, int]) -> str:
+    if state == "attention":
+        return f"{grouped['attention']} job(s) need attention"
+    if state == "running":
+        return f"{grouped['running']} job(s) are running"
+    if state == "ready":
+        return f"{grouped['ready']} job(s) are ready to deploy"
+    if state == "waiting":
+        return f"{grouped['waiting']} job(s) are waiting for validation"
+    return "No active work; enqueue a clean task branch when ready"
+
+
+def _next_action_detail(code: str, attention: Sequence[Job]) -> dict[str, Any]:
+    first_id = attention[0].id if attention else None
+    mapping: dict[str, tuple[str | None, str]] = {
+        "upgrade_mergetrain": (None, "none"),
+        "unlock_wedged_runner": ("mergetrain unlock --force", "recovery"),
+        "wait_for_runner": (None, "none"),
+        "reconcile_pending_deploy": ("mergetrain reconcile --apply", "recovery"),
+        "reconcile_conflict_manual": ("mergetrain reconcile", "recovery"),
+        "fix_blocked_job": (
+            f"mergetrain inspect {first_id}" if first_id is not None else None,
+            "none",
+        ),
+        "verify_reconciled_deploy": (
+            f"mergetrain verify --job {first_id}" if first_id is not None else "mergetrain verify",
+            "recovery",
+        ),
+        "deploy_when_approved": ("mergetrain deploy", "deploy"),
+        "cancel_and_reenqueue_legacy_validated_jobs": (None, "runner"),
+        "run_daemon_when_approved": ("mergetrain daemon", "deploy"),
+        "validate_queued_jobs": ("mergetrain validate", "runner"),
+        "reconcile_stranded_claim": ("mergetrain reconcile --apply", "recovery"),
+        "initialize_config": ("mergetrain init --write", "none"),
+        "gc_available": ("mergetrain gc", "none"),
+        "enqueue_clean_branch": (None, "none"),
+    }
+    command, approval = mapping.get(code, (None, "none"))
+    return {
+        "code": code,
+        "command": command,
+        "requires_approval": approval,
+    }
+
+
+def _diagnostics(
+    config: MergetrainConfig,
+    *,
+    lock,
+    raw_counts: dict[str, int],
+    validated_trains: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    from ..runtime import runtime_provenance
+
+    remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
+    repo_root = git_repo_root(config.repo)
+    config_drift = _config_drift(config, repo_root=repo_root)
+    return {
+        "version": __version__,
+        "runtime": runtime_provenance(),
+        "config": config.to_dict(),
+        "config_exists": config.config_exists,
+        "db": str(config.state.db),
+        "state": {
+            "logs": str(config.state.logs),
+            "worktree_root": str(config.state.worktree_root),
+            "validation_workspace": {
+                "mode": config.state.validation_workspace.mode,
+                "path": str(config.validation_worktree_path),
+                "exists": config.validation_worktree_path.exists(),
+                "cache_key": config.state.validation_workspace.cache_key,
+                "cache_paths": list(config.state.validation_workspace.cache_paths),
+                "initialized": (
+                    config.state.worktree_root / f".{config.project.name}-validation-workspace.json"
+                ).is_file(),
+            },
+        },
+        "git": {
+            "repo_root": repo_root,
+            "current_branch": git_current_branch(config.repo),
+            "worktree_clean": git_worktree_clean(config.repo) if repo_root else False,
+            "remote_url": remote_url,
+            "remote_exists": bool(remote_url) or git_remote_exists(config.repo, config.git.remote),
+            "integration_ref": config.git.integration_ref,
+            "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref)
+            if repo_root
+            else False,
+        },
+        "config_drift": config_drift,
+        "recommendations": _doctor_recommendations(config, config_drift, validated_trains),
+        "lock": lock.to_dict() if lock else None,
+        "raw_counts": raw_counts,
+        "validated_trains": list(validated_trains),
+        "gc": {
+            "worktree_candidates": find_worktree_gc_candidates(
+                config,
+                protect=(
+                    [lock.worktree_path]
+                    if lock and lock.worktree_path and lock.liveness != "dead"
+                    else []
+                ),
+            )
+        },
+    }
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     if args.limit < 1:
         raise QueueError("--limit must be 1 or greater")
@@ -98,63 +260,64 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
         count_data = counts(conn)
         recent_jobs = list_jobs(conn, limit=args.limit)
-        attention_jobs = list_attention_jobs(conn)
-        job_total = sum(
-            count_data.get(status, 0)
-            for status in (
-                "queued",
-                "in_progress",
-                "blocked",
-                "failed",
-                "validated",
-                "needs_reconcile",
-                "deployed",
-                "canceled",
-            )
+        decision_jobs = list_attention_jobs(conn)
+        attention_jobs = [job for job in decision_jobs if _job_display_state(job) == "attention"]
+        raw_next_action = _doctor_next_action(
+            {
+                "lock": lock.to_dict() if lock else None,
+                "counts": count_data,
+                "validated_trains": validated_trains,
+                "gc": {"worktree_candidates": []},
+                "config_exists": config.config_exists,
+            },
+            config_version=config.config_version,
         )
+        grouped = _grouped_counts(count_data)
+        system_state = _system_state(grouped)
+        repo_root = git_repo_root(config.repo)
+        if not config.config_exists:
+            health = "unconfigured"
+        elif not repo_root:
+            health = "degraded"
+        else:
+            health = "healthy"
         payload: dict[str, Any] = {
             "ok": True,
-            "db": str(config.state.db),
-            "lock": lock.to_dict() if lock else None,
-            "counts": count_data,
-            "jobs": [job.to_dict() for job in recent_jobs],
-            "attention_jobs": [job.to_dict() for job in attention_jobs],
-            "jobs_limit": args.limit,
-            "jobs_truncated": job_total > len(recent_jobs),
-            "validated_trains": validated_trains,
-            # CLAUDE.md tells agents to read status --json OR doctor --json
-            # before acting; carry next_action on both so the two mandated
-            # reads are symmetric.
-            "next_action": _doctor_next_action(
-                {
-                    "lock": lock.to_dict() if lock else None,
-                    "counts": count_data,
-                    "validated_trains": validated_trains,
-                    "gc": {"worktree_candidates": []},
-                    "config_exists": config.config_exists,
-                },
-                config_version=config.config_version,
-            ),
+            "health": health,
+            "state": system_state,
+            "summary": _state_summary(system_state, grouped),
+            "next_action": _next_action_detail(raw_next_action, attention_jobs),
+            "counts": grouped,
+            "attention_jobs": [_job_summary(job) for job in attention_jobs],
+            "recent_jobs": [_job_summary(job) for job in recent_jobs],
         }
+        if args.diagnose:
+            payload["diagnostics"] = _diagnostics(
+                config,
+                lock=lock,
+                raw_counts=count_data,
+                validated_trains=validated_trains,
+            )
     finally:
         conn.close()
     if args.json:
         dump_json(payload)
     else:
-        lock_text = payload["lock"]["owner"] if payload["lock"] else "none"
-        print(f"db: {payload['db']}")
-        print(f"lock: {lock_text}")
-        print(f"next action: {payload['next_action']}")
-        for job in payload["jobs"]:
-            print(f"{_job_result_line(job)} - {job['task']}")
-        for train in payload["validated_trains"]:
-            if train["integration_changed_since_validation"]:
-                print(
-                    f"warning validated train {train['train_id']}: the local "
-                    "integration ref changed since validation; deploy will "
-                    "fetch, reassemble the train, and evaluate the configured "
-                    "gate policy before push"
-                )
+        print(f"{payload['state'].upper()}: {payload['summary']}")
+        action = payload["next_action"]
+        if action["command"]:
+            print(f"next: {action['command']}")
+        if action["requires_approval"] != "none":
+            print(f"approval: {action['requires_approval']}")
+        for job in payload["attention_jobs"]:
+            print(f"attention #{job['id']} {job['task']}: {job['reason']}")
+        if args.diagnose:
+            diagnostics = payload["diagnostics"]
+            print(f"runtime: {diagnostics['runtime']['install_mode']} · {diagnostics['version']}")
+            print(f"config: {diagnostics['config']['config_path']}")
+            print(f"git repo: {diagnostics['git']['repo_root'] or 'not found'}")
+            for recommendation in diagnostics["recommendations"]:
+                print(f"warning {recommendation['code']}: {recommendation['summary']}")
     return 0
 
 
@@ -193,9 +356,7 @@ def _print_event_record(payload: dict[str, Any], *, jsonl: bool) -> None:
         return
     if payload["type"] == "event":
         gate = payload.get("gate")
-        gate_text = (
-            f" gate={gate['index']}/{gate['total']}:{gate['name']}" if gate else ""
-        )
+        gate_text = f" gate={gate['index']}/{gate['total']}:{gate['name']}" if gate else ""
         job_text = f" job={payload['job_id']}" if payload.get("job_id") else ""
         print(
             f"#{payload['id']} {payload['created_at']} "
@@ -245,9 +406,7 @@ def cmd_events(args: argparse.Namespace) -> int:
                 # The ID scope is immutable for the stream, while job state is
                 # refreshed so terminal transitions are still observed.
                 jobs = [get_job(conn, job_id) for job_id in event_job_ids or []]
-            events, latest, lock = _event_scope(
-                conn, args, cursor, event_job_ids
-            )
+            events, latest, lock = _event_scope(conn, args, cursor, event_job_ids)
             if not scoped:
                 known_ids = {job.id for job in jobs}
                 for job_id in dict.fromkeys(
@@ -320,22 +479,14 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     else:
         progress = payload["progress"]
         gate = progress.get("gate")
-        gate_text = (
-            f" · gate {gate['index']}/{gate['total']} {gate['name']}" if gate else ""
-        )
+        gate_text = f" · gate {gate['index']}/{gate['total']} {gate['name']}" if gate else ""
         print(_job_result_line(payload["job"]))
         print(
             f"phase: {progress['phase']} · {progress['state']}{gate_text} · "
             f"elapsed {progress['elapsed_seconds']}s"
         )
-        print(
-            f"heartbeat: {progress['heartbeat_at'] or 'none'} "
-            f"({progress['lease_liveness']})"
-        )
-        print(
-            f"outcome: {payload['outcome']['severity']} / "
-            f"{payload['outcome']['category']}"
-        )
+        print(f"heartbeat: {progress['heartbeat_at'] or 'none'} ({progress['lease_liveness']})")
+        print(f"outcome: {payload['outcome']['severity']} / {payload['outcome']['category']}")
     return 0
 
 
@@ -364,10 +515,7 @@ def cmd_history(args: argparse.Namespace) -> int:
             duration = item["duration_seconds"]
             duration_text = f"{duration:.3f}s" if duration is not None else "n/a"
             label = item["train_id"] or item["key"]
-            print(
-                f"{label} {item['status']} jobs={len(item['jobs'])} "
-                f"duration={duration_text}"
-            )
+            print(f"{label} {item['status']} jobs={len(item['jobs'])} duration={duration_text}")
     return 0
 
 
@@ -387,26 +535,18 @@ def cmd_stats(args: argparse.Namespace) -> int:
         )
         print(f"land rate: {rate_text}")
         terminal_rate = trains["terminal_land_rate"]
-        terminal_rate_text = (
-            f"{terminal_rate * 100:.1f}%" if terminal_rate is not None else "n/a"
-        )
-        print(
-            f"terminal land rate: {terminal_rate_text} "
-            "(includes canceled outcomes)"
-        )
+        terminal_rate_text = f"{terminal_rate * 100:.1f}%" if terminal_rate is not None else "n/a"
+        print(f"terminal land rate: {terminal_rate_text} (includes canceled outcomes)")
         reasons = {
             reason: count
-            for reason, count in payload["outcomes"][
-                "not_landed_reason_counts"
-            ].items()
+            for reason, count in payload["outcomes"]["not_landed_reason_counts"].items()
             if count
         }
         if reasons:
             print(
                 "not landed: "
                 + " · ".join(
-                    f"{reason.replace('_', ' ')}={count}"
-                    for reason, count in reasons.items()
+                    f"{reason.replace('_', ' ')}={count}" for reason, count in reasons.items()
                 )
             )
         print(
@@ -430,9 +570,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         validated_trains = payload["validation"]["trains"]
         deployment_rate = validated_trains["deployment_rate"]
         deployment_rate_text = (
-            f"{deployment_rate * 100:.1f}%"
-            if deployment_rate is not None
-            else "n/a"
+            f"{deployment_rate * 100:.1f}%" if deployment_rate is not None else "n/a"
         )
         print(
             f"validated trains: deployed={validated_trains['deployed']}/"
@@ -443,9 +581,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         batching = payload["batching"]
         jobs_per_run = batching["jobs_per_run"]
         multi_rate = batching["multi_job_run_rate"]
-        multi_rate_text = (
-            f"{multi_rate * 100:.1f}%" if multi_rate is not None else "n/a"
-        )
+        multi_rate_text = f"{multi_rate * 100:.1f}%" if multi_rate is not None else "n/a"
         print(
             f"batching: observed={batching['observed_runs']} · "
             f"jobs/run median={jobs_per_run['median']} "
@@ -506,10 +642,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 f"median={gate['median_seconds']}s p95={gate['p95_seconds']}s"
             )
         for recommendation in payload["recommendations"]:
-            print(
-                f"recommendation {recommendation['code']}: "
-                f"{recommendation['summary']}"
-            )
+            print(f"recommendation {recommendation['code']}: {recommendation['summary']}")
         for gap in payload["evidence_gaps"]:
             print(f"evidence gap {gap['metric']}: {gap['reason']}")
     return 0
@@ -525,9 +658,7 @@ def _safe_log_path(config: MergetrainConfig, job: Job) -> Path | None:
     root = config.state.logs.expanduser().resolve()
     candidate = Path(job.log_path).expanduser().resolve()
     if candidate != root and root not in candidate.parents:
-        raise QueueError(
-            f"refusing log path outside configured state.logs directory: {candidate}"
-        )
+        raise QueueError(f"refusing log path outside configured state.logs directory: {candidate}")
     return candidate
 
 
@@ -583,9 +714,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
         conn.close()
 
 
-def _git_object_sha(
-    repo: Path, arguments: Sequence[str]
-) -> str:
+def _git_object_sha(repo: Path, arguments: Sequence[str]) -> str:
     completed = run_command(
         ["git", *arguments],
         cwd=repo,
@@ -668,23 +797,25 @@ def _doctor_recommendations(
 ) -> list[dict[str, Any]]:
     recommendations: list[dict[str, Any]] = []
     if config_drift["state"] == "drifted":
-        recommendations.append({
-            "code": "operator_config_drift",
-            "severity": "warning",
-            "summary": (
-                "The operator checkout configuration differs from the "
-                "known integration-ref configuration."
-            ),
-            "evidence": {
-                "local_blob_sha": config_drift["local"]["blob_sha"],
-                "integration_ref": config_drift["integration"]["ref"],
-                "integration_blob_sha": config_drift["integration"]["blob_sha"],
-            },
-            "actions": [
-                "review the configuration diff before queue-advancing commands",
-                "synchronize a clean operator checkout without discarding local work",
-            ],
-        })
+        recommendations.append(
+            {
+                "code": "operator_config_drift",
+                "severity": "warning",
+                "summary": (
+                    "The operator checkout configuration differs from the "
+                    "known integration-ref configuration."
+                ),
+                "evidence": {
+                    "local_blob_sha": config_drift["local"]["blob_sha"],
+                    "integration_ref": config_drift["integration"]["ref"],
+                    "integration_blob_sha": config_drift["integration"]["blob_sha"],
+                },
+                "actions": [
+                    "review the configuration diff before queue-advancing commands",
+                    "synchronize a clean operator checkout without discarding local work",
+                ],
+            }
+        )
     redundant = [
         gate
         for gate in config.gates
@@ -694,164 +825,57 @@ def _doctor_recommendations(
         )
     ]
     if redundant:
-        recommendations.append({
-            "code": "redundant_builtin_diff_check",
-            "severity": "info",
-            "summary": (
-                "The configured diff-check exactly repeats mergetrain's "
-                "built-in integrity gate and is ignored at runtime."
-            ),
-            "evidence": {
-                "configured_gate_count": len(redundant),
-                "gate": "diff-check",
-                "run": redundant[0].run,
-            },
-            "actions": [
-                "remove the redundant diff-check entry from .mergetrain.yaml",
-            ],
-        })
+        recommendations.append(
+            {
+                "code": "redundant_builtin_diff_check",
+                "severity": "info",
+                "summary": (
+                    "The configured diff-check exactly repeats mergetrain's "
+                    "built-in integrity gate and is ignored at runtime."
+                ),
+                "evidence": {
+                    "configured_gate_count": len(redundant),
+                    "gate": "diff-check",
+                    "run": redundant[0].run,
+                },
+                "actions": [
+                    "remove the redundant diff-check entry from .mergetrain.yaml",
+                ],
+            }
+        )
     changed_trains = [
         train
         for train in validated_trains
         if train.get("integration_changed_since_validation") is True
     ]
     if changed_trains:
-        recommendations.append({
-            "code": "validated_train_base_changed",
-            "severity": "warning",
-            "summary": (
-                "A validated train's base differs from the locally observed "
-                "integration ref; its earlier gate result is not current deploy "
-                "evidence."
-            ),
-            "evidence": {
-                "integration_ref": config.git.integration_ref,
-                "current_integration_sha": changed_trains[0][
-                    "current_integration_sha"
+        recommendations.append(
+            {
+                "code": "validated_train_base_changed",
+                "severity": "warning",
+                "summary": (
+                    "A validated train's base differs from the locally observed "
+                    "integration ref; its earlier gate result is not current deploy "
+                    "evidence."
+                ),
+                "evidence": {
+                    "integration_ref": config.git.integration_ref,
+                    "current_integration_sha": changed_trains[0]["current_integration_sha"],
+                    "trains": [
+                        {
+                            "train_id": train["train_id"],
+                            "validation_base_sha": train["validation_base_sha"],
+                            "job_ids": train["job_ids"],
+                            "branches": train["branches"],
+                        }
+                        for train in changed_trains
+                    ],
+                },
+                "actions": [
+                    "summarize task intent, changes, destination refs, gates, and reassembly risk in human terms",
+                    "expect deploy to reassemble the train and evaluate the configured gate policy before any push",
+                    "do not ask the user to repeat an opaque train ID",
                 ],
-                "trains": [
-                    {
-                        "train_id": train["train_id"],
-                        "validation_base_sha": train["validation_base_sha"],
-                        "job_ids": train["job_ids"],
-                        "branches": train["branches"],
-                    }
-                    for train in changed_trains
-                ],
-            },
-            "actions": [
-                "summarize task intent, changes, destination refs, gates, and reassembly risk in human terms",
-                "expect deploy to reassemble the train and evaluate the configured gate policy before any push",
-                "do not ask the user to repeat an opaque train ID",
-            ],
-        })
+            }
+        )
     return recommendations
-
-
-def cmd_doctor(args: argparse.Namespace) -> int:
-    from ..runtime import runtime_provenance
-
-    config = config_from_args(args)
-    db_existed_before = config.state.db.exists()
-    conn = connect(config.state.db)
-    try:
-        lock = get_lock(conn)
-        count_data = counts(conn)
-        validated_trains = validated_train_summaries(conn)
-    finally:
-        conn.close()
-    validated_trains = _validated_trains_with_integration_state(
-        config,
-        validated_trains,
-    )
-    remote_url = redact_secrets(git_remote_url(config.repo, config.git.remote))
-    repo_root = git_repo_root(config.repo)
-    config_drift = _config_drift(config, repo_root=repo_root)
-    payload: dict[str, Any] = {
-        "ok": True,
-        "version": __version__,
-        "runtime": runtime_provenance(),
-        "config": config.to_dict(),
-        "config_exists": config.config_exists,
-        "db": str(config.state.db),
-        "db_existed_before": db_existed_before,
-        "state": {
-            "logs": str(config.state.logs),
-            "worktree_root": str(config.state.worktree_root),
-            "validation_workspace": {
-                "mode": config.state.validation_workspace.mode,
-                "path": str(config.validation_worktree_path),
-                "exists": config.validation_worktree_path.exists(),
-                "cache_key": config.state.validation_workspace.cache_key,
-                "cache_paths": list(
-                    config.state.validation_workspace.cache_paths
-                ),
-                "initialized": (
-                    config.state.worktree_root
-                    / f".{config.project.name}-validation-workspace.json"
-                ).is_file(),
-            },
-        },
-        "git": {
-            "repo_root": repo_root,
-            "current_branch": git_current_branch(config.repo),
-            "worktree_clean": git_worktree_clean(config.repo) if repo_root else False,
-            "remote_url": remote_url,
-            "remote_exists": bool(remote_url) or git_remote_exists(config.repo, config.git.remote),
-            "integration_ref": config.git.integration_ref,
-            "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref) if repo_root else False,
-        },
-        "config_drift": config_drift,
-        "recommendations": _doctor_recommendations(
-            config,
-            config_drift,
-            validated_trains,
-        ),
-        "lock": lock.to_dict() if lock else None,
-        "counts": count_data,
-        "validated_trains": validated_trains,
-        "gc": {
-            "worktree_candidates": find_worktree_gc_candidates(
-                config,
-                protect=(
-                    [lock.worktree_path]
-                    if lock and lock.worktree_path and lock.liveness != "dead"
-                    else []
-                ),
-            )
-        },
-    }
-    # `ok` means only "the command ran without an error envelope";
-    # the repo-health verdict moves to its own field so a healthy-but-unconfigured
-    # repo no longer reads as ok:false.
-    payload["health"] = bool(payload["config_exists"] and payload["git"]["repo_root"])
-    payload["next_action"] = _doctor_next_action(
-        payload, config_version=config.config_version
-    )
-    if config.config_version > CONFIG_VERSION:
-        # A too-new config: the deploy path is fail-closed, but doctor still
-        # runs and points the operator at the fix (recovery stays permitted).
-        payload["config_version_supported"] = CONFIG_VERSION
-    if args.json:
-        dump_json(payload)
-    else:
-        print(f"health: {payload['health']}")
-        print(f"config: {payload['config']['config_path']} ({'found' if payload['config_exists'] else 'default'})")
-        print(f"db: {payload['db']}")
-        print(f"git repo: {payload['git']['repo_root'] or 'not found'}")
-        runtime = payload["runtime"]
-        print(
-            "runtime: "
-            f"{runtime['install_mode']} · {runtime['source_commit'] or 'unknown'} · "
-            f"{runtime['package_path']}"
-        )
-        print(
-            "next action: "
-            f"{payload['next_action']}"
-        )
-        for recommendation in payload["recommendations"]:
-            print(
-                f"warning {recommendation['code']}: "
-                f"{recommendation['summary']}"
-            )
-    return 0

@@ -41,10 +41,7 @@ def _shell_argument(value: str) -> str:
         # must survive verbatim, so wrap without escaping.
         return f'"{value}"'
     escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("$", "\\$")
-        .replace("`", "\\`")
+        value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
     )
     return f'"{escaped}"'
 
@@ -112,9 +109,7 @@ class DemoSandbox:
                 f"could not verify demo directory before cleanup: {self.root}"
             ) from exc
         if not verified:
-            raise DemoFailure(
-                f"refusing to clean unverified demo directory: {self.root}"
-            )
+            raise DemoFailure(f"refusing to clean unverified demo directory: {self.root}")
 
         def clear_readonly(func, path, _exc_info):
             os.chmod(path, 0o700)
@@ -172,9 +167,7 @@ class DemoWalkthrough:
         # Child commands run inside the sandbox, so make those entries absolute
         # before changing cwd. Installed users do not need this adjustment.
         entries = [
-            str(Path(entry).resolve())
-            for entry in sys.path
-            if entry and Path(entry).is_dir()
+            str(Path(entry).resolve()) for entry in sys.path if entry and Path(entry).is_dir()
         ]
         if entries:
             env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(entries))
@@ -241,8 +234,8 @@ class DemoWalkthrough:
         if shown[:2] == ["mergetrain", "enqueue"] and "--branch" in shown:
             branch = shown[shown.index("--branch") + 1]
             return f"mergetrain enqueue --branch {shlex.quote(branch)} …"
-        if shown[:3] == ["mergetrain", "run-batch", "--deploy"]:
-            return "mergetrain run-batch --deploy --train-id <validated-train>"
+        if shown[:2] == ["mergetrain", "deploy"]:
+            return "mergetrain deploy"
         if shown[:2] == ["git", "--git-dir"]:
             return "git log --oneline main"
         return shlex.join(shown).replace(str(self.sandbox.root), "$DEMO")
@@ -251,6 +244,11 @@ class DemoWalkthrough:
     def _brief_output(output: str) -> str:
         prefixes = (
             "#",
+            "ATTENTION:",
+            "IDLE:",
+            "READY:",
+            "RUNNING:",
+            "WAITING:",
             "dismissed job ",
             "health:",
             "lock:",
@@ -292,28 +290,25 @@ class DemoWalkthrough:
 
     def _show_cli_json(self, args: tuple[str, ...], payload: dict[str, Any]) -> None:
         shown = (
-            ["mergetrain", *args]
-            if self.brief
-            else ["mergetrain", "--repo", str(self.repo), *args]
+            ["mergetrain", *args] if self.brief else ["mergetrain", "--repo", str(self.repo), *args]
         )
         command = self._display_command(shown)
         print(f"$ {command}", flush=True)
         if self.brief and "git" in payload:
             git_state = payload["git"]
+            next_action = payload.get("next_action") or {}
+            next_code = next_action.get("code") if isinstance(next_action, dict) else next_action
             print(
                 "ready: "
                 f"health={str(payload.get('health')).lower()} "
                 f"clean={str(git_state.get('worktree_clean')).lower()} "
-                f"next={payload.get('next_action')}"
+                f"next={next_code}"
             )
             return
         if self.brief and "job" in payload:
             job = payload["job"]
             outcome = payload.get("outcome", {})
-            print(
-                f"job: #{job.get('id')} {job.get('status')} · "
-                f"{job.get('branch')}"
-            )
+            print(f"job: #{job.get('id')} {job.get('status')} · {job.get('branch')}")
             if job.get("conflict_with"):
                 print(f"conflict_with: #{job.get('conflict_with')}")
             elif outcome.get("category") == "merge_conflict":
@@ -333,9 +328,7 @@ class DemoWalkthrough:
         match = re.search(r"(\d+)\.(\d+)", version)
         if not match or tuple(map(int, match.groups())) < (2, 32):
             installed = version.strip() or "unknown"
-            raise DemoFailure(
-                f"git >= 2.32 is required for config isolation (have {installed})"
-            )
+            raise DemoFailure(f"git >= 2.32 is required for config isolation (have {installed})")
 
     def _bootstrap(self) -> None:
         self._require_git()
@@ -363,12 +356,9 @@ class DemoWalkthrough:
         )
 
     def _write_demo_config(self) -> None:
-        gate = _yaml_scalar(
-            f"{_shell_argument(sys.executable)} -m unittest discover -s tests"
-        )
+        gate = _yaml_scalar(f"{_shell_argument(sys.executable)} -m unittest discover -s tests")
         verify = _yaml_scalar(
-            f"git --git-dir={_shell_argument(str(self.remote))} "
-            "log -1 --format=%H main"
+            f"git --git-dir={_shell_argument(str(self.remote))} log -1 --format=%H main"
         )
         config = f"""version: 2
 
@@ -407,9 +397,7 @@ deploy:
     fingerprints: []
 """
         _write_repo_file(self.repo / ".mergetrain.yaml", config)
-        _write_repo_file(
-            self.repo / ".gitignore", ".mergetrain/\n__pycache__/\n*.py[cod]\n"
-        )
+        _write_repo_file(self.repo / ".gitignore", ".mergetrain/\n__pycache__/\n*.py[cod]\n")
 
     def _commit_seed(self) -> None:
         self._write_demo_config()
@@ -501,9 +489,7 @@ deploy:
         ]
 
     @staticmethod
-    def _describe_jobs(
-        jobs: dict[str, dict[str, Any]], branches: Iterable[str]
-    ) -> str:
+    def _describe_jobs(jobs: dict[str, dict[str, Any]], branches: Iterable[str]) -> str:
         """Summarize queue rows so a demo failure says what actually happened.
 
         A walkthrough that fails on a queue outcome is otherwise unactionable:
@@ -549,22 +535,24 @@ deploy:
 
         self._step(
             "Check readiness",
-            "doctor returns a machine-readable next action before any branch is enqueued.",
+            "status returns one machine-readable next action before any branch is enqueued.",
         )
-        doctor = self._cli_json("doctor", "--json")
-        if doctor.get("next_action") != "enqueue_clean_branch":
-            raise DemoFailure("doctor did not report enqueue_clean_branch")
-        git_state = doctor.get("git", {})
+        status = self._cli_json("status", "--diagnose", "--json")
+        next_action = status.get("next_action", {})
+        if next_action.get("code") != "enqueue_clean_branch":
+            raise DemoFailure("status did not report enqueue_clean_branch")
+        diagnostics = status.get("diagnostics", {})
+        git_state = diagnostics.get("git", {})
         self._show_cli_json(
-            ("doctor", "--json"),
+            ("status", "--diagnose", "--json"),
             {
-                "health": doctor.get("health"),
+                "health": status.get("health"),
                 "git": {
                     "integration_ref": git_state.get("integration_ref"),
                     "worktree_clean": git_state.get("worktree_clean"),
                 },
-                "lock": doctor.get("lock"),
-                "next_action": doctor.get("next_action"),
+                "lock": diagnostics.get("lock"),
+                "next_action": next_action,
             },
         )
 
@@ -582,7 +570,6 @@ deploy:
                 branch,
                 "--worktree",
                 str(worktree),
-                "--capture-sha",
             )
             matched = re.search(r"queued job (\d+):", result.stdout)
             if not matched:
@@ -601,9 +588,11 @@ deploy:
             "Only the combined tree is red, so the train bisects to find which "
             "pair actually disagrees.",
         )
-        self._cli("run-batch", "--validate-only", expected={1})
-        validation = self._cli_json("status", "--json", "--limit", "10")
-        jobs = self._jobs_by_branch(validation)
+        self._cli("validate", expected={1})
+        jobs = {
+            branch: self._cli_json("inspect", str(job_id), "--json").get("job", {})
+            for branch, job_id in job_ids.items()
+        }
         all_branches = (
             "agent/faster-timeout",
             "agent/health-check",
@@ -637,7 +626,6 @@ deploy:
         train_ids = {str(job.get("train_id", "")) for job in survivors}
         if len(train_ids) != 1 or not next(iter(train_ids)):
             raise DemoFailure("validated survivors do not share one train identity")
-        train_id = next(iter(train_ids))
         print(
             "bisect result: "
             f"#{job_ids['agent/faster-timeout']} ↔ "
@@ -696,26 +684,39 @@ deploy:
             "dismiss",
             "--all",
             "--note",
-            "demo: semantic conflict acknowledged; reconcile the pair and "
-            "enqueue fresh commits",
+            "demo: semantic conflict acknowledged; reconcile the pair and enqueue fresh commits",
         )
-        self._cli("doctor")
-        after_dismiss = self._cli_json("doctor", "--json")
-        if after_dismiss.get("next_action") != "deploy_validated_train_when_approved":
-            raise DemoFailure("doctor did not reveal the validated train")
+        self._cli("status")
+        after_dismiss = self._cli_json("status", "--json")
+        if after_dismiss.get("next_action", {}).get("code") != "deploy_when_approved":
+            raise DemoFailure("status did not reveal the validated train")
 
         self._step(
             "Deploy the exact validated train",
-            "Explicit approval names one train ID; the runner re-gates and pushes atomically.",
+            "One command shows the exact plan; approval then rechecks and pushes atomically.",
         )
-        self._cli(
-            "run-batch",
-            "--deploy",
-            "--train-id",
-            train_id,
+        preview = self._cli_json("deploy", "--json")
+        plan_sha = str(preview.get("deploy_plan_sha") or "")
+        if not plan_sha:
+            raise DemoFailure("deploy did not produce an approval plan")
+        self._run(
+            [
+                sys.executable,
+                "-m",
+                "mergetrain",
+                "--repo",
+                str(self.repo),
+                "deploy",
+                "--expected-plan",
+                plan_sha,
+            ],
+            cwd=self.repo,
+            display=["mergetrain", "deploy"],
         )
-        deployed = self._cli_json("status", "--json", "--limit", "10")
-        deployed_jobs = self._jobs_by_branch(deployed)
+        deployed_jobs = {
+            branch: self._cli_json("inspect", str(job_ids[branch]), "--json").get("job", {})
+            for branch in survivor_branches
+        }
         if any(
             deployed_jobs.get(branch, {}).get("status") != "deployed"
             for branch in survivor_branches
@@ -733,7 +734,7 @@ deploy:
         )
         self._cli("status", "--limit", "10")
         final_status = self._cli_json("status", "--json", "--limit", "10")
-        if final_status.get("next_action") != "enqueue_clean_branch":
+        if final_status.get("next_action", {}).get("code") != "enqueue_clean_branch":
             raise DemoFailure("final queue did not return to enqueue_clean_branch")
         self._git(
             "--git-dir",

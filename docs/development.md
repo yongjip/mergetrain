@@ -14,10 +14,10 @@ mergetrain/
     commands/          # command-domain execution modules
       setup.py         # init, contract, version, demo, MCP
       queue.py         # enqueue, retry, supersede, dismiss, cancel
-      inspection.py    # status, events, history, stats, logs, doctor
+      inspection.py    # status, inspect, events, history, stats, logs
       deploy.py        # validation/deploy execution
       daemon.py        # single-repository auto-deploy/validation daemon command
-      recovery.py      # reconcile, recover, unlock, verify, cleanup
+      recovery.py      # reconcile, unlock, verify, cleanup
       hub.py           # dashboard and multi-repository hub commands
     config.py          # safe YAML loading + typed policy validation
     daemon.py          # auto-deploy/validation daemon loop
@@ -45,7 +45,7 @@ mergetrain/
       leases.py        # liveness, token-fenced locks, orphan recovery
       claims.py        # atomic job+lease+event claim transactions
       events.py        # append-only event storage and scoped reads
-      operations.py    # append-only reconcile/recover invocation evidence
+      operations.py    # append-only reconcile plus historical recovery evidence
       recovery.py      # durable push markers and reconcile guards
   dashboard/           # React/Vite dashboard source
   benchmarks/          # repo-local agent-adoption fixtures, traces, and grader
@@ -136,7 +136,10 @@ The suite covers the behaviors that make the queue safe:
   DB connections do not leak file descriptors; a tick exception releases the
   lock and leaves the job queued.
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
-- **cli** — structured JSON errors and result counts, truthful exit codes, agent contract, validated-train status, resumable JSONL events, inspect/log follow termination, `doctor` next actions, global option normalization, dashboard bind policy, and init output.
+- **cli** — structured JSON errors and result counts, truthful exit codes,
+  generated agent instructions, five-state status and next actions, resumable
+  JSONL events, inspect/log termination, global option normalization, dashboard
+  bind policy, and init output.
 - **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.
 - **config** — safe YAML loading, ambiguous-scalar rejection, fail-closed deploy
   refs, positive queue timing, unique gate names, defaults, and path resolution.
@@ -296,7 +299,7 @@ Supported and tested Python: 3.10 through 3.14. See the
 
 ## Dogfooding: mergetrain deploys mergetrain
 
-The repository commits its own `.mergetrain.yaml`, so `doctor` reports real
+The repository commits its own `.mergetrain.yaml`, so `status --diagnose` reports real
 configuration instead of running on defaults, and a train through this repo runs
 the checks CI runs:
 

@@ -1,46 +1,64 @@
 # mergetrain for LLM agents
 
-mergetrain serializes committed local branches through a SQLite queue and a
-single Git worktree runner.
+mergetrain serializes committed coding-agent branches through one local
+merge/test/push/verify runner. Its normal product grammar is intentionally
+small:
 
-Rules:
-- Work on a task branch/worktree.
-- Commit before enqueueing.
-- Do not push configured Git refs directly.
-- Prefer `mergetrain doctor --json` and `mergetrain status --json`.
-- Use `--auto` only after explicit unattended-deploy approval.
-- Use `run-batch --validate-only` for validation and `run-batch --deploy` for deployment.
-- After validation, deploy the exact `validated_trains` entry shown by status; do not assume newer queued jobs are included.
-- After a crash or ambiguous push response, resolve `needs_reconcile` jobs with `reconcile`/`recover` against the remote; deploy is refused while any job needs reconciling.
-- Do not delete or rewrite remote `refs/mergetrain/deploys/*`; reconcile uses these permanent audit refs to block replay when a payload ref landed and was later force-rewritten.
-- Across several repos, read the whole machine with `mergetrain hub status --json`; the hub is read-only and owns no queue state.
-- A job `blocked` with a non-empty `conflict_with` is a semantic conflict: it passes gates alone but fails combined with the listed job IDs. Rebase onto the integration branch with the partner's change merged, fix the joint breakage, and enqueue a fresh job.
-- Every `--json` payload and the `stream_start` JSONL frame carry `contract_version` (currently 2; separate from the product version). `ok` means only "the command ran without an error envelope" — branch outcomes on `result`, repo health on `health`, failures on `error.code`. Ignore unknown keys; dispatch JSONL on `type`. See `docs/contract.md`.
+```text
+init  status  enqueue  validate  deploy  inspect
+```
 
-Core commands:
-- `mergetrain enqueue --task TASK --branch BRANCH` (exact SHAs are captured by default)
-- `mergetrain status --json`
-- `mergetrain doctor --json`
-- `mergetrain inspect JOB_ID --json`
-- `mergetrain events --job JOB_ID --after EVENT_ID --follow --jsonl`
-- `mergetrain logs JOB_ID --tail 200`
-- `mergetrain run-batch --validate-only`
-- `mergetrain run-batch --deploy`
-- `mergetrain daemon --once`
-- `mergetrain reconcile` (dry-run) / `mergetrain recover` (apply, after a crash)
-- `mergetrain hub add REPO` / `mergetrain hub status --json` / `mergetrain hub` (dashboard)
-- `mergetrain hub daemon --once` (auto-only, across registered repos)
+## Shared operating protocol
 
-Agent integrations:
-- MCP server: install `mergetrain[mcp]`, then run `mergetrain mcp`.
-- Claude Code plugin: add marketplace `yongjip/mergetrain`, then install
-  `mergetrain@mergetrain`.
-- `/mergetrain:mergetrain` loads the queue protocol.
-- `/mergetrain:deploy` is manual-only and still requires the MCP client's human
-  confirmation dialog.
+<!-- BEGIN GENERATED: mergetrain-agent-protocol -->
+Purpose: Serialize committed local task branches through one merge/test/push/verify runner.
 
-Vocabulary:
-- Use canonical `deploy` vocabulary and machine state `status=deployed` with
-  `deploy_sha`.
-- Completion means configured Git refs were atomically pushed, not that a
-  downstream provider release completed or was authorized.
+### Rules
+
+1. Work on a task-specific branch and worktree.
+2. Commit a clean HEAD before handing work off.
+3. Read mergetrain status --json and follow its next action before changing queue state.
+4. Enqueue with only the task, branch, and optional worktree; mergetrain captures the exact commits. Stop after a successful enqueue unless the user explicitly authorized end-to-end validation and deployment.
+5. Never push configured integration refs directly. One authorized runner owns validation and deployment; recovery and destructive actions require their stated approval.
+
+### Safety boundary
+
+- A task agent stops after ordinary `enqueue`. Only a separately authorized runner uses `validate`, `deploy`, or a daemon.
+- Deployment requires either confirmation of the human-readable exact plan or prior bounded unattended approval. Train IDs and hashes stay internal.
+- Unattended approval is bound to the exact destination and execution policy. Any change blocks before push.
+- Recovery and destructive cleanup require their stated approval. Follow `status.next_action`; never rewrite permanent deploy audit refs.
+
+### Stable machine contract
+
+- Every JSON payload carries `contract_version`; ignore unknown keys and fail closed on unknown safety actions.
+- `deploy` means the atomic Git ref update plus configured verification. A downstream provider release is separate.
+<!-- END GENERATED: mergetrain-agent-protocol -->
+
+## Normal workflow
+
+```sh
+mergetrain status --json
+mergetrain enqueue --task "TASK" --branch BRANCH
+```
+
+After ordinary enqueue, stop. With explicit end-to-end authority, the operator
+path is `mergetrain status` followed by `mergetrain deploy`. `deploy` validates
+if needed, shows one exact plan, requires human confirmation, rechecks the plan,
+and only then may push. `validate` is the optional non-pushing path for running
+gates earlier. Use `inspect JOB_ID --json` only when status points to a job.
+
+`status` projects internal detail into Waiting, Running, Ready, Attention, and
+Done. If exceptional recovery is needed, follow its exact
+`next_action.command`; do not guess or edit the SQLite database.
+
+## Integrations
+
+- MCP: install `mergetrain[mcp]` and run `mergetrain mcp`; the default server
+  exposes exactly five tools matching status, inspect, enqueue, validate, and
+  deploy.
+- Claude Code: install `mergetrain@mergetrain` from the
+  `yongjip/mergetrain` marketplace. `/mergetrain:deploy` still requires the
+  MCP client's human confirmation dialog.
+
+See `docs/agent-contract.md`, `docs/contract.md`, and `docs/cli.md` for the
+authoritative details.

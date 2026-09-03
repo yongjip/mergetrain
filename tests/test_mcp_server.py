@@ -117,11 +117,25 @@ STATUS = {
 }
 
 PLAN_SHA = "f" * 64
-PREVIEW = {"ok": True, "deploy_plan_sha": PLAN_SHA}
+PREVIEW = {
+    "ok": True,
+    "result": "confirmation_required",
+    "deploy_plan_sha": PLAN_SHA,
+    "push_plan": {
+        "remote": "origin",
+        "url": "git@github.com:example/checkout.git",
+        "refs": [{"source": "HEAD", "target": "main", "spec": "HEAD:main"}],
+    },
+    "reuse": {"decision": {"action": "rerun"}},
+    "jobs": [
+        {"id": 7, "task": "Add checkout guard", "branch": "agent/one", "train_id": "abc123"},
+        {"id": 8, "task": "Handle payment retry", "branch": "agent/two", "train_id": "abc123"},
+    ],
+}
 
 
-def is_push_call(args: list[str]) -> bool:
-    return args[:2] == ["run-batch", "--deploy"] and "--preview" not in args
+def is_guarded_deploy_call(args: list[str]) -> bool:
+    return args[:1] == ["deploy"] and "--expected-plan" in args
 
 
 class FakeCapabilities:
@@ -147,20 +161,7 @@ class ToolSurfaceTests(unittest.TestCase):
 
     def test_no_tool_can_reach_unattended_deploy_or_destruction(self) -> None:
         forbidden = {"auto", "apply", "delete_branches", "force", "confirm", "yes"}
-        for name in (
-            "status",
-            "doctor",
-            "inspect_job",
-            "history",
-            "stats",
-            "agent_contract",
-            "gc_preview",
-            "events",
-            "logs",
-            "validate",
-            "enqueue",
-            "deploy",
-        ):
+        for name in ("status", "inspect", "validate", "enqueue", "deploy"):
             parameters = set(inspect.signature(getattr(self.tools, name)).parameters)
             self.assertEqual(
                 parameters & forbidden,
@@ -179,22 +180,20 @@ class ToolSurfaceTests(unittest.TestCase):
         with patch.object(MergetrainTools, "_run", return_value=completed("{}")) as run:
             asyncio.run(self.tools.enqueue(task="t", branch="agent/one"))
         args = run.call_args.args[0]
-        self.assertIn("--capture-sha", args)
+        self.assertEqual(args, ["enqueue", "--task", "t", "--branch", "agent/one", "--json"])
         self.assertNotIn("--auto", args)
 
-    def test_gc_preview_never_passes_apply(self) -> None:
-        with patch.object(MergetrainTools, "_run", return_value=completed("{}")) as run:
-            asyncio.run(self.tools.gc_preview())
-        args = run.call_args.args[0]
-        self.assertEqual(args, ["gc", "--json"])
+    def test_operator_only_reads_are_not_public_methods(self) -> None:
+        for name in ("doctor", "history", "stats", "agent_contract", "gc_preview"):
+            self.assertFalse(hasattr(self.tools, name), name)
 
     def test_bounded_arguments_are_clamped(self) -> None:
         with patch.object(MergetrainTools, "_run", return_value=completed("{}")) as run:
             asyncio.run(self.tools.status(limit=10_000))
         self.assertIn("200", run.call_args.args[0])
         with patch.object(MergetrainTools, "_run", return_value=completed("")) as run:
-            asyncio.run(self.tools.logs(job_id=3, tail=10_000))
-        self.assertIn("500", run.call_args.args[0])
+            asyncio.run(self.tools.inspect(job_id=3, detail="logs", limit=10_000))
+        self.assertIn("200", run.call_args.args[0])
 
 
 class PayloadTests(unittest.TestCase):
@@ -214,14 +213,14 @@ class PayloadTests(unittest.TestCase):
         with patch.object(
             MergetrainTools, "_run", return_value=completed(json.dumps(envelope), returncode=2)
         ):
-            payload = asyncio.run(self.tools.doctor())
+            payload = asyncio.run(self.tools.status())
         self.assertEqual(payload, envelope)
 
     def test_unreadable_output_becomes_the_one_failure_shape(self) -> None:
         with patch.object(
             MergetrainTools, "_run", return_value=completed("not json", returncode=1, stderr="boom")
         ):
-            payload = asyncio.run(self.tools.doctor())
+            payload = asyncio.run(self.tools.status())
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "cli_output_unreadable")
         self.assertIn("boom", payload["error"]["message"])
@@ -237,7 +236,7 @@ class PayloadTests(unittest.TestCase):
             "_run",
             return_value=completed("not json", returncode=1, stderr=stderr),
         ):
-            payload = asyncio.run(self.tools.doctor())
+            payload = asyncio.run(self.tools.status())
         message = payload["error"]["message"]
         for secret in ("super-secret", "hunter2", "credential"):
             self.assertNotIn(secret, message)
@@ -252,7 +251,7 @@ class PayloadTests(unittest.TestCase):
             "_run",
             return_value=completed("GITHUB_PAT=ghp-secret", returncode=1),
         ):
-            payload = asyncio.run(self.tools.doctor())
+            payload = asyncio.run(self.tools.status())
         self.assertNotIn("ghp-secret", payload["error"]["message"])
         self.assertIn("GITHUB_PAT=[redacted]", payload["error"]["message"])
 
@@ -275,10 +274,8 @@ class PayloadTests(unittest.TestCase):
                 "retryable": False,
             },
         }
-        with patch.object(
-            MergetrainTools, "_run", return_value=completed(json.dumps(envelope))
-        ):
-            payload = asyncio.run(self.tools.doctor())
+        with patch.object(MergetrainTools, "_run", return_value=completed(json.dumps(envelope))):
+            payload = asyncio.run(self.tools.status())
         self.assertEqual(payload, envelope)
 
     def test_timeout_is_reported_not_raised(self) -> None:
@@ -287,7 +284,7 @@ class PayloadTests(unittest.TestCase):
             "_run",
             side_effect=subprocess.TimeoutExpired(cmd="mergetrain", timeout=1),
         ):
-            payload = asyncio.run(self.tools.doctor())
+            payload = asyncio.run(self.tools.status())
         self.assertEqual(payload["error"]["code"], "cli_timeout")
 
     def test_events_returns_the_cli_frames_unchanged(self) -> None:
@@ -297,7 +294,7 @@ class PayloadTests(unittest.TestCase):
             "not json\n"
         )
         with patch.object(MergetrainTools, "_run", return_value=completed(stdout)):
-            payload = asyncio.run(self.tools.events())
+            payload = asyncio.run(self.tools.inspect(job_id=1, detail="events"))
         self.assertEqual(
             payload["frames"],
             [
@@ -312,7 +309,7 @@ class PayloadTests(unittest.TestCase):
             "_run",
             return_value=completed("", returncode=1, stderr="ACCESS_TOKEN=event-secret"),
         ):
-            payload = asyncio.run(self.tools.events())
+            payload = asyncio.run(self.tools.inspect(job_id=1, detail="events"))
         self.assertNotIn("event-secret", payload["error"]["message"])
         self.assertIn("ACCESS_TOKEN=[redacted]", payload["error"]["message"])
 
@@ -322,16 +319,14 @@ class PayloadTests(unittest.TestCase):
             "_run",
             return_value=completed("", returncode=1, stderr="--api-key log-secret"),
         ):
-            payload = asyncio.run(self.tools.logs(job_id=4))
+            payload = asyncio.run(self.tools.inspect(job_id=4, detail="logs"))
         self.assertNotIn("log-secret", payload["error"]["message"])
         self.assertIn("--api-key [redacted]", payload["error"]["message"])
 
     def test_successful_raw_log_output_remains_unchanged(self) -> None:
         raw = "API_TOKEN=intentionally-raw\n"
-        with patch.object(
-            MergetrainTools, "_run", return_value=completed(raw)
-        ):
-            payload = asyncio.run(self.tools.logs(job_id=4))
+        with patch.object(MergetrainTools, "_run", return_value=completed(raw)):
+            payload = asyncio.run(self.tools.inspect(job_id=4, detail="logs"))
         self.assertEqual(payload["log"], raw)
 
 
@@ -466,187 +461,87 @@ class DeployGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tools = MergetrainTools(repo=Path("/repo"))
 
-    def _deploy(self, ctx: Any, *, train_id: str = "", status: dict[str, Any] | None = None) -> Any:
-        payloads = [DOCTOR, status if status is not None else STATUS]
+    def _deploy(self, ctx: Any, *, preview: dict[str, Any] | None = None) -> Any:
         calls: list[list[str]] = []
 
         async def fake_run(_self: Any, args: list[str]) -> Any:
             calls.append(args)
-            if args[0] == "doctor":
-                return completed(json.dumps(payloads[0]))
-            if args[0] == "status":
-                return completed(json.dumps(payloads[1]))
-            if "--preview" in args:
-                return completed(json.dumps(PREVIEW))
+            if args == ["deploy", "--json"]:
+                return completed(json.dumps(preview or PREVIEW))
             return completed(json.dumps({"ok": True, "result": "success"}))
 
         with patch.object(MergetrainTools, "_run", new=fake_run):
-            plan = asyncio.run(self.tools.prepare_deploy(ctx, train_id=train_id))
-            data = (
-                SimpleNamespace(confirm=ctx.confirm)
-                if ctx.action == "accept"
-                else None
-            )
+            plan = asyncio.run(self.tools.prepare_deploy(ctx))
+            data = SimpleNamespace(confirm=ctx.confirm) if ctx.action == "accept" else None
             approval = SimpleNamespace(action=ctx.action, data=data)
             payload = asyncio.run(self.tools.deploy(plan, approval))
         return payload, calls
 
-    def test_accepted_confirmation_deploys_the_named_train(self) -> None:
+    def test_accepted_confirmation_deploys_the_exact_plan(self) -> None:
         ctx = FakeContext(action="accept", confirm=True)
         payload, calls = self._deploy(ctx)
         self.assertEqual(payload, {"ok": True, "result": "success"})
         self.assertIn(
-            [
-                "run-batch",
-                "--deploy",
-                "--train-id",
-                "abc123",
-                "--expected-plan",
-                PLAN_SHA,
-                "--json",
-            ],
+            ["deploy", "--expected-plan", PLAN_SHA, "--json"],
             calls,
         )
+        self.assertEqual(sum(is_guarded_deploy_call(args) for args in calls), 1)
 
     def test_the_human_sees_the_operating_contract_summary(self) -> None:
         ctx = FakeContext()
-        payloads = [DOCTOR, STATUS]
-
-        async def fake_run(_self: Any, args: list[str]) -> Any:
-            if args[0] == "doctor":
-                return completed(json.dumps(payloads[0]))
-            if args[0] == "status":
-                return completed(json.dumps(payloads[1]))
-            return completed(json.dumps(PREVIEW))
-
-        with patch.object(MergetrainTools, "_run", new=fake_run):
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            return_value=completed(json.dumps(PREVIEW)),
+        ):
             plan = asyncio.run(self.tools.prepare_deploy(ctx))
         shown = plan.summary
-        self.assertIn("Destination: origin", shown)
+        self.assertIn("Add checkout guard", shown)
+        self.assertIn("Destination: git@github.com:example/checkout.git (main)", shown)
+        self.assertIn("Gate plan: rerun", shown)
+        self.assertIn("checked again before push", shown)
         self.assertNotIn("abc123", shown)
-
-    def test_summary_uses_human_context_and_uncapped_attention(self) -> None:
-        summary = self.tools.deploy_summary(DOCTOR, STATUS, TRAIN)
-        for expected in (
-            "#7 Add checkout guard: agent/one",
-            "#8 Handle payment retry: agent/two",
-            "Destination: origin (git@github.com:example/checkout.git) atomically updates main",
-            "refs/mergetrain/deploys/<deploy-sha>",
-            "Pre-push gate policy evaluated: diff-check, ruff, tests",
-            "Post-push verification: github-ci",
-            "deploy_validated_train_when_approved",
-            "local integration ref advanced since validation",
-            "Repair refund calculation — agent/three blocked",
-        ):
-            self.assertIn(expected, summary)
-        self.assertNotIn("abc123", summary)
-
-    def test_summary_prefers_the_effective_push_endpoint_from_preview(self) -> None:
-        summary = self.tools.deploy_summary(
-            DOCTOR,
-            STATUS,
-            TRAIN,
-            {"push_plan": {"url": "ssh://deploy@example.invalid/repo.git"}},
-        )
-
-        self.assertIn(
-            "Destination: origin (ssh://deploy@example.invalid/repo.git)",
-            summary,
-        )
-        self.assertNotIn("git@github.com:example/checkout.git", summary)
-
-    def test_summary_includes_unresolved_post_push_verification(self) -> None:
-        unresolved = {
-            "id": 10,
-            "task": "Verify reconciled checkout deploy",
-            "branch": "agent/reconciled",
-            "status": "deployed",
-            "verify_status": "unknown",
-            "note": "push reconciled; verification outcome is unknown",
-        }
-        status = dict(
-            STATUS,
-            attention_jobs=[*STATUS["attention_jobs"], unresolved],
-        )
-
-        summary = self.tools.deploy_summary(DOCTOR, status, TRAIN)
-
-        self.assertIn(
-            "Verify reconciled checkout deploy — agent/reconciled "
-            "deployed (verification unknown)",
-            summary,
-        )
-
-    def test_summary_describes_only_the_selected_train(self) -> None:
-        other = dict(
-            TRAIN,
-            train_id="def456",
-            train_size=1,
-            branches=[
-                {
-                    "job_id": 10,
-                    "branch": "agent/not-selected",
-                    "validated_head_sha": "f" * 40,
-                }
-            ],
-        )
-        status = dict(STATUS, validated_trains=[TRAIN, other])
-        summary = self.tools.deploy_summary(DOCTOR, status, TRAIN)
-        self.assertIn("agent/one", summary)
-        self.assertNotIn("agent/not-selected", summary)
-        self.assertNotIn("abc123", summary)
-        self.assertNotIn("def456", summary)
 
     def test_a_client_without_elicitation_is_refused_with_instructions(self) -> None:
         ctx = FakeContext(elicitation=False)
         payload, calls = self._deploy(ctx)
         self.assertEqual(payload["error"]["code"], "confirmation_required")
-        self.assertIn("run-batch --deploy --train-id abc123", payload["command"])
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertTrue(payload["command"].endswith(" deploy"))
+        self.assertNotIn("expected-plan", payload["command"])
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
     def test_a_declined_dialog_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="decline"))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
     def test_a_cancelled_dialog_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="cancel"))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
     def test_an_accept_with_the_box_unchecked_does_not_deploy(self) -> None:
         payload, calls = self._deploy(FakeContext(action="accept", confirm=False))
         self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
         self.assertIn("unchecked", payload["error"]["message"])
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
-    def test_several_pending_trains_require_an_explicit_choice(self) -> None:
-        second = dict(TRAIN, train_id="def456", job_ids=[10], branches=[])
-        status = dict(STATUS, validated_trains=[TRAIN, second])
-        ctx = FakeContext()
-        payload, calls = self._deploy(ctx, status=status)
-        self.assertEqual(payload["error"]["code"], "train_id_required")
-        self.assertEqual(payload["pending_train_ids"], ["abc123", "def456"])
-        self.assertFalse(any(is_push_call(args) for args in calls))
-
-    def test_an_unknown_train_id_is_refused(self) -> None:
-        payload, _ = self._deploy(FakeContext(), train_id="nope")
-        self.assertEqual(payload["error"]["code"], "train_not_found")
-
-    def test_an_incomplete_train_identity_is_not_deployable(self) -> None:
-        status = dict(STATUS, validated_trains=[dict(TRAIN, deploy_eligible=False)])
-        payload, calls = self._deploy(FakeContext(), status=status)
-        self.assertEqual(payload["error"]["code"], "no_validated_train")
-        self.assertFalse(any(is_push_call(args) for args in calls))
-
-    def test_a_broken_read_stops_the_deploy(self) -> None:
+    def test_a_broken_preview_stops_the_deploy(self) -> None:
         envelope = {
             "ok": False,
             "error": {"code": "config_error", "message": "too new", "retryable": False},
         }
-        payload, calls = self._deploy(FakeContext(), status=envelope)
+        payload, calls = self._deploy(FakeContext(), preview=envelope)
         self.assertEqual(payload, envelope)
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
+
+    def test_a_non_plan_result_is_refused(self) -> None:
+        payload, calls = self._deploy(
+            FakeContext(),
+            preview={"ok": True, "result": "success", "note": "no work"},
+        )
+        self.assertEqual(payload["error"]["code"], "deploy_plan_unavailable")
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
     def test_confirmation_requires_a_pydantic_accept_shape(self) -> None:
         # Guards the helper itself: anything but action=accept plus confirm=True
@@ -672,30 +567,19 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
         action: str | None,
         confirm: bool = True,
         mode: str = "auto",
-        statuses: list[dict[str, Any]] | None = None,
+        execute_payload: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], list[list[str]], list[str]]:
         from mcp import Client
         from mcp.types import ElicitResult
 
         calls: list[list[str]] = []
         messages: list[str] = []
-        status_values = iter(statuses or [STATUS])
-        current_status = STATUS
 
         async def fake_json(_self: Any, args: list[str]) -> dict[str, Any]:
-            nonlocal current_status
             calls.append(args)
-            if args[0] == "doctor":
-                return DOCTOR
-            if args[0] == "status":
-                try:
-                    current_status = next(status_values)
-                except StopIteration:
-                    pass
-                return current_status
-            if "--preview" in args:
+            if args == ["deploy", "--json"]:
                 return PREVIEW
-            return {"ok": True, "result": "success"}
+            return execute_payload or {"ok": True, "result": "success"}
 
         async def confirm_deploy(_ctx: Any, params: Any) -> Any:
             messages.append(params.message)
@@ -720,7 +604,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
         payload, calls, messages = self._call(action="accept")
         self.assertEqual(payload, {"ok": True, "result": "success"})
         self.assertEqual(
-            sum(is_push_call(args) for args in calls),
+            sum(is_guarded_deploy_call(args) for args in calls),
             1,
         )
         self.assertEqual(len(messages), 1)
@@ -731,32 +615,38 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
         payload, calls, messages = self._call(action="accept", mode="legacy")
         self.assertEqual(payload, {"ok": True, "result": "success"})
         self.assertEqual(len(messages), 1)
-        self.assertTrue(any(is_push_call(args) for args in calls))
+        self.assertTrue(any(is_guarded_deploy_call(args) for args in calls))
 
     def test_decline_cancel_and_unchecked_accept_never_deploy(self) -> None:
         for action, confirm in (("decline", True), ("cancel", True), ("accept", False)):
             with self.subTest(action=action, confirm=confirm):
                 payload, calls, _ = self._call(action=action, confirm=confirm)
                 self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
-                self.assertTrue(
-                    not any(is_push_call(args) for args in calls)
-                )
+                self.assertTrue(not any(is_guarded_deploy_call(args) for args in calls))
 
     def test_client_without_form_elicitation_gets_terminal_fallback(self) -> None:
         payload, calls, messages = self._call(action=None)
         self.assertEqual(payload["error"]["code"], "confirmation_required")
-        self.assertIn("run-batch --deploy --train-id abc123", payload["command"])
+        self.assertTrue(payload["command"].endswith(" deploy"))
+        self.assertNotIn("expected-plan", payload["command"])
         self.assertEqual(messages, [])
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
     def test_state_change_after_confirmation_is_rechecked_and_refused(self) -> None:
-        no_train = dict(STATUS, validated_trains=[])
-        payload, calls, messages = self._call(
-            action="accept", statuses=[STATUS, STATUS, no_train]
-        )
-        self.assertEqual(payload["error"]["code"], "no_validated_train")
+        changed = {
+            "ok": False,
+            "error": {
+                "code": "deploy_plan_changed",
+                "message": "the exact plan changed; nothing was pushed",
+                "retryable": False,
+            },
+        }
+        payload, calls, messages = self._call(action="accept", execute_payload=changed)
+        self.assertEqual(payload["error"]["code"], "deploy_plan_changed")
         self.assertEqual(len(messages), 1)
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        # The adapter invokes exactly one hash-bound execution. The returned
+        # refusal proves the CLI rechecked the plan before its Git push path.
+        self.assertEqual(sum(is_guarded_deploy_call(args) for args in calls), 1)
 
     def test_client_callback_error_is_fail_closed(self) -> None:
         from mcp import Client
@@ -769,11 +659,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
 
         async def fake_json(_self: Any, args: list[str]) -> dict[str, Any]:
             calls.append(args)
-            if args[0] == "doctor":
-                return DOCTOR
-            if args[0] == "status":
-                return STATUS
-            if "--preview" in args:
+            if args == ["deploy", "--json"]:
                 return PREVIEW
             return {"ok": True, "result": "must not happen"}
 
@@ -789,7 +675,7 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
 
         with patch.object(MergetrainTools, "_json", new=fake_json):
             asyncio.run(scenario())
-        self.assertFalse(any(is_push_call(args) for args in calls))
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
 
 @unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")
@@ -803,20 +689,13 @@ class ServerRegistrationTests(unittest.TestCase):
             set(tools),
             {
                 "mergetrain_status",
-                "mergetrain_doctor",
                 "mergetrain_inspect",
-                "mergetrain_history",
-                "mergetrain_stats",
-                "mergetrain_agent_contract",
-                "mergetrain_gc_preview",
-                "mergetrain_events",
-                "mergetrain_logs",
                 "mergetrain_validate",
                 "mergetrain_enqueue",
                 "mergetrain_deploy",
             },
         )
-        for name in ("mergetrain_status", "mergetrain_doctor", "mergetrain_gc_preview"):
+        for name in ("mergetrain_status", "mergetrain_inspect"):
             self.assertTrue(tools[name].annotations.read_only_hint, name)
         # validate runs gate commands and moves job status, so claiming
         # read-only would misinform the client about its side effects.
@@ -831,7 +710,7 @@ class ServerRegistrationTests(unittest.TestCase):
             tool for tool in asyncio.run(server.list_tools()) if tool.name == "mergetrain_deploy"
         )
         self.assertNotIn("ctx", deploy.input_schema.get("properties", {}))
-        self.assertEqual(set(deploy.input_schema.get("properties", {})), {"train_id"})
+        self.assertEqual(set(deploy.input_schema.get("properties", {})), set())
 
 
 class SubcommandTests(unittest.TestCase):

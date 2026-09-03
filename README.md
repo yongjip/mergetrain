@@ -117,11 +117,13 @@ mergetrain enqueue \
   --task "add health check" \
   --branch agent/health
 
-# Inspect first, then validate or deploy explicitly
-mergetrain status --json
-mergetrain run-batch --validate-only
-mergetrain run-batch --deploy
+# Read state and deploy end to end
+mergetrain status
+mergetrain deploy
 ```
+
+For long-running gates, run `mergetrain validate` earlier; it never pushes and
+leaves one exact train Ready for the later `deploy` confirmation.
 
 `deploy` names the configured atomic Git ref update; it does not imply an App
 Store, Kubernetes, or other provider release.
@@ -182,14 +184,14 @@ covers direct, one-PR, split-PR, and validation-only patterns.
 - **Atomic remote update.** Payload refs and a permanent
   `refs/mergetrain/deploys/<sha>` recovery ref update together.
 - **Remote-truth recovery.** Write-ahead markers and pinned commits let
-  `reconcile`/`recover` determine whether a killed push landed, without replaying
+  `reconcile` determine whether a killed push landed, without replaying
   a successful deploy or calling a missing one shipped.
 - **Explicit automation.** A bare run never deploys. Daemons touch only
   pre-approved `--auto` jobs whose destination and gate/reuse/verify policy
   still match, and MCP deploy still requires attributable human confirmation.
-- **Observable state.** `doctor`, `status`, inspection, events, and statistics
-  expose structured state and the next safe action instead of asking an agent to
-  infer it from processes or prose.
+- **One state entry point.** `status` projects internal detail into Waiting,
+  Running, Ready, Attention, and Done, and returns the next safe command.
+  `inspect` supplies job-level evidence only when it is needed.
 
 Queue state, locking, train assembly, and gates stay local. Your configured Git
 remote and post-push verification may still use external services. Gate and
@@ -226,11 +228,20 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
   [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) ·
   [Product scope](https://github.com/yongjip/mergetrain/blob/main/docs/product-scope.md)
 
-## Status
+## Stable interface
 
-The latest published release is shown by the PyPI badge above. Machine-contract
-major 2 is additive-only: existing JSON keys are not removed or renamed without
-another contract-version change.
+The normal CLI is deliberately limited to six verbs:
+
+```text
+init  status  enqueue  validate  deploy  inspect
+```
+
+Version 3 is the long-lived product grammar. There is no planned v4: new
+capabilities must fit these verbs or stay in advanced operator surfaces, and
+the v3 JSON and MCP contracts evolve additively. See the
+[compatibility policy](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md#long-lived-v3-compatibility-policy).
+
+The latest published release is shown by the PyPI badge above.
 Issues and operating reports are welcome on
 [GitHub](https://github.com/yongjip/mergetrain/issues).
 

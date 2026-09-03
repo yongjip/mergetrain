@@ -75,16 +75,30 @@ for k in sys.argv[1].split("."):
     d = d[int(k)] if k.lstrip("-").isdigit() else d[k]
 print("" if d is None else d)' "$1"; }
 
-# Pull one job field out of a status/results payload by branch name.
-job_field(){ "$VPY" -c '
+# Resolve a compact status row to its canonical inspect record, then print one
+# full job field. This intentionally exercises the public status -> inspect
+# drill-down instead of depending on fields omitted from the status summary.
+job_field(){
+  repo="$1"; branch="$2"; field="$3"
+  job_id=$("$MT" --repo "$repo" status --json | "$VPY" -c '
 import sys, json
 data = json.load(sys.stdin)
-branch, field = sys.argv[1], sys.argv[2]
-for j in data["jobs"]:
-    if j["branch"] == branch:
-        print(j[field]); break
-else:
-    print("")' "$1" "$2"; }
+branch = sys.argv[1]
+seen = set()
+for job in data.get("attention_jobs", []) + data.get("recent_jobs", []):
+    if job["id"] in seen:
+        continue
+    seen.add(job["id"])
+    if job["branch"] == branch:
+        print(job["id"])
+        break
+' "$branch")
+  [ -n "$job_id" ] || return 1
+  "$MT" --repo "$repo" inspect "$job_id" --json | "$VPY" -c '
+import sys, json
+print(json.load(sys.stdin)["job"][sys.argv[1]])
+' "$field"
+}
 
 # Execute SQL against a sandbox queue DB (stdlib sqlite3 — no sqlite3 CLI needed).
 sqlexec(){ "$VPY" -c '
@@ -158,8 +172,34 @@ make_branch(){ # $1=repo $2=branch $3=file $4=content
   gitq "$1" switch -q main
 }
 
-enq(){ "$MT" --repo "$1" enqueue --worktree "$1" "${@:2}"; }  # enqueue against the sandbox repo
-ENQ="--capture-sha --allow-branch-mismatch"
+enq(){ # enqueue from the actual clean task branch, as a real agent does
+  repo="$1"; shift; branch=""; previous=""
+  for value in "$@"; do
+    [ "$previous" = "--branch" ] && branch="$value"
+    previous="$value"
+  done
+  [ -n "$branch" ] || { echo "enq helper: missing --branch" >&2; return 2; }
+  original=$(gitq "$repo" branch --show-current)
+  gitq "$repo" switch -q "$branch"
+  "$MT" --repo "$repo" enqueue --worktree "$repo" "$@"
+  rc=$?
+  [ -z "$original" ] || gitq "$repo" switch -q "$original"
+  return "$rc"
+}
+
+deploy_json(){ # preview/validate, then execute the exact machine plan
+  repo="$1"
+  preview=$("$MT" --repo "$repo" deploy --json); preview_rc=$?
+  result=$(printf '%s' "$preview" | jget result 2>/dev/null || true)
+  if [ "$result" != "confirmation_required" ]; then
+    printf '%s\n' "$preview"
+    return "$preview_rc"
+  fi
+  plan=$(printf '%s' "$preview" | jget deploy_plan_sha)
+  "$MT" --repo "$repo" deploy --expected-plan "$plan" --json
+}
+
+ENQ=""
 section(){ echo; echo "=== $1 ==="; }
 
 section "S0  Packaging smoke (installed console script)"
@@ -174,7 +214,9 @@ PYEOF
 )"
 [ "$("$MT" --version)" = "mergetrain $SRC_VERSION" ] && ok "version" || no "version=$("$MT" --version) expected=$SRC_VERSION"
 "$MT" --help >/dev/null 2>&1 && ok "--help exit 0" || no "--help nonzero"
-[ "$("$MT" agent-contract --json | jget boundary.deploy_requires)" = "either explicit approval after a human-readable exact-train summary or prior explicit bounded unattended-deployment approval; an opaque train ID is binding evidence, not a user-facing explanation" ] && ok "agent-contract well-formed (nested leaf)" || no "agent-contract"
+help_text=$("$MT" --help)
+{ echo "$help_text" | grep -q '{init,status,enqueue,validate,deploy,inspect}' && ! echo "$help_text" | grep -q 'doctor'; } \
+  && ok "help exposes only the six core verbs" || no "public help grammar drifted"
 "$VPY" -c "import mergetrain, mergetrain.cli, mergetrain.store, mergetrain.git_runner, mergetrain.daemon, mergetrain.dashboard, mergetrain.snapshot" 2>/dev/null && ok "imports" || no "imports"
 "$VPY" -c "from pathlib import Path; import mergetrain; assert Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()" 2>/dev/null && ok "dashboard assets packaged" || no "dashboard assets missing"
 "$MT" dashboard --help >/dev/null 2>&1 && ok "dashboard help" || no "dashboard help failed"
@@ -186,21 +228,21 @@ INITD="$WORK/initrepo"; rm -rf "$INITD"; mkdir -p "$INITD"; git init -q "$INITD"
 [ -f "$INITD/.mergetrain.yaml" ] && ok "config written" || no "config missing"
 [ -f "$INITD/AGENTS.mergetrain.md" ] && ok "AGENTS.mergetrain.md" || no "AGENTS doc missing"
 [ -f "$INITD/CLAUDE.mergetrain.md" ] && ok "CLAUDE.mergetrain.md" || no "CLAUDE doc missing"
-"$MT" --repo "$INITD" init --project demo --write >/dev/null 2>&1 && no "re-init w/o --force should fail" || ok "re-init refused w/o --force"
+"$MT" --repo "$INITD" init --project demo --write >/dev/null 2>&1 && no "re-init should refuse overwrite" || ok "re-init refused overwrite"
 
-section "S1b  doctor on UNCONFIGURED repo degrades safely"
+section "S1b  status on UNCONFIGURED repo degrades safely"
 NOCFG="$WORK/nocfg"; rm -rf "$NOCFG"; mkdir -p "$NOCFG"; git init -q "$NOCFG"
-dj=$("$MT" --repo "$NOCFG" doctor --json); drc=$?
-[ "$drc" = "0" ] && ok "doctor exit 0 on missing config" || no "doctor hard-failed rc=$drc"
-[ "$(echo "$dj" | jget ok)" = "True" ] && ok "doctor ok=True (command ran)" || no "ok not True"
-[ "$(echo "$dj" | jget health)" = "False" ] && ok "health=False (no config)" || no "health not False"
-[ "$(echo "$dj" | jget config_exists)" = "False" ] && ok "config_exists=False" || no "config_exists wrong"
+dj=$("$MT" --repo "$NOCFG" status --diagnose --json); drc=$?
+[ "$drc" = "0" ] && ok "status exit 0 on missing config" || no "status hard-failed rc=$drc"
+[ "$(echo "$dj" | jget ok)" = "True" ] && ok "status ok=True (command ran)" || no "ok not True"
+[ "$(echo "$dj" | jget health)" = "unconfigured" ] && ok "health=unconfigured" || no "health not unconfigured"
+[ "$(echo "$dj" | jget diagnostics.config_exists)" = "False" ] && ok "config_exists=False" || no "config_exists wrong"
 # Degrading safely means naming the blocker: every queue-advancing command
 # refuses without a config, so advising a branch enqueue here would be advice
 # that cannot succeed. status must agree -- both are mandated reads.
-[ "$(echo "$dj" | jget next_action)" = "initialize_config" ] && ok "next_action=initialize_config" || no "next_action wrong"
+[ "$(echo "$dj" | jget next_action.code)" = "initialize_config" ] && ok "next_action=initialize_config" || no "next_action wrong"
 sj=$("$MT" --repo "$NOCFG" status --json)
-[ "$(echo "$sj" | jget next_action)" = "initialize_config" ] && ok "status agrees on next_action" || no "status next_action disagrees"
+[ "$(echo "$sj" | jget next_action.code)" = "initialize_config" ] && ok "status agrees on next_action" || no "status next_action disagrees"
 ej=$("$MT" --repo "$NOCFG" enqueue --task t --branch main --json 2>&1); erc=$?
 { [ "$erc" = 1 ] && [ "$(echo "$ej" | jget error.code)" = "config_error" ]; } \
   && ok "enqueue refuses the advised-against path (config_error)" || no "enqueue did not fail closed: rc=$erc"
@@ -208,18 +250,18 @@ ej=$("$MT" --repo "$NOCFG" enqueue --task t --branch main --json 2>&1); erc=$?
 section "S1c  malformed config -> clean error, no traceback"
 R=$(setup s1c)
 printf 'project:\n  name: e2e\n bad-indent: x\n' > "$R/.mergetrain.yaml"
-err=$("$MT" --repo "$R" doctor --json 2>&1); rc=$?
+err=$("$MT" --repo "$R" status --diagnose --json 2>&1); rc=$?
 { [ "$rc" = 1 ] && [ "$(echo "$err" | jget error.code 2>/dev/null)" = "config_error" ] && ! printf '%s' "$err" | grep -q 'Traceback'; } \
   && ok "malformed config: clean error, exit 1, no traceback" || no "malformed config rc=$rc err=$err"
 
 section "S1d  explicit empty push refs fail closed"
 R=$(setup s1d)
 printf 'git:\n  remote: origin\n  integration_branch: main\n  push_refs: []\n' > "$R/.mergetrain.yaml"
-err=$("$MT" --repo "$R" doctor --json 2>&1); rc=$?
+err=$("$MT" --repo "$R" status --diagnose --json 2>&1); rc=$?
 { [ "$rc" = 1 ] && [ "$(echo "$err" | jget error.code 2>/dev/null)" = "config_error" ] && echo "$err" | grep -q 'at least one ref'; } \
   && ok "empty push_refs rejected instead of defaulting to main" || no "empty push_refs accepted: rc=$rc err=$err"
 
-section "S2/S3  enqueue, status, doctor, duplicate guard"
+section "S2/S3  enqueue, status, duplicate guard"
 R=$(setup s2); make_branch "$R" feature/a a.txt aaa
 ej=$(enq "$R" --task "feat a" --branch feature/a $ENQ --json)
 [ "$(echo "$ej" | jget job.status)" = "queued" ] && ok "enqueue -> queued" || no "enqueue: $ej"
@@ -227,15 +269,15 @@ hs=$(echo "$ej" | jget job.head_sha); bs=$(echo "$ej" | jget job.base_sha)
 is_sha "$hs" && ok "head_sha is a 40-hex SHA" || no "head_sha not a SHA: $hs"
 is_sha "$bs" && ok "base_sha is a 40-hex SHA" || no "base_sha not a SHA: $bs"
 [ "$hs" != "$bs" ] && ok "base_sha != head_sha (a real diff captured)" || no "base==head"
-[ "$("$MT" --repo "$R" status --json | jget jobs.0.branch)" = "feature/a" ] && ok "status lists job" || no "status missing"
-[ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "run_batch_validate" ] && ok "doctor next_action=run_batch_validate" || no "doctor next_action wrong"
+[ "$("$MT" --repo "$R" status --json | jget recent_jobs.0.branch)" = "feature/a" ] && ok "status lists job" || no "status missing"
+[ "$("$MT" --repo "$R" status --json | jget next_action.code)" = "validate_queued_jobs" ] && ok "status next_action=validate_queued_jobs" || no "status next_action wrong"
 echo "$(enq "$R" --task dup --branch feature/a $ENQ --json 2>&1)" | grep -qi "already has an active job" && ok "duplicate active branch rejected" || no "dup not rejected"
 
-section "S4  run-batch --validate-only  (NO push; gate runs once; verify skipped)"
+section "S4  validate  (NO push; gate runs once; verify skipped)"
 R=$(setup s4); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
-rb=$("$MT" --repo "$R" run-batch --validate-only --json)
+rb=$("$MT" --repo "$R" validate --json)
 [ "$(echo "$rb" | jget jobs.0.status)" = "validated" ] && ok "job validated" || no "validate: $rb"
 [ "$before" = "$(remote_main "$(dirname "$R")")" ] && ok "remote UNCHANGED by validate" || no "remote changed on validate!"
 [ "$(cat "$(dirname "$R")/gate.marker" 2>/dev/null)" = "x" ] && ok "gate ran exactly once" || no "gate marker wrong"
@@ -246,18 +288,17 @@ R=$(setup s4b); D=$(dirname "$R")
 make_branch "$R" feature/a a.txt aaa; make_branch "$R" feature/b b.txt bbb
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 enq "$R" --task b --branch feature/b $ENQ >/dev/null 2>&1
-vr=$("$MT" --repo "$R" run-batch --validate-only --json)
+vr=$("$MT" --repo "$R" validate --json)
 tid=$(echo "$vr" | jget jobs.0.train_id)
 [ -n "$tid" ] && [ "$tid" = "$(echo "$vr" | jget jobs.1.train_id)" ] && ok "validation records one shared train_id" || no "missing/mismatched train_id"
-[ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "deploy_validated_train_when_approved" ] && ok "doctor points to approved-train deploy" || no "doctor next_action wrong after validate"
+[ "$("$MT" --repo "$R" status --json | jget next_action.code)" = "deploy_when_approved" ] && ok "status points to deploy" || no "status next_action wrong after validate"
 [ "$("$MT" --repo "$R" gc --json | "$VPY" -c "import sys,json; print(len(json.load(sys.stdin)['branch_candidates']))")" = "0" ] && ok "validated branches excluded from GC" || no "validated branch appeared in GC"
 make_branch "$R" feature/later later.txt later
 enq "$R" --task later --branch feature/later $ENQ >/dev/null 2>&1
 printf 'integration moved\n' > "$R/base-moved.txt"; gitq "$R" add base-moved.txt; gitq "$R" commit -q -m "move integration"; gitq "$R" push -q origin main
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
-stj=$("$MT" --repo "$R" status --json)
-{ [ "$(echo "$stj" | job_field feature/a status)" = deployed ] && [ "$(echo "$stj" | job_field feature/b status)" = deployed ]; } && ok "validated train deployed" || no "validated jobs not deployed"
-[ "$(echo "$stj" | job_field feature/later status)" = queued ] && ok "newer queued job excluded from approved train" || no "new queued job was consumed"
+rb=$(deploy_json "$R")
+{ [ "$(job_field "$R" feature/a status)" = deployed ] && [ "$(job_field "$R" feature/b status)" = deployed ]; } && ok "validated train deployed" || no "validated jobs not deployed"
+[ "$(job_field "$R" feature/later status)" = queued ] && ok "newer queued job excluded from approved train" || no "new queued job was consumed"
 [ "$(git -C "$D/remote.git" show main:base-moved.txt 2>/dev/null)" = "integration moved" ] && ok "integration movement preserved" || no "moved integration content missing"
 git -C "$D/remote.git" show main:later.txt >/dev/null 2>&1 && no "new queued content leaked" || ok "new queued content not deployed"
 [ "$(cat "$D/gate.marker" 2>/dev/null)" = "xx" ] && ok "gates reran before validated deploy" || no "validated deploy did not rerun gates"
@@ -265,19 +306,19 @@ git -C "$D/remote.git" show main:later.txt >/dev/null 2>&1 && no "new queued con
 section "S4c  changed task HEAD blocks validated deploy"
 R=$(setup s4c); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
-"$MT" --repo "$R" run-batch --validate-only --json >/dev/null
+"$MT" --repo "$R" validate --json >/dev/null
 before=$(remote_main "$D")
 gitq "$R" switch -q feature/a; printf 'changed\n' > "$R/changed.txt"; gitq "$R" add changed.txt; gitq "$R" commit -q -m "change after validation"; gitq "$R" switch -q main
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 [ "$(echo "$rb" | jget jobs.0.status)" = "blocked" ] && ok "changed validated HEAD blocked" || no "changed HEAD was not blocked: $rb"
 [ "$before" = "$(remote_main "$D")" ] && ok "remote unchanged after identity failure" || no "remote changed after identity failure"
 [ "$(cat "$D/gate.marker" 2>/dev/null)" = "x" ] && ok "deploy gates skipped after identity failure" || no "gate unexpectedly reran"
 
-section "S5  run-batch --deploy  (atomic push updates remote; verify runs)"
+section "S5  deploy  (atomic push updates remote; verify runs)"
 R=$(setup s5); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 dsha=$(echo "$rb" | jget jobs.0.deploy_sha)
 [ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "job deployed" || no "deploy: $rb"
 after=$(remote_main "$(dirname "$R")")
@@ -290,40 +331,40 @@ section "S5b  post-push verify FAILURE -> deployed + warning note (not failed)"
 R=$(setup s5b verifyfail); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 dsha=$(echo "$rb" | jget jobs.0.deploy_sha)
 [ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "still DEPLOYED despite verify failure" || no "status not deployed: $rb"
 after=$(remote_main "$(dirname "$R")")
 { [ "$before" != "$after" ] && [ "$after" = "$dsha" ]; } && ok "atomic push still landed before verify ran" || no "remote not at deploy_sha"
 echo "$(echo "$rb" | jget jobs.0.note)" | grep -qi "post-push verify warning" && ok "failure recorded as non-blocking warning note" || no "no verify-warning note"
-[ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "enqueue_clean_branch" ] && ok "warned deploy is terminal-clean (not fix_blocked_job)" || no "doctor next_action wrong"
+[ "$("$MT" --repo "$R" status --json | jget next_action.code)" = "enqueue_clean_branch" ] && ok "warned deploy is terminal-clean (not fix_blocked_job)" || no "status next_action wrong"
 
 section "S5c  multiple push_refs (atomic fan-out to >1 ref)"
 R=$(setup s5c multiref); D=$(dirname "$R")
 gitq "$R" push -q origin main:release >/dev/null 2>&1   # create the second remote ref
 make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 dsha=$(echo "$rb" | jget jobs.0.deploy_sha)
 [ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "deployed with 2 push_refs" || no "multiref deploy: $rb"
 [ "$(git -C "$D/remote.git" rev-parse main 2>/dev/null)" = "$dsha" ] && ok "main advanced to deploy_sha" || no "main not at deploy_sha"
 [ "$(git -C "$D/remote.git" rev-parse release 2>/dev/null)" = "$dsha" ] && ok "release advanced to deploy_sha (fan-out)" || no "release not at deploy_sha"
 
-section "S6  run-next single-job deploy"
+section "S6  single-job deploy uses the same train path"
 R=$(setup s6); make_branch "$R" feature/solo a.txt solo
 enq "$R" --task solo --branch feature/solo $ENQ >/dev/null 2>&1
-rb=$("$MT" --repo "$R" run-next --deploy --json)
-[ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "run-next deployed one job" || no "run-next: $rb"
-[ "$(git -C "$(dirname "$R")/remote.git" show main:a.txt 2>/dev/null)" = "solo" ] && ok "run-next pushed to remote" || no "run-next remote content"
+rb=$(deploy_json "$R")
+[ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "deploy handled one job" || no "single-job deploy: $rb"
+[ "$(git -C "$(dirname "$R")/remote.git" show main:a.txt 2>/dev/null)" = "solo" ] && ok "deploy pushed single-job content" || no "single-job remote content"
 
-section "S7  batch of 2 non-conflicting branches (gate runs once)"
+section "S7  batch of 2 non-conflicting branches (one validation + one pre-push gate)"
 R=$(setup s7); make_branch "$R" feature/a a.txt aaa; make_branch "$R" feature/b b.txt bbb
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 enq "$R" --task b --branch feature/b $ENQ >/dev/null 2>&1
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 s0=$(echo "$rb" | jget jobs.0.status); s1=$(echo "$rb" | jget jobs.1.status)
 { [ "$s0" = deployed ] && [ "$s1" = deployed ]; } && ok "both deployed" || no "batch: $s0,$s1"
-[ "$(cat "$(dirname "$R")/gate.marker" 2>/dev/null)" = "x" ] && ok "gate ran ONCE for the train" || no "gate ran multiple times"
+[ "$(cat "$(dirname "$R")/gate.marker" 2>/dev/null)" = "xx" ] && ok "validation and pre-push gate each ran once" || no "unexpected batch gate count"
 af=$(remote_main "$(dirname "$R")")
 { [ -n "$(git -C "$(dirname "$R")/remote.git" show "$af:a.txt" 2>/dev/null)" ] && [ -n "$(git -C "$(dirname "$R")/remote.git" show "$af:b.txt" 2>/dev/null)" ]; } && ok "both files on remote" || no "files missing on remote"
 
@@ -333,12 +374,14 @@ gitq "$R" switch -q -c feature/x main; printf 'X\nline2\n' > "$R/app.txt"; gitq 
 gitq "$R" switch -q -c feature/y main; printf 'Y\nline2\n' > "$R/app.txt"; gitq "$R" commit -qam y; gitq "$R" switch -q main
 enq "$R" --task x --branch feature/x $ENQ >/dev/null 2>&1
 enq "$R" --task y --branch feature/y $ENQ >/dev/null 2>&1
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 allst=$(echo "$rb" | "$VPY" -c "import sys,json;print(','.join(sorted(j['status'] for j in json.load(sys.stdin)['jobs'])))")
 echo "    statuses: [$allst]"
 [ "$(echo "$rb" | jget result)" = "partial" ] && ok "partial batch reports result=partial" || no "partial result not reported"
 echo "$allst" | grep -q blocked && ok "conflicting job blocked" || no "no blocked: $allst"
-echo "$allst" | grep -q deployed && ok "other job deployed" || no "no deployed: $allst"
+echo "$allst" | grep -q validated && ok "other job validated" || no "no validated survivor: $allst"
+rb=$(deploy_json "$R")
+[ "$(echo "$rb" | jget jobs.0.status)" = deployed ] && ok "surviving train deployed after review" || no "surviving train not deployed: $rb"
 
 section "S8b  batch gate-failure ISOLATION (poison branch failed, sibling deployed)"
 R=$(setup s8b combinedfail); D=$(dirname "$R")
@@ -346,30 +389,30 @@ make_branch "$R" feature/a a.txt aaa; make_branch "$R" feature/b b.txt bbb
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 enq "$R" --task b --branch feature/b $ENQ >/dev/null 2>&1
 before=$(remote_main "$D")
-"$MT" --repo "$R" run-batch --deploy --json >/dev/null 2>&1
-stj=$("$MT" --repo "$R" status --json)
-[ "$(echo "$stj" | job_field feature/a status)" = "deployed" ] && ok "innocent branch deployed" || no "innocent not deployed"
-[ "$(echo "$stj" | job_field feature/b status)" = "failed" ] && ok "poison branch isolated as failed" || no "poison not failed"
+deploy_json "$R" >/dev/null 2>&1 || true
+deploy_json "$R" >/dev/null 2>&1
+[ "$(job_field "$R" feature/a status)" = "deployed" ] && ok "innocent branch deployed" || no "innocent not deployed"
+[ "$(job_field "$R" feature/b status)" = "failed" ] && ok "poison branch isolated as failed" || no "poison not failed"
 [ "$(git -C "$D/remote.git" show main:a.txt 2>/dev/null)" = "aaa" ] && ok "innocent content on remote" || no "innocent content missing"
 git -C "$D/remote.git" show main:b.txt >/dev/null 2>&1 && no "poison content leaked to remote" || ok "poison content NOT on remote"
-[ "$(remote_main "$D")" = "$(echo "$stj" | job_field feature/a deploy_sha)" ] && ok "remote == innocent deploy_sha" || no "remote != innocent deploy_sha"
+[ "$(remote_main "$D")" = "$(job_field "$R" feature/a deploy_sha)" ] && ok "remote == innocent deploy_sha" || no "remote != innocent deploy_sha"
 
 section "S9  gate failure -> failed, remote NOT updated"
 R=$(setup s9 gatefail); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
-rb=$("$MT" --repo "$R" run-batch --deploy --json); rc=$?
+rb=$(deploy_json "$R"); rc=$?
 { [ "$rc" = 1 ] && [ "$(echo "$rb" | jget ok)" = "True" ] && [ "$(echo "$rb" | jget result)" = "failed" ] && [ "$(echo "$rb" | jget jobs.0.status)" = "failed" ]; } \
   && ok "job failure returns result=failed and exit 1" || no "failure outcome incorrect: rc=$rc payload=$rb"
 [ "$before" = "$(remote_main "$(dirname "$R")")" ] && ok "remote UNCHANGED (no push on gate fail)" || no "remote changed despite gate fail!"
-[ "$("$MT" --repo "$R" doctor --json | jget next_action)" = "fix_blocked_job" ] && ok "doctor=fix_blocked_job" || no "doctor next_action wrong"
+[ "$("$MT" --repo "$R" status --json | jget next_action.code)" = "fix_blocked_job" ] && ok "status=fix_blocked_job" || no "status next_action wrong"
 
 section "S9b  push REJECTED by remote -> blocked (policy, not bad code), remote unchanged"
 R=$(setup s9b); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 hk="$D/remote.git/hooks/pre-receive"; printf '#!/bin/sh\necho "remote: ref locked" >&2\nexit 1\n' > "$hk"; chmod +x "$hk"
 before=$(remote_main "$D")
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 jid=$(echo "$rb" | jget jobs.0.id)
 # A pre-receive decline is a policy/permission rejection, not bad code:
 # the job parks blocked (not failed) and inspect classifies push_rejected.
@@ -381,16 +424,16 @@ echo "$(echo "$rb" | jget jobs.0.note)" | grep -Eqi 'reject|push|locked' && ok "
 section "S10  lock: concurrent run rejected while a runner holds it"
 R=$(setup s10 sleep); make_branch "$R" feature/a a.txt aaa
 jid=$(enq "$R" --task a --branch feature/a $ENQ --json | jget job.id)
-"$MT" --repo "$R" run-batch --validate-only --json >/dev/null 2>&1 &
+"$MT" --repo "$R" validate --json >/dev/null 2>&1 &
 BG=$!
 held=no
 for i in $(seq 1 50); do
-  [ "$("$MT" --repo "$R" status --json | jget lock.liveness 2>/dev/null)" = "alive" ] && { held=yes; break; }
+  [ "$("$MT" --repo "$R" status --diagnose --json | jget diagnostics.lock.liveness 2>/dev/null)" = "alive" ] && { held=yes; break; }
   sleep 0.1
 done
 if [ "$held" = yes ]; then
   ok "background runner is provably holding the lock"
-  second=$("$MT" --repo "$R" run-batch --validate-only --json 2>&1); rc=$?
+  second=$("$MT" --repo "$R" validate --json 2>&1); rc=$?
   { [ $rc -ne 0 ] && echo "$second" | grep -qi "lock is held"; } && ok "concurrent run rejected with lock error" || no "concurrent run NOT rejected (rc=$rc): $second"
 else
   no "lock never became alive within timeout"
@@ -454,7 +497,7 @@ R=$(setup s10ba); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 sqlexec "$R/.mergetrain/queue.sqlite" "UPDATE deploy_queue SET status='in_progress', started_at='2000-01-01T00:00:00Z';"
 before=$(remote_main "$D")
-rb=$("$MT" --repo "$R" run-batch --deploy --json)
+rb=$(deploy_json "$R")
 [ "$(echo "$rb" | jget jobs.0.status)" = "deployed" ] && ok "orphan in_progress requeued and deployed" || no "recovery: $rb"
 [ "$before" != "$(remote_main "$D")" ] && ok "remote advanced after recovery" || no "remote not advanced"
 # (C) Live owner + expired lease + in_progress -> refuse (operator must intervene).
@@ -462,7 +505,7 @@ R=$(setup s10bc); D=$(dirname "$R"); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
 sqlexec "$R/.mergetrain/queue.sqlite" "UPDATE deploy_queue SET status='in_progress'; INSERT INTO locks(name,owner,worktree_path,head_sha,acquired_at,expires_at) VALUES('runner','ghost:$$','','','2000-01-01T00:00:00Z','2000-01-01T00:00:00Z');"
 before=$(remote_main "$D")
-out=$("$MT" --repo "$R" run-batch --deploy --json 2>&1); rc=$?
+out=$("$MT" --repo "$R" deploy --json 2>&1); rc=$?
 { [ $rc -ne 0 ] && echo "$out" | grep -qi "in-progress"; } && ok "live+expired lock with in_progress refused" || no "not refused: rc=$rc $out"
 [ "$before" = "$(remote_main "$D")" ] && ok "remote unchanged while held back" || no "remote changed on refusal"
 
@@ -472,15 +515,14 @@ enq "$R" --task auto   --branch feature/auto   $ENQ --auto >/dev/null 2>&1
 enq "$R" --task manual --branch feature/manual $ENQ        >/dev/null 2>&1
 before=$(remote_main "$(dirname "$R")")
 "$MT" --repo "$R" daemon --once >/dev/null 2>&1
-stj=$("$MT" --repo "$R" status --json)
-[ "$(echo "$stj" | job_field feature/auto status)" = deployed ] && ok "auto job deployed by daemon" || no "auto not deployed"
-[ "$(echo "$stj" | job_field feature/manual status)" = queued ] && ok "manual job skipped (still queued)" || no "manual not queued"
+[ "$(job_field "$R" feature/auto status)" = deployed ] && ok "auto job deployed by daemon" || no "auto not deployed"
+[ "$(job_field "$R" feature/manual status)" = queued ] && ok "manual job skipped (still queued)" || no "manual not queued"
 [ "$before" != "$(remote_main "$(dirname "$R")")" ] && ok "remote updated by daemon" || no "remote not updated by daemon"
 
 section "S12  gc cleans kept temporary worktrees"
 R=$(setup s12); make_branch "$R" feature/a a.txt aaa
 enq "$R" --task a --branch feature/a $ENQ >/dev/null 2>&1
-"$MT" --repo "$R" run-batch --validate-only --keep-worktree --json >/dev/null 2>&1
+"$MT" --repo "$R" validate --keep-worktree --json >/dev/null 2>&1
 cand=$("$MT" --repo "$R" gc --json | "$VPY" -c "import sys,json;print(len(json.load(sys.stdin).get('worktree_candidates',[])))")
 [ "${cand:-0}" -ge 1 ] && ok "gc dry-run finds kept worktree (n=$cand)" || no "gc found no candidates"
 "$MT" --repo "$R" gc --apply --json >/dev/null 2>&1

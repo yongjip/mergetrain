@@ -99,7 +99,7 @@ policy, environment, and ordered train identity hashes. This makes the approval
 target machine-readable and lets the deploy runner reject partial or changed
 trains.
 
-`status` and `doctor` compare `validation_base_sha` with the locally known
+`status --diagnose` compares `validation_base_sha` with the locally known
 integration ref. A changed base does not revoke deploy eligibility: deploy
 reassembles the exact member HEADs on the current integration tip and reruns the
 gates before push. The diagnostic prevents an earlier gate result from being
@@ -254,7 +254,8 @@ CREATE TABLE IF NOT EXISTS recovery_operation_events (
 ```
 
 Schema version 11 inserts one `tracking` baseline and then records a `started`
-event before each CLI `reconcile` or `recover` invocation. A separate terminal
+event before each recovery invocation. Historical `recover` entries remain
+readable; v3 writes `reconcile`. A separate terminal
 event records success, conflict, expected refusal, or error. If the process
 dies between them, the invocation remains visibly incomplete. This sparse
 local ledger is unbounded; it contains only command kind, apply mode, aggregate
@@ -308,28 +309,36 @@ not add policy or hide transactions.
 | `in_progress` | Claimed by a runner with a unique lease token. |
 | `blocked` | Merge conflict or a policy situation needing human action. |
 | `failed` | Command failure or unexpected error. |
-| `validated` | A `--validate-only` run succeeded; the exact train remains deployable and nothing was pushed. |
+| `validated` | A `validate` run succeeded; the exact train remains deployable and nothing was pushed. |
 | `needs_reconcile` | A durable push marker exists but the remote outcome is not yet proven; deploy remains paused until reconcile resolves it. |
-| `deployed` | A `--deploy` push succeeded; inspect `verify_status` for the independent post-push outcome. |
+| `deployed` | A `deploy` push succeeded; inspect `verify_status` for the independent post-push outcome. |
 | `canceled` | Cancelled by a user. |
 
 A branch may only re-enter the queue once its previous job is terminal.
 
+Routine output projects these details into five product states: Waiting,
+Running, Ready, Attention, and Done. The database vocabulary remains detailed
+because crash recovery requires it; users branch on the projection and inspect
+detail only when needed.
+
 **All claims are atomic.** Lock acquisition, job selection, and the transition to
 `in_progress` occur in one `BEGIN IMMEDIATE` transaction. Every selected row
-receives the lock's unique claim token. A manual batch deploy claims the only
-complete validated train and leaves newer queued jobs untouched; if multiple
-validated trains exist, `--train-id` is required.
+receives the lock's unique claim token. Manual deploy claims the oldest complete
+eligible validated train and leaves newer validated or queued jobs untouched.
+The selected train ID is bound internally and is never a user input.
 
 ## Runner behavior
 
-### Single job (`run-next`)
+### Validation and deployment
 
-The runner creates the log directory and a unique integration worktree path, then: `git fetch <remote>` → `git worktree add --detach <path> <integration_ref>` → `git merge --no-edit <branch>` → clean-worktree check → record `deploy_sha` → `git diff --check` → run gates → (deploy mode) atomic push → (deploy mode) verify hooks → remove the temp worktree (unless `--keep-worktree`) → record final status. Subprocess output streams to the job log while a polling loop renews the lease, checks cancellation, and enforces `command_timeout_seconds`. Losing the token stops the process group and prevents stale state writes.
+The shared runner handles one or many jobs. It creates a unique integration
+worktree, fetches the configured remote, merges each exact task commit, checks
+tree integrity, runs gates, and removes the temporary worktree. Subprocess
+output streams to the job log while a polling loop renews the lease, checks
+cancellation, and enforces command timeouts. Losing the token stops the process
+group and prevents stale state writes.
 
-### Batch / merge train (`run-batch`)
-
-During validation, the runner merges all queued jobs into one integration
+During `validate`, the runner merges all queued jobs into one integration
 worktree in order. A branch that conflicts is marked `blocked`, `git merge
 --abort` is attempted, and the remaining jobs are still tried. Gates then run
 **once** over the whole train. If a pre-push gate fails, the train is torn
@@ -358,8 +367,8 @@ than shipping a subset. On success, every member is marked `deployed` with the
 new shared `deploy_sha`.
 
 Validated-gate reuse is an explicit optimization layered on top of that safe
-default. Configuration (`deploy.reuse.enabled`) or the deploy command
-(`--reuse-validated`) must authorize it. The runner checks the exact integration
+default. Committed configuration (`deploy.reuse.enabled`) must authorize it;
+v3 has no per-deploy override. The runner checks the exact integration
 base, current task heads, ordered train identity, validation commit and tree,
 semantic gate/fingerprint policy, adapter-provided environment hash, and age.
 Only the unchanged case restores and pushes the exact `validation_sha` while
@@ -531,10 +540,17 @@ On success every merged job shares that `deploy_sha`. A conflicting branch becom
 
 mergetrain is built so an LLM agent can operate it reliably:
 
-- **Non-interactive.** Every agent-facing command is non-interactive; ambiguous intent fails. A bare `run-batch` is rejected — `--validate-only` or `--deploy` is required.
-- **JSON-first.** JSON mode returns structured success, partial failure, and error payloads; job failures return exit code `1` instead of `ok: true`.
-- **Next safe action.** `doctor --json` emits a `next_action` so an agent does not have to infer one.
-- **Explicit consent.** Deploy needs `--deploy`; validation needs `--validate-only`; unattended eligibility needs `--auto`; destructive cleanup needs `gc --apply`; branch deletion needs `gc --delete-branches`.
+- **Small grammar.** Normal work uses `init`, `status`, `enqueue`, `validate`,
+  `deploy`, and `inspect`.
+- **JSON-first.** JSON mode returns structured success, partial failure, and
+  error payloads; a job failure returns a nonzero exit.
+- **Next safe action.** `status --json` emits an exact `next_action` so an agent
+  does not infer one.
+- **Explicit consent.** Interactive deploy shows and confirms one exact plan;
+  unattended eligibility needs bounded `--auto` approval; destructive cleanup
+  needs `gc --apply`.
+- **Machine detail stays internal.** Agents and users do not copy commit SHAs,
+  train IDs, or deploy-plan hashes.
 
 The full operating contract is in [agent-contract.md](agent-contract.md).
 
@@ -542,12 +558,9 @@ The full operating contract is in [agent-contract.md](agent-contract.md).
 
 The core ships no provider APIs for Kubernetes, AWS, Argo, Vercel, GitHub, GitLab, or any service-specific platform. Provider behavior is expressed through shell commands in `gates` and `deploy.verify`, or through a thin adapter outside the core package — see the [adapter pattern](adapter-pattern.md).
 
-## Roadmap
+## Product direction
 
-`0.1.0` ships the core: SQLite-backed queue, PID-aware runner lock, Git worktree merge trains, configurable gates and atomic push refs, the auto-only daemon, and JSON-first `doctor`/`status`/`agent-contract`/`gc`. Candidate next steps:
-
-- `mergetrain config validate` as a standalone preflight command (runtime loading already rejects blank refs, duplicate gate names, invalid queue timing, and empty `push_refs`).
-- Observability follow-ups: `mergetrain logs <job_id>`, `mergetrain inspect <job_id> --json`, machine-readable failure categories, optional metrics export.
-- Daemon operations: recommended log rotation, a stale-lock inspection command, and a health-check pattern.
-- A protected-branch guard list and documented branch-naming conventions for `gc --delete-branches`.
-- Packaging/release hardening: classifiers, a release workflow, and editable-install / old-pip fallbacks.
+Version 3 freezes the six-verb core grammar and the five-tool MCP surface. The
+next work is external adoption evidence and authority/recovery benchmarks, not
+new engine features. A new public surface must pass the evidence-based
+[product-scope admission test](product-scope.md).

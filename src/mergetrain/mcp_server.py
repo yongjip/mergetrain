@@ -21,13 +21,14 @@ import asyncio
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from .errors import redact_secrets
 
@@ -45,9 +46,7 @@ try:
     class _DeployConfirmation(BaseModel):  # type: ignore[no-redef]
         """The one thing a human has to check for a deploy to proceed."""
 
-        confirm: bool = Field(
-            default=False, description="Deploy this validated train now"
-        )
+        confirm: bool = Field(default=False, description="Deploy this validated train now")
 
 except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     _DeployConfirmation = None  # type: ignore[assignment, misc]
@@ -61,7 +60,7 @@ INSTALL_HINT = (
 # child cannot hold the server's event loop forever.
 _CLI_TIMEOUT_SECONDS = 3600
 _CLI_TERMINATE_GRACE_SECONDS = 5.0
-_LOG_TAIL_MAX_LINES = 500
+_LOG_TAIL_MAX_LINES = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,9 +168,7 @@ async def _stop_cli_process(process: asyncio.subprocess.Process) -> bool:
                     # CTRL_BREAK event. taskkill remains the tree-safe fallback.
                     await _stop_windows_process_tree(process)
         stopped = True
-        await asyncio.wait_for(
-            process.wait(), timeout=_CLI_TERMINATE_GRACE_SECONDS
-        )
+        await asyncio.wait_for(process.wait(), timeout=_CLI_TERMINATE_GRACE_SECONDS)
     except ProcessLookupError:
         await process.wait()
     except asyncio.TimeoutError:
@@ -228,9 +225,7 @@ class MergetrainTools:
         if os.name == "posix":
             popen_options["start_new_session"] = True
         else:  # pragma: no cover - exercised by Windows CI
-            popen_options["creationflags"] = getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-            )
+            popen_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         process = await asyncio.create_subprocess_exec(*argv, **popen_options)
         communicate_task = asyncio.create_task(process.communicate())
         try:
@@ -239,9 +234,7 @@ class MergetrainTools:
             )
         except asyncio.TimeoutError as exc:
             await _stop_and_drain(process, communicate_task)
-            raise subprocess.TimeoutExpired(
-                cmd=argv, timeout=_CLI_TIMEOUT_SECONDS
-            ) from exc
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=_CLI_TIMEOUT_SECONDS) from exc
         except BaseException:
             # Shield cleanup so the cancellation already delivered to this task
             # cannot strand the child. Re-raise the original CancelledError (or
@@ -302,51 +295,16 @@ class MergetrainTools:
     # --- read-only -------------------------------------------------------
 
     async def status(self, limit: int = 20) -> dict[str, Any]:
-        """Queue, runner lock, validated trains, and the advisory next action."""
+        """Current queue state, action-required work, and the exact next action."""
 
         return await self._json(["status", "--json", "--limit", str(max(1, min(limit, 200)))])
 
-    async def doctor(self) -> dict[str, Any]:
-        """Repository health, effective config, and the advisory next action."""
-
-        return await self._json(["doctor", "--json"])
-
-    async def inspect_job(self, job_id: int) -> dict[str, Any]:
+    async def _inspect_job(self, job_id: int) -> dict[str, Any]:
         """One job with its latest run, failure category, and train outcome."""
 
         return await self._json(["inspect", str(job_id), "--json"])
 
-    async def history(self, limit: int = 50, since: str = "") -> dict[str, Any]:
-        """Retained train and job history with gate outcomes."""
-
-        args = ["history", "--json", "--limit", str(max(1, min(limit, 500)))]
-        if since:
-            args += ["--since", since]
-        return await self._json(args)
-
-    async def stats(self, since: str = "") -> dict[str, Any]:
-        """Land rate, latency, queue time, and per-gate timing."""
-
-        args = ["stats", "--json"]
-        if since:
-            args += ["--since", since]
-        return await self._json(args)
-
-    async def agent_contract(self) -> dict[str, Any]:
-        """The operating contract: free commands, gated ones, and next actions."""
-
-        return await self._json(["agent-contract", "--json"])
-
-    async def gc_preview(self) -> dict[str, Any]:
-        """Preview cleanup candidates. Dry run only -- apply is not reachable.
-
-        ``--apply`` and ``--delete-branches`` are not parameters of this tool by
-        design, so nothing an agent sends can turn the preview into a deletion.
-        """
-
-        return await self._json(["gc", "--json"])
-
-    async def events(self, limit: int = 50, job_id: int = 0) -> dict[str, Any]:
+    async def _events(self, limit: int = 50, job_id: int = 0, after: int = 0) -> dict[str, Any]:
         """Recent runner event frames, bounded and never following.
 
         Returns the CLI's own JSONL frames under ``frames``; the frames
@@ -356,6 +314,8 @@ class MergetrainTools:
         args = ["events", "--jsonl", "--limit", str(max(1, min(limit, 200)))]
         if job_id:
             args += ["--job", str(job_id)]
+        if after:
+            args += ["--after", str(after)]
         try:
             completed = await self._run(args)
         except subprocess.TimeoutExpired:
@@ -376,7 +336,7 @@ class MergetrainTools:
             return _error("cli_output_unreadable", f"events failed: {detail}")
         return {"frames": frames}
 
-    async def logs(self, job_id: int, tail: int = 200) -> dict[str, Any]:
+    async def _logs(self, job_id: int, tail: int = 200) -> dict[str, Any]:
         """A capped tail of one job's runner log. Never follows.
 
         The log is plain text, so this returns text rather than a queue payload;
@@ -398,6 +358,30 @@ class MergetrainTools:
             )
         return {"job_id": job_id, "tail_lines": lines, "log": completed.stdout}
 
+    async def inspect(
+        self,
+        job_id: int,
+        detail: Literal["summary", "events", "logs"] = "summary",
+        limit: int = 100,
+        after_event_id: int = 0,
+    ) -> dict[str, Any]:
+        """Inspect one job; request bounded events or raw log text explicitly."""
+
+        if detail == "summary":
+            return await self._inspect_job(job_id)
+        if detail == "events":
+            return await self._events(
+                limit=limit,
+                job_id=job_id,
+                after=after_event_id,
+            )
+        if detail == "logs":
+            return await self._logs(job_id, tail=limit)
+        return _error(
+            "invalid_inspect_detail",
+            "detail must be one of: summary, events, logs",
+        )
+
     # --- mutating, but never shipping ------------------------------------
 
     async def validate(self) -> dict[str, Any]:
@@ -409,234 +393,65 @@ class MergetrainTools:
         claiming otherwise to the client.
         """
 
-        return await self._json(["run-batch", "--validate-only", "--json"])
+        return await self._json(["validate", "--json"])
 
     async def enqueue(self, task: str, branch: str) -> dict[str, Any]:
         """Queue a committed branch, pinning the SHA that was reviewed.
 
-        Always passes ``--capture-sha``: a queued job records the exact commit,
-        so later work on the branch cannot ride along silently. ``--auto`` is
-        not a parameter -- unattended deploy is not reachable from here.
+        The CLI always captures the exact clean commit, so later work on the
+        branch cannot ride along silently. ``--auto`` is not a parameter --
+        unattended deploy is not reachable from here.
         """
 
-        return await self._json(
-            ["enqueue", "--task", task, "--branch", branch, "--capture-sha", "--json"]
-        )
+        return await self._json(["enqueue", "--task", task, "--branch", branch, "--json"])
 
     # --- ships code, human-gated -----------------------------------------
 
-    def deploy_summary(
-        self,
-        doctor: dict[str, Any],
-        status: dict[str, Any],
-        train: dict[str, Any],
-        preview: dict[str, Any] | None = None,
-    ) -> str:
-        """Build the deploy summary the operating contract requires.
+    async def prepare_deploy(self, ctx: Context) -> _DeployPlan:
+        """Validate if needed and resolve the exact plan shown to the human.
 
-        Describe only the train selected for this deploy. Exact train identity
-        remains internal while the human sees task intent, destinations, gate
-        evidence, reassembly risk, and every action-required job.
+        There is no model-supplied confirmation or train selector. The CLI owns
+        the single-Ready invariant, and the accept comes only through MCP
+        elicitation.
         """
 
-        config = doctor.get("config") or {}
-        git = config.get("git") or {}
-        remote = git.get("remote") or "origin"
-        push_plan = (preview or {}).get("push_plan") or {}
-        remote_url = push_plan.get("url") or (doctor.get("git") or {}).get(
-            "remote_url"
-        )
-        remote_label = f"{remote} ({remote_url})" if remote_url else str(remote)
-        push_refs = [str(ref) for ref in git.get("push_refs") or []]
-        gates = [
-            str(gate.get("name"))
-            for gate in config.get("gates") or []
-            if gate.get("name")
-        ]
-        verify_hooks = [
-            str(hook.get("name"))
-            for hook in (config.get("deploy") or {}).get("verify") or []
-            if hook.get("name")
-        ]
-        jobs_by_id: dict[str, dict[str, Any]] = {}
-        for key in ("jobs", "attention_jobs"):
-            for job in status.get(key) or []:
-                jobs_by_id[str(job.get("id"))] = job
-        lines = [
-            f"Repository: {self.repo}",
-            f"Destination: {remote_label} atomically updates "
-            f"{', '.join(push_refs) or 'unknown refs'} and records "
-            "refs/mergetrain/deploys/<deploy-sha>",
-            f"Integration source: {git.get('integration_ref', 'unknown')}",
-            "Pre-push gate policy evaluated: "
-            + ", ".join(dict.fromkeys(["diff-check", *gates])),
-            "Post-push verification: " + (", ".join(verify_hooks) or "none configured"),
-            f"doctor next_action: {doctor.get('next_action', 'unknown')}",
-        ]
-        lines.append(f"Selected change set ({train.get('train_size')} job(s)):")
-        for member in train.get("branches") or []:
-            job = jobs_by_id.get(str(member.get("job_id"))) or {}
-            task = " ".join(str(job.get("task") or "task not recorded").split())
-            lines.append(
-                f"- #{member.get('job_id')} {task}: {member.get('branch')} "
-                f"@{str(member.get('validated_head_sha') or '')[:12]}"
-            )
-        lines.append(
-            "Recorded validation: "
-            f"{train.get('validated_at') or 'time unavailable'}; integration base "
-            f"{str(train.get('validation_base_sha') or 'unavailable')[:12]}; "
-            f"validated commit {str(train.get('validation_sha') or 'unavailable')[:12]}"
-        )
-        current_sha = str(train.get("current_integration_sha") or "")
-        if train.get("integration_changed_since_validation") is True:
-            lines.append(
-                "Reassembly risk: the local integration ref advanced since "
-                "validation to "
-                f"{current_sha[:12] or 'an unknown commit'}; deploy will reassemble "
-                "the selected change set and evaluate the configured pre-push "
-                "gate policy before push"
-            )
-        else:
-            lines.append(
-                "Reassembly: deploy will rebuild the selected change set and "
-                "evaluate the configured pre-push gate policy before push"
-            )
-        attention_source = status.get("attention_jobs")
-        if attention_source is None:
-            attention_source = status.get("jobs") or []
-        attention = []
-        for job in attention_source:
-            status_label = str(job.get("status") or "unknown")
-            verification_unknown = (
-                status_label == "deployed" and job.get("verify_status") == "unknown"
-            )
-            if status_label not in {"blocked", "failed", "needs_reconcile"} and not (
-                verification_unknown
-            ):
-                continue
-            if verification_unknown:
-                status_label += " (verification unknown)"
-            attention.append(
-                f"#{job.get('id')} "
-                f"{' '.join(str(job.get('task') or 'task not recorded').split())} "
-                f"— {job.get('branch')} {status_label}: "
-                f"{' '.join(str(job.get('note', '')).split())[:160]}"
-            )
-        if attention:
-            lines.append("Needs attention: " + "; ".join(attention))
-        return "\n".join(lines)
-
-    def select_train(
-        self, status: dict[str, Any], train_id: str
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Pick the train to ship, or return the refusal that explains why not.
-
-        Never guesses between candidates: with several pending trains the caller
-        has to name one, because picking for them would ship code nobody chose.
-        """
-
-        trains = [
-            train
-            for train in status.get("validated_trains") or []
-            if train.get("deploy_eligible")
-        ]
-        if not trains:
-            return None, _error(
-                "no_validated_train",
-                "no deploy-eligible validated train is pending; "
-                "run mergetrain_validate first",
-                next_action=status.get("next_action"),
-            )
-        if train_id:
-            for train in trains:
-                if str(train.get("train_id")) == train_id:
-                    return train, None
-            return None, _error(
-                "train_not_found",
-                f"no deploy-eligible validated train {train_id} is pending",
-                pending_train_ids=[str(t.get("train_id")) for t in trains],
-            )
-        if len(trains) > 1:
-            return None, _error(
-                "train_id_required",
-                "several validated trains are pending; name the one to deploy",
-                pending_train_ids=[str(t.get("train_id")) for t in trains],
-            )
-        return trains[0], None
-
-    async def prepare_deploy(self, ctx: Context, train_id: str = "") -> _DeployPlan:
-        """Resolve the current train and the human-facing confirmation summary.
-
-        There is no ``confirm`` parameter, on purpose: a model-supplied argument
-        would be the model confirming its own deploy. The accept has to come
-        through MCP's resolver-driven elicitation flow.
-        """
-
-        doctor = await self.doctor()
-        status = await self.status(limit=50)
-        for payload in (doctor, status):
-            if payload.get("ok") is False:
-                return _DeployPlan(refusal=payload)
-        train, refusal = self.select_train(status, train_id)
-        if refusal is not None:
-            return _DeployPlan(refusal=refusal)
-        assert train is not None
-        chosen = str(train.get("train_id"))
-        preview = await self._json(
-            [
-                "run-batch",
-                "--deploy",
-                "--preview",
-                "--train-id",
-                chosen,
-                "--json",
-            ]
-        )
+        preview = await self._json(["deploy", "--json"])
         if preview.get("ok") is False:
             return _DeployPlan(refusal=preview)
         plan_sha = str(preview.get("deploy_plan_sha") or "")
-        if not plan_sha:
+        if preview.get("result") != "confirmation_required" or not plan_sha:
+            note = str(preview.get("note") or "no deployable work is ready")
             return _DeployPlan(
                 refusal=_error(
                     "deploy_plan_unavailable",
-                    "the CLI did not return a deploy plan identity; nothing was pushed",
-                    train_id=chosen,
+                    f"{note}; nothing was pushed",
                 )
             )
-        # Build the displayed summary from reads taken after the core preview.
-        # If config changed between the first doctor read and preview, the human
-        # must see the newer destination the hash describes. Any change after
-        # preview is still caught by --expected-plan before claim/push.
-        current_doctor = await self.doctor()
-        current_status = await self.status(limit=50)
-        for payload in (current_doctor, current_status):
-            if payload.get("ok") is False:
-                return _DeployPlan(refusal=payload)
-        current_train, current_refusal = self.select_train(
-            current_status,
-            chosen if train_id else "",
+        jobs = preview.get("jobs") or []
+        push_plan = preview.get("push_plan") or {}
+        tasks = ", ".join(
+            " ".join(str(job.get("task") or job.get("branch") or "task").split()) for job in jobs
         )
-        if current_refusal is not None:
-            return _DeployPlan(refusal=current_refusal)
-        assert current_train is not None
-        if str(current_train.get("train_id")) != chosen:
-            return _DeployPlan(
-                refusal=_error(
-                    "deploy_plan_changed",
-                    "the selected validated train changed while its deploy plan "
-                    "was prepared; nothing was pushed",
-                    train_id=chosen,
-                )
-            )
-        summary = self.deploy_summary(
-            current_doctor, current_status, current_train, preview
+        refs = ", ".join(
+            str(item.get("target")) for item in push_plan.get("refs") or [] if item.get("target")
         )
-        command = str(preview.get("confirmed_command") or "") or (
-            f"mergetrain --repo {self.repo} run-batch --deploy --train-id "
-            f"{chosen} --expected-plan {plan_sha}"
+        destination = push_plan.get("url") or push_plan.get("remote") or "unknown"
+        reuse = preview.get("reuse") or {}
+        decision = reuse.get("decision") or {}
+        gate_action = decision.get("action") or "run configured gates"
+        summary = "\n".join(
+            [
+                f"Changes: {tasks or 'task details unavailable'}",
+                f"Destination: {destination} ({refs or 'configured refs'})",
+                f"Gate plan: {gate_action}",
+                "Safety: the exact train, destination, gate/reuse policy, and "
+                "verify hooks will be checked again before push",
+            ]
         )
+        train_id = str(jobs[0].get("train_id") or "") if jobs else ""
+        command = shlex.join(["mergetrain", "--repo", str(self.repo), "deploy"])
         return _DeployPlan(
-            train_id=chosen,
+            train_id=train_id,
             plan_sha=plan_sha,
             summary=summary,
             command=command,
@@ -668,10 +483,7 @@ class MergetrainTools:
             )
         return await self._json(
             [
-                "run-batch",
-                "--deploy",
-                "--train-id",
-                plan.train_id,
+                "deploy",
                 "--expected-plan",
                 plan.plan_sha,
                 "--json",
@@ -699,9 +511,9 @@ def _client_can_elicit(ctx: Any) -> bool:
         return False
     # Before elicitation modes existed, an empty capability meant form support.
     # In v2, form support is explicit and url-only clients cannot render this gate.
-    return getattr(elicitation, "form", None) is not None or getattr(
-        elicitation, "url", None
-    ) is None
+    return (
+        getattr(elicitation, "form", None) is not None or getattr(elicitation, "url", None) is None
+    )
 
 
 def _deploy_approval(result: Any) -> tuple[bool, str]:
@@ -734,18 +546,18 @@ def build_server(repo: Path) -> Any:
         name="mergetrain",
         instructions=(
             "mergetrain is a local merge-and-push queue for coding-agent "
-            "branches. Read state first (mergetrain_doctor, mergetrain_status) "
-            "and act on what the JSON says, never on assumption: 'ok' means "
-            "only that the command ran, a run's outcome is in 'result', and "
-            "repo health is in 'health'. 'next_action' is advisory. "
-            "mergetrain_deploy ships code and needs a human accept; unattended "
-            "deploy, destructive cleanup and cancellation are not available "
-            "here by design -- ask the human to run those in a terminal."
+            "branches. Work in the assigned worktree, commit a clean HEAD, read "
+            "mergetrain_status before changing queue state, and enqueue with task "
+            "and branch only. Stop after enqueue unless end-to-end deployment was "
+            "explicitly authorized. Never push integration refs directly. "
+            "mergetrain_deploy ships code and requires a client-rendered human "
+            "accept; unattended deploy, recovery, cancellation, and destructive "
+            "cleanup are not available through this server."
         ),
     )
 
-    async def resolve_deploy_plan(train_id: str, ctx: Context) -> _DeployPlan:
-        return await tools.prepare_deploy(ctx, train_id)
+    async def resolve_deploy_plan(ctx: Context) -> _DeployPlan:
+        return await tools.prepare_deploy(ctx)
 
     async def resolve_deploy_confirmation(plan: _DeployPlan) -> Any:
         if plan.refusal is not None:
@@ -768,27 +580,19 @@ def build_server(repo: Path) -> Any:
         Elicit[_DeployConfirmation] | _ConfirmationSkipped
     )
 
-    async def deploy_tool(plan: Any, approval: Any, train_id: str = "") -> dict[str, Any]:
+    async def deploy_tool(plan: Any, approval: Any) -> dict[str, Any]:
         return await tools.deploy(plan, approval)
 
     deploy_tool.__annotations__["plan"] = plan_dependency
     deploy_tool.__annotations__["approval"] = Annotated[
         ElicitationResult[Any], Resolve(resolve_deploy_confirmation)
     ]
-    deploy_tool.__annotations__["train_id"] = str
     deploy_tool.__annotations__["return"] = dict[str, Any]
 
     read_only = ToolAnnotations(read_only_hint=True, destructive_hint=False)
     for fn, name, hints in (
         (tools.status, "mergetrain_status", read_only),
-        (tools.doctor, "mergetrain_doctor", read_only),
-        (tools.inspect_job, "mergetrain_inspect", read_only),
-        (tools.history, "mergetrain_history", read_only),
-        (tools.stats, "mergetrain_stats", read_only),
-        (tools.agent_contract, "mergetrain_agent_contract", read_only),
-        (tools.gc_preview, "mergetrain_gc_preview", read_only),
-        (tools.events, "mergetrain_events", read_only),
-        (tools.logs, "mergetrain_logs", read_only),
+        (tools.inspect, "mergetrain_inspect", read_only),
         # Not read-only: validate runs gate commands and moves job status.
         (
             tools.validate,

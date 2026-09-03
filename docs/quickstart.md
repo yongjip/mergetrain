@@ -1,179 +1,118 @@
 # Quickstart
 
-mergetrain earns its keep when several coding-agent sessions work the same
-repo in parallel worktrees and you want their branches to land safely without
-hand-coordinating the order, the rebases, and the combined test run. If that's
-your situation, worktrees are the parallel lanes and mergetrain is their serial
-integration spine. This page takes about five minutes; the
-[README](../README.md#the-problem) explains what goes wrong without a queue.
-If you are deciding between one PR per agent branch and a local train, read the
-[PR-first comparison](pr-workflows.md) before adopting either workflow.
-After the first few trains, use the [efficient-operation
-guide](best-practices.md) to interpret latency, size batches, scope gates, and
-decide whether a persistent cache is warranted.
+mergetrain gives parallel coding-agent worktrees one serialized path into an
+integration branch. The normal workflow is intentionally small:
 
-## 1. Initialize config
+```text
+enqueue → validate → approve → push
+```
 
-From your Git repository root:
+`deploy` can perform the middle three steps in one command, so most operators
+use only `status`, `enqueue`, and `deploy` after setup.
+
+## 1. Initialize
+
+From the repository root:
 
 ```sh
 mergetrain init --project example-app --write
 ```
 
-Edit `.mergetrain.yaml` so `git.remote`, `git.integration_branch`, `git.push_refs`,
-`gates`, and `deploy.verify` match your service, then **commit the scaffold** —
-`init` writes `.mergetrain.yaml` and the agent-contract docs, and an uncommitted
-file trips the clean-worktree check at enqueue time:
+The generated `.mergetrain.yaml` contains only the schema version, project
+name, and gates. Git remote `origin`, integration branch `main`, local state
+paths, sequential gates, and no validation reuse are code defaults.
 
-The generated sidecars are deliberately separate so `init` never overwrites
-existing project instructions. They are not discovered automatically. Link
-them from the platform-standard root files before relying on agent behavior:
+Add at least one meaningful project gate before deploying. For example:
 
-```markdown
-<!-- AGENTS.md -->
-Read and follow ./AGENTS.mergetrain.md for integration handoff and deploy rules.
+```yaml
+version: 2
 
-<!-- CLAUDE.md -->
-@CLAUDE.mergetrain.md
+project:
+  name: example-app
+
+gates:
+  - name: tests
+    run: pytest -q
 ```
 
-Then commit the config, sidecars, and root-file links:
+`init --write` also creates `AGENTS.mergetrain.md` and
+`CLAUDE.mergetrain.md`. Link the relevant sidecar from your root agent
+instructions, then commit the config and instructions. Existing files are
+never overwritten.
+
+After an upgrade, refresh only generated instructions with:
 
 ```sh
-git add .mergetrain.yaml AGENTS.md CLAUDE.md \
-  AGENTS.mergetrain.md CLAUDE.mergetrain.md
-git commit -m "add mergetrain config"
+mergetrain init --refresh-instructions
 ```
 
-After upgrading mergetrain, refresh only the generated contract documents—
-without touching `.mergetrain.yaml`—using the existing command:
-
-```sh
-mergetrain agent-contract > AGENTS.mergetrain.md
-mergetrain agent-contract > CLAUDE.mergetrain.md
-git diff -- AGENTS.mergetrain.md CLAUDE.mergetrain.md
-```
-
-mergetrain's own `.mergetrain/` runtime directory (queue DB, logs, worktrees)
-is git-ignored automatically, so it never shows up as uncommitted.
-
-## 2. Create a task branch
+## 2. Commit and enqueue a task branch
 
 ```sh
 git switch -c codex/feature-a
-# edit files
+# edit and test
 git add .
 git commit -m "feature a"
-```
 
-## 3. Enqueue
-
-```sh
-mergetrain doctor --json
+mergetrain status
 mergetrain enqueue --task "feature a" --branch codex/feature-a
+```
+
+mergetrain verifies a clean worktree and captures the exact integration and
+task commits. Do not copy SHAs by hand.
+
+For a task agent, a successful enqueue is the handoff boundary. Stop there
+unless the user explicitly authorized end-to-end validation and deployment.
+
+## 3. Deploy
+
+```sh
+mergetrain deploy
+```
+
+If queued work has not been validated, `deploy` first assembles the FIFO train
+and runs the configured gates. It then shows the exact tasks, destination,
+refs, and gate policy and asks for confirmation. Only `y` or `yes` continues to
+the pre-push execution. With the safe default reuse policy, that execution
+reassembles the train and reruns gates before the atomic push and post-push
+verification. Train IDs and plan hashes remain internal.
+
+To run gates earlier without any possibility of a push:
+
+```sh
+mergetrain validate
+```
+
+The resulting Ready train stays available for a later `mergetrain deploy`.
+
+## 4. Follow the state
+
+```sh
+mergetrain status
 mergetrain status --json
+mergetrain inspect <job-id>
 ```
 
-For a task agent, a successful exact-SHA enqueue is the handoff boundary: stop
-here. A request to implement, merge, integrate, land, or enqueue the task does
-not authorize validation or deploy. The remaining steps belong to the one
-separately authorized runner/operator.
+`status` is the single entry point. It projects detailed queue state into five
+groups—Waiting, Running, Ready, Attention, and Done—and provides an exact
+`next_action.command` when action is needed. Use `inspect` only for one job's
+evidence. Add `status --diagnose` for configuration, Git, runtime, and lock
+details.
 
-## 4. Validate
+If `status` reports an ambiguous push, follow its recovery command:
 
 ```sh
-mergetrain run-batch --validate-only
+mergetrain reconcile --apply
 ```
 
-A successful validation marks merged jobs as `validated`, records a shared
-`train_id` plus the integration and task SHAs, and does not push. Inspect
-`status --json` before a one-shot approval to see the exact deployable train.
-If `integration_changed_since_validation` is true, deploy remains eligible but
-will reassemble against the current integration ref and evaluate the configured
-gate policy. This status field observes the local ref without fetching; deploy
-fetches before rebuilding.
+Reconciliation asks the pinned remote endpoint what landed; it never guesses
+or blindly repeats a push.
 
-## 5. Observe a long run
+## Next guides
 
-Use the job ID returned by `enqueue` to inspect or follow without parsing OS
-processes:
-
-```sh
-mergetrain inspect <job-id> --json
-mergetrain events --job <job-id> --after 0 --follow --jsonl
-mergetrain logs <job-id> --follow --tail 20
-```
-
-Reconnect `events` with the last event ID already processed. Structured events
-and heartbeat frames never contain command output; request `logs` only when raw
-local output is appropriate for the destination.
-
-## 6. Deploy
-
-After either a human-readable one-shot approval or prior bounded unattended
-approval for this task and destination:
-
-```sh
-mergetrain run-batch --deploy
-```
-
-Here `deploy` names the atomic Git ref update. A provider release after this
-push is a separate action.
-
-Deploy mode runs gates first, then performs an atomic push to configured
-`git.push_refs` plus the retained `refs/mergetrain/deploys/<sha>` recovery audit
-ref, then runs `deploy.verify` hooks. If a validated train is
-pending, only that exact train is rebuilt and deployed; newly queued jobs wait
-for a later validation. Integration-ref movement is allowed because the train
-is rebuilt and gated again, but a changed task branch is blocked and must be
-enqueued fresh. The opaque `train_id` selects the train internally; it is not
-something the user must understand or repeat.
-
-For an explicitly configured validated-gate reuse policy, preview the decision
-before deploying:
-
-```sh
-mergetrain run-batch --deploy --train-id <id> --reuse-validated --preview --json
-mergetrain run-batch --deploy --train-id <id> --reuse-validated
-```
-
-Only an unchanged safety identity reuses the exact validation SHA. Otherwise the
-normal full gate path runs (or the policy fails closed), and post-push verify
-hooks still run.
-
-If the approved contents change before deploy, replace the train atomically
-instead of canceling and enqueueing its members one at a time:
-
-```sh
-mergetrain supersede --train-id <old-id> \
-  --replacement "updated task" codex/updated /path/to/clean-worktree --json
-```
-
-The replacement captures exact HEADs but carries no validation or approval.
-Run `run-batch --validate-only` again and approve the new train identity.
-
-## 7. Optional validation daemon
-
-If manual jobs arrive repeatedly, authorize one foreground runner to assemble
-and validate them:
-
-```sh
-mergetrain daemon --validate-only --interval 15
-```
-
-It processes only manual queued jobs and pauses as soon as any validated train
-exists. It never pushes; inspect and approve that exact train, then deploy it
-with `run-batch --deploy`. Resolve, dismiss, or supersede the train before the
-validation daemon can build another one.
-
-## 8. Auto-only deploy daemon
-
-Use `--auto` only when unattended deploy is explicitly approved:
-
-```sh
-mergetrain enqueue --task "safe fix" --branch codex/safe-fix --auto
-mergetrain daemon --interval 15
-```
-
-The default daemon ignores manual queued jobs. `hub daemon` also remains
-auto-deploy-only.
+- [Configuration reference](config.md) for non-default Git, gates, verification,
+  and performance settings.
+- [Operations](daemon.md) for validation and pre-approved deploy daemons.
+- [Failure modes](failure-modes.md) for repair and recovery commands.
+- [MCP server](mcp.md) for the five-tool agent adapter.
+- [CLI reference](cli.md) for the stable core and advanced operator surfaces.

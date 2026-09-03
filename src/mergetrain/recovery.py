@@ -404,7 +404,7 @@ def reconcile(
 ) -> ReconcileOutcome:
     """Resolve every ``needs_reconcile`` job against the remote.
 
-    Acquires the runner lock (serialized against ``run-batch``; a live owner
+    Acquires the runner lock (serialized against ``validate``/``deploy``; a live owner
     raises ``LockHeld``). Reads truth from the remote and either finalizes
     ``deployed``, requeues, honors a late cancel, or blocks — the exact writes a
     crash-free run would also have produced. Never pushes. If the remote is

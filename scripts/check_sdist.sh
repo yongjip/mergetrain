@@ -26,7 +26,9 @@ for required in \
   .github/workflows/mcp-registry.yml \
   .github/release-allowed-signers \
   SECURITY.md \
-  .mergetrain.yaml; do
+  .mergetrain.yaml \
+  llms.txt \
+  llms-full.txt; do
   if [ ! -e "$package_root/$required" ]; then
     echo "sdist is missing required test input: $required" >&2
     exit 1

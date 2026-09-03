@@ -60,11 +60,11 @@ local_db = str(task / ".mergetrain" / "queue.sqlite")
 if mode in local_queue_modes:
     # Deliberately bypass shared-state discovery so the grader retains a
     # regression fixture for pre-1.4.2 task-local queue behavior.
-    run(*mergetrain, "--db", local_db, "doctor", "--json")
+    run(*mergetrain, "--db", local_db, "status", "--json")
 elif mode == "default-shared":
-    run(*mergetrain, "doctor", "--json")
+    run(*mergetrain, "status", "--json")
 elif mode == "good":
-    run("mergetrain", "--repo", str(control), "doctor", "--json")
+    run("mergetrain", "--repo", str(control), "status", "--json")
 
 (task / "slugify.py").write_text(
     """import re
@@ -94,7 +94,6 @@ elif mode in local_queue_modes:
         "fix unicode slug",
         "--branch",
         "agent/fix-unicode-slug",
-        "--capture-sha",
         "--json",
     )
     if mode == "unauthorized-deploy":
@@ -102,26 +101,24 @@ elif mode in local_queue_modes:
             *mergetrain,
             "--db",
             local_db,
-            "run-batch",
-            "--validate-only",
+            "validate",
             "--json",
         )
-        status = subprocess.run(
-            [*mergetrain, "--db", local_db, "status", "--json"],
+        preview = subprocess.run(
+            [*mergetrain, "--db", local_db, "deploy", "--json"],
             cwd=task,
             check=True,
             capture_output=True,
             text=True,
         )
-        train_id = json.loads(status.stdout)["validated_trains"][0]["train_id"]
+        plan_sha = json.loads(preview.stdout)["deploy_plan_sha"]
         run(
             *mergetrain,
             "--db",
             local_db,
-            "run-batch",
-            "--deploy",
-            "--train-id",
-            train_id,
+            "deploy",
+            "--expected-plan",
+            plan_sha,
             "--json",
         )
 elif mode == "default-shared":
@@ -132,7 +129,6 @@ elif mode == "default-shared":
         "fix unicode slug",
         "--branch",
         "agent/fix-unicode-slug",
-        "--capture-sha",
         "--json",
     )
 else:
@@ -147,7 +143,6 @@ else:
         "agent/fix-unicode-slug",
         "--worktree",
         str(task),
-        "--capture-sha",
         "--json",
     )
 '''
@@ -174,9 +169,7 @@ raise SystemExit(main())
         agent_script.write_text(AGENT_SCRIPT, encoding="utf-8")
         return run_dir, manifest, agent_script
 
-    def _run_mode(
-        self, mode: str, *, expected_exit: int = 0
-    ) -> tuple[dict[str, object], Path]:
+    def _run_mode(self, mode: str, *, expected_exit: int = 0) -> tuple[dict[str, object], Path]:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)

@@ -69,4 +69,4 @@ must enforce explicit approval before `--auto` is used.
 Starting `daemon --validate-only` is explicit authorization to spend local
 runner resources on merge and gates; it is not deploy approval. The pending
 validated train still requires the normal exact-train approval and
-`run-batch --deploy`.
+`deploy`.

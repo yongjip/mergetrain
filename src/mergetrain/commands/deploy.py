@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hmac
-import shlex
 import sys
 from collections import Counter
 from typing import Any
@@ -27,8 +26,8 @@ from ..reuse import reuse_explanation
 from ..store import (
     claim_all_queued,
     claim_deploy_batch,
-    claim_next_job,
     connect,
+    counts,
     default_owner,
     deploy_reconcile_pending,
     list_history_events,
@@ -36,12 +35,6 @@ from ..store import (
     select_validated_train,
     validated_train_summaries,
 )
-
-
-def _mode_from_args(args: argparse.Namespace) -> bool:
-    if args.deploy == args.validate_only:
-        raise QueueError("choose exactly one: --validate-only or --deploy")
-    return bool(args.deploy)
 
 
 def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
@@ -63,42 +56,6 @@ def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:
     return 1
 
 
-def _emit_validated_train_block(
-    args: argparse.Namespace, trains: list[dict[str, Any]]
-) -> int:
-    """Refuse a one-job push while an approved train is still pending.
-
-    ``run-next`` claims the next *queued* job, so it never picks up the
-    ``validated`` members of a pending train — it would push a different commit
-    and move the integration ref out from under the exact train a human
-    approved, invalidating that validation without saying so. docs/cli.md
-    already directs validated work through ``run-batch --deploy``; this makes it
-    true instead of advisory.
-    """
-
-    ids = [str(train.get("train_id")) for train in trains]
-    listed = ", ".join(ids)
-    note = (
-        f"deploy refused: {len(ids)} validated train(s) pending "
-        f"({listed}). run-next claims a queued job instead, which would move the "
-        f"integration ref and invalidate that validation — "
-        f"'mergetrain run-batch --deploy --train-id {ids[0]}' "
-        "ships the approved train, or dismiss it first to ship something else"
-    )
-    if args.json:
-        dump_json(
-            _error_payload(
-                "validated_train_pending",
-                note,
-                next_action="deploy_validated_train_when_approved",
-                pending_train_ids=ids,
-            )
-        )
-    else:
-        print(note, file=sys.stderr)
-    return 1
-
-
 def _results_payload(results: list[Job]) -> dict[str, Any]:
     status_counts = Counter(job.status for job in results)
     push_counts = Counter(job.push_status for job in results)
@@ -107,9 +64,7 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
         {job.reused_validation_sha for job in results if job.reused_validation_sha}
     )
     successful = sum(status_counts[status] for status in ("validated", "deployed"))
-    warnings = sum(
-        job.status == "deployed" and job.verify_status == "failed" for job in results
-    )
+    warnings = sum(job.status == "deployed" and job.verify_status == "failed" for job in results)
     if successful == len(results) and warnings:
         result = "warning"
     elif successful == len(results):
@@ -150,8 +105,14 @@ def _print_run_payload(payload: dict[str, Any]) -> None:
         print(payload.get("note", "done"))
 
 
-def cmd_run_next(args: argparse.Namespace) -> int:
-    deploy = _mode_from_args(args)
+def _execute_batch(
+    args: argparse.Namespace,
+    *,
+    deploy: bool,
+    expected_plan: str = "",
+) -> int:
+    """Run the shared train engine behind the two public execution verbs."""
+
     config = config_from_args(args)
     _preflight_config(config)
     owner = default_owner()
@@ -162,167 +123,10 @@ def cmd_run_next(args: argparse.Namespace) -> int:
             pending = deploy_reconcile_pending(conn)
             if pending:
                 return _emit_deploy_reconcile_block(args, pending)
-            eligible = [
-                train
-                for train in validated_train_summaries(conn)
-                if train.get("deploy_eligible")
-            ]
-            if eligible:
-                return _emit_validated_train_block(args, eligible)
-        job = claim_next_job(
-            conn,
-            owner=owner,
-            ttl_minutes=config.queue.lock_ttl_minutes,
-            deploy=deploy,
-        )
-        if job is None:
-            if deploy:
-                pending = deploy_reconcile_pending(conn)
-                if pending:
-                    return _emit_deploy_reconcile_block(args, pending)
-            payload = {**_results_payload([]), "note": "no queued jobs"}
-        else:
-            lease_token = job.claim_token
-            result = GitRunner(config).process_one(
-                conn,
-                job,
-                deploy=deploy,
-                keep_worktree=args.keep_worktree,
-                owner=owner,
-                ttl_minutes=config.queue.lock_ttl_minutes,
-            )
-            payload = _results_payload([result])
-    finally:
-        if lease_token:
-            release_runner_lock(conn, owner=owner, token=lease_token)
-        conn.close()
-    if args.json:
-        dump_json(payload)
-    else:
-        _print_run_payload(payload)
-    return _run_exit_code(payload)
-
-
-def cmd_run_batch(args: argparse.Namespace) -> int:
-    deploy = _mode_from_args(args)
-    if args.train_id and not deploy:
-        raise QueueError("--train-id requires --deploy")
-    if args.reuse_validated and not deploy:
-        raise QueueError("--reuse-validated requires --deploy")
-    if args.preview and not deploy:
-        raise QueueError("--preview requires --deploy")
-    if args.expected_plan and (not deploy or not args.train_id):
-        raise QueueError("--expected-plan requires --deploy and --train-id")
-    config = config_from_args(args)
-    _preflight_config(config)
-    if args.preview:
-        conn = connect(config.state.db)
-        try:
-            selected, jobs = select_validated_train(
-                conn, train_id=args.train_id or ""
-            )
-            history_events = list_history_events(conn)
-        finally:
-            conn.close()
-        if selected is None or not jobs:
-            raise QueueError("no validated train is ready to preview")
-        decision = GitRunner(config).preview_validated_reuse(
-            jobs,
-            authorized=args.reuse_validated,
-        )
-        destination = resolve_git_destination(config)
-        plan_sha = deploy_plan_sha(
-            config,
-            jobs,
-            reuse_validated=args.reuse_validated,
-            destination=destination,
-        )
-        confirmed_parts = [
-            "mergetrain",
-            "--repo",
-            str(config.repo),
-        ]
-        if args.config:
-            confirmed_parts.extend(["--config", str(config.config_path)])
-        if args.db:
-            confirmed_parts.extend(["--db", str(config.state.db)])
-        confirmed_parts.extend([
-            "run-batch",
-            "--deploy",
-            "--train-id",
-            str(selected["train_id"]),
-        ])
-        if args.reuse_validated:
-            confirmed_parts.append("--reuse-validated")
-        confirmed_parts.extend(["--expected-plan", plan_sha])
-        confirmed_command = shlex.join(confirmed_parts)
-        payload = {
-            "ok": True,
-            "preview": True,
-            "mode": "deploy",
-            "push_plan": {
-                "atomic": True,
-                "remote": config.git.remote,
-                "url": destination.display_url,
-                "fetch_url": redact_secrets(destination.fetch_url),
-                "destination_sha": destination.destination_sha,
-                "refs": [
-                    {"source": "HEAD", "target": ref, "spec": f"HEAD:{ref}"}
-                    for ref in config.git.push_refs
-                ],
-                "audit_ref": {
-                    "source": "DEPLOY_SHA",
-                    "target": f"{DEPLOY_AUDIT_REF_PREFIX}<DEPLOY_SHA>",
-                    "spec": f"DEPLOY_SHA:{DEPLOY_AUDIT_REF_PREFIX}<DEPLOY_SHA>",
-                    "retention": "permanent",
-                },
-            },
-            "train_id": selected["train_id"],
-            "deploy_plan_sha": plan_sha,
-            "confirmed_command": confirmed_command,
-            "reuse": reuse_explanation(
-                config,
-                jobs,
-                decision=decision,
-                gate_runs=_gate_runs(history_events),
-            ),
-            "jobs": [job.to_dict() for job in jobs],
-        }
-        if args.json:
-            dump_json(payload)
-        else:
-            targets = ", ".join(
-                f"HEAD:{ref}" for ref in config.git.push_refs
-            )
-            print(f"Deploy preview for {len(jobs)} validated job(s)")
-            print(
-                f"Destination: {config.git.remote} ({destination.display_url}) "
-                f"atomically updates {targets}"
-            )
-            if decision.eligible:
-                print(
-                    "Gate plan: reuse validated commit "
-                    f"{decision.reused_validation_sha}"
-                )
-            else:
-                print(
-                    f"Gate plan: {decision.action} full gates - "
-                    f"{'; '.join(decision.reasons)}"
-                )
-            print(f"Deploy plan: {plan_sha}")
-            print(f"Confirmed command: {confirmed_command}")
-        return 0
-    owner = default_owner()
-    lease_token = ""
-    conn = connect(config.state.db)
-    try:
-        if deploy:
-            pending = deploy_reconcile_pending(conn)
-            if pending:
-                return _emit_deploy_reconcile_block(args, pending)
-            if args.expected_plan:
+            if expected_plan:
                 selected, selected_jobs = select_validated_train(
-                    conn, train_id=args.train_id or ""
+                    conn,
+                    train_id=getattr(args, "train_id", ""),
                 )
                 if selected is None or not selected_jobs:
                     raise DeployPlanChanged(
@@ -332,9 +136,9 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 current_plan_sha = deploy_plan_sha(
                     config,
                     selected_jobs,
-                    reuse_validated=args.reuse_validated,
+                    reuse_validated=False,
                 )
-                if not hmac.compare_digest(current_plan_sha, args.expected_plan):
+                if not hmac.compare_digest(current_plan_sha, expected_plan):
                     raise DeployPlanChanged(
                         "deploy_plan_changed: the confirmed train, destination, "
                         "gates, reuse, or verify policy changed; nothing was pushed"
@@ -343,7 +147,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 conn,
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
-                train_id=args.train_id or "",
+                train_id=getattr(args, "train_id", ""),
             )
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
@@ -358,8 +162,8 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
                 keep_worktree=args.keep_worktree,
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
-                reuse_validated=args.reuse_validated,
-                expected_plan_sha=args.expected_plan or "",
+                reuse_validated=False,
+                expected_plan_sha=expected_plan,
             )
             payload = _results_payload(results)
     finally:
@@ -371,3 +175,191 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     else:
         _print_run_payload(payload)
     return _run_exit_code(payload)
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate the queued train without exposing runner implementation modes."""
+
+    config = config_from_args(args)
+    _preflight_config(config)
+    conn = connect(config.state.db)
+    try:
+        ready = any(train.get("deploy_eligible") for train in validated_train_summaries(conn))
+    finally:
+        conn.close()
+    if ready:
+        note = "a validated train is already ready; deploy it before validating more work"
+        if args.json:
+            dump_json(
+                _error_payload(
+                    "validated_train_pending",
+                    note,
+                    next_action="deploy_when_approved",
+                )
+            )
+        else:
+            print(note, file=sys.stderr)
+        return 1
+    return _execute_batch(args, deploy=False)
+
+
+def _render_v3_preview(payload: dict[str, Any]) -> None:
+    jobs = payload.get("jobs", [])
+    tasks = ", ".join(str(job.get("task") or job.get("branch")) for job in jobs)
+    push_plan = payload["push_plan"]
+    refs = ", ".join(item["target"] for item in push_plan["refs"])
+    print(f"Ready to deploy {len(jobs)} job(s): {tasks}")
+    print(f"Destination: {push_plan['url']} ({refs})")
+    reuse = payload.get("reuse") or {}
+    decision = reuse.get("decision") or {}
+    action = decision.get("action")
+    if action:
+        print(f"Gate plan: {action}")
+    print(
+        "The exact train, destination, gates, reuse policy, and verify hooks "
+        "will be checked again before push."
+    )
+
+
+def cmd_deploy(args: argparse.Namespace) -> int:
+    """Validate if needed, present one exact plan, then deploy after approval."""
+
+    if args.expected_plan:
+        return _execute_batch(
+            args,
+            deploy=True,
+            expected_plan=args.expected_plan,
+        )
+
+    config = config_from_args(args)
+    _preflight_config(config)
+    conn = connect(config.state.db)
+    try:
+        pending_reconcile = deploy_reconcile_pending(conn)
+        ready = any(train.get("deploy_eligible") for train in validated_train_summaries(conn))
+        queue_counts = counts(conn)
+        queued = bool(queue_counts.get("queued", 0))
+        in_progress = bool(queue_counts.get("in_progress", 0))
+    finally:
+        conn.close()
+    if pending_reconcile:
+        return _emit_deploy_reconcile_block(args, pending_reconcile)
+
+    if not ready:
+        if not queued and not in_progress:
+            payload = {**_results_payload([]), "note": "no queued or ready jobs"}
+            if args.json:
+                dump_json(payload)
+            else:
+                _print_run_payload(payload)
+            return 0
+
+        # A deploy command is explicit deploy intent, but no push can occur
+        # until the combined result has passed validation and the resulting
+        # exact plan is shown. Keep JSON to one document by capturing the
+        # validation output internally.
+        owner = default_owner()
+        lease_token = ""
+        conn = connect(config.state.db)
+        try:
+            jobs = claim_all_queued(
+                conn,
+                owner=owner,
+                ttl_minutes=config.queue.lock_ttl_minutes,
+            )
+            if not jobs:
+                validation_payload = {
+                    **_results_payload([]),
+                    "note": "no queued jobs",
+                }
+            else:
+                lease_token = jobs[0].claim_token
+                results = GitRunner(config).process_batch(
+                    conn,
+                    jobs,
+                    deploy=False,
+                    keep_worktree=args.keep_worktree,
+                    owner=owner,
+                    ttl_minutes=config.queue.lock_ttl_minutes,
+                    reuse_validated=False,
+                    expected_plan_sha="",
+                )
+                validation_payload = _results_payload(results)
+        finally:
+            if lease_token:
+                release_runner_lock(conn, owner=owner, token=lease_token)
+            conn.close()
+        if _run_exit_code(validation_payload):
+            if args.json:
+                dump_json(validation_payload)
+            else:
+                _print_run_payload(validation_payload)
+            return _run_exit_code(validation_payload)
+        if not args.json:
+            _print_run_payload(validation_payload)
+
+    # Build the preview directly so the command emits exactly one JSON object.
+    conn = connect(config.state.db)
+    try:
+        selected, jobs = select_validated_train(
+            conn,
+            train_id=getattr(args, "train_id", ""),
+        )
+        history_events = list_history_events(conn)
+    finally:
+        conn.close()
+    if selected is None or not jobs:
+        raise QueueError("no validated train is ready to deploy")
+    decision = GitRunner(config).preview_validated_reuse(jobs, authorized=False)
+    destination = resolve_git_destination(config)
+    plan_sha = deploy_plan_sha(
+        config,
+        jobs,
+        reuse_validated=False,
+        destination=destination,
+    )
+    preview = {
+        "ok": True,
+        "result": "confirmation_required",
+        "push_plan": {
+            "atomic": True,
+            "remote": config.git.remote,
+            "url": destination.display_url,
+            "fetch_url": redact_secrets(destination.fetch_url),
+            "destination_sha": destination.destination_sha,
+            "refs": [
+                {"source": "HEAD", "target": ref, "spec": f"HEAD:{ref}"}
+                for ref in config.git.push_refs
+            ],
+            "audit_ref": {
+                "source": "DEPLOY_SHA",
+                "target": f"{DEPLOY_AUDIT_REF_PREFIX}<DEPLOY_SHA>",
+                "spec": f"DEPLOY_SHA:{DEPLOY_AUDIT_REF_PREFIX}<DEPLOY_SHA>",
+                "retention": "permanent",
+            },
+        },
+        "deploy_plan_sha": plan_sha,
+        "reuse": reuse_explanation(
+            config,
+            jobs,
+            decision=decision,
+            gate_runs=_gate_runs(history_events),
+        ),
+        "jobs": [job.to_dict() for job in jobs],
+    }
+    if args.json:
+        dump_json(preview)
+        return 0
+
+    _render_v3_preview(preview)
+    if not sys.stdin.isatty():
+        print(
+            "Deploy confirmation requires an interactive terminal; nothing was pushed.",
+            file=sys.stderr,
+        )
+        return 2
+    accepted = input("Deploy this exact plan? [y/N] ").strip().lower()
+    if accepted not in {"y", "yes"}:
+        print("Deploy declined; the validated train remains ready.")
+        return 0
+    return _execute_batch(args, deploy=True, expected_plan=plan_sha)

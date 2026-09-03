@@ -89,9 +89,7 @@ def _stage_in_progress(conn, job_id: int, token: str, *, cancel: str = "") -> No
     conn.commit()
 
 
-def _set_needs_reconcile(
-    config, conn, job_id: int, sha: str, *, cancel: str = ""
-) -> None:  # type: ignore[no-untyped-def]
+def _set_needs_reconcile(config, conn, job_id: int, sha: str, *, cancel: str = "") -> None:  # type: ignore[no-untyped-def]
     destination_sha = resolve_git_destination(config).push_endpoint_sha
     conn.execute(
         "UPDATE deploy_queue SET status='needs_reconcile', pending_deploy_sha=?, "
@@ -251,9 +249,7 @@ class ReconcileClassifierTests(unittest.TestCase):
 
             try:
                 _set_needs_reconcile(config, conn, job.id, pending)
-                with patch(
-                    "mergetrain.recovery._apply", side_effect=cancel_then_apply
-                ):
+                with patch("mergetrain.recovery._apply", side_effect=cancel_then_apply):
                     reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
@@ -354,15 +350,12 @@ class ReconcileClassifierTests(unittest.TestCase):
                 # Schema-v12 markers acquire this blank default during the v13
                 # migration. The current remote cannot prove their old target.
                 conn.execute(
-                    "UPDATE deploy_queue SET pending_deploy_destination_sha='' "
-                    "WHERE id=?",
+                    "UPDATE deploy_queue SET pending_deploy_destination_sha='' WHERE id=?",
                     (job.id,),
                 )
                 conn.commit()
                 before = get_job(conn, job.id)
-                with self.assertRaisesRegex(
-                    RemoteUnreachable, "legacy pending-push marker"
-                ):
+                with self.assertRaisesRegex(RemoteUnreachable, "legacy pending-push marker"):
                     reconcile(config, conn, apply=True)
                 after = get_job(conn, job.id)
             finally:
@@ -530,7 +523,8 @@ class CrashRecoveryTests(unittest.TestCase):
                         destination=destination,
                     )
                     raise CommandFailed(
-                        ["git", "push"], 1,
+                        ["git", "push"],
+                        1,
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
@@ -598,9 +592,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
-                with patch.object(
-                    runner, "push_verified_head", side_effect=land_cancel_then_drop
-                ):
+                with patch.object(runner, "push_verified_head", side_effect=land_cancel_then_drop):
                     runner.process_batch(
                         conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
                     )
@@ -659,7 +651,8 @@ class CrashRecoveryTests(unittest.TestCase):
                         destination=destination,
                     )
                     raise CommandFailed(
-                        ["git", "push"], 1,
+                        ["git", "push"],
+                        1,
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
@@ -741,9 +734,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
-                with patch.object(
-                    runner, "push_verified_head", side_effect=land_then_drop
-                ):
+                with patch.object(runner, "push_verified_head", side_effect=land_then_drop):
                     runner.process_batch(
                         conn,
                         claimed,
@@ -763,9 +754,7 @@ class CrashRecoveryTests(unittest.TestCase):
                     "origin",
                     str(remote_c),
                 )
-                with self.assertRaisesRegex(
-                    RemoteUnreachable, "no longer matches the endpoint"
-                ):
+                with self.assertRaisesRegex(RemoteUnreachable, "no longer matches the endpoint"):
                     reconcile(config, conn, apply=True)
                 self.assertEqual(get_job(conn, job.id).status, "needs_reconcile")
 
@@ -872,7 +861,7 @@ class DeployGateTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_run_batch_deploy_hard_blocked_while_needs_reconcile(self) -> None:
+    def test_deploy_hard_blocked_while_needs_reconcile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
@@ -886,7 +875,7 @@ class DeployGateTests(unittest.TestCase):
 
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--repo", str(repo), "run-batch", "--deploy", "--json"])
+                code = main(["--repo", str(repo), "deploy", "--json"])
             payload = json.loads(out.getvalue())
             self.assertEqual(code, 1)
             self.assertEqual(payload["next_action"], "reconcile_pending_deploy")
@@ -899,11 +888,11 @@ class DeployGateTests(unittest.TestCase):
                 git(root / "remote.git", "show", "main:a.txt")
 
 
-class DoctorNextActionTests(unittest.TestCase):
-    def _doctor(self, repo: Path) -> dict:
+class StatusNextActionTests(unittest.TestCase):
+    def _status(self, repo: Path) -> dict:
         out = io.StringIO()
         with redirect_stdout(out):
-            main(["--repo", str(repo), "doctor", "--json"])
+            main(["--repo", str(repo), "status", "--json"])
         return json.loads(out.getvalue())
 
     def test_needs_reconcile_reports_reconcile_pending_deploy(self) -> None:
@@ -917,7 +906,10 @@ class DoctorNextActionTests(unittest.TestCase):
                 _set_needs_reconcile(config, conn, job.id, "d" * 40)
             finally:
                 conn.close()
-            self.assertEqual(self._doctor(repo)["next_action"], "reconcile_pending_deploy")
+            self.assertEqual(
+                self._status(repo)["next_action"]["code"],
+                "reconcile_pending_deploy",
+            )
 
     def test_reconciled_deploy_reports_verify_reconciled_deploy(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -940,7 +932,8 @@ class DoctorNextActionTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(
-                self._doctor(repo)["next_action"], "verify_reconciled_deploy"
+                self._status(repo)["next_action"]["code"],
+                "verify_reconciled_deploy",
             )
             # `mergetrain verify --ack` discharges it — the next_action was
             # otherwise permanent (deployed_verify_unknown never decremented).
@@ -953,7 +946,8 @@ class DoctorNextActionTests(unittest.TestCase):
             self.assertEqual(payload["resolved"][0]["verify_status"], "succeeded")
             self.assertNotEqual(payload["next_action"], "verify_reconciled_deploy")
             self.assertNotEqual(
-                self._doctor(repo)["next_action"], "verify_reconciled_deploy"
+                self._status(repo)["next_action"]["code"],
+                "verify_reconciled_deploy",
             )
 
     def test_wedged_lock_reports_unlock_wedged_runner(self) -> None:
@@ -964,14 +958,15 @@ class DoctorNextActionTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 # expired lease, owner still alive, work mid-flight
-                acquire_runner_lock(
-                    conn, owner=f"user:{os.getpid()}", ttl_minutes=-1
-                )
+                acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=-1)
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 _stage_in_progress(conn, job.id, "t")
             finally:
                 conn.close()
-            self.assertEqual(self._doctor(repo)["next_action"], "unlock_wedged_runner")
+            self.assertEqual(
+                self._status(repo)["next_action"]["code"],
+                "unlock_wedged_runner",
+            )
 
 
 class VerifyRerunTests(unittest.TestCase):
@@ -1031,7 +1026,7 @@ class VerifyRerunTests(unittest.TestCase):
             command = (
                 f'{SHELL_PYTHON} -c "from pathlib import Path; '
                 f"Path('{py_path(marker)}').write_text('ran'); "
-                "raise SystemExit(1)\""
+                'raise SystemExit(1)"'
             )
             repo, _ = make_demo_repo(root, verify_command=command)
             job_id, _ = self._stage_unknown_deploy(repo)
@@ -1049,6 +1044,7 @@ class VerifyRerunTests(unittest.TestCase):
                 payload["resolved"],
                 [{"job_id": job_id, "verify_status": "failed"}],
             )
+
 
 class CommandExitCodeTests(unittest.TestCase):
     def _run(self, repo: Path, *argv: str) -> tuple[int, dict]:
@@ -1120,11 +1116,11 @@ class CommandExitCodeTests(unittest.TestCase):
             self.assertEqual(events[-1].state, "remote_unreachable")
             self.assertTrue(events[-1].applied)
 
-    def test_recover_records_one_command_without_double_counting_reconcile(self) -> None:
+    def test_reconcile_apply_records_one_command(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
-            code, payload = self._run(repo, "recover", "--json")
+            code, payload = self._run(repo, "reconcile", "--apply", "--json")
             self.assertEqual(code, 0)
             self.assertTrue(payload["ok"])
             config = load_config(repo=repo)
@@ -1135,7 +1131,7 @@ class CommandExitCodeTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(
                 [(event.operation, event.state) for event in events[1:]],
-                [("recover", "started"), ("recover", "success")],
+                [("reconcile", "started"), ("reconcile", "success")],
             )
 
     def test_unexpected_reconcile_error_is_durably_classified(self) -> None:
@@ -1309,9 +1305,7 @@ class ReviewHardeningTests(unittest.TestCase):
             try:
                 parked = enqueue_job(conn, task="a", branch="feature/a")
                 _set_needs_reconcile(config, conn, parked.id, "c" * 40)
-                auto = enqueue_job(
-                    conn, task="b", branch="feature/b", auto_deploy=True
-                )
+                auto = enqueue_job(conn, task="b", branch="feature/b", auto_deploy=True)
             finally:
                 conn.close()
             processed: list[list[int]] = []
@@ -1348,16 +1342,12 @@ class ReviewHardeningTests(unittest.TestCase):
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 _stage_in_progress(conn, job.id, "tok")
                 # a stale token matches nothing → abort, no split, nothing touched
-                self.assertFalse(
-                    force_clear_lock_and_split(conn, owner="runnerA:1", token="WRONG")
-                )
+                self.assertFalse(force_clear_lock_and_split(conn, owner="runnerA:1", token="WRONG"))
                 self.assertEqual(get_job(conn, job.id).status, "in_progress")
                 self.assertIsNotNone(get_lock(conn))
                 # the authorized token clears the lock and splits orphans
                 self.assertTrue(
-                    force_clear_lock_and_split(
-                        conn, owner="runnerA:1", token=lock.token
-                    )
+                    force_clear_lock_and_split(conn, owner="runnerA:1", token=lock.token)
                 )
                 self.assertIsNone(get_lock(conn))
                 self.assertEqual(get_job(conn, job.id).status, "queued")
@@ -1450,9 +1440,7 @@ class ReviewHardeningTests(unittest.TestCase):
                     outcome = recover(config, conn, gc=True)
             finally:
                 if live_lock is not None:
-                    release_runner_lock(
-                        conn, owner=f"runner:{os.getpid()}", token=live_lock.token
-                    )
+                    release_runner_lock(conn, owner=f"runner:{os.getpid()}", token=live_lock.token)
                 conn.close()
 
             self.assertIsNotNone(outcome.gc)
@@ -1460,10 +1448,7 @@ class ReviewHardeningTests(unittest.TestCase):
             self.assertFalse(orphan.exists())
             self.assertTrue(live.exists())
             self.assertTrue(
-                any(
-                    item["job_id"] == stale.id
-                    for item in outcome.gc["swept_pending_refs"]
-                )
+                any(item["job_id"] == stale.id for item in outcome.gc["swept_pending_refs"])
             )
             self.assertNotIn(pending_ref_name(stale.id), _pending_refs(repo))
 

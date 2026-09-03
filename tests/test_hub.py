@@ -20,9 +20,7 @@ from mergetrain.store import connect, enqueue_job, utc_now
 
 
 def _plus_hour() -> str:
-    return (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    return (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def make_repo(root: Path, name: str) -> Path:
@@ -106,7 +104,7 @@ class HubSnapshotTests(unittest.TestCase):
             self.assertEqual(by_name["live"]["summary"]["counts"]["queued"], 1)
             self.assertEqual(
                 by_name["live"]["summary"]["next_action"],
-                "run_batch_validate",
+                "validate_queued_jobs",
             )
             self.assertNotIn("snapshot", by_name["live"])
             self.assertTrue(by_name["empty"]["empty"])
@@ -146,9 +144,7 @@ class HubSnapshotTests(unittest.TestCase):
 
             observer = connect(db, read_only=True)
             try:
-                row = observer.execute(
-                    "SELECT COUNT(*) AS n FROM deploy_queue"
-                ).fetchone()
+                row = observer.execute("SELECT COUNT(*) AS n FROM deploy_queue").fetchone()
                 self.assertEqual(int(row["n"]), 1)
                 with self.assertRaises(sqlite3.OperationalError):
                     observer.execute("DELETE FROM deploy_queue")
@@ -324,9 +320,7 @@ class HubSnapshotCacheTests(unittest.TestCase):
             cache = HubSnapshotCache()
             warm = build_hub_snapshot(load_registry(registry), cache=cache)
             self.assertEqual(warm["repos"][0]["snapshot"]["lock"]["liveness"], "alive")
-            self.assertEqual(
-                warm["repos"][0]["snapshot"]["next_action"], "wait_for_runner"
-            )
+            self.assertEqual(warm["repos"][0]["snapshot"]["next_action"], "wait_for_runner")
 
             # The runner "dies" (owner PID replaced with an impossible one) but
             # touches no file the cache fingerprints. A cache hit must still
@@ -340,9 +334,7 @@ class HubSnapshotCacheTests(unittest.TestCase):
             served = build_hub_snapshot(load_registry(registry), cache=cache)
             lock = served["repos"][0]["snapshot"]["lock"]
             self.assertEqual(lock["liveness"], "dead")
-            self.assertNotEqual(
-                served["repos"][0]["snapshot"]["next_action"], "wait_for_runner"
-            )
+            self.assertNotEqual(served["repos"][0]["snapshot"]["next_action"], "wait_for_runner")
 
     def test_cache_evicts_deregistered_repos(self) -> None:
         from mergetrain.hub import HubSnapshotCache
@@ -479,7 +471,7 @@ class HubStatusCliTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             lines = stdout.getvalue().splitlines()
-            self.assertIn("live: queued=1 | next: run_batch_validate", lines)
+            self.assertIn("live: queued=1 | next: validate_queued_jobs", lines)
             self.assertTrue(any("gone" in line and "ERROR" in line for line in lines))
 
     def test_hub_status_summary_json_omits_full_snapshots(self) -> None:
@@ -548,7 +540,7 @@ class HubServerTests(unittest.TestCase):
                 self.assertEqual(payload["repos"][0]["name"], "live")
                 # The outer hub frame is stamped at the HTTP
                 # boundary; embedded per-repo snapshots stay bare.
-                self.assertEqual(payload["contract_version"], 2)
+                self.assertEqual(payload["contract_version"], 3)
                 self.assertNotIn("contract_version", payload["repos"][0]["snapshot"])
 
                 # Registry edits show up without a server restart.

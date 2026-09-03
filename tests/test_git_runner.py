@@ -48,6 +48,7 @@ def rmtree(path: Path | str) -> None:
         kwargs = {"onerror": lambda f, p, _e: _clear_readonly(f, p, None)}
     shutil.rmtree(path, **kwargs)
 
+
 from mergetrain.cli import main
 from mergetrain.command_runner import (
     _dashboard_command,
@@ -141,21 +142,17 @@ def make_demo_repo(
         fingerprint_config = f"""    fingerprints:
       - name: toolchain
         run: {fingerprint_command}"""
-    always_rerun_config = (
-        "\n    always_rerun_on_deploy: true" if always_rerun_on_deploy else ""
-    )
+    always_rerun_config = "\n    always_rerun_on_deploy: true" if always_rerun_on_deploy else ""
     paths_config = ""
     if gate_paths:
-        rendered_paths = "".join(
-            f"\n      - {json.dumps(pattern)}" for pattern in gate_paths
-        )
+        rendered_paths = "".join(f"\n      - {json.dumps(pattern)}" for pattern in gate_paths)
         paths_config = f"\n    paths:{rendered_paths}"
     config_text = f"""project:
   name: demo
 state:
-  db: {root / 'queue.sqlite'}
-  logs: {root / 'logs'}
-  worktree_root: {root / 'worktrees'}
+  db: {root / "queue.sqlite"}
+  logs: {root / "logs"}
+  worktree_root: {root / "worktrees"}
 git:
   remote: origin
   integration_branch: main
@@ -259,9 +256,7 @@ class GitRunnerTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(stored.status, "blocked")
             self.assertIn("approval_execution_policy_changed", stored.note)
-            self.assertEqual(
-                git(root / "remote.git", "rev-parse", "main"), approved_main
-            )
+            self.assertEqual(git(root / "remote.git", "rev-parse", "main"), approved_main)
             self.assertFalse(marker.exists(), "changed policy must block before gates")
 
     def test_invalid_manual_destination_is_typed_before_push(self) -> None:
@@ -283,13 +278,9 @@ class GitRunnerTests(unittest.TestCase):
                     "ownership_pulse": lambda: None,
                     "state": atomic_push_module.PushVerifyState(),
                 }
-                with self.assertRaisesRegex(
-                    MergeBlocked, "deploy_destination_invalid"
-                ):
+                with self.assertRaisesRegex(MergeBlocked, "deploy_destination_invalid"):
                     runner._push_and_verify(**common)
-                with self.assertRaisesRegex(
-                    DeployPlanChanged, "confirmed destination"
-                ):
+                with self.assertRaisesRegex(DeployPlanChanged, "confirmed destination"):
                     runner._push_and_verify(
                         **common,
                         expected_plan_sha="b" * 64,
@@ -304,9 +295,7 @@ class GitRunnerTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="manual", branch="feature/a")
-                with self.assertRaisesRegex(
-                    DeployPlanChanged, "confirmed train, destination"
-                ):
+                with self.assertRaisesRegex(DeployPlanChanged, "confirmed train, destination"):
                     GitRunner(config)._push_and_verify(
                         conn,
                         job_ids=[job.id],
@@ -588,9 +577,7 @@ gates:
                 worktree=repo,
                 log=log,
                 pulse=None,
-                on_gate=lambda name, state, _index, _total, _detail: events.append(
-                    (name, state)
-                ),
+                on_gate=lambda name, state, _index, _total, _detail: events.append((name, state)),
                 initial_states={},
             )
 
@@ -716,7 +703,8 @@ gates:
             repo, _ = make_demo_repo(root)
             config_path = repo / ".mergetrain.yaml"
             config_path.write_text(
-                config_path.read_text(encoding="utf-8").replace(
+                config_path.read_text(encoding="utf-8")
+                .replace(
                     """gates:
   - name: marker
     run:""",
@@ -727,7 +715,8 @@ gates:
     parallel_group: quality
     run:""",
                     1,
-                ).replace(
+                )
+                .replace(
                     "deploy:\n",
                     """  - name: second
     parallel_group: quality
@@ -745,9 +734,7 @@ deploy:
                 worktree=repo,
                 log=io.StringIO(),
                 pulse=None,
-                on_gate=lambda name, state, _index, _total, _detail: events.append(
-                    (name, state)
-                ),
+                on_gate=lambda name, state, _index, _total, _detail: events.append((name, state)),
             )
 
             self.assertEqual(
@@ -804,9 +791,7 @@ deploy:
             runner_python = runner_bin / "python"
             first = root / "first"
             second = root / "second"
-            inherited_path = os.pathsep.join(
-                (str(first), str(runner_bin), str(second))
-            )
+            inherited_path = os.pathsep.join((str(first), str(runner_bin), str(second)))
             with (
                 patch.object(
                     command_runner_module.sys,
@@ -847,9 +832,7 @@ deploy:
             conn = connect(config.state.db)
             try:
                 first = enqueue_job(conn, task="first", branch="feature/a")
-                first_result = runner.process_batch(
-                    conn, [first], deploy=False
-                )[0]
+                first_result = runner.process_batch(conn, [first], deploy=False)[0]
                 self.assertEqual(first_result.status, "validated")
                 self.assertEqual(observed.read_text(encoding="utf-8"), "1")
 
@@ -864,9 +847,7 @@ deploy:
                     branch="feature/a",
                     allow_duplicate=True,
                 )
-                second_result = runner.process_batch(
-                    conn, [second], deploy=False
-                )[0]
+                second_result = runner.process_batch(conn, [second], deploy=False)[0]
                 events = list_run_events(conn)
             finally:
                 conn.close()
@@ -874,14 +855,10 @@ deploy:
             self.assertEqual(second_result.status, "validated")
             self.assertEqual(observed.read_text(encoding="utf-8"), "2")
             self.assertEqual(
-                (config.validation_worktree_path / "app.txt").read_text(
-                    encoding="utf-8"
-                ),
+                (config.validation_worktree_path / "app.txt").read_text(encoding="utf-8"),
                 "base\n",
             )
-            self.assertFalse(
-                (config.validation_worktree_path / "scratch.tmp").exists()
-            )
+            self.assertFalse((config.validation_worktree_path / "scratch.tmp").exists())
             self.assertIn(
                 "Persistent validation workspace reused",
                 [event.message for event in events],
@@ -912,16 +889,12 @@ deploy:
             try:
                 first = enqueue_job(conn, task="first", branch="feature/a")
                 self.assertEqual(
-                    GitRunner(config).process_batch(
-                        conn, [first], deploy=False
-                    )[0].status,
+                    GitRunner(config).process_batch(conn, [first], deploy=False)[0].status,
                     "validated",
                 )
                 config_path = repo / ".mergetrain.yaml"
                 config_path.write_text(
-                    config_path.read_text(encoding="utf-8").replace(
-                        "cache-v1", "cache-v2"
-                    ),
+                    config_path.read_text(encoding="utf-8").replace("cache-v1", "cache-v2"),
                     encoding="utf-8",
                 )
                 changed = load_config(repo=repo)
@@ -931,9 +904,7 @@ deploy:
                     branch="feature/a",
                     allow_duplicate=True,
                 )
-                result = GitRunner(changed).process_batch(
-                    conn, [second], deploy=False
-                )[0]
+                result = GitRunner(changed).process_batch(conn, [second], deploy=False)[0]
             finally:
                 conn.close()
 
@@ -971,9 +942,7 @@ deploy:
             try:
                 first = enqueue_job(conn, task="first", branch="feature/a")
                 self.assertEqual(
-                    GitRunner(config).process_batch(
-                        conn, [first], deploy=False
-                    )[0].status,
+                    GitRunner(config).process_batch(conn, [first], deploy=False)[0].status,
                     "validated",
                 )
                 toolchain.write_text("tool-b\n", encoding="utf-8")
@@ -983,9 +952,7 @@ deploy:
                     branch="feature/a",
                     allow_duplicate=True,
                 )
-                result = GitRunner(config).process_batch(
-                    conn, [second], deploy=False
-                )[0]
+                result = GitRunner(config).process_batch(conn, [second], deploy=False)[0]
             finally:
                 conn.close()
 
@@ -998,16 +965,12 @@ deploy:
             with self.subTest(cache_path=cache_path), tempfile.TemporaryDirectory() as td:
                 root = Path(td)
                 repo, _ = make_demo_repo(root)
-                enable_persistent_validation_workspace(
-                    repo, cache_paths=(cache_path,)
-                )
+                enable_persistent_validation_workspace(repo, cache_paths=(cache_path,))
                 config = load_config(repo=repo)
                 conn = connect(config.state.db)
                 try:
                     job = enqueue_job(conn, task="unsafe cache", branch="feature/a")
-                    result = GitRunner(config).process_batch(
-                        conn, [job], deploy=False
-                    )[0]
+                    result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
                 finally:
                     conn.close()
 
@@ -1021,9 +984,7 @@ deploy:
             root = Path(td)
             repo, _ = make_demo_repo(root)
             config = load_config(repo=repo)
-            inherited_path = os.pathsep.join(
-                (str(root / "first"), str(root / "second"))
-            )
+            inherited_path = os.pathsep.join((str(root / "first"), str(root / "second")))
             with (
                 patch.object(command_runner_module.sys, "executable", ""),
                 patch.dict(os.environ, {"PATH": inherited_path}),
@@ -1041,8 +1002,7 @@ deploy:
         inherited_path = os.pathsep.join(
             entry
             for entry in os.environ.get("PATH", "").split(os.pathsep)
-            if entry
-            and os.path.normcase(os.path.abspath(entry)) != runner_bin_key
+            if entry and os.path.normcase(os.path.abspath(entry)) != runner_bin_key
         )
 
         with tempfile.TemporaryDirectory() as td:
@@ -1071,24 +1031,16 @@ deploy:
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                result = GitRunner(config).process_batch(
-                    conn, [job], deploy=False
-                )[0]
+                result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
                 events = list_run_events(conn)
             finally:
                 conn.close()
 
             self.assertEqual(result.status, "validated")
             self.assertFalse(marker.exists())
-            skipped = next(
-                event
-                for event in events
-                if event.message == "Skipped gate 2/2: marker"
-            )
+            skipped = next(event for event in events if event.message == "Skipped gate 2/2: marker")
             self.assertEqual(skipped.state, "skipped")
-            self.assertEqual(
-                skipped.detail, "no changed paths matched configured paths"
-            )
+            self.assertEqual(skipped.detail, "no changed paths matched configured paths")
 
     def test_path_scoped_gate_runs_for_a_train_wide_match(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1106,9 +1058,7 @@ deploy:
                     enqueue_job(conn, task="a", branch="feature/a"),
                     enqueue_job(conn, task="b", branch="agent/b"),
                 ]
-                results = GitRunner(config).process_batch(
-                    conn, jobs, deploy=False
-                )
+                results = GitRunner(config).process_batch(conn, jobs, deploy=False)
                 events = list_run_events(conn)
             finally:
                 conn.close()
@@ -1155,9 +1105,7 @@ deploy:
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="rename", branch="feature/a")
-                result = GitRunner(config).process_batch(
-                    conn, [job], deploy=False
-                )[0]
+                result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
             finally:
                 conn.close()
 
@@ -1220,10 +1168,7 @@ deploy:
                 running = False
             else:
                 try:
-                    running = (
-                        ctypes.windll.kernel32.WaitForSingleObject(handle, 0)
-                        == wait_timeout
-                    )
+                    running = ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == wait_timeout
                 finally:
                     ctypes.windll.kernel32.CloseHandle(handle)
             self.assertFalse(running, f"grandchild process {pid} survived timeout")
@@ -1285,7 +1230,7 @@ deploy:
                 (
                     f'{SHELL_PYTHON} -c "import json,sys; '
                     'print(json.dumps(sys.argv[1:]))" '
-                    '${repo} "${repo}" ${worktree} \'${worktree}\''
+                    "${repo} \"${repo}\" ${worktree} '${worktree}'"
                 ),
                 config=config,
                 worktree=worktree,
@@ -1308,7 +1253,7 @@ deploy:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             verify_marker = root / "verify.txt"
-            verify = f'{SHELL_PYTHON} -c "from pathlib import Path; Path(\'{py_path(verify_marker)}\').write_text(\'verified\')"'
+            verify = f"{SHELL_PYTHON} -c \"from pathlib import Path; Path('{py_path(verify_marker)}').write_text('verified')\""
             repo, marker = make_demo_repo(root, verify_command=verify)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -1361,16 +1306,10 @@ deploy:
                 conn.close()
 
             self.assertEqual(deployed.status, "deployed")
-            self.assertEqual(
-                deployed.reused_validation_sha, validated.validation_sha
-            )
+            self.assertEqual(deployed.reused_validation_sha, validated.validation_sha)
             self.assertFalse(marker.exists())
             self.assertEqual(
-                [
-                    event.message
-                    for event in events
-                    if event.state == "skipped"
-                ],
+                [event.message for event in events if event.state == "skipped"],
                 [
                     "Skipped gate 2/2: marker",
                     "Skipped gate 2/2: marker",
@@ -1401,15 +1340,13 @@ deploy:
                 conn.close()
 
             self.assertEqual(deployed.status, "deployed")
-            self.assertEqual(
-                deployed.reused_validation_sha, validated.validation_sha
-            )
+            self.assertEqual(deployed.reused_validation_sha, validated.validation_sha)
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
 
     def test_reuse_preview_json_names_exact_validation_sha_without_claiming(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root)
+            repo, marker = make_demo_repo(root, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -1425,41 +1362,25 @@ deploy:
                         str(repo),
                         "--db",
                         str(config.state.db),
-                        "run-batch",
-                        "--deploy",
-                        "--train-id",
-                        validated.train_id,
-                        "--reuse-validated",
-                        "--preview",
+                        "deploy",
                         "--json",
                     ]
                 )
             payload = json.loads(output.getvalue())
             self.assertEqual(code, 0)
-            self.assertTrue(payload["preview"])
+            self.assertEqual(payload["result"], "confirmation_required")
             self.assertTrue(payload["reuse"]["eligible"])
             self.assertEqual(
                 payload["reuse"]["reused_validation_sha"],
                 validated.validation_sha,
             )
-            checks = {
-                check["code"]: check for check in payload["reuse"]["identity_checks"]
-            }
+            checks = {check["code"]: check for check in payload["reuse"]["identity_checks"]}
             self.assertEqual(checks["integration_base"]["status"], "match")
             self.assertEqual(checks["gate_policy"]["status"], "match")
             self.assertEqual(checks["environment"]["status"], "match")
-            self.assertTrue(
-                all(
-                    gate["action"] == "reuse"
-                    for gate in payload["reuse"]["gates"]
-                )
-            )
-            self.assertFalse(
-                payload["reuse"]["estimated_savings"]["authorizes_reuse"]
-            )
-            self.assertGreater(
-                payload["reuse"]["estimated_savings"]["timed_gate_count"], 0
-            )
+            self.assertTrue(all(gate["action"] == "reuse" for gate in payload["reuse"]["gates"]))
+            self.assertFalse(payload["reuse"]["estimated_savings"]["authorizes_reuse"])
+            self.assertGreater(payload["reuse"]["estimated_savings"]["timed_gate_count"], 0)
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
@@ -1497,7 +1418,7 @@ deploy:
                 reuse_enabled=True,
                 # `cat` is not a Windows command; read the file portably.
                 fingerprint_command=(
-                    f"{SHELL_PYTHON} -c \"from pathlib import Path; "
+                    f'{SHELL_PYTHON} -c "from pathlib import Path; '
                     f"print(Path('{py_path(fingerprint)}').read_text())\""
                 ),
             )
@@ -1528,7 +1449,7 @@ deploy:
                 root,
                 reuse_enabled=True,
                 fingerprint_command=(
-                    f"{SHELL_PYTHON} -c \"from pathlib import Path; "
+                    f'{SHELL_PYTHON} -c "from pathlib import Path; '
                     "Path('fingerprint.tmp').write_text('side effect'); "
                     "print('tool-a')\""
                 ),
@@ -1556,9 +1477,7 @@ deploy:
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 runner = GitRunner(config)
-                failure = CommandFailed(
-                    ["git", "push"], 1, stderr="remote rejected the update"
-                )
+                failure = CommandFailed(["git", "push"], 1, stderr="remote rejected the update")
                 with patch.object(runner, "push_verified_head", side_effect=failure):
                     result = runner.process_one(conn, job, deploy=True)
             finally:
@@ -1593,13 +1512,12 @@ deploy:
                 claimed = claim_deploy_batch(conn, owner=owner)
                 runner = GitRunner(config)
                 rejection = CommandFailed(
-                    ["git", "push"], 1,
+                    ["git", "push"],
+                    1,
                     stderr="! [rejected] main -> main (fetch first)",
                 )
                 with patch.object(runner, "push_verified_head", side_effect=rejection):
-                    result = runner.process_one(
-                        conn, claimed[0], deploy=True, owner=owner
-                    )
+                    result = runner.process_one(conn, claimed[0], deploy=True, owner=owner)
                 action = next_action({"counts": counts(conn)})
             finally:
                 conn.close()
@@ -1609,9 +1527,7 @@ deploy:
             self.assertEqual(result.push_status, "failed")
             self.assertEqual(result.pending_deploy_sha, "")
             self.assertEqual(action, "fix_blocked_job")
-            pending = git(
-                repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/"
-            )
+            pending = git(repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/")
             self.assertEqual(pending, "")
 
     def test_a_gate_that_mutates_the_worktree_blocks_the_deploy(self) -> None:
@@ -1827,11 +1743,14 @@ deploy:
             # was absent. The lease must reject both this ref and main together.
             git(repo, "push", "origin", f"{base}:{audit_ref}")
 
-            with patch.object(
-                runner,
-                "_audit_ref_expectation",
-                return_value=(audit_ref, ""),
-            ), self.assertRaises(CommandFailed) as raised:
+            with (
+                patch.object(
+                    runner,
+                    "_audit_ref_expectation",
+                    return_value=(audit_ref, ""),
+                ),
+                self.assertRaises(CommandFailed) as raised,
+            ):
                 runner.push_verified_head(worktree=repo, deploy_sha=target)
 
             self.assertIn("stale info", raised.exception.stderr)
@@ -1855,11 +1774,14 @@ deploy:
                         raise CommandFailed(command, 1, stderr="cannot lock ref")
                     return original_run_command(command, **kwargs)
 
-                with patch.object(
-                    atomic_push_module,
-                    "run_command",
-                    side_effect=fail_pending_ref,
-                ), patch.object(runner, "push_verified_head") as push:
+                with (
+                    patch.object(
+                        atomic_push_module,
+                        "run_command",
+                        side_effect=fail_pending_ref,
+                    ),
+                    patch.object(runner, "push_verified_head") as push,
+                ):
                     result = runner.process_one(conn, job, deploy=True)
             finally:
                 conn.close()
@@ -1907,9 +1829,7 @@ deploy:
             "https://ghp_fixture-secret@example.com/org/repo.git": (
                 "https://[redacted]@example.com/org/repo.git"
             ),
-            'mysql --password="p@ss word" -h db': (
-                "mysql --password=[redacted] -h db"
-            ),
+            'mysql --password="p@ss word" -h db': ("mysql --password=[redacted] -h db"),
             "deploy --auth-token 'fixture secret' --access-token=second": (
                 "deploy --auth-token [redacted] --access-token=[redacted]"
             ),
@@ -1933,10 +1853,7 @@ deploy:
             root = Path(td)
             # The secret is inline in the gate command itself (not just its
             # output), so it lands in CommandFailed.command -> the job note.
-            gate = (
-                f'{SHELL_PYTHON} -c "import sys; sys.exit(5)" '
-                "--token sk-inline-secret-value"
-            )
+            gate = f'{SHELL_PYTHON} -c "import sys; sys.exit(5)" --token sk-inline-secret-value'
             repo, _marker = make_demo_repo(root, gate_command=gate)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -1956,19 +1873,15 @@ deploy:
             gate = (
                 f'{SHELL_PYTHON} -c "import sys; '
                 "import os; print(os.environ['FIXTURE_EVENT_SECRET'], "
-                "file=sys.stderr); sys.exit(5)\""
+                'file=sys.stderr); sys.exit(5)"'
             )
             repo, _marker = make_demo_repo(root, gate_command=gate)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                with patch.dict(
-                    os.environ, {"FIXTURE_EVENT_SECRET": secret}, clear=False
-                ):
-                    result = GitRunner(config).process_batch(
-                        conn, [job], deploy=False
-                    )[0]
+                with patch.dict(os.environ, {"FIXTURE_EVENT_SECRET": secret}, clear=False):
+                    result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
                 events = list_run_events(conn, limit=200)
             finally:
                 conn.close()
@@ -2004,8 +1917,7 @@ deploy:
             env.update({"LC_ALL": "C", "LANG": "C"})
             log = io.StringIO()
             completed = run_shell(
-                f"{SHELL_PYTHON} -c \"import sys; "
-                "sys.stdout.buffer.write(b'\\xff\\n')\"",
+                f"{SHELL_PYTHON} -c \"import sys; sys.stdout.buffer.write(b'\\xff\\n')\"",
                 cwd=td,
                 env=env,
                 log=log,
@@ -2041,9 +1953,7 @@ deploy:
     def test_run_shell_defaults_to_managed_noninteractive_execution(self) -> None:
         expected = subprocess.CompletedProcess("true", 0, "", "")
         with patch("mergetrain.command_runner._run_managed", return_value=expected) as run:
-            completed = run_shell(
-                "true", cwd=".", env={"PATH": os.environ.get("PATH", "")}
-            )
+            completed = run_shell("true", cwd=".", env={"PATH": os.environ.get("PATH", "")})
         self.assertIs(completed, expected)
         self.assertEqual(run.call_args.kwargs["timeout_seconds"], 600.0)
         self.assertEqual(run.call_args.kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
@@ -2072,7 +1982,9 @@ deploy:
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
             self.assertIn("Merged feature/a", [event.message for event in events])
             self.assertIn("Running gate 2/2: marker", [event.message for event in events])
-            running_gate = next(event for event in events if event.message == "Running gate 2/2: marker")
+            running_gate = next(
+                event for event in events if event.message == "Running gate 2/2: marker"
+            )
             self.assertEqual(running_gate.detail, config.gates[0].run)
 
     def test_same_named_tag_cannot_shadow_uncaptured_task_branch(self) -> None:
@@ -2170,8 +2082,8 @@ deploy:
             root = Path(td)
             first_marker = root / "first-gate.txt"
             second_marker = root / "second-gate.txt"
-            first_gate = f'{SHELL_PYTHON} -c "from pathlib import Path; Path(\'{py_path(first_marker)}\').write_text(\'x\')"'
-            second_gate = f'{SHELL_PYTHON} -c "from pathlib import Path; Path(\'{py_path(second_marker)}\').write_text(\'y\')"'
+            first_gate = f"{SHELL_PYTHON} -c \"from pathlib import Path; Path('{py_path(first_marker)}').write_text('x')\""
+            second_gate = f"{SHELL_PYTHON} -c \"from pathlib import Path; Path('{py_path(second_marker)}').write_text('y')\""
             repo, _marker = make_demo_repo(root, gate_command=first_gate)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
@@ -2179,9 +2091,7 @@ deploy:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 validated = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
                 config.config_path.write_text(
-                    config.config_path.read_text(encoding="utf-8").replace(
-                        first_gate, second_gate
-                    ),
+                    config.config_path.read_text(encoding="utf-8").replace(first_gate, second_gate),
                     encoding="utf-8",
                 )
                 changed_config = load_config(repo=repo)
@@ -2415,7 +2325,7 @@ class BisectIsolationTests(unittest.TestCase):
             with self.subTest(filler_count=filler_count), tempfile.TemporaryDirectory() as td:
                 root = Path(td)
                 gate = (
-                    f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                    f'{SHELL_PYTHON} -c "import sys, pathlib; '
                     "sys.exit(1 if (pathlib.Path('left.txt').exists() "
                     "and pathlib.Path('right.txt').exists()) else 0)\""
                 )
@@ -2457,7 +2367,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
                 "sys.exit(1 if (pathlib.Path('left.txt').exists() "
                 "and pathlib.Path('right.txt').exists()) else 0)\""
             )
@@ -2515,7 +2425,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; p=pathlib.Path; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; p=pathlib.Path; '
                 "sys.exit(1 if all(p(f'{name}.txt').exists() for name in "
                 "('one', 'two', 'three')) else 0)\""
             )
@@ -2548,12 +2458,10 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
                 "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
             )
-            repo, _ = make_demo_repo(
-                root, gate_command=gate, gate_paths=("bad.txt",)
-            )
+            repo, _ = make_demo_repo(root, gate_command=gate, gate_paths=("bad.txt",))
             add_branch(repo, "agent/bad", "bad.txt")
             add_branch(repo, "agent/b", "b.txt")
             add_branch(repo, "agent/c", "c.txt")
@@ -2592,7 +2500,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
                 "sys.exit(1 if (pathlib.Path('left.txt').exists() "
                 "and pathlib.Path('right.txt').exists()) else 0)\""
             )
@@ -2630,7 +2538,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
                 "sys.exit(1 if (pathlib.Path('t1.txt').exists() "
                 "and pathlib.Path('t3.txt').exists() "
                 "and pathlib.Path('t5.txt').exists()) else 0)\""
@@ -2653,9 +2561,7 @@ class BisectIsolationTests(unittest.TestCase):
             conflicted = ("agent/t1", "agent/t3", "agent/t5")
             for branch in conflicted:
                 self.assertEqual(stored[branch].status, "blocked", branch)
-                partners = {
-                    int(part) for part in stored[branch].conflict_with.split(",")
-                }
+                partners = {int(part) for part in stored[branch].conflict_with.split(",")}
                 expected = {ids[other] for other in conflicted if other != branch}
                 self.assertEqual(partners, expected, branch)
                 self.assertIn("semantic conflict", stored[branch].note)
@@ -2668,7 +2574,7 @@ class BisectIsolationTests(unittest.TestCase):
             root = Path(td)
             # bad fails alone but is masked by fix; the real conflict is x+y.
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; e=pathlib.Path; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; e=pathlib.Path; '
                 "sys.exit(1 if ((e('bad.txt').exists() and not e('fix.txt').exists()) "
                 "or (e('x.txt').exists() and e('y.txt').exists())) else 0)\""
             )
@@ -2702,10 +2608,10 @@ class BisectIsolationTests(unittest.TestCase):
             root = Path(td)
             counter = root / "count.txt"
             gate = (
-                f"{SHELL_PYTHON} -c \"import pathlib, sys; "
+                f'{SHELL_PYTHON} -c "import pathlib, sys; '
                 f"p = pathlib.Path('{py_path(counter)}'); "
                 "n = (int(p.read_text()) + 1) if p.exists() else 1; "
-                "p.write_text(str(n)); sys.exit(1 if n == 1 else 0)\""
+                'p.write_text(str(n)); sys.exit(1 if n == 1 else 0)"'
             )
             repo, _ = make_demo_repo(root, gate_command=gate)
             for name in ("b", "c", "d"):
@@ -2715,8 +2621,7 @@ class BisectIsolationTests(unittest.TestCase):
             try:
                 jobs = [enqueue_job(conn, task="a", branch="feature/a")]
                 jobs.extend(
-                    enqueue_job(conn, task=name, branch=f"agent/{name}")
-                    for name in ("b", "c", "d")
+                    enqueue_job(conn, task=name, branch=f"agent/{name}") for name in ("b", "c", "d")
                 )
                 GitRunner(config).process_batch(conn, jobs, deploy=False)
                 stored = [get_job(conn, job.id) for job in jobs]
@@ -2733,10 +2638,10 @@ class BisectIsolationTests(unittest.TestCase):
             root = Path(td)
             counter = root / "count.txt"
             gate = (
-                f"{SHELL_PYTHON} -c \"import pathlib, sys; "
+                f'{SHELL_PYTHON} -c "import pathlib, sys; '
                 f"p = pathlib.Path('{py_path(counter)}'); "
                 "n = (int(p.read_text()) + 1) if p.exists() else 1; "
-                "p.write_text(str(n)); sys.exit(1 if n == 1 else 0)\""
+                'p.write_text(str(n)); sys.exit(1 if n == 1 else 0)"'
             )
             repo, _ = make_demo_repo(root, gate_command=gate)
             for name in ("b", "c", "d"):
@@ -2755,13 +2660,9 @@ class BisectIsolationTests(unittest.TestCase):
                     enqueue_job(conn, task=task, branch=branch)
                 claimed = claim_deploy_batch(conn, owner=owner)
                 token = claimed[0].claim_token
-                failure = CommandFailed(
-                    ["git", "push"], 1, stderr="transport timed out"
-                )
+                failure = CommandFailed(["git", "push"], 1, stderr="transport timed out")
                 runner = GitRunner(config)
-                with patch.object(
-                    runner, "push_verified_head", side_effect=failure
-                ) as push:
+                with patch.object(runner, "push_verified_head", side_effect=failure) as push:
                     runner.process_batch(conn, claimed, deploy=True, owner=owner)
                 stored = [get_job(conn, job.id) for job in claimed]
             finally:
@@ -2779,7 +2680,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import sys, pathlib; "
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
                 "sys.exit(1 if pathlib.Path('bad.txt').exists() else 0)\""
             )
             repo, _ = make_demo_repo(root, gate_command=gate)
@@ -2811,7 +2712,7 @@ class BisectIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             gate = (
-                f"{SHELL_PYTHON} -c \"import pathlib, sys; p=pathlib.Path; "
+                f'{SHELL_PYTHON} -c "import pathlib, sys; p=pathlib.Path; '
                 "sys.exit(1 if sum(p(name).exists() for name in "
                 "('a.txt', 'b.txt', 'c.txt')) > 1 else 0)\""
             )
@@ -2831,16 +2732,10 @@ class BisectIsolationTests(unittest.TestCase):
                     enqueue_job(conn, task=task, branch=branch)
                 claimed = claim_deploy_batch(conn, owner=owner)
                 token = claimed[0].claim_token
-                failure = CommandFailed(
-                    ["git", "push"], 1, stderr="transport timed out"
-                )
+                failure = CommandFailed(["git", "push"], 1, stderr="transport timed out")
                 runner = GitRunner(config)
-                with patch.object(
-                    runner, "push_verified_head", side_effect=failure
-                ) as push:
-                    results = runner.process_batch(
-                        conn, claimed, deploy=True, owner=owner
-                    )
+                with patch.object(runner, "push_verified_head", side_effect=failure) as push:
+                    results = runner.process_batch(conn, claimed, deploy=True, owner=owner)
                 stored = [get_job(conn, job.id) for job in claimed]
             finally:
                 if token:
@@ -2867,7 +2762,9 @@ class PushRejectionTests(unittest.TestCase):
         from mergetrain.git_ops import is_push_rejection
 
         self.assertTrue(is_push_rejection("remote: error: GH006 Protected branch update failed"))
-        self.assertTrue(is_push_rejection("! [remote rejected] main -> main (protected branch hook declined)"))
+        self.assertTrue(
+            is_push_rejection("! [remote rejected] main -> main (protected branch hook declined)")
+        )
         self.assertTrue(is_push_rejection("! [rejected] main -> main (fetch first)"))
         self.assertTrue(is_push_rejection("! [rejected] main -> main (non-fast-forward)"))
         self.assertTrue(is_push_rejection("remote: Permission to org/repo denied to user."))
@@ -2880,7 +2777,10 @@ class PushRejectionTests(unittest.TestCase):
         from mergetrain.observability import job_outcome
 
         job = Job(
-            id=1, task="a", branch="feature/a", status="blocked",
+            id=1,
+            task="a",
+            branch="feature/a",
+            status="blocked",
             push_status="failed",
             note="remote rejected the push (protected branch, required pull request)",
         )
@@ -2926,8 +2826,7 @@ class GcWorktreeGuardTests(unittest.TestCase):
             workspace = config.validation_worktree_path
             workspace.mkdir(parents=True)
             marker = (
-                config.state.worktree_root
-                / f".{config.project.name}-validation-workspace.json"
+                config.state.worktree_root / f".{config.project.name}-validation-workspace.json"
             )
             marker.write_text("{}\n", encoding="utf-8")
 
@@ -2954,9 +2853,7 @@ class GcWorktreeGuardTests(unittest.TestCase):
             preview = find_worktree_gc_candidates(disabled)
             result = apply_gc(disabled)
 
-            self.assertEqual(
-                preview[0]["reason"], "disabled persistent validation workspace"
-            )
+            self.assertEqual(preview[0]["reason"], "disabled persistent validation workspace")
             self.assertFalse(workspace.exists())
             self.assertFalse(marker.exists())
             self.assertEqual(result["removed_worktrees"], preview)
@@ -3110,9 +3007,7 @@ class MergeConflictTests(unittest.TestCase):
             # The custom driver reports a successful content merge but mutates
             # another tracked file after Git built the merge index. The merge
             # commit therefore succeeds while the integration worktree is dirty.
-            (repo / ".gitattributes").write_text(
-                "app.txt merge=dirty\n", encoding="utf-8"
-            )
+            (repo / ".gitattributes").write_text("app.txt merge=dirty\n", encoding="utf-8")
             (repo / "sentinel.txt").write_text("clean\n", encoding="utf-8")
             git(repo, "add", ".gitattributes", "sentinel.txt")
             git(repo, "commit", "-m", "configure dirty merge driver")
@@ -3145,15 +3040,9 @@ class MergeConflictTests(unittest.TestCase):
             self.assertEqual(stored["agent/dirty"].status, "blocked")
             self.assertIn("dirty after merge", stored["agent/dirty"].note)
             self.assertEqual(stored["agent/clean"].status, "deployed")
-            self.assertEqual(
-                git(root / "remote.git", "show", "main:app.txt"), "main-moved"
-            )
-            self.assertEqual(
-                git(root / "remote.git", "show", "main:sentinel.txt"), "clean"
-            )
-            self.assertEqual(
-                git(root / "remote.git", "show", "main:clean.txt"), "agent/clean"
-            )
+            self.assertEqual(git(root / "remote.git", "show", "main:app.txt"), "main-moved")
+            self.assertEqual(git(root / "remote.git", "show", "main:sentinel.txt"), "clean")
+            self.assertEqual(git(root / "remote.git", "show", "main:clean.txt"), "agent/clean")
 
 
 class JobOutcomeCategoryTests(unittest.TestCase):
@@ -3166,15 +3055,23 @@ class JobOutcomeCategoryTests(unittest.TestCase):
         # must categorize as gate_failed, not push_failed, which would steer
         # remediation toward branch-protection instead of the failing gate.
         gate = Job(
-            id=1, task="a", branch="agent/a", status="failed",
-            push_status="not_run", note="gate 'no-force-push' failed: exit 1",
+            id=1,
+            task="a",
+            branch="agent/a",
+            status="failed",
+            push_status="not_run",
+            note="gate 'no-force-push' failed: exit 1",
         )
         self.assertEqual(job_outcome(gate)["category"], "gate_failed")
 
         # A genuine push failure is still push_failed — via the structured field.
         pushed = Job(
-            id=2, task="a", branch="agent/b", status="failed",
-            push_status="failed", note="remote rejected the update",
+            id=2,
+            task="a",
+            branch="agent/b",
+            status="failed",
+            push_status="failed",
+            note="remote rejected the update",
         )
         self.assertEqual(job_outcome(pushed)["category"], "push_failed")
 

@@ -92,24 +92,30 @@ def _capture_simple(argv):
 # --- surface capture functions -------------------------------------------
 
 
-def _cap_doctor(repo):
-    return _run_json(["--repo", str(repo), "doctor"])
+def _cap_status_diagnose(repo):
+    return _run_json(["--repo", str(repo), "status", "--diagnose"])
 
 
 def _cap_status(repo):
     return _run_json(["--repo", str(repo), "status"])
 
 
-def _cap_version(repo):
-    return _run_json(["--repo", str(repo), "version"])
+def _prepare_enqueue_branch(repo: Path) -> None:
+    """Turn make_demo_repo's fixture into one clean, queueable task worktree."""
 
-
-def _cap_agent_contract(repo):
-    return _run_json(["--repo", str(repo), "agent-contract"])
+    subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "track mergetrain config"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "switch", "feature/a"], cwd=repo, check=True)
+    subprocess.run(["git", "rebase", "main"], cwd=repo, check=True)
 
 
 def _cap_enqueue(repo):
     # Enqueue emits the job envelope; seed a branch so it succeeds.
+    _prepare_enqueue_branch(repo)
     return _run_json(
         [
             "--repo",
@@ -119,13 +125,14 @@ def _cap_enqueue(repo):
             "a",
             "--branch",
             "feature/a",
-            "--no-ready-check",
+            "--worktree",
+            str(repo),
         ]
     )
 
 
-def _cap_run_validate(repo):
-    return _run_json(["--repo", str(repo), "run-batch", "--validate-only"])
+def _cap_validate(repo):
+    return _run_json(["--repo", str(repo), "validate"])
 
 
 def _cap_gc(repo):
@@ -206,12 +213,10 @@ def _cap_stats(repo):
 
 def _cap_failure_envelope(repo):
     # A config_error routes through main()'s unified failure envelope.
-    (repo / ".mergetrain.yaml").write_text(
-        "git:\n  push_refs: []\n", encoding="utf-8"
-    )
+    (repo / ".mergetrain.yaml").write_text("git:\n  push_refs: []\n", encoding="utf-8")
     out = io.StringIO()
     with redirect_stdout(out):
-        main(["--repo", str(repo), "doctor", "--json"])
+        main(["--repo", str(repo), "status", "--diagnose", "--json"])
     return json.loads(out.getvalue())
 
 
@@ -266,9 +271,7 @@ def _cap_jsonl_frames(repo):
     # stream_end (normal): a scoped follow over a terminal job returns at once.
     conn = connect(_db(repo))
     terminal_job = enqueue_job(conn, task="b", branch="feature/b")
-    conn.execute(
-        "UPDATE deploy_queue SET status='deployed' WHERE id=?", (terminal_job.id,)
-    )
+    conn.execute("UPDATE deploy_queue SET status='deployed' WHERE id=?", (terminal_job.id,))
     conn.commit()
     conn.close()
     ended = io.StringIO()
@@ -327,10 +330,6 @@ def _cap_jsonl_frames(repo):
     return frames
 
 
-def _cap_recover(repo):
-    return _run_json(["--repo", str(repo), "recover"])
-
-
 def _cap_unlock(repo):
     # No lock present: the command runs, ok:true, cleared:false (exit 5).
     return _run_json(["--repo", str(repo), "unlock"])
@@ -350,8 +349,12 @@ def _cap_verify(repo):
     conn = connect(_db(repo))
     job = enqueue_job(conn, task="a", branch="feature/a")
     mark_job(
-        conn, job.id, status="deployed", deploy_sha="e" * 40,
-        push_status="succeeded", verify_status="unknown",
+        conn,
+        job.id,
+        status="deployed",
+        deploy_sha="e" * 40,
+        push_status="succeeded",
+        verify_status="unknown",
     )
     conn.close()
     return _run_json(["--repo", str(repo), "verify", "--ack", "succeeded"])
@@ -427,30 +430,21 @@ def _cap_hub_status_summary(repo):
 def _cap_init(repo):
     # `init --write` reports the scaffold it produced and what to do next. It
     # has no --json flag: the payload is unconditional, so capture it directly.
+    target = repo / "new-project"
+    target.mkdir()
     out = io.StringIO()
     with redirect_stdout(out):
-        main(["--repo", str(repo), "init", "--project", "demo", "--write", "--force"])
+        main(["--repo", str(target), "init", "--project", "demo", "--write"])
     return json.loads(out.getvalue())
 
 
-def _cap_run_preview(repo):
+def _cap_deploy_preview(repo):
     # The pre-deploy preview is its own shape -- push plan, reuse decision, and
     # the exact train -- and it is what an operator or agent reads *before*
     # approving a push, so it belongs under the freeze like any other surface.
-    _run_json(
-        [
-            "--repo",
-            str(repo),
-            "enqueue",
-            "--task",
-            "a",
-            "--branch",
-            "feature/a",
-            "--no-ready-check",
-        ]
-    )
-    _run_json(["--repo", str(repo), "run-batch", "--validate-only"])
-    return _run_json(["--repo", str(repo), "run-batch", "--deploy", "--preview"])
+    _cap_enqueue(repo)
+    _run_json(["--repo", str(repo), "validate"])
+    return _run_json(["--repo", str(repo), "deploy"])
 
 
 def _hub_registry(repo: Path) -> Path:
@@ -458,30 +452,23 @@ def _hub_registry(repo: Path) -> Path:
 
 
 def _cap_hub_add(repo):
-    return _run_json(
-        ["hub", "add", str(repo), "--registry", str(_hub_registry(repo))]
-    )
+    return _run_json(["hub", "add", str(repo), "--registry", str(_hub_registry(repo))])
 
 
 def _cap_hub_remove(repo):
     from mergetrain.registry import add_repo
 
     add_repo(repo, _hub_registry(repo))
-    return _run_json(
-        ["hub", "remove", str(repo), "--registry", str(_hub_registry(repo))]
-    )
+    return _run_json(["hub", "remove", str(repo), "--registry", str(_hub_registry(repo))])
 
 
 SURFACES = {
-    "doctor": _cap_doctor,
+    "status_diagnose": _cap_status_diagnose,
     "status": _cap_status,
-    "version": _cap_version,
-    "agent_contract": _cap_agent_contract,
     "enqueue": _cap_enqueue,
-    "run_batch_validate": _cap_run_validate,
+    "validate": _cap_validate,
     "gc": _cap_gc,
     "reconcile": _cap_reconcile,
-    "recover": _cap_recover,
     "unlock": _cap_unlock,
     "verify": _cap_verify,
     "dismiss": _cap_dismiss,
@@ -493,7 +480,7 @@ SURFACES = {
     "hub_add": _cap_hub_add,
     "hub_remove": _cap_hub_remove,
     "init": _cap_init,
-    "run_batch_preview": _cap_run_preview,
+    "deploy_preview": _cap_deploy_preview,
     "inspect": _cap_inspect,
     "history": _cap_history,
     "stats": _cap_stats,
@@ -586,7 +573,7 @@ class ErrorTaxonomyTests(unittest.TestCase):
     def test_config_error_is_not_retryable(self) -> None:
         repo = self._repo()
         (repo / ".mergetrain.yaml").write_text("git:\n  push_refs: []\n", encoding="utf-8")
-        error = _run_json(["--repo", str(repo), "doctor"])["error"]
+        error = _run_json(["--repo", str(repo), "status", "--diagnose"])["error"]
         self.assertEqual(error["code"], "config_error")
         self.assertFalse(error["retryable"])
 
@@ -598,8 +585,18 @@ class ErrorTaxonomyTests(unittest.TestCase):
 
     def test_duplicate_active_branch_is_not_retryable(self) -> None:
         repo = self._repo()
-        argv = ["--repo", str(repo), "enqueue", "--task", "a",
-                "--branch", "feature/a", "--no-ready-check"]
+        _prepare_enqueue_branch(repo)
+        argv = [
+            "--repo",
+            str(repo),
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "feature/a",
+            "--worktree",
+            str(repo),
+        ]
         _run_json(argv)  # the first enqueue succeeds
         error = _run_json(argv)["error"]  # the duplicate is rejected
         self.assertEqual(error["code"], "duplicate_active_branch")
@@ -615,7 +612,7 @@ class ErrorTaxonomyTests(unittest.TestCase):
             acquire_runner_lock(conn, owner=default_owner())  # a live lock this process owns
         finally:
             conn.close()
-        error = _run_json(["--repo", str(repo), "run-batch", "--deploy"])["error"]
+        error = _run_json(["--repo", str(repo), "deploy"])["error"]
         self.assertEqual(error["code"], "lock_held")
         self.assertTrue(error["retryable"])
 
@@ -656,9 +653,9 @@ class ErrorTaxonomyTests(unittest.TestCase):
         # worst place for a stale claim, so check it rather than trust it.
         import re
 
-        doc = (
-            Path(__file__).resolve().parents[1] / "docs" / "contract.md"
-        ).read_text(encoding="utf-8")
+        doc = (Path(__file__).resolve().parents[1] / "docs" / "contract.md").read_text(
+            encoding="utf-8"
+        )
         paragraph = doc.split("Coverage is")[1].split("Run results share")[0]
         documented = set(re.findall(r"`([a-z_]+)`", paragraph))
         golden = set(json.loads(GOLDEN.read_text(encoding="utf-8"))["surfaces"])
@@ -681,9 +678,9 @@ class ErrorTaxonomyTests(unittest.TestCase):
 
         from mergetrain import errors as errors_module
 
-        doc = (
-            Path(__file__).resolve().parents[1] / "docs" / "contract.md"
-        ).read_text(encoding="utf-8")
+        doc = (Path(__file__).resolve().parents[1] / "docs" / "contract.md").read_text(
+            encoding="utf-8"
+        )
         table = doc.split("## `error.code` vocabulary")[1].split("\n\n##")[0]
         documented = {
             row.group(1): "yes" in row.group(2).lower()
@@ -691,9 +688,9 @@ class ErrorTaxonomyTests(unittest.TestCase):
         }
 
         def wire_code(name: str) -> str:
-            return "".join(
-                f"_{char.lower()}" if char.isupper() else char for char in name
-            ).lstrip("_")
+            return "".join(f"_{char.lower()}" if char.isupper() else char for char in name).lstrip(
+                "_"
+            )
 
         implemented = {
             wire_code(name)
@@ -704,13 +701,10 @@ class ErrorTaxonomyTests(unittest.TestCase):
         }
         source_root = Path(__file__).resolve().parents[1] / "src" / "mergetrain"
         cli_sources = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted(source_root.rglob("*.py"))
+            path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.py"))
         )
         implemented |= set(re.findall(r'error_code="([a-z_]+)"', cli_sources))
-        implemented |= set(
-            re.findall(r'_error_payload\(\s*\n?\s*"([a-z_]+)"', cli_sources)
-        )
+        implemented |= set(re.findall(r'_error_payload\(\s*\n?\s*"([a-z_]+)"', cli_sources))
 
         self.assertEqual(
             implemented - set(documented),
@@ -734,7 +728,7 @@ class ErrorTaxonomyTests(unittest.TestCase):
             "mergetrain.commands.inspection.config_from_args",
             side_effect=KeyboardInterrupt,
         ):
-            payload = _run_json(["--repo", str(repo), "doctor"])
+            payload = _run_json(["--repo", str(repo), "status", "--diagnose"])
         self.assertEqual(payload["error"]["code"], "interrupted")
         self.assertEqual(payload["error"]["message"], "interrupted")
         self.assertFalse(payload["error"]["retryable"])
