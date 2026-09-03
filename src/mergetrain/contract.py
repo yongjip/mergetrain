@@ -19,4 +19,4 @@ type or meaning, is breaking and requires a deliberate bump.
 
 from __future__ import annotations
 
-CONTRACT_VERSION = 3
+CONTRACT_VERSION = 4

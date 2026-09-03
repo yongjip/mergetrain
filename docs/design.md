@@ -89,7 +89,12 @@ the same reviewed change rather than bypassing the check.
 
 ## Concepts
 
-**Job** — one task branch in the queue. It records a human-readable `task` name, the `branch`, the originating `worktree_path`, a `status`, separate `push_status` and `verify_status` outcomes, the SHAs captured at enqueue (`base_sha`, `head_sha`), the integration result SHA the runner produces (`deploy_sha`), validation-train identity, timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
+**Job** — one task branch in the queue. It records a human-readable `task` name,
+the `branch`, the originating `worktree_path`, a `status`, separate
+`push_status` and `verify_status` outcomes, the SHAs captured at enqueue
+(`base_sha`, `head_sha`), the integration result SHA the runner produces
+(`deploy_sha`), validation-train and deployment-generation identity,
+timestamps, a `log_path`, a `note`, and the `auto_deploy` flag.
 
 **Validated train** — the exact group of jobs that passed a validation run. Each
 member stores the shared `train_id`, expected `train_size`, `validated_at`,
@@ -133,6 +138,13 @@ fail-closed and runs the gate. A gate failure is a pre-push failure: nothing
 ships.
 
 **Verify hook** — a post-push verification command (`deploy.verify` in config) run after the push to confirm the deploy is live.
+
+**Deployment generation** — one atomic push and its post-push verification
+result. Every member records a shared random `deployment_id`, the credential-
+free destination identity, and the verification-policy identity before remote
+I/O. A definitive rejection or unlanded cancellation clears that identity; a
+landed deployment retains it so one later recheck can resolve every member
+without grouping by train ID or commit SHA.
 
 **Auto job** — a job enqueued with `--auto` (`auto_deploy = 1`). It is the only
 kind the default and Hub daemons will deploy. `--auto` does not mean the agent
@@ -186,7 +198,10 @@ CREATE TABLE IF NOT EXISTS deploy_queue (
   pending_deploy_sha TEXT NOT NULL DEFAULT '',
   pending_deploy_remote TEXT NOT NULL DEFAULT '',
   pending_deploy_refs TEXT NOT NULL DEFAULT '',
-  pending_deploy_destination_sha TEXT NOT NULL DEFAULT ''
+  pending_deploy_destination_sha TEXT NOT NULL DEFAULT '',
+  deployment_id TEXT NOT NULL DEFAULT '',
+  deployment_destination_sha TEXT NOT NULL DEFAULT '',
+  verification_policy_sha TEXT NOT NULL DEFAULT ''
 );
 ```
 
@@ -208,6 +223,13 @@ timeout), validation-reuse configuration and authorization, and verify hooks.
 Legacy rows migrate with a blank value and therefore fail closed instead of
 being silently upgraded to the current policy. The field is intentionally
 omitted from public job JSON.
+
+Schema v15 adds the three internal deployment-generation fields. They are
+written atomically with the pending-push marker, shared by all train members,
+and omitted from public job JSON. Existing rows migrate with blank identity:
+recovery may resolve a selected legacy row explicitly, but never guesses a
+group from a train ID or deploy SHA, and an automatic re-run requires a
+persisted matching verification policy.
 
 ### `locks`
 
@@ -271,7 +293,15 @@ worktree and log paths and reduces the owner identity to `local:<pid>`.
 
 ### Connection policy
 
-`connect()` creates the parent directory, sets the row factory to `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE` transactions to take an early lock and reduce queue-state conflicts under concurrent writers. Schema upgrades run once per `PRAGMA user_version` in the same transaction; databases newer than the running binary fail closed.
+`connect()` creates the parent directory, sets the row factory to
+`sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and
+`PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE`
+transactions to take an early lock and reduce queue-state conflicts under
+concurrent writers. Status, Hub, and dashboard builders wrap their related
+`SELECT` statements in one deferred read transaction, fixing counts, jobs,
+events, and the resulting action to one WAL snapshot without blocking writers.
+Schema upgrades run once per `PRAGMA user_version` in the same transaction;
+databases newer than the running binary fail closed.
 
 ### Persistence responsibility boundaries
 
@@ -281,7 +311,7 @@ is no ORM or generic repository layer:
 
 | Module | Owns |
 | --- | --- |
-| `transactions.py` | `BEGIN IMMEDIATE`, rollback/commit handling, and `QueueBusy` translation |
+| `transactions.py` | write transactions, stable read snapshots, rollback/commit handling, and `QueueBusy` translation |
 | `connection.py` | writable versus observer-only connections, WAL/FULL pragmas, and state-directory safety |
 | `schema.py` | current schema, ordered migrations, and forward-version refusal |
 | `jobs.py` | queue/job reads and compare-and-swap mutations plus validated-train identity |
@@ -435,6 +465,16 @@ v4 migration backfills legacy `deployed` rows as pushed and recognizes the
 canonical warning-note prefix when available; otherwise historical verification
 remains `not_run` because no stronger fact was persisted. See [failure
 modes](failure-modes.md#post-push-verify-failure).
+
+Unknown and failed verification remain current Attention until explicitly
+resolved; a later deployment cannot hide them. For schema-v15 deployments,
+`verify --job` checks that the stored verification-policy identity matches the
+current hooks, runs those hooks once against the recorded deploy SHA, and
+updates the entire deployment generation in one transaction. Missing or
+changed policy fails closed and requires the existing explicit
+`--ack succeeded/failed` review path. Legacy rows have no trustworthy grouping
+or policy identity, so automatic re-verification is refused rather than
+silently treating an empty current hook list as success.
 
 ## Daemon model
 

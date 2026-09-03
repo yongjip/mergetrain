@@ -13,7 +13,7 @@ from statistics import median
 from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
-from .errors import redact_secrets
+from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound, redact_secrets
 from .models import Job, RunEvent, RunnerLock
 from .observability import _gate_runs, elapsed_seconds
 from .reuse import reuse_explanation
@@ -26,6 +26,7 @@ from .store import (
     list_jobs,
     list_jobs_fifo,
     owner_liveness,
+    read_snapshot,
     utc_now,
     validated_train_summaries,
 )
@@ -46,6 +47,7 @@ GATE_EVENT = re.compile(
 )
 ESTIMATE_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
 ESTIMATE_SAMPLE_LIMIT = 20
+PUBLIC_REASON_LIMIT = PUBLIC_TEXT_LIMIT
 
 NEXT_ACTION_VALUES = frozenset(
     {
@@ -108,6 +110,19 @@ def attention_reason_code(job: Job) -> str | None:
     if job.status in {"blocked", "failed"}:
         return job.status
     return None
+
+
+def public_reason(job: Job) -> tuple[str | None, bool]:
+    """Return a bounded, secret-masked explanation for public projections."""
+
+    raw = (
+        job.note
+        or job.conflict_with
+        or attention_reason_code(job)
+        or job.status
+    )
+    redacted, truncated = redact_and_bound(raw, limit=PUBLIC_REASON_LIMIT)
+    return redacted or None, truncated
 
 
 def _attention_priority(job: Job) -> tuple[int, int]:
@@ -233,7 +248,12 @@ def plan_next_action(
     if selected_reason == "post_push_verification_failed" or count_data.get(
         "deployed_verify_failed", 0
     ):
-        return _plan_for_code("resolve_failed_verification", job=selected)
+        target = (
+            selected
+            if selected_reason == "post_push_verification_failed"
+            else None
+        )
+        return _plan_for_code("resolve_failed_verification", job=target)
     if count_data.get("blocked", 0) or count_data.get("failed", 0):
         target = (
             selected
@@ -348,9 +368,10 @@ def build_queue_summary(
 
     conn = connect(config.state.db, read_only=read_only)
     try:
-        count_data = counts(conn)
-        lock = _public_lock(get_lock(conn))
-        validated_trains = validated_train_summaries(conn)
+        with read_snapshot(conn):
+            count_data = counts(conn)
+            lock = _public_lock(get_lock(conn))
+            validated_trains = validated_train_summaries(conn)
     finally:
         conn.close()
     payload: dict[str, Any] = {
@@ -720,11 +741,14 @@ def build_dashboard_snapshot(
 
     conn = connect(config.state.db, read_only=read_only)
     try:
-        recent_jobs = list_jobs(conn, limit=job_limit)
-        selected_jobs, selection = _selected_jobs(conn)
-        history_events = list_history_events(conn)
-        raw_events = history_events[-max(1, min(int(event_limit), 200)) :]
-        lock = _public_lock(get_lock(conn))
+        with read_snapshot(conn):
+            recent_jobs = list_jobs(conn, limit=job_limit)
+            selected_jobs, selection = _selected_jobs(conn)
+            history_events = list_history_events(conn)
+            raw_events = history_events[-max(1, min(int(event_limit), 200)) :]
+            lock = _public_lock(get_lock(conn))
+            count_data = counts(conn)
+            validated_trains = validated_train_summaries(conn)
         configured_gates = effective_gates(config)
         gate_names = ("diff-check", *(gate.name for gate in configured_gates))
         payload: dict[str, Any] = {
@@ -758,7 +782,7 @@ def build_dashboard_snapshot(
                     ],
                 },
             },
-            "counts": counts(conn),
+            "counts": count_data,
             "lock": lock,
             "jobs": [_public_job(job) for job in recent_jobs],
             "train": {
@@ -766,7 +790,7 @@ def build_dashboard_snapshot(
                 "jobs": [_public_job(job) for job in selected_jobs],
             },
             "events": [event.to_dict() for event in raw_events],
-            "validated_trains": validated_train_summaries(conn),
+            "validated_trains": validated_trains,
             "reuse": reuse_explanation(
                 config,
                 selected_jobs,

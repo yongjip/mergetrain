@@ -8,6 +8,7 @@ from pathlib import Path
 from mergetrain.config import (
     CONFIG_VERSION,
     effective_gates,
+    gate_policy_warnings,
     load_config,
     load_yaml,
     render_default_config,
@@ -90,6 +91,24 @@ notify:
             config = load_config(repo=repo)
 
         self.assertEqual([gate.name for gate in effective_gates(config)], ["diff-check"])
+        self.assertEqual(gate_policy_warnings(config), [])
+
+    def test_duplicate_builtin_diff_check_still_warns_that_no_project_gate_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "gates:\n"
+                "  - name: diff-check\n"
+                "    run: git diff --check ${integration_ref}..HEAD\n",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+
+        self.assertEqual(effective_gates(config), ())
+        self.assertEqual(
+            [warning["code"] for warning in gate_policy_warnings(config)],
+            ["no_configured_gates"],
+        )
 
     def test_version_one_removed_settings_are_migrated_in_memory(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -438,7 +438,10 @@ class GitRunner:
         """
 
         if not self.config.deploy.verify:
-            return True
+            raise MergeBlocked(
+                "verification policy is unavailable; use --ack succeeded/failed "
+                "after explicit review"
+            )
         self._ensure_state_dirs()
         worktree = self._worktree_path(0)
         run_command(

@@ -38,7 +38,7 @@ test("single-repo components render shared running and validated snapshots", asy
     assert.match(running, /Gate timing/);
     assert.match(running, /Show 10 more|Activity/);
     assert.match(running, /Phone glance status/);
-    assert.match(running, /1 request blocked/);
+    assert.match(running, /1 request needs review/);
 
     const validated = renderToStaticMarkup(
       React.createElement(SingleRepoBody, {
@@ -49,6 +49,47 @@ test("single-repo components render shared running and validated snapshots", asy
     assert.match(validated, /Awaiting deploy approval/);
     assert.match(validated, /Tests passed · Not on main yet/);
     assert.match(validated, /train-fixture/);
+
+    const verifyFailure = renderToStaticMarkup(
+      React.createElement(SingleRepoBody, {
+        snapshot: {
+          ...(await fixture("running-snapshot")),
+          counts: { deployed_verify_failed: 1 },
+          jobs: [{ id: 71, status: "deployed", verify_status: "failed", branch: "feature/a" }],
+          train: { selection: "idle", jobs: [] },
+          validated_trains: [],
+          events: [],
+          lock: null,
+          progress: { message: "Git deployment complete", gates: [] },
+          eta: { sample_count: 0, gates: [] },
+          next_action: "resolve_failed_verification",
+        },
+        now,
+      }),
+    );
+    assert.match(verifyFailure, /Verification needs attention/);
+    assert.match(verifyFailure, /Re-run the failed post-push verification/);
+    assert.doesNotMatch(verifyFailure, /Queue is clear|Queue clear/);
+
+    const blockedIdle = renderToStaticMarkup(
+      React.createElement(SingleRepoBody, {
+        snapshot: {
+          ...(await fixture("running-snapshot")),
+          counts: { blocked: 1 },
+          jobs: [{ id: 72, status: "blocked", branch: "feature/b" }],
+          train: { selection: "idle", jobs: [] },
+          validated_trains: [],
+          events: [],
+          lock: null,
+          progress: { message: "Blocked", gates: [] },
+          eta: { sample_count: 0, gates: [] },
+          next_action: "fix_blocked_job",
+        },
+        now,
+      }),
+    );
+    assert.match(blockedIdle, /Queue needs attention/);
+    assert.doesNotMatch(blockedIdle, /Verification needs attention|Queue is clear|Queue clear/);
 
     const stale = renderToStaticMarkup(
       React.createElement(FeedErrorBanner, {

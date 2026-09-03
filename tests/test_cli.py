@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -326,13 +327,20 @@ class CliTests(unittest.TestCase):
             "source_commit": "a" * 40,
             "source_dirty": None,
         }
-        out = io.StringIO()
-        with (
-            patch("mergetrain.runtime.runtime_provenance", return_value=runtime),
-            redirect_stdout(out),
-        ):
-            code = main(["status", "--diagnose", "--json"])
-        payload = json.loads(out.getvalue())
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("runtime-diagnose"), encoding="utf-8"
+            )
+            out = io.StringIO()
+            with (
+                patch("mergetrain.runtime.runtime_provenance", return_value=runtime),
+                redirect_stdout(out),
+            ):
+                code = main(
+                    ["--repo", str(repo), "status", "--diagnose", "--json"]
+                )
+            payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
         self.assertEqual(payload["diagnostics"]["version"], __version__)
         self.assertEqual(payload["diagnostics"]["runtime"], runtime)
@@ -685,6 +693,46 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("fixture-secret", json.dumps(payload))
         self.assertIn("https://user:[redacted]@example.com", payload["jobs"][0]["note"])
 
+    def test_inspect_progress_fallback_redacts_a_legacy_note(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="legacy", branch="feature/legacy")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="blocked",
+                    note="ACCESS_TOKEN=inspect-secret " + "x" * 1200,
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "inspect",
+                        str(job.id),
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("inspect-secret", json.dumps(payload))
+        self.assertEqual(len(payload["progress"]["message"]), 1000)
+        self.assertTrue(payload["progress"]["message_truncated"])
+        self.assertEqual(len(payload["outcome"]["message"]), 1000)
+        self.assertTrue(payload["outcome"]["message_truncated"])
+        self.assertEqual(len(payload["job"]["note"]), 1000)
+        self.assertTrue(payload["job"]["note_truncated"])
+
     def test_json_mode_emits_structured_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -697,7 +745,7 @@ class CliTests(unittest.TestCase):
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["error"]["code"], "config_error")
 
-    def test_contract3_envelope_ok_is_uniform_and_health_is_separate(self) -> None:
+    def test_contract_envelope_ok_is_uniform_and_health_is_separate(self) -> None:
         # A valid but unconfigured repo: the command ran (ok:true), and the
         # repo-health verdict lives in its own `health` field, not in `ok`.
         with tempfile.TemporaryDirectory() as td:
@@ -712,7 +760,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("health", payload)
             self.assertIn("next_action", payload)
 
-    def test_contract3_status_carries_structured_next_action(self) -> None:
+    def test_status_carries_structured_next_action(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -979,6 +1027,98 @@ class CliTests(unittest.TestCase):
             [old_attention.id],
         )
 
+    def test_status_redacts_and_bounds_persisted_attention_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            note = (
+                "API_TOKEN=super-secret-value --token option-secret "
+                "https://user:url-secret@example.test/ "
+                + "x" * 1200
+            )
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="secret note", branch="feature/secret")
+                mark_job(conn, job.id, status="blocked", note=note)
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        rendered = json.dumps(payload)
+        for secret in ("super-secret-value", "option-secret", "url-secret"):
+            self.assertNotIn(secret, rendered)
+        for key in ("attention_jobs", "recent_jobs"):
+            summary = payload[key][0]
+            self.assertLessEqual(len(summary["reason"]), 1000)
+            self.assertTrue(summary["reason_truncated"])
+            self.assertIn("API_TOKEN=[redacted]", summary["reason"])
+            self.assertIn("--token [redacted]", summary["reason"])
+            self.assertIn("https://user:[redacted]@example.test", summary["reason"])
+
+    def test_status_reads_counts_and_action_rows_from_one_snapshot(self) -> None:
+        from mergetrain.persistence.jobs import counts as persisted_counts
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                failed_verify = enqueue_job(
+                    conn, task="failed verify", branch="feature/verify"
+                )
+                mark_job(
+                    conn,
+                    failed_verify.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="failed",
+                )
+                blocked = enqueue_job(conn, task="blocked", branch="feature/blocked")
+                mark_job(conn, blocked.id, status="blocked", note="gate stopped")
+            finally:
+                conn.close()
+
+            def counts_then_commit(read_conn):
+                observed = persisted_counts(read_conn)
+                writer = sqlite3.connect(db)
+                try:
+                    writer.execute(
+                        "UPDATE deploy_queue SET verify_status='succeeded' WHERE id=?",
+                        (failed_verify.id,),
+                    )
+                    writer.commit()
+                finally:
+                    writer.close()
+                return observed
+
+            out = io.StringIO()
+            with (
+                patch(
+                    "mergetrain.commands.inspection.counts",
+                    side_effect=counts_then_commit,
+                ),
+                redirect_stdout(out),
+            ):
+                code = main(["--repo", str(repo), "--db", str(db), "status", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["counts"]["attention"], 2)
+        self.assertEqual(
+            {item["id"] for item in payload["attention_jobs"]},
+            {failed_verify.id, blocked.id},
+        )
+        self.assertEqual(payload["next_action"]["target_job_id"], failed_verify.id)
+        self.assertEqual(
+            payload["next_action"]["reason_code"],
+            "post_push_verification_failed",
+        )
+
     def test_status_keeps_failed_verify_in_attention_and_plans_one_exact_target(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -1031,7 +1171,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(reasons[blocked.id], "blocked")
         self.assertEqual(reasons[verify_unknown.id], "post_push_verification_unknown")
 
-    def test_status_keeps_superseded_verify_failure_as_history_not_attention(self) -> None:
+    def test_status_keeps_old_verify_failure_actionable_until_explicit_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             db = repo / "queue.sqlite"
@@ -1080,11 +1220,15 @@ class CliTests(unittest.TestCase):
                 conn.close()
 
         self.assertEqual(code, 0)
-        self.assertEqual(payload["counts"]["attention"], 0)
-        self.assertEqual(payload["counts"]["done"], 2)
+        self.assertEqual(payload["counts"]["attention"], 1)
+        self.assertEqual(payload["counts"]["done"], 1)
         recent_by_id = {job["id"]: job for job in payload["recent_jobs"]}
-        self.assertEqual(recent_by_id[old_failure.id]["state"], "done")
-        self.assertEqual(recent_by_id[old_failure.id]["outcome"], "deployed")
+        self.assertEqual(recent_by_id[old_failure.id]["state"], "attention")
+        self.assertIsNone(recent_by_id[old_failure.id]["outcome"])
+        self.assertEqual(
+            payload["next_action"]["target_job_id"],
+            old_failure.id,
+        )
         self.assertEqual(persisted_failure.verify_status, "failed")
 
     def test_enqueue_defaults_to_repo_instead_of_process_cwd(self) -> None:

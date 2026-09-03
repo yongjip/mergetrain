@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .errors import redact_secrets
+from .errors import redact_and_bound
 
 ACTIVE_STATUSES = ("queued", "in_progress", "blocked", "failed", "validated", "needs_reconcile")
 TERMINAL_STATUSES = ("deployed", "canceled")
@@ -52,6 +52,9 @@ class Job:
     pending_deploy_remote: str = ""
     pending_deploy_refs: str = ""
     pending_deploy_destination_sha: str = ""
+    deployment_id: str = ""
+    deployment_destination_sha: str = ""
+    verification_policy_sha: str = ""
     supersession_id: str = ""
     supersedes_train_id: str = ""
 
@@ -102,6 +105,11 @@ class Job:
             pending_deploy_destination_sha=str(
                 row["pending_deploy_destination_sha"] or ""
             ),
+            deployment_id=str(row["deployment_id"] or ""),
+            deployment_destination_sha=str(
+                row["deployment_destination_sha"] or ""
+            ),
+            verification_policy_sha=str(row["verification_policy_sha"] or ""),
             supersession_id=str(row["supersession_id"] or ""),
             supersedes_train_id=str(row["supersedes_train_id"] or ""),
         )
@@ -109,7 +117,7 @@ class Job:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["auto_deploy"] = bool(self.auto_deploy)
-        data["note"] = redact_secrets(self.note)
+        data["note"], data["note_truncated"] = redact_and_bound(self.note)
         data.pop("claim_token", None)
         # Internal recovery bookkeeping — the durable push target is not part of
         # the public job surface (keeps the contract fingerprint stable).
@@ -118,6 +126,9 @@ class Job:
         data.pop("pending_deploy_destination_sha", None)
         data.pop("approval_destination_sha", None)
         data.pop("approval_execution_policy_sha", None)
+        data.pop("deployment_id", None)
+        data.pop("deployment_destination_sha", None)
+        data.pop("verification_policy_sha", None)
         return data
 
 

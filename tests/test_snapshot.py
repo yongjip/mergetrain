@@ -4,13 +4,71 @@ import unittest
 
 from mergetrain.commands.inspection import _job_display_state
 from mergetrain.models import Job
-from mergetrain.snapshot import attention_reason_code, next_action
+from mergetrain.snapshot import (
+    PUBLIC_REASON_LIMIT,
+    attention_reason_code,
+    next_action,
+    plan_next_action,
+    public_reason,
+)
 
 PAST = "2000-01-01T00:00:00Z"  # any past ISO timestamp -> the lease is expired
 FUTURE = "2999-01-01T00:00:00Z"
 
 
 class NextActionTests(unittest.TestCase):
+    def test_public_reason_redacts_before_applying_the_length_limit(self) -> None:
+        secret = "s" * (PUBLIC_REASON_LIMIT * 2)
+        reason, truncated = public_reason(
+            Job(
+                id=1,
+                task="a",
+                branch="a",
+                status="blocked",
+                note=f"API_TOKEN={secret}",
+            )
+        )
+        self.assertEqual(reason, "API_TOKEN=[redacted]")
+        self.assertFalse(truncated)
+
+        exact, exact_truncated = public_reason(
+            Job(
+                id=2,
+                task="a",
+                branch="a",
+                status="blocked",
+                note="x" * PUBLIC_REASON_LIMIT,
+            )
+        )
+        self.assertEqual(len(exact or ""), PUBLIC_REASON_LIMIT)
+        self.assertFalse(exact_truncated)
+
+        long, long_truncated = public_reason(
+            Job(
+                id=3,
+                task="a",
+                branch="a",
+                status="blocked",
+                note="x" * (PUBLIC_REASON_LIMIT + 1),
+            )
+        )
+        self.assertEqual(len(long or ""), PUBLIC_REASON_LIMIT)
+        self.assertTrue(long_truncated)
+
+    def test_count_only_verify_failure_never_targets_an_unrelated_job(self) -> None:
+        blocked = Job(id=9, task="blocked", branch="b", status="blocked")
+        plan = plan_next_action(
+            {
+                "lock": None,
+                "counts": {"deployed_verify_failed": 1, "blocked": 1},
+            },
+            attention_jobs=[blocked],
+        )
+        self.assertEqual(plan.code, "resolve_failed_verification")
+        self.assertIsNone(plan.target_job_id)
+        self.assertIsNone(plan.command)
+        self.assertIsNone(plan.reason_code)
+
     def test_job_projection_matrix_keeps_verification_failures_actionable(self) -> None:
         cases = [
             (Job(id=1, task="a", branch="a", status="queued"), "waiting", None),

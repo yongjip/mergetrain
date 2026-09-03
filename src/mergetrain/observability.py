@@ -11,7 +11,7 @@ from statistics import mean, median
 from typing import Any
 
 from .config import MergetrainConfig, effective_gates
-from .errors import redact_secrets
+from .errors import redact_and_bound
 from .evidence import history_groups, history_status, product_evidence, run_mode
 from .models import Job, RunEvent, RunnerLock
 from .store import (
@@ -686,7 +686,7 @@ def gate_details(event: RunEvent | None) -> dict[str, Any] | None:
 def job_outcome(job: Job) -> dict[str, Any]:
     category = job.status
     severity = "pending"
-    message = redact_secrets(job.note or job.status)
+    message, message_truncated = redact_and_bound(job.note or job.status)
 
     if job.status == "deployed":
         severity = "success"
@@ -694,6 +694,9 @@ def job_outcome(job: Job) -> dict[str, Any]:
         if job.verify_status == "failed":
             severity = "warning"
             category = "post_push_verification_failed"
+        elif job.verify_status == "unknown":
+            severity = "warning"
+            category = "post_push_verification_unknown"
     elif job.status == "validated":
         severity = "success"
         category = "validated"
@@ -746,6 +749,7 @@ def job_outcome(job: Job) -> dict[str, Any]:
         "failure_category": category if severity == "failure" else None,
         "warning_categories": [category] if severity == "warning" else [],
         "message": message,
+        "message_truncated": message_truncated,
     }
 
 
@@ -829,6 +833,7 @@ def inspect_job_payload(
 
     run_events = _latest_run_events(job, events)
     latest = run_events[-1] if run_events else None
+    message_truncated = False
     if latest is not None:
         phase, state, message, updated_at = (
             latest.phase,
@@ -853,7 +858,13 @@ def inspect_job_payload(
             job.finished_at,
         )
     else:
-        phase, state, message, updated_at = job.status, job.status, job.note or job.status, job.finished_at
+        message, message_truncated = redact_and_bound(job.note or job.status)
+        phase, state, message, updated_at = (
+            job.status,
+            job.status,
+            message,
+            job.finished_at,
+        )
 
     end_at = "" if job.status == "in_progress" else (job.finished_at or updated_at)
     lease = _lease_context(job, lock)
@@ -862,6 +873,7 @@ def inspect_job_payload(
         "phase": phase,
         "state": state,
         "message": message,
+        "message_truncated": message_truncated,
         "detail": latest.detail if latest else "",
         "gate": current_gate,
         "started_at": job.started_at,

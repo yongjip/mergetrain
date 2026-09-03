@@ -13,6 +13,7 @@ import {
 
 import { clockTime, dateTime, duration, parseTime, relative, shortSha } from "../dashboardFormatters.js";
 import { PHASE_LABELS, STATE_LABELS, eventDescription } from "../dashboardPresentation.js";
+import { isAttentionJob } from "../dashboardLogic.js";
 import { StatusIcon } from "./StatusIcon.jsx";
 
 export function DeploymentHistory({ jobs, words }) {
@@ -154,19 +155,15 @@ export function RunnerPanel({ snapshot, now }) {
 }
 
 export function AttentionPanel({ jobs }) {
-  const problemJobs = jobs.filter((item) => (
-    item.status === "blocked"
-    || item.status === "failed"
-    || item.status === "needs_reconcile"
-    || (item.status === "deployed" && item.verify_status === "failed")
-  ));
+  const problemJobs = jobs.filter(isAttentionJob);
   return (
     <section className="rail-section blocked-section">
       <h2>Attention <small>(history)</small></h2>
       {problemJobs.length ? (
         <div className="blocked-list">
           {problemJobs.map((job) => {
-            const verifyWarning = job.status === "deployed" && job.verify_status === "failed";
+            const verifyWarning = job.status === "deployed"
+              && ["failed", "unknown"].includes(job.verify_status);
             return (
               <article className="blocked-item" key={job.id}>
                 <div className={`blocked-title ${verifyWarning ? "warning" : "error"}`}>

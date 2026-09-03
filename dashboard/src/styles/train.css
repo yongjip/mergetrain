@@ -78,6 +78,10 @@
 .batch-status-banner.queued {
   border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
 }
+.batch-status-banner.attention {
+  border-color: color-mix(in srgb, var(--red) 68%, var(--line));
+  background: color-mix(in srgb, var(--red-soft) 62%, var(--surface));
+}
 .batch-status-primary {
   min-width: 0;
   display: flex;
@@ -101,6 +105,8 @@
 .batch-status-banner.running h1 { color: var(--blue); }
 .batch-status-banner.queued .batch-status-icon,
 .batch-status-banner.queued h1 { color: var(--blue); }
+.batch-status-banner.attention .batch-status-icon,
+.batch-status-banner.attention h1 { color: var(--red); }
 .batch-status-primary h1 {
   margin: 0;
   font-size: clamp(22px, 2vw, 29px);
@@ -249,6 +255,7 @@
   line-height: 1.35;
 }
 .batch-status-banner.approval .batch-next-action span { color: var(--amber); }
+.batch-status-banner.attention .batch-next-action span { color: var(--red); }
 
 .workspace-eyebrow {
   display: block;

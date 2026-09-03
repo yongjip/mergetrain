@@ -11,19 +11,22 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, redirect_stderr, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from mergetrain.cli import main
+from mergetrain.config import load_config
 from mergetrain.mcp_server import (
     MergetrainTools,
     _deploy_approval,
     _replace_local_path_root,
     _stop_cli_process,
 )
+from mergetrain.store import connect, enqueue_job, mark_job
 
 try:
     HAS_MCP = importlib.util.find_spec("mcp.server.mcpserver") is not None
@@ -35,6 +38,19 @@ def completed(stdout: str, returncode: int = 0, stderr: str = "") -> Any:
     return subprocess.CompletedProcess(
         args=["mergetrain"], returncode=returncode, stdout=stdout, stderr=stderr
     )
+
+
+@contextmanager
+def current_checkout_cli() -> Iterator[None]:
+    """Make real MCP child-process tests execute the checkout under test."""
+
+    source_path = str(Path(__file__).resolve().parents[1] / "src")
+    inherited = os.environ.get("PYTHONPATH", "")
+    child_pythonpath = os.pathsep.join(
+        part for part in (source_path, inherited) if part
+    )
+    with patch.dict(os.environ, {"PYTHONPATH": child_pythonpath}):
+        yield
 
 
 DOCTOR = {
@@ -209,7 +225,8 @@ class ToolSurfaceTests(unittest.TestCase):
             )
 
             tools = MergetrainTools(repo=repo)
-            payload = asyncio.run(tools.enqueue(task="mcp cwd", branch="agent/one"))
+            with current_checkout_cli():
+                payload = asyncio.run(tools.enqueue(task="mcp cwd", branch="agent/one"))
 
         self.assertTrue(payload["ok"])
         self.assertEqual(Path(payload["job"]["worktree_path"]), repo)
@@ -235,6 +252,37 @@ class PayloadTests(unittest.TestCase):
         with patch.object(MergetrainTools, "_run", return_value=completed(json.dumps(STATUS))):
             payload = asyncio.run(self.tools.status())
         self.assertEqual(payload, STATUS)
+
+    def test_real_status_keeps_persisted_note_secrets_out_of_mcp_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "version: 2\nproject:\n  name: mcp-redaction-test\n",
+                encoding="utf-8",
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="secret", branch="feature/secret")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="blocked",
+                    note="API_TOKEN=mcp-secret --password mcp-password",
+                )
+            finally:
+                conn.close()
+
+            # pytest's ``pythonpath = ["src"]`` does not propagate to this
+            # MCP CLI child, so make the real-process test hermetic.
+            with current_checkout_cli():
+                payload = asyncio.run(MergetrainTools(repo=repo).status())
+
+        rendered = json.dumps(payload)
+        self.assertNotIn("mcp-secret", rendered)
+        self.assertNotIn("mcp-password", rendered)
+        self.assertIn("API_TOKEN=[redacted]", rendered)
+        self.assertIn("--password [redacted]", rendered)
 
     def test_a_failure_envelope_is_passed_through_not_rewritten(self) -> None:
         envelope = {

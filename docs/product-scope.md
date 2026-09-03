@@ -229,7 +229,11 @@ current failure. Git readiness fails closed before enqueue advice, a missing
 queue is observed without filesystem creation, and CLI/MCP enqueue use the
 bound repository by default. Table-driven projection, mixed-priority,
 superseded-health, zero-create status, and out-of-CWD enqueue tests must remain
-green. Remove none of these checks while contract 3 is supported.
+green. Remove none of these checks from the v3 regression suite.
+
+This paragraph records the 3.0.1 policy as shipped. The 3.0.2 record below
+replaces heuristic automatic supersession with explicit resolution after new
+evidence showed the heuristic could conflate unrelated deployments.
 
 ## Discovery-metadata alignment record — 2026-09-04
 
@@ -308,3 +312,56 @@ The agy discovery cell must meet the shared 80% discovery, 5% false-positive,
 95% safe-handoff, and zero unauthorized-mutation gates. Remove or narrow the
 plugin if agy changes its native schema, if the pinned MCP launch cannot be
 reproduced, or if held-out trials show persistent false activation.
+
+## 3.0.2 confidentiality and verification-consistency record — 2026-09-04
+
+### Evidence
+
+Compact status copied persisted notes into CLI JSON without the shared secret
+redaction or a length bound, and MCP returned that valid JSON unchanged. Status
+also assembled counts and job rows across independent SQLite snapshots, so a
+concurrent writer could pair a verification action with an unrelated blocked
+job. Dashboard clients independently omitted known verification failures from
+some Attention calculations.
+
+A deployed train shares one push and one post-push verification result, but
+`verify --job` updated only one member. It could also mark that member succeeded
+after all verify hooks were removed. Finally, heuristic latest-deploy
+supersession could hide an unresolved production failure after an unrelated
+deployment, and a legacy duplicate of the built-in integrity gate suppressed
+the no-project-gates warning even though it was ignored at runtime.
+
+### Existing fit and decision cost
+
+The repair stays inside the existing `status`, `verify`, dashboard, Hub, and
+warning behavior. It adds no command, option, config field, state group,
+dashboard control, recovery action, notification path, or MCP tool. The only
+public shape additions are explicit `reason_truncated`, `note_truncated`, and
+`message_truncated` metadata on existing bounded text projections; internal
+SQLite fields preserve deployment, destination, and verification-policy
+identity without asking the operator to supply them.
+
+### Safety decision
+
+Status reasons are redacted before a 1,000-character bound, and every
+multi-query projection reads one WAL snapshot. Presentation clients consume one
+shared Attention predicate. A verification re-run executes once and resolves
+the exact deployment generation atomically only when its persisted policy still
+matches; missing, changed, or legacy-unprovable policy requires the existing
+explicit `--ack` path.
+
+Known failures now remain Attention until that explicit resolution. Automatic
+supersession was removed rather than adding destination-aware policy controls:
+this is the smaller fail-closed behavior and does not create a new user choice.
+Because it corrects the meaning introduced by contract 3, machine output moves
+to contract 4 under the documented safety exception while the v3 product
+grammar stays fixed.
+
+### Success measure
+
+CLI and MCP secret/length probes, concurrent-writer snapshot tests,
+deployment-group repair and policy-drift tests, cross-client Attention tests,
+schema migration tests, and effective-gate warning tests must remain green.
+Remove the internal deployment identity only if verification recovery is
+removed; do not restore inferred supersession without evidence and exact
+destination plus policy identity.

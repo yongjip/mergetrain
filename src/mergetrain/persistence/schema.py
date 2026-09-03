@@ -7,7 +7,7 @@ import sqlite3
 from ..errors import QueueError
 from .transactions import immediate, utc_now
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -80,6 +80,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           pending_deploy_remote TEXT NOT NULL DEFAULT '',
           pending_deploy_refs TEXT NOT NULL DEFAULT '',
           pending_deploy_destination_sha TEXT NOT NULL DEFAULT '',
+          deployment_id TEXT NOT NULL DEFAULT '',
+          deployment_destination_sha TEXT NOT NULL DEFAULT '',
+          verification_policy_sha TEXT NOT NULL DEFAULT '',
           supersession_id TEXT NOT NULL DEFAULT '',
           supersedes_train_id TEXT NOT NULL DEFAULT ''
         )
@@ -199,6 +202,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     "TEXT NOT NULL DEFAULT ''",
                 ),
             ),
+            15: (
+                ("deploy_queue", "deployment_id", "TEXT NOT NULL DEFAULT ''"),
+                (
+                    "deploy_queue",
+                    "deployment_destination_sha",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+                (
+                    "deploy_queue",
+                    "verification_policy_sha",
+                    "TEXT NOT NULL DEFAULT ''",
+                ),
+            ),
         }
         for next_version in range(version + 1, SCHEMA_VERSION + 1):
             for table, column, definition in migrations[next_version]:
@@ -277,4 +293,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                         """,
                         (detail, utc_now()),
                     )
+            if next_version == 15:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS deploy_queue_deployment_id_idx "
+                    "ON deploy_queue(deployment_id, id)"
+                )
             conn.execute(f"PRAGMA user_version = {next_version}")

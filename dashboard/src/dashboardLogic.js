@@ -79,13 +79,26 @@ export function workspaceStepForSnapshot(snapshot = {}) {
   return 0;
 }
 
+export function isAttentionJob(job = {}) {
+  return ["blocked", "failed", "needs_reconcile"].includes(job.status)
+    || (job.status === "deployed" && ["failed", "unknown"].includes(job.verify_status));
+}
+
+export function attentionCount(counts = {}) {
+  return (counts.blocked || 0)
+    + (counts.failed || 0)
+    + (counts.needs_reconcile || 0)
+    + (counts.deployed_verify_failed || 0)
+    + (counts.deployed_verify_unknown || 0);
+}
+
 export function repoStateForEntry(entry = {}) {
   if (!entry.ok) return ["error", "ERROR"];
   if (entry.empty) return ["waiting", "NO QUEUE"];
 
   const snapshot = entry.snapshot || {};
   const counts = snapshot.counts || {};
-  if (counts.needs_reconcile || counts.blocked || counts.failed || counts.deployed_verify_unknown) {
+  if (attentionCount(counts)) {
     return ["warning", "ATTENTION"];
   }
   if (snapshot.lock?.liveness === "alive" || counts.in_progress) return ["active", "RUNNING"];
@@ -151,10 +164,7 @@ export function browserIndicator(snapshot = {}) {
     return { state, count: attention, label: "hub", ...BROWSER_STATES[state] };
   }
   const counts = snapshot.counts || {};
-  const failures = (counts.blocked || 0)
-    + (counts.failed || 0)
-    + (counts.needs_reconcile || 0)
-    + (counts.deployed_verify_unknown || 0);
+  const failures = attentionCount(counts);
   const state = failures
     ? "attention"
     : snapshot.train?.selection === "running"
@@ -239,15 +249,17 @@ export function currentTrainModel(snapshot) {
     .sort((a, b) => Number(a.id) - Number(b.id));
 
   const attentionJobs = [...jobMap.values()]
-    .filter((job) => ["blocked", "failed", "needs_reconcile"].includes(job.status))
+    .filter(isAttentionJob)
     .sort((a, b) => Number(a.id) - Number(b.id));
+  const trainAttentionJobs = attentionJobs
+    .filter((job) => ["blocked", "failed", "needs_reconcile"].includes(job.status));
   const batchAttentionJobs = selectedJobs.length
-    ? attentionJobs.filter((job) => sameBatch(job, selectedJobs))
-    : attentionJobs;
+    ? trainAttentionJobs.filter((job) => sameBatch(job, selectedJobs))
+    : trainAttentionJobs;
   const blockedJobs = ["running", "validated"].includes(selection)
     ? batchAttentionJobs
     : selection === "idle"
-      ? attentionJobs
+      ? trainAttentionJobs
       : [];
   const safeJobs = selection === "validated"
     ? selectedJobs.filter((job) => job.status === "validated")
@@ -275,6 +287,8 @@ export function isGitConflict(job) {
 }
 
 export function blockedReason(job) {
+  if (job.status === "deployed" && job.verify_status === "failed") return "Verification failed";
+  if (job.status === "deployed" && job.verify_status === "unknown") return "Verification unknown";
   if (isGitConflict(job)) return "Git conflict";
   if (splitJobIds(job.conflict_with).length) return "Semantic conflict";
   if (job.status === "needs_reconcile") return "Needs reconcile";
@@ -296,8 +310,10 @@ export function conflictFiles(job) {
     .slice(0, 3);
 }
 
-export function historyState(status) {
-  if (["failed", "blocked", "needs_reconcile", "deployed_verify_unknown"].includes(status)) return "failed";
+export function historyState(value) {
+  const job = typeof value === "object" ? value : { status: value };
+  const { status } = job;
+  if (isAttentionJob(job) || status === "deployed_verify_unknown" || status === "deployed_verify_failed") return "failed";
   if (["in_progress", "running"].includes(status)) return "active";
   if (["queued", "canceled"].includes(status)) return "queued";
   return "success";

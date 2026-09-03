@@ -68,3 +68,29 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
                     f"queue database is busy; the commit could not complete: {exc}"
                 ) from exc
             raise
+
+
+@contextmanager
+def read_snapshot(conn: sqlite3.Connection) -> Iterator[None]:
+    """Pin several observation queries to one SQLite snapshot.
+
+    SQLite autocommit mode otherwise gives each standalone ``SELECT`` its own
+    view of the database. Status and dashboard builders combine several reads
+    into one decision, so seeing a writer commit between those statements can
+    pair an aggregate from one instant with a job row from another. A deferred
+    read transaction is enough to keep the view stable in WAL mode without
+    blocking writers.
+    """
+
+    if conn.in_transaction:
+        # Callers that already own a transaction have already fixed the
+        # snapshot. Do not commit or roll back work that belongs to them.
+        yield
+        return
+    conn.execute("BEGIN")
+    try:
+        yield
+    finally:
+        # Observation transactions never have writes to commit. Rollback also
+        # releases the snapshot if a projection step raises.
+        conn.rollback()

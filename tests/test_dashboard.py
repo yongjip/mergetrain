@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mergetrain.config import load_config
+from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.dashboard import (
     DashboardSnapshotCache,
     _create_from_snapshot_fn,
@@ -451,7 +452,7 @@ class DashboardTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertTrue(payload["ok"])
                 # The served snapshot is stamped at the HTTP boundary.
-                self.assertEqual(payload["contract_version"], 3)
+                self.assertEqual(payload["contract_version"], CONTRACT_VERSION)
                 self.assertTrue(payload["project"]["preview"])
                 self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
                 self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))

@@ -416,7 +416,11 @@ Verify hooks run after push. A verify failure means the remote ref was already
 updated, so mergetrain keeps `status=deployed` while recording
 `push_status=succeeded`, `verify_status=failed`, and a warning note. Runs with no
 hooks record `verify_status=not_configured`; configured hooks that all pass record
-`verify_status=succeeded`.
+`verify_status=succeeded`. A later `verify --job` re-run is allowed only while
+the current hook policy matches the identity recorded at deployment, and it
+updates that deployment's train members together. Removing or changing hooks
+requires explicit `--ack succeeded|failed`; an empty current list is never an
+implicit successful verification.
 
 ## Placeholders and environment
 

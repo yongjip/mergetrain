@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mergetrain.config import load_config
+from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.dashboard import create_hub_server
 from mergetrain.errors import QueueError
 from mergetrain.hub import build_hub_snapshot, build_hub_summary
@@ -540,7 +541,7 @@ class HubServerTests(unittest.TestCase):
                 self.assertEqual(payload["repos"][0]["name"], "live")
                 # The outer hub frame is stamped at the HTTP
                 # boundary; embedded per-repo snapshots stay bare.
-                self.assertEqual(payload["contract_version"], 3)
+                self.assertEqual(payload["contract_version"], CONTRACT_VERSION)
                 self.assertNotIn("contract_version", payload["repos"][0]["snapshot"])
 
                 # Registry edits show up without a server restart.

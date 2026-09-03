@@ -117,7 +117,14 @@ Verify hooks run after push. The remote ref is already updated, so jobs remain
 `deployed` with `push_status=succeeded` and `verify_status=failed` instead of
 being rewritten as a pre-push failure. Run JSON returns `result=warning` and
 `ok=true`, human output names both outcomes, the final completion event remains
-a warning, and the dashboard keeps the job in its Attention history.
+a warning, and status plus every dashboard/Hub view keep the job in Attention.
+A later deployment does not dismiss the failure. Run the exact
+`status.next_action.command` to recheck it; one `verify --job` invocation runs
+the recorded policy once and resolves every member of that deployment. If the
+policy is missing or has changed, mergetrain refuses to infer success and
+requires explicit review through `verify --job <id> --ack succeeded|failed`.
+Legacy rows without a provable deployment/policy identity can be acknowledged
+but are not automatically grouped or re-run.
 
 ## Queue database contention
 

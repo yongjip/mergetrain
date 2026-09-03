@@ -41,6 +41,7 @@ class JobOutcomeTests(unittest.TestCase):
     CASES = [
         ({"status": "deployed"}, "deployed", "success"),
         ({"status": "deployed", "verify_status": "failed"}, "post_push_verification_failed", "warning"),
+        ({"status": "deployed", "verify_status": "unknown"}, "post_push_verification_unknown", "warning"),
         ({"status": "validated"}, "validated", "success"),
         ({"status": "canceled"}, "canceled", "failure"),
         ({"status": "blocked", "push_status": "failed", "note": "remote rejected the update"}, "push_rejected", "failure"),
@@ -78,6 +79,21 @@ class JobOutcomeTests(unittest.TestCase):
         self.assertEqual(warning["warning_categories"], ["post_push_verification_failed"])
         secret = job_outcome(job(status="failed", note="API_TOKEN=do-not-leak"))
         self.assertNotIn("do-not-leak", secret["message"])
+        self.assertFalse(secret["message_truncated"])
+
+    def test_structured_note_projections_are_redacted_and_bounded(self) -> None:
+        source = "API_TOKEN=do-not-leak " + "x" * 1200
+        item = job(status="failed", note=source)
+
+        serialized = item.to_dict()
+        outcome = job_outcome(item)
+
+        self.assertNotIn("do-not-leak", serialized["note"])
+        self.assertEqual(len(serialized["note"]), 1000)
+        self.assertTrue(serialized["note_truncated"])
+        self.assertNotIn("do-not-leak", outcome["message"])
+        self.assertEqual(len(outcome["message"]), 1000)
+        self.assertTrue(outcome["message_truncated"])
 
     def test_skipped_gate_event_has_stable_gate_details(self) -> None:
         event = RunEvent(

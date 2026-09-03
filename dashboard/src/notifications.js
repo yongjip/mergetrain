@@ -1,9 +1,4 @@
-const ATTENTION_STATUSES = new Set([
-  "blocked",
-  "failed",
-  "needs_reconcile",
-  "deployed_verify_unknown",
-]);
+import { isAttentionJob } from "./dashboardLogic.js";
 
 export const NOTIFICATION_PREFERENCE_KEY = "mergetrain-dashboard-notifications";
 export const NOTIFICATION_SEEN_KEY = "mergetrain-dashboard-notifications-seen";
@@ -20,11 +15,6 @@ function stableToken(value) {
 
 function jobMap(snapshot = {}) {
   return new Map((snapshot.jobs || []).map((job) => [String(job.id), job]));
-}
-
-function isAttentionJob(job = {}) {
-  return ATTENTION_STATUSES.has(job.status)
-    || (job.status === "deployed" && ["failed", "unknown"].includes(job.verify_status));
 }
 
 function attentionIdentity(job = {}) {

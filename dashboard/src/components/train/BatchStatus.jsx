@@ -1,4 +1,10 @@
-import { Circle, Clock, HourglassHigh, SpinnerGap } from "@phosphor-icons/react";
+import {
+  Circle,
+  Clock,
+  HourglassHigh,
+  SpinnerGap,
+  WarningCircle,
+} from "@phosphor-icons/react";
 
 import {
   actionCopy,
@@ -8,8 +14,15 @@ import {
 } from "../../dashboardLogic.js";
 import { DEPLOY_WORDS, duration, relative } from "../../dashboardFormatters.js";
 
+function hasOnlyVerificationAttention(jobs = []) {
+  return jobs.length > 0 && jobs.every((job) => (
+    job.status === "deployed" && ["failed", "unknown"].includes(job.verify_status)
+  ));
+}
+
 export function BatchStatusBanner({ snapshot, model, now }) {
   const { currentJobs, selection } = model;
+  const attention = model.attentionJobs || [];
   const count = currentJobs.length;
   const words = DEPLOY_WORDS;
   const target = snapshot.project.integration_ref;
@@ -27,7 +40,17 @@ export function BatchStatusBanner({ snapshot, model, now }) {
   let nextAction = "Enqueue a committed task branch";
   let icon = <Circle size={25} />;
 
-  if (selection === "validated") {
+  if (selection === "idle" && attention.length) {
+    const [actionTitle] = actionCopy(snapshot.next_action, words);
+    tone = "attention";
+    title = hasOnlyVerificationAttention(attention)
+      ? "Verification needs attention"
+      : "Queue needs attention";
+    detail = `${attention.length} request${attention.length === 1 ? "" : "s"} unresolved`;
+    runnerDetail = "Waiting for operator review";
+    nextAction = actionTitle;
+    icon = <WarningCircle size={25} weight="fill" />;
+  } else if (selection === "validated") {
     tone = "approval";
     title = "Awaiting deploy approval";
     detail = "Tests passed · Not on main yet";
@@ -98,7 +121,11 @@ export function MobileGlance({ snapshot, model, now }) {
   const [nextTitle] = actionCopy(snapshot.next_action, DEPLOY_WORDS);
   const etaSeconds = etaRemainingSeconds(snapshot.eta, now.getTime());
   const attention = model.attentionJobs || [];
-  const stateTitle = model.selection === "validated"
+  const stateTitle = attention.length && model.selection === "idle"
+    ? hasOnlyVerificationAttention(attention)
+      ? "Verification needs attention"
+      : "Queue needs attention"
+    : model.selection === "validated"
     ? "Awaiting deploy approval"
     : model.selection === "running"
       ? "Runner active"
@@ -120,7 +147,9 @@ export function MobileGlance({ snapshot, model, now }) {
       </article>
       <article className={attention.length ? "attention" : "clear"}>
         <span>Attention</span>
-        <strong>{attention.length ? `${attention.length} request${attention.length === 1 ? "" : "s"} blocked` : "Nothing needs intervention"}</strong>
+        <strong>{attention.length
+          ? attention.length === 1 ? "1 request needs review" : `${attention.length} requests need review`
+          : "Nothing needs intervention"}</strong>
         {!!attention.length && <small>{attention.slice(0, 3).map((job) => `#${job.id} ${jobLabel(job)}`).join(" · ")}</small>}
       </article>
     </section>

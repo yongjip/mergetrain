@@ -1,5 +1,44 @@
 # Changelog
 
+## 3.0.2 - 2026-09-04
+
+- Align PyPI, MCP Registry, Claude, README, and LLM-facing discovery metadata
+  around the parallel-agent integration problems mergetrain solves. Add a
+  canonical metadata source and product-name-free benchmark fixtures without
+  changing queue, deployment, recovery, CLI, or MCP semantics.
+
+- Package the existing five-tool MCP adapter and ordinary-agent protocol as a
+  native agy plugin. Its skill preserves the `status → enqueue → stop` flow and
+  the existing human-gated deploy and recovery boundary.
+
+- Redact persisted job notes before every structured projection, cap public
+  note-derived text at 1,000 characters, and publish explicit
+  `reason_truncated`, `note_truncated`, or `message_truncated` metadata. This
+  covers compact status, serialized jobs, outcomes, and the legacy no-event
+  inspect fallback, so valid CLI JSON remains safe when the MCP adapter returns
+  it unchanged.
+
+- Pin every multi-query status, Hub, and dashboard read to one SQLite snapshot
+  so aggregate counts, attention rows, and the resulting next action cannot
+  describe different commits. Share verification-failure classification across
+  the Python projection, Hub, browser badge, current train, and history views.
+
+- Persist an internal deployment-generation ID, destination identity, and
+  verification-policy identity before remote I/O. `verify --job` now runs the
+  original available policy once and resolves every member of that deployment
+  atomically; changed, missing, and legacy-unprovable policies require explicit
+  `--ack succeeded/failed` instead of silently succeeding without a hook.
+
+- Keep every known post-push verification failure in Attention until an
+  explicit recheck or acknowledgement resolves it. A later unrelated deploy no
+  longer hides unresolved health evidence. This safety correction changes the
+  meaning introduced by contract 3, so machine output advances to contract 4
+  without adding a CLI verb, flag, config field, state group, or MCP tool.
+
+- Base the minimal-gate warning on effective gates, so a legacy configured copy
+  of the built-in `diff-check` no longer suppresses the no-project-gates
+  warning.
+
 ## 3.0.1 - 2026-09-03
 
 - Keep unknown post-push verification and the latest deployed generation's
