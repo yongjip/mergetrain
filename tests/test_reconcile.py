@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
+from mergetrain.deploy_plan import verification_policy_sha
 from mergetrain.errors import CommandFailed, QueueError, RemoteUnreachable
 from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
@@ -984,6 +985,9 @@ class VerifyRerunTests(unittest.TestCase):
                 deploy_sha=deploy_sha,
                 push_status="succeeded",
                 verify_status="unknown",
+                deployment_id=f"deployment-{job.id}",
+                deployment_destination_sha="destination-a",
+                verification_policy_sha=verification_policy_sha(config),
             )
         finally:
             conn.close()
@@ -1075,6 +1079,139 @@ class VerifyRerunTests(unittest.TestCase):
                 payload["resolved"],
                 [{"job_id": job_id, "verify_status": "succeeded"}],
             )
+
+    def test_verify_runs_once_and_resolves_every_member_of_the_deployment(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker = root / "verify-count.txt"
+            command = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                f"p=Path('{py_path(marker)}'); "
+                "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
+            )
+            repo, _ = make_demo_repo(root, verify_command=command)
+            config = load_config(repo=repo)
+            deploy_sha = git(repo, "rev-parse", "feature/a")
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="first", branch="feature/first")
+                second = enqueue_job(conn, task="second", branch="feature/second")
+                for job in (first, second):
+                    mark_job(
+                        conn,
+                        job.id,
+                        status="deployed",
+                        deploy_sha=deploy_sha,
+                        push_status="succeeded",
+                        verify_status="failed",
+                        deployment_id="deployment-shared",
+                        deployment_destination_sha="destination-shared",
+                        verification_policy_sha=verification_policy_sha(config),
+                    )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "verify", "--job", str(second.id), "--json"]
+                )
+            payload = json.loads(out.getvalue())
+
+            conn = connect(config.state.db)
+            try:
+                states = [get_job(conn, job.id).verify_status for job in (first, second)]
+            finally:
+                conn.close()
+
+            self.assertEqual(code, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+            self.assertEqual(states, ["succeeded", "succeeded"])
+            self.assertEqual(
+                payload["resolved"],
+                [
+                    {"job_id": first.id, "verify_status": "succeeded"},
+                    {"job_id": second.id, "verify_status": "succeeded"},
+                ],
+            )
+
+    def test_verify_refuses_to_infer_success_after_hooks_are_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker = root / "must-not-run.txt"
+            command = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                f"Path('{py_path(marker)}').write_text('ran')\""
+            )
+            repo, _ = make_demo_repo(root, verify_command=command)
+            job_id, _ = self._stage_unknown_deploy(repo)
+            config_path = repo / ".mergetrain.yaml"
+            before_deploy, deploy_body = config_path.read_text(encoding="utf-8").split(
+                "deploy:\n", 1
+            )
+            _, reuse_body = deploy_body.split("  reuse:\n", 1)
+            config_path.write_text(
+                before_deploy + "deploy:\n  verify: []\n  reuse:\n" + reuse_body,
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "verify", "--job", str(job_id), "--json"]
+                )
+            payload = json.loads(out.getvalue())
+            conn = connect(load_config(repo=repo).state.db)
+            try:
+                persisted = get_job(conn, job_id)
+            finally:
+                conn.close()
+
+            self.assertNotEqual(code, 0)
+            self.assertEqual(payload["error"]["code"], "queue_error")
+            self.assertIn(
+                "policy changed or is unavailable", payload["error"]["message"]
+            )
+            self.assertFalse(marker.exists())
+            self.assertEqual(persisted.verify_status, "unknown")
+
+    def test_verify_refuses_a_changed_nonempty_policy_before_running_it(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker = root / "old-policy-must-not-run.txt"
+            command = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                f"Path('{py_path(marker)}').write_text('ran')\""
+            )
+            repo, _ = make_demo_repo(root, verify_command=command)
+            job_id, _ = self._stage_unknown_deploy(repo)
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    "name: live-check", "name: replacement-check"
+                ),
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "verify", "--job", str(job_id), "--json"]
+                )
+            payload = json.loads(out.getvalue())
+            conn = connect(load_config(repo=repo).state.db)
+            try:
+                persisted = get_job(conn, job_id)
+            finally:
+                conn.close()
+
+            self.assertNotEqual(code, 0)
+            self.assertEqual(payload["error"]["code"], "queue_error")
+            self.assertIn(
+                "policy changed or is unavailable", payload["error"]["message"]
+            )
+            self.assertFalse(marker.exists())
+            self.assertEqual(persisted.verify_status, "unknown")
 
 
 class CommandExitCodeTests(unittest.TestCase):

@@ -14,6 +14,7 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
+from ..deploy_plan import verification_policy_sha
 from ..errors import ConfigError, LockHeld, QueueError, RemoteUnreachable
 from ..git_ops import (
     apply_gc,
@@ -28,9 +29,10 @@ from ..store import (
     finish_recovery_operation,
     get_job,
     get_lock,
+    get_verification_group,
     list_verify_unknown_jobs,
     live_worktree_path,
-    resolve_verify_status,
+    resolve_deployment_verify_status,
     start_recovery_operation,
     terminal_branch_candidates,
 )
@@ -266,20 +268,48 @@ def cmd_verify(args: argparse.Namespace) -> int:
             targets = [job]
         else:
             targets = list_verify_unknown_jobs(conn)
-        resolved: list[dict[str, Any]] = []
+        unique_targets = []
+        seen_deployments: set[str] = set()
         for job in targets:
+            key = job.deployment_id or f"legacy-job:{job.id}"
+            if key in seen_deployments:
+                continue
+            seen_deployments.add(key)
+            unique_targets.append(job)
+        resolved: list[dict[str, Any]] = []
+        for job in unique_targets:
+            members = get_verification_group(conn, job.id)
+            policy_job = members[0]
             if args.ack:
                 outcome = args.ack
                 note = f"verify {outcome} by operator --ack"
             else:
+                current_policy = verification_policy_sha(config)
+                if (
+                    not config.deploy.verify
+                    or not policy_job.verification_policy_sha
+                    or policy_job.verification_policy_sha != current_policy
+                ):
+                    raise QueueError(
+                        "verification policy changed or is unavailable; use "
+                        "--ack succeeded/failed after explicit review"
+                    )
                 log_path = config.state.logs / f"verify-{job.id}.log"
                 config.state.logs.mkdir(parents=True, exist_ok=True)
                 with log_path.open("w", encoding="utf-8") as log:
-                    passed = GitRunner(config).reverify_deploy(deploy_sha=job.deploy_sha, log=log)
+                    passed = GitRunner(config).reverify_deploy(
+                        deploy_sha=policy_job.deploy_sha,
+                        log=log,
+                    )
                 outcome = "succeeded" if passed else "failed"
-                note = f"verify re-run against {job.deploy_sha}: {outcome}"
-            updated = resolve_verify_status(conn, job.id, verify_status=outcome, note=note)
-            resolved.append({"job_id": updated.id, "verify_status": updated.verify_status})
+                note = f"verify re-run against {policy_job.deploy_sha}: {outcome}"
+            updated = resolve_deployment_verify_status(
+                conn, job.id, verify_status=outcome, note=note
+            )
+            resolved.extend(
+                {"job_id": member.id, "verify_status": member.verify_status}
+                for member in updated
+            )
         next_action = _recovery_next_action(conn, config)
     finally:
         conn.close()

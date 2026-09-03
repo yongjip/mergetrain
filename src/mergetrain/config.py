@@ -244,7 +244,7 @@ def effective_gates(config: MergetrainConfig) -> tuple[GateConfig, ...]:
 def gate_policy_warnings(config: MergetrainConfig) -> list[dict[str, str]]:
     """Explain a valid but intentionally minimal pre-push policy."""
 
-    if config.gates:
+    if effective_gates(config):
         return []
     return [
         {

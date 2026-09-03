@@ -93,11 +93,24 @@ def _capture_simple(argv):
 
 
 def _cap_status_diagnose(repo):
+    _seed_status_attention(repo)
     return _run_json(["--repo", str(repo), "status", "--diagnose"])
 
 
 def _cap_status(repo):
+    _seed_status_attention(repo)
     return _run_json(["--repo", str(repo), "status"])
+
+
+def _seed_status_attention(repo: Path) -> None:
+    from mergetrain.store import mark_job
+
+    conn = connect(_db(repo))
+    try:
+        job = enqueue_job(conn, task="attention", branch="feature/attention")
+        mark_job(conn, job.id, status="blocked", note="gate failed")
+    finally:
+        conn.close()
 
 
 def _prepare_enqueue_branch(repo: Path) -> None:

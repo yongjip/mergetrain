@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowRight, GitBranch, Heartbeat, MagnifyingGlass, StackSimple } from "@phosphor-icons/react";
 
 import {
+  attentionCount,
   currentTrainModel,
   historyState,
   jobActivityAt,
@@ -17,13 +18,15 @@ export function RepoHistory({ jobs = [] }) {
     .sort((a, b) => Date.parse(jobActivityAt(a)) - Date.parse(jobActivityAt(b)))
     .slice(-14);
   if (!recent.length) return <span className="repo-history-empty">No history</span>;
-  const summary = recent.map((job) => `${job.id}: ${job.status}`).join(", ");
+  const summary = recent
+    .map((job) => `${job.id}: ${[job.status, job.verify_status].filter(Boolean).join(":")}`)
+    .join(", ");
   return (
     <div className="repo-history" role="img" aria-label={`Recent train outcomes: ${summary}`}>
       {recent.map((job, index) => (
         <span
           aria-hidden="true"
-          className={`repo-history-mark ${historyState(job.status)}`}
+          className={`repo-history-mark ${historyState(job)}`}
           key={`${job.id}-${index}`}
           style={{ "--history-height": `${14 + ((Number(job.id) + index * 3) % 13)}px` }}
         />
@@ -48,9 +51,7 @@ export function RepoTableRow({ entry, onSelect, now }) {
     ? batch.selection === "validated" ? "Validated train" : "Current batch"
     : latestDeployed ? "Latest deployment" : "Latest activity";
   const activity = featuredJob ? relative(jobActivityAt(featuredJob), now) : "—";
-  const attention = snapshot
-    ? (snapshot.counts?.blocked || 0) + (snapshot.counts?.failed || 0) + (snapshot.counts?.needs_reconcile || 0)
-    : 0;
+  const attention = snapshot ? attentionCount(snapshot.counts) : 0;
   const queueSummary = batch?.currentJobs.length
     ? <>Current <strong>{batch.currentJobs.length}</strong><i>·</i> Next <strong>{batch.nextBatchJobs.length}</strong></>
     : <>Queued <strong>{snapshot?.counts?.queued || 0}</strong><i>·</i> Attention <strong>{attention}</strong></>;

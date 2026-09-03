@@ -401,38 +401,20 @@ def list_attention_jobs(conn: sqlite3.Connection) -> list[Job]:
 
     This intentionally has no display limit. A recent-history cap must not
     hide an older blocked train, pending reconcile, or unknown post-push
-    verification from the compact status view. A known verification failure is
-    current operator work only for the latest deployed generation; a later
-    deploy supersedes its production-health result without rewriting history.
+    verification from the compact status view. Known verification failures stay
+    actionable until an explicit recheck or acknowledgement resolves their
+    deployment generation; an unrelated later deploy cannot hide them.
     """
 
     rows = conn.execute(
         """
-        WITH latest_deploy AS (
-          SELECT id, train_id, deploy_sha
-          FROM deploy_queue
-          WHERE status = 'deployed'
-          ORDER BY COALESCE(
-            NULLIF(finished_at, ''), NULLIF(started_at, ''), requested_at
-          ) DESC, id DESC
-          LIMIT 1
-        )
         SELECT queue.* FROM deploy_queue AS queue
         WHERE queue.status IN (
           'queued', 'in_progress', 'blocked', 'failed', 'validated',
           'needs_reconcile'
         )
         OR (queue.status = 'deployed' AND queue.verify_status = 'unknown')
-        OR (
-          queue.status = 'deployed'
-          AND queue.verify_status = 'failed'
-          AND EXISTS (
-            SELECT 1 FROM latest_deploy AS latest
-            WHERE queue.id = latest.id
-               OR (queue.train_id != '' AND queue.train_id = latest.train_id)
-               OR (queue.deploy_sha != '' AND queue.deploy_sha = latest.deploy_sha)
-          )
-        )
+        OR (queue.status = 'deployed' AND queue.verify_status = 'failed')
         ORDER BY queue.id DESC
         """
     ).fetchall()
@@ -504,36 +486,88 @@ def list_verify_unknown_jobs(conn: sqlite3.Connection) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
-def resolve_verify_status(
-    conn: sqlite3.Connection, job_id: int, *, verify_status: str, note: str = ""
-) -> Job:
-    """Resolve or recheck a deployed job's post-push verification.
+def _verification_group(conn: sqlite3.Connection, job_id: int) -> list[Job]:
+    row = conn.execute(
+        "SELECT * FROM deploy_queue WHERE id = ?", (job_id,)
+    ).fetchone()
+    if row is None:
+        raise QueueError(f"job not found: {job_id}")
+    target = Job.from_row(row)
+    if target.status != "deployed" or target.verify_status not in {"unknown", "failed"}:
+        raise QueueError(
+            f"job {job_id} does not need verify attention (status={target.status}, "
+            f"verify_status={target.verify_status})"
+        )
+    if not target.deployment_id:
+        return [target]
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue WHERE deployment_id = ? ORDER BY id ASC",
+        (target.deployment_id,),
+    ).fetchall()
+    jobs = [Job.from_row(item) for item in rows]
+    identity = (
+        target.deploy_sha,
+        target.deployment_destination_sha,
+        target.verification_policy_sha,
+    )
+    if not jobs or any(
+        job.status != "deployed"
+        or job.deployment_id != target.deployment_id
+        or (
+            job.deploy_sha,
+            job.deployment_destination_sha,
+            job.verification_policy_sha,
+        )
+        != identity
+        for job in jobs
+    ):
+        raise QueueError(
+            f"deployment {target.deployment_id} has inconsistent member state; "
+            "inspect and acknowledge it explicitly after review"
+        )
+    return jobs
 
-    Only moves a deployed+unknown/failed job to succeeded/failed — never
-    reopens a terminal job or touches its deployed status.
+
+def get_verification_group(conn: sqlite3.Connection, job_id: int) -> list[Job]:
+    """Return the exact deployment generation repaired by ``verify --job``."""
+
+    return _verification_group(conn, job_id)
+
+
+def resolve_deployment_verify_status(
+    conn: sqlite3.Connection, job_id: int, *, verify_status: str, note: str = ""
+) -> list[Job]:
+    """Resolve one deployed generation in one transaction.
+
+    New rows carry ``deployment_id`` and every member is updated together.
+    Legacy rows have no safe grouping identity and therefore fall back to the
+    selected row only rather than guessing from train IDs or commit SHAs.
     """
     if verify_status not in {"succeeded", "failed"}:
         raise QueueError(f"verify_status must be 'succeeded' or 'failed', got {verify_status!r}")
     with immediate(conn):
-        row = conn.execute(
-            "SELECT status, verify_status FROM deploy_queue WHERE id = ?", (job_id,)
-        ).fetchone()
-        if row is None:
-            raise QueueError(f"job not found: {job_id}")
-        if str(row["status"]) != "deployed" or str(row["verify_status"]) not in {
-            "unknown",
-            "failed",
-        }:
-            raise QueueError(
-                f"job {job_id} does not need verify attention (status={row['status']}, "
-                f"verify_status={row['verify_status']})"
-            )
-        conn.execute(
-            "UPDATE deploy_queue SET verify_status = ?, note = COALESCE(NULLIF(?, ''), note) "
-            "WHERE id = ?",
-            (verify_status, note, job_id),
+        jobs = _verification_group(conn, job_id)
+        ids = [job.id for job in jobs]
+        placeholders = ",".join("?" for _ in ids)
+        updated = conn.execute(
+            f"UPDATE deploy_queue SET verify_status = ?, "
+            f"note = COALESCE(NULLIF(?, ''), note) WHERE id IN ({placeholders})",
+            (verify_status, note, *ids),
         )
-    return get_job(conn, job_id)
+        if updated.rowcount != len(ids):
+            raise QueueError("deployment verification members changed during resolution")
+    return [get_job(conn, member_id) for member_id in ids]
+
+
+def resolve_verify_status(
+    conn: sqlite3.Connection, job_id: int, *, verify_status: str, note: str = ""
+) -> Job:
+    """Compatibility wrapper returning the selected member after group repair."""
+
+    resolved = resolve_deployment_verify_status(
+        conn, job_id, verify_status=verify_status, note=note
+    )
+    return next(job for job in resolved if job.id == job_id)
 
 
 def list_train_jobs(conn: sqlite3.Connection, train_id: str) -> list[Job]:
@@ -563,15 +597,6 @@ def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued", auto_onl
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
     row = conn.execute(
         """
-        WITH latest_deploy AS (
-          SELECT id, train_id, deploy_sha
-          FROM deploy_queue
-          WHERE status = 'deployed'
-          ORDER BY COALESCE(
-            NULLIF(finished_at, ''), NULLIF(started_at, ''), requested_at
-          ) DESC, id DESC
-          LIMIT 1
-        )
         SELECT
           SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
           SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
@@ -592,14 +617,6 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
           SUM(CASE WHEN status = 'deployed' AND verify_status = 'unknown'
               THEN 1 ELSE 0 END) AS deployed_verify_unknown,
           SUM(CASE WHEN status = 'deployed' AND verify_status = 'failed'
-              AND EXISTS (
-                SELECT 1 FROM latest_deploy AS latest
-                WHERE deploy_queue.id = latest.id
-                   OR (deploy_queue.train_id != ''
-                       AND deploy_queue.train_id = latest.train_id)
-                   OR (deploy_queue.deploy_sha != ''
-                       AND deploy_queue.deploy_sha = latest.deploy_sha)
-              )
               THEN 1 ELSE 0 END) AS deployed_verify_failed
         FROM deploy_queue
         """
@@ -762,6 +779,9 @@ def mark_job(
     validation_train_sha: str = "",
     reused_validation_sha: str = "",
     conflict_with: str = "",
+    deployment_id: str = "",
+    deployment_destination_sha: str = "",
+    verification_policy_sha: str = "",
     expected_claim_token: str | None = None,
     expected_status: str = "",
 ) -> Job:
@@ -810,6 +830,13 @@ def mark_job(
                 validation_environment_sha = COALESCE(NULLIF(?, ''), validation_environment_sha),
                 validation_train_sha = COALESCE(NULLIF(?, ''), validation_train_sha),
                 reused_validation_sha = COALESCE(NULLIF(?, ''), reused_validation_sha),
+                deployment_id = COALESCE(NULLIF(?, ''), deployment_id),
+                deployment_destination_sha = COALESCE(
+                    NULLIF(?, ''), deployment_destination_sha
+                ),
+                verification_policy_sha = COALESCE(
+                    NULLIF(?, ''), verification_policy_sha
+                ),
                 conflict_with = ?,
                 claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
                 cancel_requested_at = CASE
@@ -854,6 +881,9 @@ def mark_job(
                 validation_environment_sha,
                 validation_train_sha,
                 reused_validation_sha,
+                deployment_id,
+                deployment_destination_sha,
+                verification_policy_sha,
                 conflict_with,
                 status,
                 status,
@@ -883,6 +913,19 @@ def mark_job(
                     "(raced by a concurrent transition)"
                 )
             raise LostLease(f"job {job_id} is no longer owned by this runner")
+        if status in {"queued", "canceled"}:
+            # Neither state represents a completed deployment.  A pending
+            # push records the identity before remote I/O, so an unlanded
+            # reconcile that ends in cancellation must discard it as well.
+            conn.execute(
+                """
+                UPDATE deploy_queue
+                SET deployment_id = '', deployment_destination_sha = '',
+                    verification_policy_sha = ''
+                WHERE id = ?
+                """,
+                (job_id,),
+            )
         if status == "queued":
             # Queued means a fresh attempt. Validation identity and outcome
             # fields belong to the previous attempt and must not leak into a

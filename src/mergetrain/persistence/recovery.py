@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from collections.abc import Sequence
 
 from ..errors import LostLease, QueueError
@@ -52,6 +53,8 @@ def record_pending_push(
     remote: str = "",
     push_refs: Sequence[str] = (),
     destination_sha: str = "",
+    deployment_id: str = "",
+    verification_policy_sha: str = "",
 ) -> None:
     """Durably record intent to push ``deploy_sha`` before the remote is touched.
 
@@ -71,6 +74,7 @@ def record_pending_push(
         return
     if not deploy_sha:
         raise QueueError("pending push deploy sha is missing")
+    deployment_id = deployment_id or uuid.uuid4().hex
     placeholders = ",".join("?" for _ in ids)
     with immediate(conn):
         cur = conn.execute(
@@ -78,7 +82,8 @@ def record_pending_push(
             UPDATE deploy_queue
             SET pending_deploy_sha = ?, push_status = 'pending',
                 pending_deploy_remote = ?, pending_deploy_refs = ?,
-                pending_deploy_destination_sha = ?
+                pending_deploy_destination_sha = ?, deployment_id = ?,
+                deployment_destination_sha = ?, verification_policy_sha = ?
             WHERE id IN ({placeholders})
               AND status = 'in_progress'
               AND claim_token = ?
@@ -88,6 +93,9 @@ def record_pending_push(
                 remote,
                 pack_push_refs(push_refs),
                 destination_sha,
+                deployment_id,
+                destination_sha,
+                verification_policy_sha,
                 *ids,
                 claim_token,
             ),
@@ -120,7 +128,8 @@ def clear_rejected_push(
             UPDATE deploy_queue
             SET pending_deploy_sha = '', pending_deploy_remote = '',
                 pending_deploy_refs = '', pending_deploy_destination_sha = '',
-                push_status = 'failed'
+                deployment_id = '', deployment_destination_sha = '',
+                verification_policy_sha = '', push_status = 'failed'
             WHERE id IN ({placeholders})
               AND status = 'in_progress'
               AND claim_token = ?

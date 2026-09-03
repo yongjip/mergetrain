@@ -1,5 +1,5 @@
 {
-  "contract_version": 3,
+  "contract_version": 4,
   "surfaces": {
     "_jsonl_frames": {
       "event": {
@@ -80,6 +80,7 @@
         "id": null,
         "log_path": null,
         "note": null,
+        "note_truncated": null,
         "pending_deploy_sha": null,
         "push_status": null,
         "requested_at": null,
@@ -120,6 +121,7 @@
           "id": null,
           "log_path": null,
           "note": null,
+          "note_truncated": null,
           "pending_deploy_sha": null,
           "push_status": null,
           "requested_at": null,
@@ -230,6 +232,7 @@
           "id": null,
           "log_path": null,
           "note": null,
+          "note_truncated": null,
           "pending_deploy_sha": null,
           "push_status": null,
           "requested_at": null,
@@ -270,6 +273,7 @@
         "id": null,
         "log_path": null,
         "note": null,
+        "note_truncated": null,
         "pending_deploy_sha": null,
         "push_status": null,
         "requested_at": null,
@@ -373,6 +377,7 @@
                 "category": null,
                 "failure_category": null,
                 "message": null,
+                "message_truncated": null,
                 "severity": null,
                 "warning_categories": "[]?"
               },
@@ -493,6 +498,7 @@
                 "head_sha": null,
                 "id": null,
                 "note": null,
+                "note_truncated": null,
                 "pending_deploy_sha": null,
                 "push_status": null,
                 "requested_at": null,
@@ -628,6 +634,7 @@
                   "head_sha": null,
                   "id": null,
                   "note": null,
+                  "note_truncated": null,
                   "pending_deploy_sha": null,
                   "push_status": null,
                   "requested_at": null,
@@ -715,6 +722,7 @@
         "id": null,
         "log_path": null,
         "note": null,
+        "note_truncated": null,
         "pending_deploy_sha": null,
         "push_status": null,
         "requested_at": null,
@@ -742,6 +750,7 @@
         "category": null,
         "failure_category": null,
         "message": null,
+        "message_truncated": null,
         "severity": null,
         "warning_categories": "[]?"
       },
@@ -755,6 +764,7 @@
         "lease_liveness": null,
         "lost_lease": null,
         "message": null,
+        "message_truncated": null,
         "phase": null,
         "started_at": null,
         "state": null,
@@ -790,6 +800,7 @@
         "id": null,
         "log_path": null,
         "note": null,
+        "note_truncated": null,
         "pending_deploy_sha": null,
         "push_status": null,
         "requested_at": null,
@@ -824,6 +835,7 @@
         "id": null,
         "log_path": null,
         "note": null,
+        "note_truncated": null,
         "pending_deploy_sha": null,
         "push_status": null,
         "requested_at": null,
@@ -1113,7 +1125,19 @@
       }
     },
     "status": {
-      "attention_jobs": "[]?",
+      "attention_jobs": {
+        "[]": {
+          "branch": null,
+          "id": null,
+          "outcome": null,
+          "reason": null,
+          "reason_code": null,
+          "reason_truncated": null,
+          "state": null,
+          "task": null,
+          "updated_at": null
+        }
+      },
       "contract_version": null,
       "counts": {
         "attention": null,
@@ -1131,13 +1155,37 @@
         "target_job_id": null
       },
       "ok": null,
-      "recent_jobs": "[]?",
+      "recent_jobs": {
+        "[]": {
+          "branch": null,
+          "id": null,
+          "outcome": null,
+          "reason": null,
+          "reason_code": null,
+          "reason_truncated": null,
+          "state": null,
+          "task": null,
+          "updated_at": null
+        }
+      },
       "state": null,
       "summary": null,
       "warnings": "[]?"
     },
     "status_diagnose": {
-      "attention_jobs": "[]?",
+      "attention_jobs": {
+        "[]": {
+          "branch": null,
+          "id": null,
+          "outcome": null,
+          "reason": null,
+          "reason_code": null,
+          "reason_truncated": null,
+          "state": null,
+          "task": null,
+          "updated_at": null
+        }
+      },
       "contract_version": null,
       "counts": {
         "attention": null,
@@ -1284,7 +1332,19 @@
         "target_job_id": null
       },
       "ok": null,
-      "recent_jobs": "[]?",
+      "recent_jobs": {
+        "[]": {
+          "branch": null,
+          "id": null,
+          "outcome": null,
+          "reason": null,
+          "reason_code": null,
+          "reason_truncated": null,
+          "state": null,
+          "task": null,
+          "updated_at": null
+        }
+      },
       "state": null,
       "summary": null,
       "warnings": "[]?"

@@ -12,10 +12,10 @@ changes without an explicit compatibility decision.
 | `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
 | Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-mergetrain 3.0 uses machine contract **3** and config schema **2**. They move
+mergetrain 3.0.2 uses machine contract **4** and config schema **2**. They move
 only when their own boundary changes; neither is tied to the SQLite schema.
 
-## Contract 3 envelope
+## Contract 4 envelope
 
 Every one-shot JSON response carries top-level `contract_version`. Nested job
 or repository objects are not stamped; the outer response owns the version.
@@ -33,7 +33,7 @@ All failures use one shape:
 
 ```json
 {
-  "contract_version": 3,
+  "contract_version": 4,
   "ok": false,
   "error": {
     "code": "queue_error",
@@ -61,21 +61,33 @@ text.
 - `counts`: `waiting`, `running`, `ready`, `attention`, and `done`;
 - compact `attention_jobs` and `recent_jobs`, whose `state` uses the same four
   active values plus `done`, whose terminal detail stays in `outcome`, and
-  whose actionable rows carry the same stable `reason_code` vocabulary.
+  whose actionable rows carry the same stable `reason_code` vocabulary;
+  human-readable `reason` is secret-redacted before a 1,000-character bound,
+  with `reason_truncated` recording whether the bound was applied.
 
-An unknown post-push verification remains in Attention until it is resolved. A
-known verification failure remains in Attention while it belongs to the latest
-deployed generation; a later deploy supersedes that production-health result in
-the compact current projection, while `inspect` keeps the immutable failure
-evidence. A missing configured Git remote or integration ref makes the
-repository `degraded`; status will not recommend enqueue until the base can be
-resolved. `resolve_failed_verification` points at the exact deployed job and
-uses the existing non-pushing `verify --job` recovery path. Status does not
-create a queue database when none exists.
+Unknown and failed post-push verification remain in Attention until explicitly
+resolved; a later deployment does not supersede unresolved health evidence.
+A missing configured Git remote or integration ref makes the repository
+`degraded`; status will not recommend enqueue until the base can be resolved.
+`resolve_failed_verification` points at one exact deployed job. The existing
+non-pushing `verify --job` recovery path uses that job to identify its
+deployment generation, runs the matching verification policy once, and updates
+all members atomically. If the persisted policy is absent or differs from the
+current policy, the command fails closed and directs the operator to explicit
+`--ack succeeded/failed`. Legacy rows without deployment identity are never
+grouped by a guessed train ID or commit SHA. Status does not create a queue
+database when none exists.
 
 Internal queue, push, verify, and recovery states remain available through
 `inspect` and diagnostics. Consumers should not reconstruct a competing state
 machine from those fields.
+
+Advanced structured views that serialize a job redact and bound its persisted
+`note` at 1,000 characters and publish `note_truncated`. Outcome and progress
+messages derived from that note use the same rule and publish
+`message_truncated`. The truncation keys are always boolean; consumers should
+show the bounded text and may use the flag to explain that more text was
+discarded.
 
 `next_action.code` and other enum-like values may grow. Consumers must preserve
 unknown values, show their accompanying summary/message, and avoid mutation if
@@ -129,7 +141,7 @@ The following promises apply indefinitely across 3.x releases:
    and `inspect`—will not be removed, renamed, or repurposed.
 2. Existing public options keep their meaning. A new optional flag cannot make
    an old invocation more permissive or introduce a push.
-3. Contract-3 JSON evolves additively: existing keys, types, meanings, failure
+3. Contract-4 JSON evolves additively: existing keys, types, meanings, failure
    envelope, and exit semantics are preserved.
 4. Consumers ignore unknown object keys and tolerate unknown enum values. An
    unknown safety or next-action value must fail closed for mutation.
@@ -163,6 +175,18 @@ Removing or renaming a key, changing a type or meaning, changing whether an
 invocation can push, changing exit semantics, or changing stream resume rules
 is incompatible.
 
+## Contract 3 to 4 safety migration
+
+Contract 3 treated only the latest inferred deployment generation's known
+verification failure as current Attention. That inference could hide a failure
+after an unrelated deployment because older rows did not retain destination,
+policy, or generation identity. Contract 4 removes that unsafe supersession:
+every unresolved known failure stays visible until `verify` or explicit
+`--ack` resolves it. Consumers must not infer resolution from a later deployed
+row. The `reason_truncated`, `note_truncated`, and `message_truncated` keys are
+additive; the contract bump is for the Attention meaning change, not those
+keys.
+
 ## Too-new configuration
 
 State-changing paths (`enqueue`, `validate`, `deploy`, and daemons) reject a
@@ -191,7 +215,8 @@ golden regeneration. A removal or rename fails CI and is rejected unless it
 meets the safety-exception policy. Semantic stability that key fingerprints
 cannot detect is covered by focused contract tests and review.
 
-The v2-to-v3 break is intentionally concentrated in 3.0: ambiguous command
+The v2-to-v3 grammar break is intentionally concentrated in 3.0: ambiguous command
 aliases, manually copied SHA inputs, human train IDs, separate doctor state,
 and duplicate preview/reuse switches were removed together. From 3.0 onward,
-the compatibility direction is additive and boring by design.
+the product grammar remains fixed. Contract 4 is the narrow safety exception
+above and adds no command, option, config field, or MCP tool.

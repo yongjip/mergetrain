@@ -68,6 +68,26 @@ def deploy_execution_policy_sha(
     )
 
 
+def verification_policy_sha(config: MergetrainConfig) -> str:
+    """Hash the configured behavior that a later verification re-run repeats."""
+
+    return _sha256_json(
+        {
+            "version": 1,
+            "project": config.project.name,
+            "integration_ref": config.git.integration_ref,
+            "command_timeout_seconds": config.queue.command_timeout_seconds,
+            "verify": [
+                {
+                    "name": hook.name,
+                    "run": hook.run,
+                }
+                for hook in config.deploy.verify
+            ],
+        }
+    )
+
+
 def deploy_plan_sha(
     config: MergetrainConfig,
     jobs: Iterable[Job],

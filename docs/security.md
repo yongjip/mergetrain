@@ -66,6 +66,13 @@ sensitive command options such as `--token`, and passwords in URL userinfo
 (`https://user:password@host`); the username is retained for diagnostics. This
 is defense in depth, not a general secret scanner. Raw command logs can still
 contain anything the subprocess printed, so the rules above remain mandatory.
+Every structured copy of a persisted note applies redaction before its
+1,000-character bound. Compact status publishes `reason_truncated`, serialized
+jobs publish `note_truncated`, and note-derived outcome or progress messages
+publish `message_truncated`, so a long note cannot expose a suffix or expand
+CLI and MCP context without limit. This includes the no-event `inspect`
+fallback. MCP continues to return valid CLI JSON unchanged; safety is enforced
+at the shared projection source rather than relying on adapter rewriting.
 
 ## CLI observability boundaries
 

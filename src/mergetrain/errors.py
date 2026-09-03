@@ -28,6 +28,7 @@ _SENSITIVE_KEY_MARKERS = (
     "CREDENTIAL",
 )
 _SENSITIVE_KEYS = {"DB_PASS", "PGPASS", "GITHUB_PAT"}
+PUBLIC_TEXT_LIMIT = 1000
 
 
 def _redact_assignment(match: re.Match[str]) -> str:
@@ -62,6 +63,15 @@ def redact_secrets(text: str) -> str:
     text = _SENSITIVE_ASSIGNMENT.sub(_redact_assignment, text)
     text = _SENSITIVE_OPTION.sub(r"\1[redacted]", text)
     return text
+
+
+def redact_and_bound(
+    text: str, *, limit: int = PUBLIC_TEXT_LIMIT
+) -> tuple[str, bool]:
+    """Mask secrets before bounding text emitted on structured surfaces."""
+
+    redacted = redact_secrets(text)
+    return redacted[:limit], len(redacted) > limit
 
 
 class MergetrainError(Exception):

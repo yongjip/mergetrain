@@ -46,6 +46,7 @@ from mergetrain.store import (
     record_run_event,
     refresh_runner_lock,
     release_runner_lock,
+    resolve_deployment_verify_status,
     retry_job,
     start_recovery_operation,
     supersede_validated_train,
@@ -108,11 +109,22 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "")
         record_pending_push(
-            conn, job_ids=[a.id, b.id], deploy_sha="deadbeef", claim_token=token
+            conn,
+            job_ids=[a.id, b.id],
+            deploy_sha="deadbeef",
+            claim_token=token,
+            destination_sha="destination-a",
+            verification_policy_sha="verify-policy-a",
         )
-        self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "deadbeef")
-        self.assertEqual(get_job(conn, a.id).push_status, "pending")
-        self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
+        marked_a = get_job(conn, a.id)
+        marked_b = get_job(conn, b.id)
+        self.assertEqual(marked_a.pending_deploy_sha, "deadbeef")
+        self.assertEqual(marked_a.push_status, "pending")
+        self.assertTrue(marked_a.deployment_id)
+        self.assertEqual(marked_b.deployment_id, marked_a.deployment_id)
+        self.assertEqual(marked_a.deployment_destination_sha, "destination-a")
+        self.assertEqual(marked_a.verification_policy_sha, "verify-policy-a")
+        self.assertEqual(marked_b.pending_deploy_sha, "deadbeef")
         self.assertEqual(get_job(conn, other.id).pending_deploy_sha, "")
         self.assertEqual(get_job(conn, other.id).push_status, "not_run")
 
@@ -125,6 +137,7 @@ class StoreTests(unittest.TestCase):
         mark_job(conn, a.id, status="deployed", expected_claim_token=token)
         mark_job(conn, b.id, status="failed", expected_claim_token=token)
         self.assertEqual(get_job(conn, a.id).pending_deploy_sha, "")
+        self.assertEqual(get_job(conn, a.id).deployment_id, marked_a.deployment_id)
         self.assertEqual(get_job(conn, b.id).pending_deploy_sha, "deadbeef")
 
     def test_pending_marker_records_the_push_target(self) -> None:
@@ -151,6 +164,64 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(
             unpack_push_refs(marked.pending_deploy_refs), ["main", "refs/deploy/prod"]
         )
+
+    def test_unlanded_cancellation_clears_deployment_identity(self) -> None:
+        conn = self.make_conn()
+        token = "runner:cancel"
+        job = enqueue_job(conn, task="a", branch="a")
+        conn.execute(
+            "UPDATE deploy_queue SET status='in_progress', claim_token=? WHERE id=?",
+            (token, job.id),
+        )
+        conn.commit()
+        record_pending_push(
+            conn,
+            job_ids=[job.id],
+            deploy_sha="deadbeef",
+            claim_token=token,
+            destination_sha="destination-a",
+            verification_policy_sha="policy-a",
+        )
+
+        canceled = mark_job(
+            conn,
+            job.id,
+            status="canceled",
+            expected_claim_token=token,
+        )
+
+        self.assertEqual(canceled.pending_deploy_sha, "")
+        self.assertEqual(canceled.deployment_id, "")
+        self.assertEqual(canceled.deployment_destination_sha, "")
+        self.assertEqual(canceled.verification_policy_sha, "")
+
+    def test_verification_resolution_updates_one_exact_deployment_atomically(self) -> None:
+        conn = self.make_conn()
+        first = enqueue_job(conn, task="a", branch="a")
+        second = enqueue_job(conn, task="b", branch="b")
+        for job, verify_status in ((first, "failed"), (second, "unknown")):
+            mark_job(
+                conn,
+                job.id,
+                status="deployed",
+                deploy_sha="deploy-a",
+                push_status="succeeded",
+                verify_status=verify_status,
+                deployment_id="deployment-a",
+                deployment_destination_sha="destination-a",
+                verification_policy_sha="policy-a",
+            )
+
+        resolved = resolve_deployment_verify_status(
+            conn,
+            second.id,
+            verify_status="succeeded",
+            note="verified once",
+        )
+
+        self.assertEqual([job.id for job in resolved], [first.id, second.id])
+        self.assertEqual({job.verify_status for job in resolved}, {"succeeded"})
+        self.assertEqual({job.note for job in resolved}, {"verified once"})
 
     def test_cancel_refuses_needs_reconcile_and_preserves_marker(self) -> None:
         conn = self.make_conn()
@@ -460,7 +531,10 @@ class StoreTests(unittest.TestCase):
                 validated_head_sha = 'head', validation_tree_sha = 'tree',
                 validation_gate_policy_sha = 'gates',
                 validation_environment_sha = 'environment',
-                validation_train_sha = 'train', reused_validation_sha = 'reuse'
+                validation_train_sha = 'train', reused_validation_sha = 'reuse',
+                deployment_id = 'deployment',
+                deployment_destination_sha = 'destination',
+                verification_policy_sha = 'verify-policy'
             WHERE id = ?
             """,
             (job.id,),
@@ -487,6 +561,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(requeued.validation_environment_sha, "")
         self.assertEqual(requeued.validation_train_sha, "")
         self.assertEqual(requeued.reused_validation_sha, "")
+        self.assertEqual(requeued.deployment_id, "")
+        self.assertEqual(requeued.deployment_destination_sha, "")
+        self.assertEqual(requeued.verification_policy_sha, "")
 
     def test_orphan_requeue_note_singles_out_the_dissolved_train(self) -> None:
         # Only the row that actually carried an approved identity gets the
@@ -628,6 +705,9 @@ class StoreTests(unittest.TestCase):
         self.assertIn("pending_deploy_refs", columns)
         self.assertIn("approval_destination_sha", columns)
         self.assertIn("approval_execution_policy_sha", columns)
+        self.assertIn("deployment_id", columns)
+        self.assertIn("deployment_destination_sha", columns)
+        self.assertIn("verification_policy_sha", columns)
         self.assertEqual(migrated.pending_deploy_remote, "")
         self.assertEqual(migrated.pending_deploy_refs, "")
         self.assertEqual(migrated.approval_execution_policy_sha, "")
@@ -678,6 +758,7 @@ class StoreTests(unittest.TestCase):
             self.assertIn(
                 "deploy_queue_supersession_id_idx", queue_indexes
             )
+            self.assertIn("deploy_queue_deployment_id_idx", queue_indexes)
             queue_columns = {
                 row[1]
                 for row in migrated_db.execute(

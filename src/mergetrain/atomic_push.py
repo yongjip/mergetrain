@@ -10,6 +10,7 @@ from typing import IO
 
 from .command_runner import Pulse, redacting_log, run_command
 from .config import MergetrainConfig
+from .deploy_plan import verification_policy_sha
 from .errors import (
     AmbiguousPush,
     CancellationRequested,
@@ -185,6 +186,7 @@ class AtomicPush:
             remote=destination.remote_name,
             push_refs=destination.push_refs,
             destination_sha=destination.push_endpoint_sha,
+            verification_policy_sha=verification_policy_sha(self.config),
         )
         for job_id in job_ids:
             pending_ref = pending_ref_name(job_id)

@@ -43,7 +43,7 @@ from ..observability import (
     stats_payload,
     stream_terminal,
 )
-from ..snapshot import attention_reason_code, plan_next_action
+from ..snapshot import attention_reason_code, plan_next_action, public_reason
 from ..store import (
     connect,
     counts,
@@ -53,6 +53,7 @@ from ..store import (
     list_jobs,
     list_run_events,
     list_train_jobs,
+    read_snapshot,
     validated_train_summaries,
 )
 
@@ -105,31 +106,21 @@ def _job_display_state(job: Job) -> str:
 
 def _job_summary(
     job: Job,
-    *,
-    attention_job_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     state = _job_display_state(job)
-    if (
-        attention_job_ids is not None
-        and job.status == "deployed"
-        and job.verify_status == "failed"
-        and job.id not in attention_job_ids
-    ):
-        # A later deploy supersedes this known production-health result. Keep
-        # the failed verify as immutable inspect/history evidence without
-        # presenting it as current operator work forever.
-        state = "done"
     outcome = job.status if state == "done" else None
-    reason = ""
+    reason: str | None = None
+    reason_truncated = False
     if state == "attention":
-        reason = job.note or job.conflict_with or attention_reason_code(job) or job.status
+        reason, reason_truncated = public_reason(job)
     return {
         "id": job.id,
         "task": job.task,
         "branch": job.branch,
         "state": state,
         "reason_code": attention_reason_code(job) if state == "attention" else None,
-        "reason": reason or None,
+        "reason": reason,
+        "reason_truncated": reason_truncated,
         "outcome": outcome,
         "updated_at": job.finished_at or job.started_at or job.requested_at,
     }
@@ -273,19 +264,20 @@ def cmd_status(args: argparse.Namespace) -> int:
     if config.state.db.is_file():
         conn = connect(config.state.db, read_only=True)
         try:
-            lock = get_lock(conn)
+            with read_snapshot(conn):
+                lock = get_lock(conn)
+                raw_validated_trains = validated_train_summaries(conn)
+                count_data = counts(conn)
+                recent_jobs = list_jobs(conn, limit=args.limit)
+                decision_jobs = list_attention_jobs(conn)
             validated_trains = _validated_trains_with_integration_state(
                 config,
-                validated_train_summaries(conn),
+                raw_validated_trains,
             )
-            count_data = counts(conn)
-            recent_jobs = list_jobs(conn, limit=args.limit)
-            decision_jobs = list_attention_jobs(conn)
         finally:
             conn.close()
 
     attention_jobs = [job for job in decision_jobs if _job_display_state(job) == "attention"]
-    attention_job_ids = {job.id for job in attention_jobs}
     grouped = _grouped_counts(count_data)
     system_state = _system_state(grouped)
     repo_root = git_repo_root(config.repo) if config.repo.is_dir() else ""
@@ -324,13 +316,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         "warnings": warnings,
         "counts": grouped,
         "attention_jobs": [_job_summary(job) for job in attention_jobs],
-        "recent_jobs": [
-            _job_summary(
-                job,
-                attention_job_ids=attention_job_ids,
-            )
-            for job in recent_jobs
-        ],
+        "recent_jobs": [_job_summary(job) for job in recent_jobs],
     }
     if args.diagnose:
         payload["diagnostics"] = _diagnostics(

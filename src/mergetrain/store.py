@@ -24,6 +24,7 @@ from .persistence.jobs import (
     dismiss_job,
     enqueue_job,
     get_job,
+    get_verification_group,
     has_queued_auto,
     has_queued_manual,
     list_attention_jobs,
@@ -34,6 +35,7 @@ from .persistence.jobs import (
     list_train_jobs,
     list_verify_unknown_jobs,
     mark_job,
+    resolve_deployment_verify_status,
     resolve_verify_status,
     retry_job,
     select_validated_train,
@@ -72,7 +74,7 @@ from .persistence.recovery import (
 )
 from .persistence.schema import SCHEMA_VERSION, ensure_schema
 from .persistence.transactions import _parse_utc as _parse_utc
-from .persistence.transactions import immediate, utc_now
+from .persistence.transactions import immediate, read_snapshot, utc_now
 
 __all__ = (
     "Liveness",
@@ -99,6 +101,7 @@ __all__ = (
     "force_clear_lock_and_split",
     "finish_recovery_operation",
     "get_job",
+    "get_verification_group",
     "get_lock",
     "has_in_progress",
     "has_queued_auto",
@@ -120,10 +123,12 @@ __all__ = (
     "pack_push_refs",
     "record_pending_push",
     "record_run_event",
+    "read_snapshot",
     "recover_orphans",
     "refresh_runner_lock",
     "release_runner_lock",
     "resolve_verify_status",
+    "resolve_deployment_verify_status",
     "retry_job",
     "select_validated_train",
     "start_recovery_operation",

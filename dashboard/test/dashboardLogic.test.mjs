@@ -5,12 +5,15 @@ import {
   NEXT_ACTION_COPY,
   SSE_RECONNECT_GRACE_MS,
   actionCopy,
+  attentionCount,
   browserIndicator,
   conflictFiles,
   contextualInspectorState,
   currentTrainModel,
   etaRemainingSeconds,
   gateWaterfallModel,
+  historyState,
+  isAttentionJob,
   jobActivityAt,
   latestRepoJob,
   newestFirstFifoRows,
@@ -223,4 +226,28 @@ test("browser indicator drives the state dot, failure count, and favicon", () =>
   assert.match(favicon, /^data:image\/svg\+xml,/);
   assert.match(favicon, />3<\/text>/);
   assert.match(favicon, /#d1242f/);
+});
+
+test("verification failures stay Attention across hub, badge, train model, and history", () => {
+  const failed = { id: 71, status: "deployed", verify_status: "failed" };
+  const unknown = { id: 72, status: "deployed", verify_status: "unknown" };
+  const counts = { deployed_verify_failed: 1, deployed_verify_unknown: 1 };
+  const snapshot = {
+    counts,
+    jobs: [failed, unknown],
+    train: { jobs: [], selection: "idle" },
+    validated_trains: [],
+  };
+
+  assert.equal(isAttentionJob(failed), true);
+  assert.equal(isAttentionJob(unknown), true);
+  assert.equal(attentionCount(counts), 2);
+  assert.deepEqual(repoStateForEntry({ ok: true, snapshot }), ["warning", "ATTENTION"]);
+  assert.deepEqual(
+    { state: browserIndicator(snapshot).state, count: browserIndicator(snapshot).count },
+    { state: "attention", count: 2 },
+  );
+  assert.deepEqual(currentTrainModel(snapshot).attentionJobs.map((job) => job.id), [71, 72]);
+  assert.equal(historyState(failed), "failed");
+  assert.equal(historyState(unknown), "failed");
 });
