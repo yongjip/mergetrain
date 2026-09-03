@@ -337,7 +337,12 @@ dsha=$(echo "$rb" | jget jobs.0.deploy_sha)
 after=$(remote_main "$(dirname "$R")")
 { [ "$before" != "$after" ] && [ "$after" = "$dsha" ]; } && ok "atomic push still landed before verify ran" || no "remote not at deploy_sha"
 echo "$(echo "$rb" | jget jobs.0.note)" | grep -qi "post-push verify warning" && ok "failure recorded as non-blocking warning note" || no "no verify-warning note"
-[ "$("$MT" --repo "$R" status --json | jget next_action.code)" = "enqueue_clean_branch" ] && ok "warned deploy is terminal-clean (not fix_blocked_job)" || no "status next_action wrong"
+jid=$(echo "$rb" | jget jobs.0.id)
+sj=$("$MT" --repo "$R" status --json)
+{ [ "$(echo "$sj" | jget next_action.code)" = "resolve_failed_verification" ] \
+  && [ "$(echo "$sj" | jget next_action.target_job_id)" = "$jid" ]; } \
+  && ok "failed verification stays actionable with its exact job target" \
+  || no "status next_action wrong"
 
 section "S5c  multiple push_refs (atomic fan-out to >1 ref)"
 R=$(setup s5c multiref); D=$(dirname "$R")
