@@ -11,7 +11,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, redirect_stderr, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -37,6 +38,19 @@ def completed(stdout: str, returncode: int = 0, stderr: str = "") -> Any:
     return subprocess.CompletedProcess(
         args=["mergetrain"], returncode=returncode, stdout=stdout, stderr=stderr
     )
+
+
+@contextmanager
+def current_checkout_cli() -> Iterator[None]:
+    """Make real MCP child-process tests execute the checkout under test."""
+
+    source_path = str(Path(__file__).resolve().parents[1] / "src")
+    inherited = os.environ.get("PYTHONPATH", "")
+    child_pythonpath = os.pathsep.join(
+        part for part in (source_path, inherited) if part
+    )
+    with patch.dict(os.environ, {"PYTHONPATH": child_pythonpath}):
+        yield
 
 
 DOCTOR = {
@@ -211,7 +225,8 @@ class ToolSurfaceTests(unittest.TestCase):
             )
 
             tools = MergetrainTools(repo=repo)
-            payload = asyncio.run(tools.enqueue(task="mcp cwd", branch="agent/one"))
+            with current_checkout_cli():
+                payload = asyncio.run(tools.enqueue(task="mcp cwd", branch="agent/one"))
 
         self.assertTrue(payload["ok"])
         self.assertEqual(Path(payload["job"]["worktree_path"]), repo)
@@ -258,7 +273,10 @@ class PayloadTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = asyncio.run(MergetrainTools(repo=repo).status())
+            # pytest's ``pythonpath = ["src"]`` does not propagate to this
+            # MCP CLI child, so make the real-process test hermetic.
+            with current_checkout_cli():
+                payload = asyncio.run(MergetrainTools(repo=repo).status())
 
         rendered = json.dumps(payload)
         self.assertNotIn("mcp-secret", rendered)
