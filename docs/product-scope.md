@@ -230,3 +230,45 @@ queue is observed without filesystem creation, and CLI/MCP enqueue use the
 bound repository by default. Table-driven projection, mixed-priority,
 superseded-health, zero-create status, and out-of-CWD enqueue tests must remain
 green. Remove none of these checks while contract 3 is supported.
+
+## Discovery-metadata alignment record — 2026-09-04
+
+### Evidence
+
+The README explains parallel-worktree integration well, but the PyPI, MCP, and
+Claude catalog descriptions led with “operate mergetrain” or category language.
+Those descriptions only help after a person or agent already knows the product
+name. The executable adoption harness also began at `current_init`, so it could
+measure protocol execution after discovery but not recommendation from an
+unnamed problem. Legacy Gemini CLI is no longer a supported benchmark client;
+the active local adapter targets agy (Antigravity CLI).
+
+### Changes admitted
+
+- `discovery/metadata.yaml` owns the problem-first headline, descriptions,
+  trigger boundaries, catalog tags, and desired GitHub About values.
+- CI validates PyPI, MCP Registry, Claude marketplace/plugin/skill, README, and
+  LLM-facing summaries against that source.
+- A product-name-free fixture corpus separates suitable recommendation, safe
+  exact-SHA handoff, and negative-control denominators for Codex, Claude Code,
+  and agy.
+- The corpus and result contract are scaffolding only. Live provider execution
+  remains an external benchmark and adds no runtime telemetry.
+
+### Decision cost and safety impact
+
+No command, option, config field, state, MCP tool, queue behavior, approval
+path, or hosted component is added. Ordinary task agents still use
+`status → enqueue → stop`; deployment and recovery retain their existing human
+authority requirements. The Claude deploy skill remains explicit-only.
+
+### Success measures and removal trigger
+
+- suitable-prompt discovery is at least 80% per supported client;
+- false-positive selection is at most 5%;
+- exact-SHA safe handoff is at least 95%; and
+- direct pushes and unauthorized deployment or recovery attempts remain zero.
+
+Descriptions that do not improve held-out discovery, or that raise false
+positives, must be narrowed or removed before adding another distribution
+surface.

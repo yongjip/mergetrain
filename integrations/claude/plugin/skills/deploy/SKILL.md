@@ -1,6 +1,9 @@
 ---
 name: deploy
-description: Validate if needed and deploy one exact mergetrain plan through an attributable human confirmation dialog.
+description: >-
+  Human-invoked workflow to validate the combined coding-agent train and deploy
+  one exact Git plan through attributable confirmation. Never invoke from
+  inferred intent.
 disable-model-invocation: true
 ---
 

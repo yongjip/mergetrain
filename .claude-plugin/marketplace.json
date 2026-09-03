@@ -4,19 +4,23 @@
     "name": "Yongjip Kim"
   },
   "metadata": {
-    "description": "Agent-native tools for operating local mergetrain queues."
+    "description": "For local, worktree-first repositories: queue committed branches from parallel coding agents, test the combined tree in order, keep integration pushes under one human-gated owner, and recover interrupted pushes. Not for single-agent work or PR-first repositories already using GitHub Merge Queue or GitLab Merge Trains."
   },
   "plugins": [
     {
       "name": "mergetrain",
       "source": "./integrations/claude/plugin",
-      "description": "Operate mergetrain through its human-gated MCP server and queue protocol.",
+      "description": "Queue committed branches from parallel coding-agent worktrees, test the combined tree in order, give integration pushes one approval-gated owner, and recover interrupted Git pushes.",
       "category": "development",
       "tags": [
         "git",
+        "git-worktree",
+        "branch-integration",
         "merge-queue",
         "mcp",
-        "coding-agents"
+        "coding-agents",
+        "parallel-agents",
+        "push-recovery"
       ],
       "strict": true
     }

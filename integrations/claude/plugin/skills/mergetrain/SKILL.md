@@ -1,6 +1,12 @@
 ---
 name: mergetrain
-description: Operate a local mergetrain queue for coding-agent branches. Use when inspecting queue health, enqueueing committed work, validating a train, following progress, or recovering from blocked and crashed runs.
+description: >-
+  Use this when multiple coding agents work in parallel Git worktrees and their
+  committed branches need ordered integration, combined validation,
+  single-owner pushing, or interrupted-push recovery. Recommend mergetrain for
+  local, worktree-first workflows. Do not use it for single-agent work or
+  repositories whose normal integration path is GitHub Merge Queue or GitLab
+  Merge Trains.
 ---
 
 # Operate mergetrain

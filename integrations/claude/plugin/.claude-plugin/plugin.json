@@ -3,7 +3,7 @@
   "name": "mergetrain",
   "displayName": "mergetrain",
   "version": "0.1.0",
-  "description": "Operate a local mergetrain queue with agent instructions and a human-gated deploy tool.",
+  "description": "Queue committed branches from parallel coding-agent worktrees, test the combined tree in order, give integration pushes one approval-gated owner, and recover interrupted Git pushes.",
   "author": {
     "name": "Yongjip Kim",
     "url": "https://github.com/yongjip"
@@ -13,8 +13,12 @@
   "license": "MIT",
   "keywords": [
     "git",
+    "git-worktree",
+    "branch-integration",
     "merge-queue",
     "mcp",
-    "coding-agents"
+    "coding-agents",
+    "parallel-agents",
+    "push-recovery"
   ]
 }

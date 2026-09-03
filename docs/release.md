@@ -149,8 +149,18 @@ an upload that already succeeded.
 1. Confirm all `main` CI checks passed (the TestPyPI rehearsal is optional —
    PR CI already builds both distributions, runs `twine check --strict`, and
    smoke-installs the wheel in a clean environment).
-2. Update the version and dated changelog heading for the intended release.
-3. Create a signed annotated tag on the exact verified `main` commit, verify it
+2. Confirm catalog descriptions match the canonical discovery metadata:
+
+   ```sh
+   python scripts/check_discovery_metadata.py
+   python scripts/check_discovery_metadata.py --github-json
+   ```
+
+   Compare the second command's description and topic set with GitHub About and
+   update that repository setting if it drifted. Do not maintain a second copy
+   of the desired text in this checklist.
+3. Update the version and dated changelog heading for the intended release.
+4. Create a signed annotated tag on the exact verified `main` commit, verify it
    locally against the tracked allowed signer, and push it. Unsigned release
    tags are rejected by the release workflow:
 
@@ -163,9 +173,9 @@ an upload that already succeeded.
    git push origin v0.1.0
    ```
 
-4. Confirm repository-level **Release immutability** is enabled. It applies only
+5. Confirm repository-level **Release immutability** is enabled. It applies only
    to future Releases, so do this before publishing the release.
-5. Publish a GitHub Release for that existing tag. Once published, the tag and
+6. Publish a GitHub Release for that existing tag. Once published, the tag and
    any attached assets are locked:
 
    ```sh
@@ -173,7 +183,7 @@ an upload that already succeeded.
      --title "mergetrain 0.1.0"
    ```
 
-6. Dispatch the trusted workflow explicitly at `main` with the same tag:
+7. Dispatch the trusted workflow explicitly at `main` with the same tag:
 
    ```sh
    gh workflow run release.yml --ref main -f tag=v0.1.0
@@ -183,8 +193,8 @@ an upload that already succeeded.
    signatures, lightweight tags, and commits outside current main before any
    tag-provided code or package-publishing credential is used. It builds and
    uploads to PyPI, then publishes `server.json` to the official MCP Registry.
-   The Release publication in step 5 remains the human approval.
-7. Verify <https://pypi.org/project/mergetrain/>, install from PyPI in a fresh
+   The Release publication in step 6 remains the human approval.
+8. Verify <https://pypi.org/project/mergetrain/>, install from PyPI in a fresh
    environment, verify its GitHub artifact attestation, and confirm the Registry
    API returns the released version:
 
@@ -195,7 +205,7 @@ an upload that already succeeded.
      --repo yongjip/mergetrain
    ```
 
-8. The Homebrew tap picks the release up on its own daily cron. To make that
+9. The Homebrew tap picks the release up on its own daily cron. To make that
    immediate, see the optional dispatch below; otherwise check
    `brew install yongjip/tap/mergetrain` the next day.
 

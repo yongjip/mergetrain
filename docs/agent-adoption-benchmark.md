@@ -1,5 +1,11 @@
 # Agent adoption benchmark
 
+This protocol benchmark starts after mergetrain is available through repository
+onboarding, a skill, or MCP. The complementary
+[product-name-free discovery benchmark](../benchmarks/discovery/README.md)
+measures whether Codex, Claude Code, and agy select the capability from the
+problem description before the product is named.
+
 This document defines how mergetrain measures whether a coding agent discovers
 and follows the repository's integration protocol. The normative sections are
 an evaluation contract, not a product telemetry feature. Dated evidence is kept

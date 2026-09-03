@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/mergetrain)](https://pypi.org/project/mergetrain/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/yongjip/mergetrain/blob/main/LICENSE)
 
-**Parallel agents need a serial integration spine.**
+**Safely integrate committed branches from parallel coding agents.**
 
 mergetrain is a local-first deploy train for coding-agent worktrees. Agents
 commit and enqueue their branches; one runner assembles them in order, tests the
@@ -50,8 +50,8 @@ Use mergetrain when:
 - you want unattended processing only for explicitly pre-approved jobs; or
 - one local hub should show queues and runners across several repositories.
 
-It is harness-agnostic: Codex, Claude Code, scripts, and humans all use the same
-CLI and JSON contract.
+It is harness-agnostic: Codex, Claude Code, agy, scripts, and humans all use the
+same CLI and JSON contract.
 
 ## Who should not use it?
 
@@ -223,6 +223,7 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
 - Trust and extend: [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) ·
   [Agent contract](https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md) ·
   [Agent adoption benchmark](https://github.com/yongjip/mergetrain/blob/main/docs/agent-adoption-benchmark.md) ·
+  [Product-name-free discovery benchmark](https://github.com/yongjip/mergetrain/blob/main/benchmarks/discovery/README.md) ·
   [Local multi-agent benchmark](https://github.com/yongjip/mergetrain/blob/main/benchmarks/multi_agent_integration/README.md) ·
   [MCP server](https://github.com/yongjip/mergetrain/blob/main/docs/mcp.md) ·
   [Adapter pattern](https://github.com/yongjip/mergetrain/blob/main/docs/adapter-pattern.md) ·

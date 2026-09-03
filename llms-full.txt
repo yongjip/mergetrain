@@ -1,8 +1,10 @@
 # mergetrain full LLM operating guide
 
-mergetrain is a local Git integration train for coding-agent worktrees. It is
-not a cloud CI service, provider deployment wrapper, general job queue, or
-forge-native PR merge queue.
+For local, worktree-first repositories: queue committed branches from parallel
+coding agents, test the combined tree in order, keep integration pushes under
+one human-gated owner, and recover interrupted pushes. Not for single-agent
+work or PR-first repositories already using GitHub Merge Queue or GitLab Merge
+Trains.
 
 ## Shared operating protocol
 

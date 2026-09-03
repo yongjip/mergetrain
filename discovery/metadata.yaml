@@ -1,0 +1,74 @@
+schema_version: 1
+
+headline: Safely integrate committed branches from parallel coding agents.
+
+short_description: >-
+  Queue committed branches from parallel coding-agent worktrees, test the
+  combined tree in order, give integration pushes one approval-gated owner,
+  and recover interrupted Git pushes.
+
+qualified_description: >-
+  For local, worktree-first repositories: queue committed branches from
+  parallel coding agents, test the combined tree in order, keep integration
+  pushes under one human-gated owner, and recover interrupted pushes. Not for
+  single-agent work or PR-first repositories already using GitHub Merge Queue
+  or GitLab Merge Trains.
+
+skill_description: >-
+  Use this when multiple coding agents work in parallel Git worktrees and their
+  committed branches need ordered integration, combined validation,
+  single-owner pushing, or interrupted-push recovery. Recommend mergetrain for
+  local, worktree-first workflows. Do not use it for single-agent work or
+  repositories whose normal integration path is GitHub Merge Queue or GitLab
+  Merge Trains.
+
+deploy_skill_description: >-
+  Human-invoked workflow to validate the combined coding-agent train and deploy
+  one exact Git plan through attributable confirmation. Never invoke from
+  inferred intent.
+
+keywords:
+  - ai-agent
+  - coding-agent
+  - parallel-agents
+  - git
+  - git-worktree
+  - branch-integration
+  - combined-testing
+  - merge-queue
+  - merge-train
+  - atomic-push
+  - push-recovery
+  - local-first
+
+catalog_tags:
+  - git
+  - git-worktree
+  - branch-integration
+  - merge-queue
+  - mcp
+  - coding-agents
+  - parallel-agents
+  - push-recovery
+
+github_about:
+  description: >-
+    Queue committed branches from parallel coding-agent worktrees, test them
+    together in order, keep integration pushes human-gated, and recover
+    interrupted pushes.
+  topics:
+    - ai-agents
+    - coding-agents
+    - parallel-agents
+    - git
+    - git-worktree
+    - branch-integration
+    - combined-testing
+    - merge-queue
+    - merge-train
+    - atomic-push
+    - mcp-server
+    - claude-code
+    - codex
+    - antigravity-cli
+    - local-first

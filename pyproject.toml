@@ -5,14 +5,27 @@ build-backend = "hatchling.build"
 [project]
 name = "mergetrain"
 version = "3.0.1"
-description = "A local-first merge-and-push queue for coding-agent worktrees"
+description = "Queue committed branches from parallel coding-agent worktrees, test the combined tree in order, give integration pushes one approval-gated owner, and recover interrupted Git pushes."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
   { name = "mergetrain contributors" }
 ]
-keywords = ["llm", "ai-agent", "git", "deploy", "merge-train", "sqlite", "worktree"]
+keywords = [
+  "ai-agent",
+  "coding-agent",
+  "parallel-agents",
+  "git",
+  "git-worktree",
+  "branch-integration",
+  "combined-testing",
+  "merge-queue",
+  "merge-train",
+  "atomic-push",
+  "push-recovery",
+  "local-first",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -123,6 +136,7 @@ include = [
   "/src",
   "/tests",
   "/benchmarks",
+  "/discovery",
   "/docs",
   "/dashboard",
   "/examples",

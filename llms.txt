@@ -1,8 +1,10 @@
 # mergetrain for LLM agents
 
-mergetrain serializes committed coding-agent branches through one local
-merge/test/push/verify runner. Its normal product grammar is intentionally
-small:
+Queue committed branches from parallel coding-agent worktrees, test the
+combined tree in order, give integration pushes one approval-gated owner, and
+recover interrupted Git pushes.
+
+The normal product grammar is intentionally small:
 
 ```text
 init  status  enqueue  validate  deploy  inspect
