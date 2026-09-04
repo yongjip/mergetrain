@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stderr, suppress
+from importlib.metadata import version
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -230,6 +231,62 @@ class ToolSurfaceTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(Path(payload["job"]["worktree_path"]), repo)
+
+    def test_enqueue_resolves_two_named_worktrees_from_control_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "control"
+            api = root / "agent-api"
+            ui = root / "agent-ui"
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main", str(repo)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True
+            )
+            (repo / ".mergetrain.yaml").write_text(
+                "version: 2\nproject:\n  name: mcp-control\ngates: []\n",
+                encoding="utf-8",
+            )
+            (repo / "base.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+            for branch, worktree in (("agent/api", api), ("agent/ui", ui)):
+                subprocess.run(
+                    ["git", "worktree", "add", "-q", "-b", branch, str(worktree), "main"],
+                    cwd=repo,
+                    check=True,
+                )
+                (worktree / f"{branch.rsplit('/', 1)[-1]}.txt").write_text(
+                    branch + "\n", encoding="utf-8"
+                )
+                subprocess.run(["git", "add", "."], cwd=worktree, check=True)
+                subprocess.run(
+                    ["git", "commit", "-qm", branch], cwd=worktree, check=True
+                )
+
+            tools = MergetrainTools(repo=repo)
+            with current_checkout_cli():
+                api_payload = asyncio.run(tools.enqueue(task="api", branch="agent/api"))
+                ui_payload = asyncio.run(tools.enqueue(task="ui", branch="agent/ui"))
+
+        self.assertTrue(api_payload["ok"])
+        self.assertTrue(ui_payload["ok"])
+        self.assertEqual(api_payload["job"]["id"], 1)
+        self.assertEqual(ui_payload["job"]["id"], 2)
+        self.assertEqual(Path(api_payload["job"]["worktree_path"]), api.resolve())
+        self.assertEqual(Path(ui_payload["job"]["worktree_path"]), ui.resolve())
 
     def test_operator_only_reads_are_not_public_methods(self) -> None:
         for name in ("doctor", "history", "stats", "agent_contract", "gc_preview"):
@@ -782,6 +839,7 @@ class ServerRegistrationTests(unittest.TestCase):
         from mergetrain.mcp_server import build_server
 
         server = build_server(Path("/repo"))
+        self.assertEqual(server.version, version("mergetrain"))
         tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
         self.assertEqual(
             set(tools),

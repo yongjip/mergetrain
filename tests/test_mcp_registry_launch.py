@@ -6,6 +6,7 @@ from pathlib import Path
 from scripts.check_mcp_registry_launch import (
     isolated_uv_environment,
     registry_command,
+    source_version,
 )
 
 
@@ -30,6 +31,9 @@ class MCPRegistryLaunchTests(unittest.TestCase):
         env = isolated_uv_environment(cache)
 
         self.assertEqual(env["UV_CACHE_DIR"], str(cache))
+
+    def test_source_version_matches_release_metadata(self) -> None:
+        self.assertEqual(source_version(), "3.0.3")
 
 
 if __name__ == "__main__":

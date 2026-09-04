@@ -128,7 +128,7 @@ jobs:
           python -m venv /tmp/mergetrain-mcp-wheel
           wheel="$(find dist -name 'mergetrain-*.whl' -print -quit)"
           /tmp/mergetrain-mcp-wheel/bin/python -m pip install "${wheel}[mcp]"
-          python scripts/check_mcp_registry_launch.py --timeout 60 \
+          python scripts/check_mcp_registry_launch.py --timeout 60 --require-version \
             --command /tmp/mergetrain-mcp-wheel/bin/mergetrain mcp
 
   claude-plugin:

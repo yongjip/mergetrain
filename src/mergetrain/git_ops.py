@@ -29,6 +29,66 @@ def git_repo_root(path: str | Path) -> str:
     return git_output_or_empty(["rev-parse", "--show-toplevel"], cwd=path)
 
 
+def git_common_dir(path: str | Path) -> Path | None:
+    """Return the repository's resolved common Git directory, if provable."""
+
+    completed = run_command(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=path,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    raw = completed.stdout.rstrip("\r\n")
+    if not raw:
+        return None
+    common = Path(raw)
+    if not common.is_absolute():
+        common = Path(path) / common
+    return common.resolve()
+
+
+def _parse_worktree_porcelain(output: str, branch: str) -> tuple[Path, ...]:
+    """Parse ``git worktree list --porcelain -z`` without path injection."""
+
+    expected_ref = f"refs/heads/{branch}"
+    matches: list[Path] = []
+    record: dict[str, str] = {}
+
+    def finish() -> None:
+        if (
+            record.get("branch") == expected_ref
+            and "worktree" in record
+            and "prunable" not in record
+        ):
+            # Porcelain -z makes the complete path one NUL-delimited value.
+            # Do not strip it: spaces and newlines are valid path characters.
+            matches.append(Path(record["worktree"]))
+        record.clear()
+
+    for field in output.split("\0"):
+        if field == "":
+            if record:
+                finish()
+            continue
+        key, separator, value = field.partition(" ")
+        record[key] = value if separator else ""
+    if record:
+        finish()
+    return tuple(matches)
+
+
+def git_worktrees_for_branch(path: str | Path, branch: str) -> tuple[Path, ...]:
+    """Return live registered worktrees with exactly ``branch`` checked out."""
+
+    completed = run_command(
+        ["git", "worktree", "list", "--porcelain", "-z"],
+        cwd=path,
+        check=True,
+    )
+    return _parse_worktree_porcelain(completed.stdout, branch)
+
+
 def git_current_branch(path: str | Path) -> str:
     return git_output_or_empty(["branch", "--show-current"], cwd=path)
 

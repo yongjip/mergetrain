@@ -27,6 +27,7 @@ import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -61,6 +62,15 @@ INSTALL_HINT = (
 _CLI_TIMEOUT_SECONDS = 3600
 _CLI_TERMINATE_GRACE_SECONDS = 5.0
 _LOG_TAIL_MAX_LINES = 200
+
+
+def _server_version() -> str:
+    """Read installed package metadata without importing the package root."""
+
+    try:
+        return version("mergetrain")
+    except PackageNotFoundError:
+        return "0+unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -550,6 +560,7 @@ def build_server(repo: Path) -> Any:
     tools = MergetrainTools(repo=repo)
     server = MCPServer(
         name="mergetrain",
+        version=_server_version(),
         instructions=(
             "mergetrain is a local merge-and-push queue for coding-agent "
             "branches. Work in the assigned worktree, commit a clean HEAD, read "

@@ -1276,6 +1276,35 @@ class CliTests(unittest.TestCase):
         self.assertEqual(Path(payload["job"]["worktree_path"]), repo.resolve())
         self.assertEqual(payload["job"]["status"], "queued")
 
+    def test_enqueue_missing_repo_keeps_the_json_error_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            missing = root / "missing"
+            config = root / ".mergetrain.yaml"
+            config.write_text(render_default_config("missing-repo"), encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(missing),
+                        "--config",
+                        str(config),
+                        "enqueue",
+                        "--task",
+                        "missing repo",
+                        "--branch",
+                        "agent/missing",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "queue_error")
+        self.assertIn("repository does not exist", payload["error"]["message"])
+
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

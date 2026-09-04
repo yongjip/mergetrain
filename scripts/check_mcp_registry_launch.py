@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import queue
@@ -16,6 +17,25 @@ from pathlib import Path
 from typing import Any, TextIO
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def source_version() -> str:
+    """Read the checkout version without importing the package under test."""
+
+    tree = ast.parse(
+        (ROOT / "src/mergetrain/__init__.py").read_text(encoding="utf-8")
+    )
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(
+            isinstance(target, ast.Name) and target.id == "__version__"
+            for target in node.targets
+        ):
+            value = ast.literal_eval(node.value)
+            if isinstance(value, str):
+                return value
+    raise ValueError("mergetrain.__version__ must be a string literal")
 
 
 def _argument_tokens(arguments: object) -> list[str]:
@@ -99,6 +119,7 @@ def smoke(
     *,
     timeout: float,
     env: Mapping[str, str] | None = None,
+    expected_version: str | None = None,
 ) -> None:
     process = subprocess.Popen(
         command,
@@ -139,6 +160,18 @@ def smoke(
         initialized = reader.response(1, timeout=timeout)
         if "error" in initialized:
             raise RuntimeError(f"MCP initialize failed: {initialized['error']}")
+        if expected_version is not None:
+            actual_version = str(
+                ((initialized.get("result") or {}).get("serverInfo") or {}).get(
+                    "version"
+                )
+                or ""
+            )
+            if actual_version != expected_version:
+                raise RuntimeError(
+                    "MCP serverInfo.version must match the built checkout; "
+                    f"expected {expected_version!r}, received {actual_version!r}"
+                )
         _send(
             process.stdin,
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -221,6 +254,11 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=ROOT / "server.json")
     parser.add_argument("--attempts", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=60)
+    parser.add_argument(
+        "--require-version",
+        action="store_true",
+        help="require serverInfo.version to match this checkout",
+    )
     parser.add_argument("--command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command or registry_command(args.manifest)
@@ -236,6 +274,7 @@ def main() -> int:
                     command,
                     timeout=args.timeout,
                     env=isolated_uv_environment(Path(td)),
+                    expected_version=source_version() if args.require_version else None,
                 )
             print("MCP Registry launch OK: initialize, five tools, deploy schema")
             return 0

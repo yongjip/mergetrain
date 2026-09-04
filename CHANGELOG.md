@@ -3,11 +3,14 @@
 ## Unreleased
 
 - Incorporate the partial Claude Code plugin runtime pilot from issue #212:
-  describe every MCP tool, make the two-input enqueue contract explicit, remove
+  describe every MCP tool and server version, keep the two-input MCP enqueue
+  contract while safely resolving a branch's unique live Git worktree, remove
   stale global-install guidance, and clarify that agents do not select train
   IDs or supply plan hashes even though structured evidence may retain
-  identifiers. Add checks that prevent these presentation defects from
-  recurring; the login-dependent interactive behavior cells remain open.
+  identifiers. Harden worktree discovery against forged porcelain attributes,
+  stale registrations, and foreign repositories; document clean gate output
+  and the shell security boundary. The native interactive behavior cells remain
+  open.
 
 - Make the Claude Code plugin self-contained for community-directory review:
   launch the exact released MCP extra through `uvx`, bind its manifest version

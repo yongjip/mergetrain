@@ -201,14 +201,20 @@ a declined deploy, and pushed after human acceptance. The exercise did not run
 the four login-dependent interactive Claude Code behavior cells, so it is
 runtime evidence rather than a completed adoption score.
 
-The exercise found four presentation inconsistencies: one empty MCP tool
-description, generic agent text that named the CLI-only optional worktree
-argument beside an MCP workflow, stale global-install guidance in the Claude
-skill, and wording that implied identifiers could never appear in structured
-evidence. This change fixes those defects without adding a command, flag,
-configuration field, MCP tool, or authority path. CI now treats non-empty MCP
-tool descriptions and Claude-specific runtime/input wording as existing
-contract quality requirements.
+The exercise found four presentation inconsistencies: missing MCP description
+and version metadata, generic agent text that named the CLI-only optional
+worktree argument beside an MCP workflow, stale global-install guidance, and
+wording that implied identifiers could never appear in structured evidence. It
+also showed that the two-input MCP surface could not enqueue a linked branch
+from the control checkout.
+
+The admitted correction keeps `task + branch` as the MCP contract and resolves
+the branch's unique live Git worktree internally. It fails closed on missing or
+ambiguous matches, NUL-parses Git's porcelain format, ignores prunable
+registrations, and verifies repository ownership. This consolidates an existing
+workflow without adding a command, flag, configuration field, MCP tool, or
+authority path. CI treats MCP metadata and Claude-specific runtime/input
+wording as existing contract quality requirements.
 
 ## Release freeze after 3.0
 

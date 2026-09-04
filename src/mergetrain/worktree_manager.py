@@ -13,7 +13,7 @@ from .command_runner import Pulse, run_command
 from .config import MergetrainConfig
 from .errors import MergetrainError
 from .gate_runner import GateRunner
-from .git_ops import git_worktree_clean
+from .git_ops import git_common_dir, git_worktree_clean
 from .reuse import gate_policy_sha
 
 
@@ -71,17 +71,7 @@ class WorktreeManager:
 
     @staticmethod
     def git_common_dir(path: Path) -> Path | None:
-        completed = run_command(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=path,
-            check=False,
-        )
-        if completed.returncode != 0:
-            return None
-        common = Path(completed.stdout.strip())
-        if not common.is_absolute():
-            common = path / common
-        return common.resolve()
+        return git_common_dir(path)
 
     def persistent_cache_directories(self, worktree: Path) -> list[tuple[str, Path]]:
         directories: list[tuple[str, Path]] = []

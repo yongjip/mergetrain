@@ -15,11 +15,13 @@ from ..command_runner import run_command
 from ..deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from ..errors import CommandFailed, MergetrainError, QueueError
 from ..git_ops import (
+    git_common_dir,
     git_current_branch,
     git_dirty_paths,
     git_repo_root,
     git_rev_parse,
     git_worktree_clean,
+    git_worktrees_for_branch,
 )
 from ..snapshot import next_action as _doctor_next_action
 from ..store import (
@@ -47,6 +49,8 @@ def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:
 def _validate_enqueue_worktree(
     worktree: Path,
     branch: str,
+    *,
+    repo: Path,
 ) -> None:
     if not worktree.exists():
         raise QueueError(f"worktree does not exist: {worktree}")
@@ -63,16 +67,55 @@ def _validate_enqueue_worktree(
     current = git_current_branch(worktree)
     if current != branch:
         raise QueueError(f"current branch {current!r} does not match --branch {branch!r}")
+    repo_common = git_common_dir(repo)
+    worktree_common = git_common_dir(worktree)
+    if repo_common is None or worktree_common != repo_common:
+        raise QueueError(
+            f"worktree does not belong to the configured repository: {worktree}"
+        )
+
+
+def _resolve_enqueue_worktree(
+    *,
+    repo: Path,
+    branch: str,
+    explicit_worktree: str | None,
+) -> Path:
+    """Resolve one branch-owning worktree without expanding the public input."""
+
+    if not repo.exists():
+        raise QueueError(f"repository does not exist: {repo}")
+    if explicit_worktree:
+        return Path(explicit_worktree).expanduser().resolve()
+    if git_current_branch(repo) == branch:
+        return repo.resolve()
+
+    candidates = git_worktrees_for_branch(repo, branch)
+    if len(candidates) == 1:
+        return candidates[0].expanduser().resolve()
+    if not candidates:
+        raise QueueError(
+            f"branch {branch!r} is not checked out in a live worktree for "
+            f"repository {repo}"
+        )
+    rendered = ", ".join(str(path) for path in candidates)
+    raise QueueError(
+        f"branch {branch!r} is checked out in multiple live worktrees: {rendered}"
+    )
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     _preflight_config(config)
-    # ``--repo`` identifies the owning checkout for every core command.  An
-    # explicit --worktree still supports advanced handoff, but the normal path
-    # must not silently switch back to the process CWD (notably for MCP).
-    worktree = Path(args.worktree or config.repo).expanduser().resolve()
-    _validate_enqueue_worktree(worktree, args.branch)
+    # Keep the public MCP path at task + branch. If the configured checkout is
+    # not on that branch, Git's own worktree registry supplies the unique live
+    # owner. An explicit CLI --worktree remains authoritative.
+    worktree = _resolve_enqueue_worktree(
+        repo=config.repo,
+        branch=args.branch,
+        explicit_worktree=args.worktree,
+    )
+    _validate_enqueue_worktree(worktree, args.branch, repo=config.repo)
     # v3 has one enqueue path: verify a clean owning worktree and derive both
     # identities from Git. User-supplied SHAs and readiness bypasses no longer
     # exist, so the queue row always describes the branch that was inspected.
@@ -124,14 +167,14 @@ def cmd_retry(args: argparse.Namespace) -> int:
                 "fixed branch manually"
             )
         worktree = Path(original.worktree_path).expanduser().resolve()
-        _validate_enqueue_worktree(worktree, original.branch)
+        _validate_enqueue_worktree(worktree, original.branch, repo=config.repo)
         if args.rebase:
             # Fetch/rebase before any queue mutation. A conflict intentionally
             # leaves the worktree in rebase state for the user to resolve, while
             # the original blocked/failed row remains untouched.
             run_command(["git", "fetch", config.git.remote], cwd=worktree)
             run_command(["git", "rebase", config.git.integration_ref], cwd=worktree)
-            _validate_enqueue_worktree(worktree, original.branch)
+            _validate_enqueue_worktree(worktree, original.branch, repo=config.repo)
 
         base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
         head_sha = _capture_sha_or_error(worktree, original.branch, label="head")
@@ -182,7 +225,7 @@ def cmd_supersede(args: argparse.Namespace) -> int:
     replacements: list[SupersedeReplacement] = []
     for task, branch, worktree_value in args.replacement:
         worktree = Path(worktree_value).expanduser().resolve()
-        _validate_enqueue_worktree(worktree, branch)
+        _validate_enqueue_worktree(worktree, branch, repo=config.repo)
         head_sha = _capture_sha_or_error(worktree, branch, label="head")
         replacements.append(
             SupersedeReplacement(

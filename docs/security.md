@@ -22,6 +22,14 @@ MCP can narrow the actions available through that server, but it does not revoke
 capabilities exposed by a separate general shell. Repository instructions are a
 behavioral protocol, not a substitute for credential or branch protection.
 
+In particular, `mergetrain_deploy` mechanically requires client-rendered human
+acceptance on the MCP surface. The internal CLI continuation using an expected
+plan remains non-interactive so the confirmed MCP request can finish. An agent
+with arbitrary shell access under the same operating-system identity is
+therefore governed by the host's shell permissions, credentials, and operating
+instructions, not by the MCP confirmation mechanism. Mergetrain cannot create
+an OS security boundary against another process running as the same user.
+
 Give the runner the minimum remote permission needed for configured payload
 refs and permanent audit refs. Keep provider-specific credential setup outside
 core configuration and examples.

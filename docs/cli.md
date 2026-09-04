@@ -55,7 +55,10 @@ mergetrain enqueue --task TEXT --branch BRANCH [--worktree PATH] [--note TEXT] [
 
 Enqueue always verifies a clean, matching task worktree and captures the exact
 integration and task commits. SHA inputs and readiness bypasses do not exist in
-the v3 interface.
+the v3 interface. When the configured checkout is on another branch, mergetrain
+uses Git's worktree registry to resolve the branch's one live worktree. A
+missing or ambiguous match is refused; the optional CLI `--worktree` remains an
+explicit override.
 
 `--auto` is intentionally hidden. Use it only after explicit bounded approval
 to validate, deploy, and verify the named task unattended. The approval is
