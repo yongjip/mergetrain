@@ -32,7 +32,8 @@ publication.
 Useful local equivalents:
 
 ```sh
-PYTHONPATH=src python -m unittest discover -s tests
+python -m pip install -e ".[dev]"
+python -m pytest -q
 PYTHON=python3.12 bash scripts/e2e.sh
 python scripts/check_release.py --tag v0.1.0
 python -m build
