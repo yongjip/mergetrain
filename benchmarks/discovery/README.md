@@ -31,6 +31,10 @@ The initial client matrix is Codex, Claude Code, and `agy` (Antigravity CLI).
 Legacy Gemini CLI is not a target. Record the exact client, model, extension or
 plugin revision, permission profile, and installation condition for every run.
 
+Diagnostic pilot notes live under [`pilots/`](pilots/). They are evidence about
+the harness and observed failure modes, not benchmark-rate claims unless a full
+20-fixture cell is complete.
+
 ## Corpus
 
 [`fixtures.json`](fixtures.json) contains five prompt families per class and
