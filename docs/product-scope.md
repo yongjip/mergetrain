@@ -340,6 +340,9 @@ select a capability that its plugin catalog does not expose.
   `uvx`; it adds no server and exposes the same five tools.
 - CI validates the marketplace, plugin manifest, canonical copy, exact package
   version, and generated protocol block.
+- The README states the existing runtime boundary directly: no mergetrain
+  account, hosted control plane, OAuth app, or product telemetry; local queue
+  state remains distinct from configured Git remotes and trusted commands.
 
 ### Decision cost and safety impact
 

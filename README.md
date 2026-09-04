@@ -15,6 +15,10 @@ combined tree, and atomically updates your Git refs only after explicit approval
 It is intentionally optimized as an owner-operated local utility, not a hosted
 team platform.
 
+There is no mergetrain account, hosted control plane, OAuth app, or product
+telemetry. Queue and runner state stay on your machine; only your configured Git
+remote and trusted gate or verification commands may contact external services.
+
 ## The problem
 
 Worktrees let several agents edit one repository without sharing a checkout.

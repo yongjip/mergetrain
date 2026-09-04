@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Clarify the local trust boundary in the README: mergetrain has no account,
+  hosted control plane, OAuth app, or product telemetry. Add a launch-ready Show
+  HN first-comment draft and preserve the completed Codex recommendation and
+  negative-control executions as pending owner-reviewed benchmark evidence.
+
 - Separate discovery selection, false-positive recommendation, unnecessary
   activation, explanation quality, and authority-safety metrics in discovery
   benchmark version 2. Preserve validation of immutable version 1 results and
