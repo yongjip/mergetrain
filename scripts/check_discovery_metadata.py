@@ -65,6 +65,7 @@ def validate_canonical(data: dict[str, Any]) -> list[str]:
     required_strings = (
         "headline",
         "short_description",
+        "mcp_description",
         "qualified_description",
         "skill_description",
         "deploy_skill_description",
@@ -73,6 +74,10 @@ def validate_canonical(data: dict[str, Any]) -> list[str]:
         value = data.get(key)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"discovery metadata {key} must be a non-empty string")
+
+    mcp_description = data.get("mcp_description")
+    if isinstance(mcp_description, str) and len(mcp_description) > 100:
+        errors.append("discovery metadata mcp_description must contain at most 100 characters")
 
     for key in ("keywords", "catalog_tags"):
         values = data.get(key)
@@ -157,7 +162,7 @@ def check_discovery_metadata(root: Path = ROOT) -> list[str]:
             "server.json",
             "description",
             server.get("description"),
-            canonical["short_description"],
+            canonical["mcp_description"],
         )
 
         marketplace = _load_json(root / ".claude-plugin/marketplace.json")

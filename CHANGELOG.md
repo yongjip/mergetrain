@@ -2,6 +2,10 @@
 
 ## 3.0.2 - 2026-09-04
 
+- Bound the problem-first MCP Registry description to the registry's
+  100-character schema limit while keeping it in the canonical discovery
+  metadata source.
+
 - Align PyPI, MCP Registry, Claude, README, and LLM-facing discovery metadata
   around the parallel-agent integration problems mergetrain solves. Add a
   canonical metadata source and product-name-free benchmark fixtures without

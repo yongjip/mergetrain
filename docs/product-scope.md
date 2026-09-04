@@ -251,6 +251,8 @@ the active local adapter targets agy (Antigravity CLI).
 
 - `discovery/metadata.yaml` owns the problem-first headline, descriptions,
   trigger boundaries, catalog tags, and desired GitHub About values.
+- Its MCP Registry projection is separately bounded to the registry's 100-character
+  description limit while remaining in the same canonical source.
 - CI validates PyPI, MCP Registry, Claude marketplace/plugin/skill, README, and
   LLM-facing summaries against that source.
 - A product-name-free fixture corpus separates suitable recommendation, safe

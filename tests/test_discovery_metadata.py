@@ -19,6 +19,7 @@ class DiscoveryMetadataTests(unittest.TestCase):
             "short_description": (
                 "Parallel coding worktree committed branches combined push interrupted"
             ),
+            "mcp_description": "Parallel agent worktree integration",
             "qualified_description": "Qualified",
             "skill_description": (
                 "single-agent GitHub Merge Queue GitLab Merge Trains"
@@ -32,6 +33,17 @@ class DiscoveryMetadataTests(unittest.TestCase):
         errors = validate_canonical(invalid)
 
         self.assertTrue(any("keywords must not contain duplicates" in e for e in errors))
+
+    def test_mcp_description_respects_registry_limit(self) -> None:
+        from pathlib import Path
+
+        import yaml
+
+        root = Path(__file__).resolve().parents[1]
+        metadata = yaml.safe_load(
+            (root / "discovery/metadata.yaml").read_text(encoding="utf-8")
+        )
+        self.assertLessEqual(len(metadata["mcp_description"]), 100)
 
     def test_gemini_is_not_a_canonical_client_signal(self) -> None:
         from pathlib import Path

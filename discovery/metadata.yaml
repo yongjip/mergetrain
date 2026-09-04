@@ -7,6 +7,10 @@ short_description: >-
   combined tree in order, give integration pushes one approval-gated owner,
   and recover interrupted Git pushes.
 
+mcp_description: >-
+  Queue parallel-agent worktree branches, test together, serialize and recover
+  Git pushes.
+
 qualified_description: >-
   For local, worktree-first repositories: queue committed branches from
   parallel coding agents, test the combined tree in order, keep integration
