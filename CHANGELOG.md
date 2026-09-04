@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.0.5 - 2026-09-05
 
 - Update the dashboard build's Browserslist dependency to 4.28.9 and refresh
   its compatible browser-data dependencies, resolving the reported cache-growth
