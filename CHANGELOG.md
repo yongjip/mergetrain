@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a benchmark-only runner and deterministic scorer for the frozen
+  product-name-free discovery corpus. Results now preserve prompt and metadata
+  revisions, exclude contaminated or operationally invalid trials, enforce
+  per-client 20-fixture denominators, and retain zero-tolerance push and
+  authority violations without changing product runtime semantics.
+
 - Add a Git-installable Codex marketplace and native plugin that package the
   problem-first skill with the existing five-tool, release-pinned MCP server.
   Keep its descriptions and starter prompts bound to the canonical discovery
