@@ -10,7 +10,9 @@ from ..errors import QueueError
 from .schema import SCHEMA_VERSION, ensure_schema
 
 
-def _open_read_only(path: Path) -> sqlite3.Connection:
+def _open_read_only(
+    path: Path, *, check_same_thread: bool = True
+) -> sqlite3.Connection:
     """Open a strict read-only connection, bootstrapping idle WAL sidecars.
 
     SQLite cannot open a WAL-mode database with ``mode=ro`` when the last
@@ -24,7 +26,9 @@ def _open_read_only(path: Path) -> sqlite3.Connection:
     uri = f"file:{quote(str(path))}"
     observer: sqlite3.Connection | None = None
     try:
-        observer = sqlite3.connect(f"{uri}?mode=ro", uri=True)
+        observer = sqlite3.connect(
+            f"{uri}?mode=ro", uri=True, check_same_thread=check_same_thread
+        )
         observer.execute("PRAGMA busy_timeout = 5000")
         # sqlite3_open() is lazy: an idle WAL failure can surface only when
         # the first database page is read, not while the handle is created.
@@ -45,7 +49,9 @@ def _open_read_only(path: Path) -> sqlite3.Connection:
         # Force SQLite to initialize the WAL index before the strict observer
         # opens.  Keep bootstrap alive until that observer owns the sidecars.
         bootstrap.execute("PRAGMA user_version").fetchone()
-        observer = sqlite3.connect(f"{uri}?mode=ro", uri=True)
+        observer = sqlite3.connect(
+            f"{uri}?mode=ro", uri=True, check_same_thread=check_same_thread
+        )
         observer.execute("PRAGMA busy_timeout = 5000")
         observer.execute("PRAGMA user_version").fetchone()
         return observer
@@ -104,7 +110,9 @@ def _self_ignore(state_dir: Path, *, db_name: str, dedicated: bool) -> None:
         pass  # best-effort; never fail a connect over an ignore file
 
 
-def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
+def connect(
+    db_path: str | Path, *, read_only: bool = False, check_same_thread: bool = True
+) -> sqlite3.Connection:
     path = Path(db_path).expanduser()
     if read_only:
         # Observer path (the hub): never create directories, never migrate
@@ -123,7 +131,7 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
         # truncate the URI filename AND silently drop mode=ro (falling back
         # to a writable connection), and a literal '%XX' would be decoded
         # into a different path.
-        conn = _open_read_only(path)
+        conn = _open_read_only(path, check_same_thread=check_same_thread)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -155,7 +163,7 @@ def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connecti
         dedicated = not state_dir.exists()
         state_dir.mkdir(parents=True, exist_ok=True)
         _self_ignore(state_dir, db_name=path.name, dedicated=dedicated)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     # WAL is not available for in-memory DBs, but SQLite quietly returns memory.

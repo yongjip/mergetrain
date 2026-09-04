@@ -18,8 +18,9 @@ from urllib.parse import unquote, urlsplit
 from .config import MergetrainConfig
 from .contract import CONTRACT_VERSION
 from .errors import redact_secrets
-from .hub import HubSnapshotCache, _db_fingerprint, build_hub_snapshot_safe
+from .hub import HubSnapshotCache, build_hub_snapshot_safe
 from .snapshot import build_dashboard_snapshot, refresh_dashboard_snapshot
+from .snapshot_cache import QueueChangeMonitor
 
 STATIC_ROOT = Path(__file__).with_name("dashboard_dist")
 SECURITY_HEADERS = {
@@ -47,10 +48,14 @@ class DashboardSnapshotCache:
         self._lock = threading.Lock()
         self._db_fp: tuple[object, ...] | None = None
         self._snapshot: dict | None = None
+        self._monitor = QueueChangeMonitor()
+        self._closed = False
 
     def __call__(self) -> dict:
-        db_fp = _db_fingerprint(self._config.state.db)
         with self._lock:
+            if self._closed:
+                raise RuntimeError("snapshot cache is closed")
+            db_fp = self._monitor.token(self._config.state.db)
             if self._snapshot is not None and self._db_fp == db_fp:
                 return refresh_dashboard_snapshot(
                     self._snapshot,
@@ -68,12 +73,19 @@ class DashboardSnapshotCache:
                 config_version=self._config.config_version,
             )
 
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._monitor.close()
+            self._snapshot = None
+
 
 class DashboardHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        self.close_snapshot: Callable[[], None] | None = None
         self.stopping = threading.Event()
         self._sse_slots = threading.BoundedSemaphore(MAX_SSE_CLIENTS)
         self._sse_lock = threading.Lock()
@@ -103,7 +115,11 @@ class DashboardHTTPServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
-        super().server_close()
+        try:
+            super().server_close()
+        finally:
+            if self.close_snapshot is not None:
+                self.close_snapshot()
 
     def handle_error(self, request: object, client_address: object) -> None:
         error = sys.exc_info()[1]
@@ -366,12 +382,20 @@ def _create_from_snapshot_fn(
     host: str,
     port: int,
     preview: bool = False,
+    close_snapshot: Callable[[], None] | None = None,
 ) -> DashboardHTTPServer:
     if not STATIC_ROOT.joinpath("index.html").is_file():
         raise FileNotFoundError("dashboard assets are missing from this installation")
-    return DashboardHTTPServer(
-        (host, port), make_handler(snapshot_fn, preview=preview, bound_host=host)
-    )
+    try:
+        server = DashboardHTTPServer(
+            (host, port), make_handler(snapshot_fn, preview=preview, bound_host=host)
+        )
+    except Exception:
+        if close_snapshot is not None:
+            close_snapshot()
+        raise
+    server.close_snapshot = close_snapshot
+    return server
 
 
 def create_server(
@@ -387,6 +411,7 @@ def create_server(
         host=host,
         port=port,
         preview=preview,
+        close_snapshot=cache.close,
     )
 
 
@@ -399,12 +424,13 @@ def create_hub_server(
     # The registry is re-read on every snapshot so `hub add`/`hub remove`
     # show up live without restarting the server; a broken roster degrades
     # to a visible registry_error payload instead of killing the stream.
-    # One cache per server: unchanged repos cost stat calls, not DB opens.
+    # One observer per repository, shared by every connected browser.
     cache = HubSnapshotCache()
     return _create_from_snapshot_fn(
         lambda: build_hub_snapshot_safe(registry, cache=cache),
         host=host,
         port=port,
+        close_snapshot=cache.close,
     )
 
 

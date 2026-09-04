@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import ExitStack, closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -45,7 +46,7 @@ class DashboardTests(unittest.TestCase):
                 self.assertIn(f"{value}:", source)
 
     def test_single_repo_cache_rebuilds_only_when_queue_changes(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             config = self.make_config(root)
             conn = connect(config.state.db)
@@ -53,7 +54,7 @@ class DashboardTests(unittest.TestCase):
                 enqueue_job(conn, task="first", branch="codex/first")
             finally:
                 conn.close()
-            cache = DashboardSnapshotCache(config)
+            cache = resources.enter_context(closing(DashboardSnapshotCache(config)))
 
             with patch(
                 "mergetrain.dashboard.build_dashboard_snapshot",

@@ -584,3 +584,34 @@ Design evidence remains available from the signed v3.0.4 tag, while current
 source distributions exclude the design-only directory. Revert these renderers
 only if the underlying structured fields are removed under a future contract
 change.
+
+
+## Observer cache correctness record — 2026-09-05
+
+### Evidence and existing fit
+
+A real 3.0.4 SQLite regression reproduced queued=1/failed=0 from the warm
+dashboard and Hub after a committed update had made queued=0/failed=1. Following
+a PASSIVE checkpoint, WAL reuse changed neither its file size nor the main
+file's mtime, so the prior file-only cache key hid a current failure.
+
+### Change and decision cost
+
+The existing observer cache now compares SQLite data_version on one shared,
+read-only connection per cached repository. It reads no job history on a warm
+hit and opens no connection per browser. File replacement and configuration
+changes rebind that connection, Hub removal and server shutdown close it, and
+missing databases remain absent. No command, flag, config field, schema,
+state group, dashboard control, notification path, or MCP tool is added; the
+six-command/five-tool baseline is unchanged.
+
+### Safety and success measure
+
+Tokens precede snapshot reads, so a write during assembly cannot certify old
+content with new evidence. No long-running read transaction blocks checkpoints.
+Regression checks cover reused WAL, concurrent requests and commits, checkpoint
+truncation, absent/replaced databases, configuration changes, removal, and
+shutdown. A 64-request/16-thread unchanged-queue test must use one observer and
+one snapshot build. Existing read-only, schema, recovery, and architecture
+checks remain required. Revisit this internal lifetime only if a measured
+connection cost justifies another equally correct change detector.
