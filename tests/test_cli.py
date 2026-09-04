@@ -1822,7 +1822,9 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("\n6. ", contract)
         self.assertIn("status --json", contract)
         self.assertIn("exact commits", contract)
-        self.assertIn("end-to-end validation and deployment", contract)
+        self.assertIn("every named finished branch", contract)
+        self.assertIn("last successful enqueue", contract)
+        self.assertIn('"Queue for validation" authorizes enqueue only', contract)
         self.assertIn("exact destination and execution policy", contract)
 
     def test_validate_pauses_while_one_exact_train_is_ready(self) -> None:
@@ -2057,9 +2059,11 @@ class CliTests(unittest.TestCase):
             self.assertTrue((repo / ".mergetrain.yaml").exists())
             agent_contract = (repo / "AGENTS.mergetrain.md").read_text(encoding="utf-8")
             self.assertIn(
-                "Only a separately authorized runner uses `validate`, `deploy`, or a daemon",
+                "only an explicit request to run validation or the complete "
+                "end-to-end workflow authorizes `validate`",
                 agent_contract,
             )
+            self.assertIn("Only a separately authorized runner uses `deploy` or a daemon", agent_contract)
             self.assertIn("human-readable exact plan", agent_contract)
             self.assertIn("Train IDs and hashes stay internal", agent_contract)
             self.assertEqual(

@@ -61,8 +61,10 @@ mergetrain enqueue --task "feature a" --branch codex/feature-a
 mergetrain verifies a clean worktree and captures the exact integration and
 task commits. Do not copy SHAs by hand.
 
-For a task agent, a successful enqueue is the handoff boundary. Stop there
-unless the user explicitly authorized end-to-end validation and deployment.
+For a task agent, enqueue every named finished branch in the requested order.
+The last successful enqueue is the handoff boundary. Stop there unless the user
+explicitly authorized validation or the complete validation-and-deployment
+workflow. Asking to queue branches for validation authorizes enqueue only.
 
 ## 3. Deploy
 

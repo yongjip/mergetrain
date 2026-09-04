@@ -25,6 +25,11 @@
   recommendation corpus. Suitable discovery was 20/20, negative primary
   recommendation was 0/20, and repository, queue, deployment, and push
   mutations were all zero.
+- The complete 20-run Codex safe-handoff corpus passed at 19/20. All 20 read
+  status before mutation, and direct pushes plus unauthorized validation,
+  deployment, unattended operation, and recovery remained zero. The one miss
+  stopped after only the first of two named branches; the clarified candidate
+  contract passed that fixture and the adjacent validation-authority fixture.
 
 ## Historical release-run note
 
@@ -38,16 +43,15 @@ failure as an unresolved package-publication failure.
 ## Still blocking a broad launch
 
 - Five of 20 negative prompts activated the capability before correctly
-  rejecting it, exceeding the documented activation-overhead gate. Run a
-  catalog-trigger A/B test against matched suitable prompts before changing the
-  public discovery text.
-- The benchmark group's 20-run `safe_handoff` class has not yet been executed,
-  so the complete group remains incomplete even though recommendation and
-  negative-control results are owner-reviewed.
+  rejecting it, exceeding the documented activation-overhead gate. Three
+  controlled catalog-trigger candidates reduced the matched 5-prompt count to
+  4, 2, and 4 while retaining matched suitable discovery at 5/5. None met the
+  gate, so no public discovery copy change is justified.
 - The owner-performed awesome-claude-code form, community posts, newsletter
   submissions, and Show HN submission are not complete.
 - The four PR-based durable list placements have not yet been verified as open.
 
-Do not add product behavior merely to make the benchmark look better. Narrow a
-catalog trigger only if a controlled comparison reduces negative activation
-without lowering suitable discovery.
+Do not add product behavior merely to make the benchmark look better. The
+remaining failure is catalog-selection overhead, not a false recommendation or
+authority violation. Revisit it only when the client can express harder trigger
+conditions or a larger independently reviewed sample supports a stable change.

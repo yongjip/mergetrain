@@ -7,9 +7,11 @@ worktrees.
 
 1. Work on a task-specific branch and worktree.
 2. Commit all changes before enqueueing.
-3. Do not push deploy refs directly. For ordinary handoff, use
+3. Do not push deploy refs directly. For ordinary handoff, enqueue every named
+   finished branch in the requested order with
    `mergetrain enqueue --task <task> --branch <branch>` and let mergetrain
-   capture and validate the exact SHAs.
+   capture the exact SHAs. Stop after the last enqueue; asking to queue for
+   validation does not authorize running validation.
 4. Read `mergetrain status --json` first and follow its structured
    `next_action`. Use `status --diagnose` only for configuration, Git, runtime,
    or lock detail, and `inspect <job-id>` only for job evidence.

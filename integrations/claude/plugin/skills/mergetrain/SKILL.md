@@ -19,12 +19,13 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 1. Work on a task-specific branch and worktree.
 2. Commit a clean HEAD before handing work off.
 3. Read mergetrain status --json and follow its next action before changing queue state.
-4. Enqueue with only the task, branch, and optional worktree; mergetrain captures the exact commits. Stop after a successful enqueue unless the user explicitly authorized end-to-end validation and deployment.
+4. Enqueue every named finished branch in the requested order using only its task, branch, and optional worktree; mergetrain captures the exact commits. Stop after the last successful enqueue unless the user explicitly authorized validation or the complete validation-and-deployment workflow.
 5. Never push configured integration refs directly. One authorized runner owns validation and deployment; recovery and destructive actions require their stated approval.
 
 ### Safety boundary
 
-- A task agent stops after ordinary `enqueue`. Only a separately authorized runner uses `validate`, `deploy`, or a daemon.
+- A task agent enqueues every named finished branch, then stops. "Queue for validation" authorizes enqueue only; only an explicit request to run validation or the complete end-to-end workflow authorizes `validate`.
+- Only a separately authorized runner uses `deploy` or a daemon.
 - Deployment requires either confirmation of the human-readable exact plan or prior bounded unattended approval. Train IDs and hashes stay internal.
 - Unattended approval is bound to the exact destination and execution policy. Any change blocks before push.
 - Recovery and destructive cleanup require their stated approval. Follow `status.next_action`; never rewrite permanent deploy audit refs.
@@ -46,8 +47,9 @@ action.
    authorization.
 3. Read `health`, `result`, and `error.code`; `ok` only says the command
    produced a contract response.
-4. Enqueue only a committed, clean task branch. Validation may run without
-   deploy approval.
+4. Enqueue every named committed, clean task branch in order. A request to queue
+   for validation does not authorize validation; explicit validation authority
+   is still separate from deploy approval.
 5. Observe a running job with `mergetrain_inspect`; request bounded events or
    logs through its `detail` input only when needed.
 6. Never infer approval for deploy, unattended `--auto`, validated-gate reuse,

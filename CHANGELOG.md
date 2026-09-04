@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add a mechanically graded Codex safe-handoff harness and complete the fixed
+  20-run cell at 19/20 with zero direct pushes or unauthorized actions. Clarify
+  the generated protocol so every named finished branch is enqueued in order,
+  stopping after the last enqueue, and so "queue for validation" cannot be
+  interpreted as permission to execute validation.
+
+- Record a controlled Codex catalog-trigger diagnostic. Three narrower
+  discovery-copy candidates kept matched suitable discovery at 5/5 but reduced
+  the five known negative activations only to 4, 2, and 4, so the public
+  discovery metadata remains unchanged.
+
 - Clarify the local trust boundary in the README: mergetrain has no account,
   hosted control plane, OAuth app, or product telemetry. Add a launch-ready Show
   HN first-comment draft and preserve the completed Codex recommendation and

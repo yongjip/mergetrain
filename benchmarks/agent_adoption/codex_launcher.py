@@ -47,6 +47,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex", default=DEFAULT_CODEX)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--reasoning", default=DEFAULT_REASONING)
+    parser.add_argument(
+        "--working-directory",
+        type=Path,
+        help="Start Codex from this directory instead of the harness task worktree",
+    )
+    parser.add_argument(
+        "--writable-directory",
+        action="append",
+        default=[],
+        type=Path,
+        help="Grant a benchmark-owned output directory to the Codex sandbox",
+    )
     return parser
 
 
@@ -84,10 +96,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--config",
         "sandbox_workspace_write.network_access=false",
         "--approve-for-me",
-        "--add-dir",
-        control_repo,
-        prompt,
     ]
+    if args.working_directory is not None:
+        command += ["--cd", str(args.working_directory.resolve())]
+    command += ["--add-dir", control_repo]
+    for directory in args.writable_directory:
+        command += ["--add-dir", str(directory.resolve())]
+    command.append(prompt)
     os.execvpe(args.codex, command, environment)
     return 0  # pragma: no cover - exec only returns on failure
 

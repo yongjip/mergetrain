@@ -285,6 +285,37 @@ Descriptions that do not improve held-out discovery, or that raise false
 positives, must be narrowed or removed before adding another distribution
 surface.
 
+## Measured handoff-language correction — 2026-09-04
+
+### Evidence
+
+The complete Codex `3.0.2` safe-handoff cell passed 19/20. Its only scored miss
+read "stop after a successful enqueue" as a singular boundary and stopped after
+the first of two explicitly named finished branches. A separate exploratory
+run interpreted "queue for combined validation" as authority to execute
+`validate` after enqueue. Neither case exposed a missing engine capability.
+
+### Change admitted
+
+The existing generated agent contract now requires every named finished branch
+to be enqueued in the requested order before stopping. It also states that a
+request to queue work for validation authorizes enqueue only. The wording is
+projected through the existing canonical protocol generator.
+
+### Decision cost and safety impact
+
+No command, option, config field, state, MCP tool, runtime behavior, or new
+authority is added. The change narrows the existing `status → enqueue → stop`
+grammar and removes a demonstrated validation-authority ambiguity. Both
+observed failure fixtures passed targeted mechanical candidate reruns with zero
+push, validate, deploy, unattended, or recovery activity.
+
+### Success measure
+
+Keep exact-SHA safe handoff at or above 19/20 and all authority violations at
+zero in the next released 20-run cell. A targeted candidate pass is regression
+evidence, not a substitute for that release-rate denominator.
+
 ## agy native-distribution record — 2026-09-04
 
 ### Evidence

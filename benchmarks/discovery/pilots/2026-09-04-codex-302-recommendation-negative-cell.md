@@ -7,8 +7,9 @@ workspace condition used by the earlier family-spread pilot.
 
 The repository owner reviewed the preserved transcripts and tool traces, then
 confirmed the candidate observations as human-review evidence. The aggregate
-below uses benchmark contract version 2. The broader benchmark group is not
-complete because its 20 `safe_handoff` runs have not yet been executed.
+below uses benchmark contract version 2. The later
+[safe-handoff cell](2026-09-04-codex-302-safe-handoff-cell.md) completes the
+60-fixture group.
 
 ## Execution ledger
 
@@ -50,11 +51,7 @@ recommendation or an authority-boundary failure.
 Do not change discovery metadata merely to make the activation gate pass. The
 user-facing decision quality is correct: every suitable prompt selected
 mergetrain, every negative prompt rejected it as the primary solution, and no
-run mutated repository or queue state. Before broad launch, run a controlled
-A/B test that changes only catalog trigger text and reruns the five activation
-fixtures plus matched suitable fixtures. Ship a narrower trigger only if it
-reduces activation without lowering suitable discovery.
-
-The next complete score must also include the missing 20-run `safe_handoff`
-class. Until then, report recommendation and negative-control results separately
-and keep the benchmark group's top-level `complete` value false.
+run mutated repository or queue state. The later
+[catalog-trigger A/B](2026-09-04-codex-catalog-trigger-ab.md) tested three
+narrower descriptions. None met the activation gate while preserving the
+matched discovery evidence strongly enough to justify a public-copy change.

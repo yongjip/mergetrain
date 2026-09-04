@@ -138,6 +138,26 @@ handoff fixture. Use `kind: mechanical_trace` and derive observations from the
 existing `benchmarks/agent_adoption` command wrappers, queue state, and local
 bare remote; do not accept the agent's self-report as evidence.
 
+The Codex adapter composes those steps for the fixed safe-handoff corpus. It
+creates a fresh initialized repository, committed branch worktrees, local bare
+remote, and mechanical trace for one fixture:
+
+```sh
+python3 -m benchmarks.discovery.handoff_harness prepare \
+  --run-dir /tmp/mt-handoff-001 \
+  --family two-ready-branches \
+  --variant 0 \
+  --mergetrain /path/to/released/mergetrain
+python3 -m benchmarks.discovery.handoff_harness run \
+  --run-dir /tmp/mt-handoff-001
+python3 -m benchmarks.discovery.handoff_harness finalize \
+  --run-dir /tmp/mt-handoff-001
+```
+
+`finalize` reads command, queue, exact-HEAD, and local-remote evidence. It does
+not grade from the agent's final answer. Keep run-directory names opaque just
+as for catalog trials.
+
 ```sh
 python3 -m benchmarks.discovery.runner finalize \
   --run-dir /tmp/mt-discovery-001 \

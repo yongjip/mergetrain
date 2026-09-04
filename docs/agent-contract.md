@@ -6,10 +6,11 @@ rules:
 1. Work on the assigned task branch and worktree.
 2. Commit a clean HEAD before handoff.
 3. Read `mergetrain status --json` and follow its stated next action.
-4. Enqueue with task, branch, and optional worktree only; mergetrain captures
-   exact commits.
-5. Stop after enqueue unless the user explicitly authorized end-to-end
-   validation and deployment. Never push integration refs directly.
+4. Enqueue every named finished branch in the requested order with task,
+   branch, and optional worktree only; mergetrain captures exact commits.
+5. Stop after the last enqueue unless the user explicitly authorized validation
+   or the complete validation-and-deployment workflow. Asking to queue for
+   validation authorizes enqueue only. Never push integration refs directly.
 
 Create or refresh the generated sidecars with:
 
