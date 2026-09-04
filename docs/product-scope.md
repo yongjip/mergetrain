@@ -443,3 +443,43 @@ schema migration tests, and effective-gate warning tests must remain green.
 Remove the internal deployment identity only if verification recovery is
 removed; do not restore inferred supersession without evidence and exact
 destination plus policy identity.
+
+## External-distribution record — 2026-09-04
+
+### Evidence
+
+The fixed-corpus discovery cell now records 20/20 appropriate Codex discovery,
+and the safe-handoff cell records 19/20 exact-SHA handoffs without a direct push
+or unauthorized action. A separate small external repository pilot also found
+the generated sidecar. These results support the repository-local discovery
+path, but they are owner-operated evidence rather than external-user adoption.
+Public discovery still starts mostly from the GitHub repository, whose search
+snippet and README do not provide a controllable problem-first entry page.
+
+### Changes admitted
+
+- One static GitHub Pages site states the problem, narrow workflow, demo, and
+  evidence boundary without adding an account, backend, or product telemetry.
+- One least-privilege Pages workflow publishes only the static `site/` tree.
+- One maintained submission packet supplies consistent copy for the Claude
+  community marketplace, OpenAI Developer Showcase, Show HN, community posts,
+  and curated lists.
+- The existing Claude marketplace gains an install section alongside the
+  existing Codex and agy instructions; it adds no provider-specific runtime.
+
+### Decision cost and safety impact
+
+This is distribution surface, not product grammar. It adds no command, flag,
+config field, state, daemon behavior, dashboard control, MCP tool, recovery
+action, or notification path. The cost is one public URL, one workflow, and one
+copy packet. Evidence is labelled owner-operated, and the site contains no
+client script, analytics provider, credential, or mutable release number.
+
+### Success measure and removal trigger
+
+For four weekly snapshots after launch, record Page availability, GitHub traffic
+and referring sites, public package downloads, catalog status, and voluntary
+reports of independently operated enqueue, validation, and deployment. Do not
+add telemetry or a hosted control plane to improve attribution. Defer a custom
+domain, analytics, additional directory-specific pages, and onboarding features
+until repeated external-user evidence shows a concrete discovery failure.

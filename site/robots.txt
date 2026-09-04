@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yongjip.github.io/mergetrain/sitemap.xml

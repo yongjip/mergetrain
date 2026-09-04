@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Merge queue for parallel coding agents — mergetrain</title>
+    <meta name="description" content="Queue committed branches from parallel coding-agent worktrees, test the combined tree, and ship through one approval-gated atomic push.">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="https://yongjip.github.io/mergetrain/">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Merge queue for parallel coding agents">
+    <meta property="og:description" content="Finish in parallel. Integrate safely. Test agent branches together before one approved push.">
+    <meta property="og:url" content="https://yongjip.github.io/mergetrain/">
+    <meta property="og:image" content="https://raw.githubusercontent.com/yongjip/mergetrain/main/docs/images/mergetrain-explainer-still.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "mergetrain",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "description": "A local merge queue for branches produced by parallel coding agents.",
+        "url": "https://yongjip.github.io/mergetrain/",
+        "downloadUrl": "https://pypi.org/project/mergetrain/",
+        "softwareHelp": "https://github.com/yongjip/mergetrain/tree/main/docs",
+        "license": "https://opensource.org/licenses/MIT",
+        "codeRepository": "https://github.com/yongjip/mergetrain"
+      }
+    </script>
+  </head>
+  <body>
+    <header class="nav shell">
+      <a class="brand" href="#top" aria-label="mergetrain home">
+        <span class="brand-mark" aria-hidden="true">mt</span>
+        <span>mergetrain</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#how">How it works</a>
+        <a href="#proof">Evidence</a>
+        <a href="https://github.com/yongjip/mergetrain">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero shell">
+        <div class="hero-copy">
+          <p class="eyebrow">Local-first integration for agent worktrees</p>
+          <h1>Finish in parallel.<br><span>Integrate safely.</span></h1>
+          <p class="lede">Coding agents can complete branches at the same time. They still need one place to choose order, test the combined result, and own the final push.</p>
+          <div class="actions">
+            <a class="button primary" href="#demo">Run the 60-second demo</a>
+            <a class="button secondary" href="https://github.com/yongjip/mergetrain">View on GitHub</a>
+          </div>
+          <p class="fine-print">Open source · Runs locally · No account or hosted control plane</p>
+        </div>
+
+        <div class="terminal-card" aria-label="mergetrain workflow example">
+          <div class="terminal-bar"><span></span><span></span><span></span><b>agent-worktrees</b></div>
+          <div class="lanes">
+            <div class="lane"><span class="agent">agent/health</span><i></i><strong>committed</strong></div>
+            <div class="lane"><span class="agent">agent/cache</span><i></i><strong>committed</strong></div>
+            <div class="lane"><span class="agent">agent/docs</span><i></i><strong>committed</strong></div>
+          </div>
+          <div class="train">
+            <div class="train-label">combined train</div>
+            <div class="cars"><span>1</span><span>2</span><span>3</span><b>✓ gates</b></div>
+          </div>
+          <div class="push-line"><span>explicit approval</span><i></i><strong>atomic push → main</strong></div>
+        </div>
+      </section>
+
+      <section class="problem band">
+        <div class="shell split">
+          <div>
+            <p class="eyebrow">The last-mile problem</p>
+            <h2>Worktrees separate edits.<br>They do not integrate outcomes.</h2>
+          </div>
+          <p>Without an integration boundary, you become the queue: rebasing finished branches, choosing order, rerunning tests after every merge, and deciding which session may push. mergetrain turns that coordination into one durable local protocol.</p>
+        </div>
+      </section>
+
+      <section id="how" class="section shell">
+        <p class="eyebrow">One narrow workflow</p>
+        <h2>Commit. Enqueue. Let one runner integrate.</h2>
+        <div class="steps">
+          <article><span>01</span><h3>Agents hand off exact commits</h3><p>Each finished worktree commits and enqueues. Branch movement cannot silently change the reviewed work.</p></article>
+          <article><span>02</span><h3>The train is tested together</h3><p>One isolated runner assembles branches in FIFO order and runs gates against the combined tree.</p></article>
+          <article><span>03</span><h3>One approval, one push</h3><p>The exact plan is confirmed, pushed atomically, and checked against durable recovery evidence.</p></article>
+        </div>
+        <div class="flow" aria-label="Workflow: agent branches, queue, combined gates, approval, atomic push">
+          <span>agent branches</span><b>→</b><span>FIFO queue</span><b>→</b><span>combined gates</span><b>→</b><span>approval</span><b>→</b><span>atomic push</span>
+        </div>
+      </section>
+
+      <section id="demo" class="section demo-band">
+        <div class="shell demo-grid">
+          <div>
+            <p class="eyebrow">See the real workflow</p>
+            <h2>A disposable demo in one command.</h2>
+            <p>It creates a temporary repository and runs real branches through ordered merge, combined-only failure, conflict attribution, and deployment.</p>
+          </div>
+          <div class="command">
+            <div><span>$</span> uvx mergetrain demo</div>
+            <span class="copy-label">one command</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="proof" class="section shell">
+        <p class="eyebrow">Evidence before expansion</p>
+        <h2>Safety behavior is measured, not assumed.</h2>
+        <div class="proof-grid">
+          <article><strong>20/20</strong><span>appropriate discovery</span><p>Owner-run Codex discovery cell on a fixed, product-name-free corpus.</p></article>
+          <article><strong>19/20</strong><span>safe handoff</span><p>Exact-SHA enqueue and stop behavior, with zero direct pushes or unauthorized actions.</p></article>
+          <article><strong>20</strong><span>landed soak trains</span><p>Including semantic conflicts and killed-push recovery checked against remote truth.</p></article>
+        </div>
+        <p class="evidence-note">These are transparent owner-operated evaluations, not claims of external user adoption. <a href="https://github.com/yongjip/mergetrain/tree/main/benchmarks">Inspect the benchmark evidence.</a></p>
+      </section>
+
+      <section class="section integrations band">
+        <div class="shell">
+          <p class="eyebrow">Works with the agents you already use</p>
+          <h2>One CLI and machine contract.</h2>
+          <div class="integration-grid">
+            <article><h3>Claude Code</h3><p>Install the plugin for problem-first discovery, the operating skill, and the approval-gated MCP adapter.</p><a href="https://github.com/yongjip/mergetrain/blob/main/docs/install.md#claude-code-plugin">Claude install guide →</a></article>
+            <article><h3>Codex</h3><p>Add the Git marketplace and install the native skill plus the same release-pinned MCP server.</p><a href="https://github.com/yongjip/mergetrain/blob/main/docs/install.md#codex-plugin">Codex install guide →</a></article>
+            <article><h3>Any coding agent</h3><p>Generated AGENTS.md and CLAUDE.md instructions keep the task-agent boundary simple: commit, enqueue, stop.</p><a href="https://github.com/yongjip/mergetrain/blob/main/docs/agent-contract.md">Read the contract →</a></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta shell">
+        <p class="eyebrow">Remove yourself from the merge queue</p>
+        <h2>Keep agents parallel through the last mile.</h2>
+        <div class="actions">
+          <a class="button primary" href="https://pypi.org/project/mergetrain/">Install mergetrain</a>
+          <a class="button secondary" href="https://github.com/yongjip/mergetrain#install-and-first-run">Read the quickstart</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="shell">
+      <span>mergetrain · MIT</span>
+      <span>Local queue state. No product telemetry.</span>
+      <a href="https://github.com/yongjip/mergetrain/blob/main/docs/security.md">Security boundary</a>
+    </footer>
+  </body>
+</html>

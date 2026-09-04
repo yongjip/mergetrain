@@ -69,6 +69,22 @@ stdio MCP server. The ordinary agent path remains `status → enqueue → stop`.
 The plugin does not grant deployment, unattended-operation, or recovery
 authority.
 
+## Claude Code plugin
+
+With Claude Code and `uv` installed, add the repository marketplace and install
+the plugin:
+
+```sh
+claude plugin marketplace add yongjip/mergetrain
+claude plugin install mergetrain@mergetrain
+```
+
+The same commands are available interactively as `/plugin marketplace add` and
+`/plugin install`. Installing the plugin loads its problem-first skill and the
+same five-tool, release-pinned stdio MCP server. The ordinary agent path remains
+`status → enqueue → stop`; the plugin does not grant deployment,
+unattended-operation, or recovery authority.
+
 ## agy native plugin
 
 With [Antigravity CLI](https://www.agy.dev/docs/cli/plugins/) and `uv` already
