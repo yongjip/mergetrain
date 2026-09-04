@@ -25,6 +25,8 @@ for required in \
   .github/workflows/demo-gif.yml \
   .github/workflows/mcp-registry.yml \
   .github/release-allowed-signers \
+  site/index.html \
+  site/styles.css \
   SECURITY.md \
   .mergetrain.yaml \
   llms.txt \

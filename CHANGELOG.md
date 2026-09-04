@@ -5,7 +5,8 @@
 - Add a problem-first, telemetry-free GitHub Pages landing page and a single
   evidence-backed submission packet for the Claude community marketplace,
   OpenAI Developer Showcase, Show HN, Reddit, and curated lists. Keep external
-  distribution copy separate from the stable product grammar.
+  distribution copy separate from the stable product grammar. Package the
+  static site in the sdist so its included landing-page tests remain runnable.
 
 ## 3.0.3 - 2026-09-04
 

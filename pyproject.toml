@@ -141,6 +141,7 @@ include = [
   "/dashboard",
   "/examples",
   "/scripts",
+  "/site",
   "/integrations",
   "/.github/workflows",
   "/.github/release-allowed-signers",
