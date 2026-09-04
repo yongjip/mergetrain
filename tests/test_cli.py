@@ -2065,7 +2065,10 @@ class CliTests(unittest.TestCase):
             )
             self.assertIn("Only a separately authorized runner uses `deploy` or a daemon", agent_contract)
             self.assertIn("human-readable exact plan", agent_contract)
-            self.assertIn("Train IDs and hashes stay internal", agent_contract)
+            self.assertIn(
+                "Agents never select train IDs or supply plan hashes", agent_contract
+            )
+            self.assertIn("structured evidence may include identifiers", agent_contract)
             self.assertEqual(
                 (repo / ".mergetrain.yaml").read_text(encoding="utf-8"),
                 "version: 2\n\nproject:\n  name: demo\n\ngates: []\n",

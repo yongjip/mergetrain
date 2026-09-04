@@ -145,7 +145,8 @@ ambiguity and duplicated safety explanations without adding correctness.
 - `validate` pauses while an exact Ready train exists, so normal v3 operation
   has one approval slot instead of a train-selection workflow.
 - `deploy` validates when needed, renders that exact Ready plan, confirms
-  interactively, and keeps train IDs and hashes internal.
+  interactively, and never asks an agent or operator to select a train ID or
+  copy a plan hash. Structured evidence may retain identifiers for inspection.
 - `deploy --json` is a non-pushing machine plan; MCP performs the supported
   attributable non-interactive confirmation flow.
 - Enqueue SHA inputs, readiness bypasses, duplicate override, routine deploy
@@ -190,6 +191,24 @@ not accidental complexity.
 - deployment/recovery safety regression suites remain green;
 - external pilots report discovery or workflow misses before any new surface is
   considered.
+
+## Claude plugin pilot follow-up — 2026-09-04
+
+An owner-provided runtime exercise for issue #212 loaded the plugin without a
+global `mergetrain` installation, listed all five MCP tools, enqueued two
+branches in order with exact commits, ran real gates, produced zero pushes after
+a declined deploy, and pushed after human acceptance. The exercise did not run
+the four login-dependent interactive Claude Code behavior cells, so it is
+runtime evidence rather than a completed adoption score.
+
+The exercise found four presentation inconsistencies: one empty MCP tool
+description, generic agent text that named the CLI-only optional worktree
+argument beside an MCP workflow, stale global-install guidance in the Claude
+skill, and wording that implied identifiers could never appear in structured
+evidence. This change fixes those defects without adding a command, flag,
+configuration field, MCP tool, or authority path. CI now treats non-empty MCP
+tool descriptions and Claude-specific runtime/input wording as existing
+contract quality requirements.
 
 ## Release freeze after 3.0
 

@@ -142,6 +142,22 @@ def check_product_grammar() -> list[str]:
     for required in ("mergetrain_status", "mergetrain_deploy"):
         if required not in deploy_skill:
             errors.append(f"the Claude deploy skill is missing {required}")
+
+    claude_skill = (
+        ROOT / "integrations/claude/plugin/skills/mergetrain/SKILL.md"
+    ).read_text(encoding="utf-8")
+    for forbidden in ("uv tool install 'mergetrain[mcp]'", "optional worktree"):
+        if forbidden in claude_skill:
+            errors.append(
+                "the Claude mergetrain skill contains stale MCP guidance: "
+                f"{forbidden}"
+            )
+    for required in (
+        "`mergetrain_enqueue` accepts only `task` and `branch`",
+        "release-pinned MCP package through `uvx`",
+    ):
+        if required not in claude_skill:
+            errors.append(f"the Claude mergetrain skill is missing {required}")
     return errors
 
 

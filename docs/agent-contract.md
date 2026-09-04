@@ -6,8 +6,8 @@ rules:
 1. Work on the assigned task branch and worktree.
 2. Commit a clean HEAD before handoff.
 3. Read `mergetrain status --json` and follow its stated next action.
-4. Enqueue every named finished branch in the requested order with task,
-   branch, and optional worktree only; mergetrain captures exact commits.
+4. Enqueue every named finished branch in the requested order with task and
+   branch only; mergetrain resolves the worktree and captures exact commits.
 5. Stop after the last enqueue unless the user explicitly authorized validation
    or the complete validation-and-deployment workflow. Asking to queue for
    validation authorizes enqueue only. Never push integration refs directly.
@@ -29,6 +29,10 @@ opaque train-ID questions.
 confirmation. Unattended jobs use hidden `enqueue --auto` only after explicit
 bounded approval; their destination and execution-policy hashes are rechecked
 at claim, before gates, and before push.
+
+Agents never select a train ID or supply a deployment-plan hash. Structured
+status and inspection evidence may still include identifiers so operators can
+audit what happened.
 
 Recovery and destructive cleanup are separate authority boundaries. Follow the
 exact command returned by `status.next_action`; do not guess, directly edit the

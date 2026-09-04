@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Incorporate the partial Claude Code plugin runtime pilot from issue #212:
+  describe every MCP tool, make the two-input enqueue contract explicit, remove
+  stale global-install guidance, and clarify that agents do not select train
+  IDs or supply plan hashes even though structured evidence may retain
+  identifiers. Add checks that prevent these presentation defects from
+  recurring; the login-dependent interactive behavior cells remain open.
+
 - Make the Claude Code plugin self-contained for community-directory review:
   launch the exact released MCP extra through `uvx`, bind its manifest version
   to the package release, and include install, prompt, privacy, security,

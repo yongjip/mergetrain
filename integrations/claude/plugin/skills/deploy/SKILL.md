@@ -12,8 +12,9 @@ disable-model-invocation: true
 1. Call `mergetrain_status` and read its health, state, and next action.
 2. Invoke `mergetrain_deploy` without selection or approval arguments. It may
    validate queued work, then presents the exact tasks, destination refs, and
-   gate policy through the client's human confirmation dialog. Train IDs and
-   plan hashes remain internal.
+   gate policy through the client's human confirmation dialog. Neither the
+   agent nor the operator selects a train ID or supplies a plan hash; structured
+   evidence may retain identifiers for inspection.
 3. Do not substitute a shell deploy command or a model-supplied confirmation.
    If the tool returns `confirmation_required`, show its terminal command and
    stop. If it returns `deploy_not_confirmed`, report that nothing was pushed.

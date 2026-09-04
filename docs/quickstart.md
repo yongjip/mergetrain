@@ -77,7 +77,9 @@ and runs the configured gates. It then shows the exact tasks, destination,
 refs, and gate policy and asks for confirmation. Only `y` or `yes` continues to
 the pre-push execution. With the safe default reuse policy, that execution
 reassembles the train and reruns gates before the atomic push and post-push
-verification. Train IDs and plan hashes remain internal.
+verification. Operators approve readable tasks and destinations rather than
+selecting train IDs or copying plan hashes; structured evidence may retain
+identifiers for inspection.
 
 To run gates earlier without any possibility of a push:
 

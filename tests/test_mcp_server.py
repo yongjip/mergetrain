@@ -793,6 +793,8 @@ class ServerRegistrationTests(unittest.TestCase):
                 "mergetrain_deploy",
             },
         )
+        for name, tool in tools.items():
+            self.assertTrue(tool.description and tool.description.strip(), name)
         for name in ("mergetrain_status", "mergetrain_inspect"):
             self.assertTrue(tools[name].annotations.read_only_hint, name)
         # validate runs gate commands and moves job status, so claiming

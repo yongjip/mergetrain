@@ -587,6 +587,8 @@ def build_server(repo: Path) -> Any:
     )
 
     async def deploy_tool(plan: Any, approval: Any) -> dict[str, Any]:
+        """Deploy one exact validated plan after client-rendered human confirmation."""
+
         return await tools.deploy(plan, approval)
 
     deploy_tool.__annotations__["plan"] = plan_dependency

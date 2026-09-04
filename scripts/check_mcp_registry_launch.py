@@ -166,6 +166,16 @@ def smoke(
                 "MCP tools/list must expose the five stable v3 tools; "
                 f"received {sorted(tools)}"
             )
+        missing_descriptions = sorted(
+            name
+            for name, tool in tools.items()
+            if not str(tool.get("description") or "").strip()
+        )
+        if missing_descriptions:
+            raise RuntimeError(
+                "MCP tools/list descriptions must be non-empty; "
+                f"missing={missing_descriptions}"
+            )
         deploy = tools.get("mergetrain_deploy")
         assert deploy is not None
         schema = deploy.get("inputSchema") or {}
