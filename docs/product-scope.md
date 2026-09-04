@@ -285,6 +285,34 @@ Descriptions that do not improve held-out discovery, or that raise false
 positives, must be narrowed or removed before adding another distribution
 surface.
 
+## Claude community-package correction — 2026-09-04
+
+### Evidence
+
+The community-directory source path passed Claude's strict manifest validator,
+but its MCP configuration invoked a separately installed `mergetrain`
+executable while the public install copy promised the release-pinned `uvx`
+runtime. Its explicit plugin version also remained `0.1.0`, which takes
+precedence over commit-SHA update detection. The copied plugin directory had no
+self-contained installation, prompt, troubleshooting, privacy, security, or
+support document.
+
+### Change admitted
+
+The existing Claude plugin now launches the same exact released MCP extra as
+the Codex plugin and MCP Registry, carries the package release version, and
+includes a plugin-local README. Release and discovery checks reject runtime,
+version, or description drift. No command, option, config field, state, MCP
+tool, authority path, hosted service, or telemetry is added.
+
+### Success measure
+
+Strict plugin validation and release checks must remain green, the configured
+command must initialize and list the five stable MCP tools through the existing
+Registry smoke test, and an owner-operated clean Claude Code pilot must record
+plugin discovery, read-only behavior, ordered handoff, and deployment
+confirmation without an unauthorized mutation or push.
+
 ## Measured handoff-language correction — 2026-09-04
 
 ### Evidence

@@ -133,8 +133,10 @@ jobs:
 
   claude-plugin:
     # Keep the distributable plugin valid against a pinned Claude Code CLI and
-    # keep its operating protocol synchronized with the CLI-generated agent
-    # contract. The MCP executable itself is exercised by the mcp job above.
+    # keep its operating protocol and release-pinned runtime synchronized with
+    # the CLI contract and Registry command. The built server is exercised by
+    # the mcp job; the exact published uvx command is exercised before each
+    # Registry publication.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

@@ -287,6 +287,38 @@ def check_release(*, tag: str = "") -> list[str]:
                 f"uvx --from mergetrain[mcp]=={project_version} mergetrain mcp"
             )
 
+    claude_root = ROOT / "integrations/claude/plugin"
+    try:
+        claude_manifest = json.loads(
+            (claude_root / ".claude-plugin/plugin.json").read_text(encoding="utf-8")
+        )
+        claude_mcp = json.loads(
+            (claude_root / ".mcp.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"Claude plugin metadata is missing or invalid JSON: {exc}")
+        return errors
+
+    if claude_manifest.get("version") != project_version:
+        errors.append("Claude plugin version must match the release version")
+    claude_servers = (
+        claude_mcp.get("mcpServers") if isinstance(claude_mcp, dict) else None
+    )
+    if not isinstance(claude_servers, dict) or set(claude_servers) != {"mergetrain"}:
+        errors.append("Claude .mcp.json must contain exactly one mergetrain server")
+    else:
+        claude_server = claude_servers["mergetrain"]
+        if claude_server.get("command") != "uvx" or claude_server.get("args") != [
+            "--from",
+            f"mergetrain[mcp]=={project_version}",
+            "mergetrain",
+            "mcp",
+        ]:
+            errors.append(
+                "Claude .mcp.json must launch the exact release with "
+                f"uvx --from mergetrain[mcp]=={project_version} mergetrain mcp"
+            )
+
     return errors
 
 

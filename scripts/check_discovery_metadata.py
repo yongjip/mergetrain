@@ -219,6 +219,14 @@ def check_discovery_metadata(root: Path = ROOT) -> list[str]:
             manifest.get("keywords"),
             canonical["catalog_tags"],
         )
+        claude_mcp = _load_json(root / "integrations/claude/plugin/.mcp.json")
+        _expect(
+            errors,
+            "integrations/claude/plugin/.mcp.json",
+            "mcpServers.mergetrain.description",
+            claude_mcp.get("mcpServers", {}).get("mergetrain", {}).get("description"),
+            canonical["mcp_description"],
+        )
 
         agy_manifest = _load_json(root / "plugin.json")
         _expect(

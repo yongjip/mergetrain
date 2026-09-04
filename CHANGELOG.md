@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make the Claude Code plugin self-contained for community-directory review:
+  launch the exact released MCP extra through `uvx`, bind its manifest version
+  to the package release, and include install, prompt, privacy, security,
+  troubleshooting, and support documentation. Release checks now reject
+  Claude runtime or version drift.
+
 - Add a problem-first, telemetry-free GitHub Pages landing page and a single
   evidence-backed submission packet for the Claude community marketplace,
   OpenAI Developer Showcase, Show HN, Reddit, and curated lists. Keep external

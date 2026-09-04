@@ -2,13 +2,13 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "mergetrain",
   "displayName": "mergetrain",
-  "version": "0.1.0",
+  "version": "3.0.3",
   "description": "Queue committed branches from parallel coding-agent worktrees, test the combined tree in order, give integration pushes one approval-gated owner, and recover interrupted Git pushes.",
   "author": {
     "name": "Yongjip Kim",
     "url": "https://github.com/yongjip"
   },
-  "homepage": "https://github.com/yongjip/mergetrain",
+  "homepage": "https://yongjip.github.io/mergetrain/",
   "repository": "https://github.com/yongjip/mergetrain",
   "license": "MIT",
   "keywords": [
