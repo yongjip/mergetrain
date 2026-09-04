@@ -50,11 +50,13 @@ ADAPTER_ALLOWED = {
         "mergetrain.errors",
         "mergetrain.hub",
         "mergetrain.snapshot",
+        "mergetrain.snapshot_cache",
     ),
     "mergetrain.hub": (
         "mergetrain.config",
         "mergetrain.registry",
         "mergetrain.snapshot",
+        "mergetrain.snapshot_cache",
         "mergetrain.store",
     ),
 }

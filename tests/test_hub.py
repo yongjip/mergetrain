@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from contextlib import ExitStack, closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -202,7 +203,7 @@ class HubSnapshotCacheTests(unittest.TestCase):
     def test_warm_cache_preserves_upgrade_next_action(self) -> None:
         from mergetrain.hub import HubSnapshotCache
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             registry = root / "repos.json"
             live = make_repo(root, "future")
@@ -211,7 +212,7 @@ class HubSnapshotCacheTests(unittest.TestCase):
                 "version: 999\nproject:\n  name: future\n", encoding="utf-8"
             )
             add_repo(live, registry)
-            cache = HubSnapshotCache()
+            cache = resources.enter_context(closing(HubSnapshotCache()))
 
             cold = build_hub_snapshot(load_registry(registry), cache=cache)
             warm = build_hub_snapshot(load_registry(registry), cache=cache)
@@ -228,13 +229,13 @@ class HubSnapshotCacheTests(unittest.TestCase):
     def test_served_snapshot_cannot_mutate_cached_nested_state(self) -> None:
         from mergetrain.hub import HubSnapshotCache
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             registry = root / "repos.json"
             live = make_repo(root, "live")
             seed_queue(live)
             add_repo(live, registry)
-            cache = HubSnapshotCache()
+            cache = resources.enter_context(closing(HubSnapshotCache()))
 
             first = build_hub_snapshot(load_registry(registry), cache=cache)
             first["repos"][0]["snapshot"]["counts"]["queued"] = 999
@@ -248,13 +249,13 @@ class HubSnapshotCacheTests(unittest.TestCase):
         import mergetrain.hub as hub_module
         from mergetrain.hub import HubSnapshotCache
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             registry = root / "repos.json"
             live = make_repo(root, "live")
             seed_queue(live)
             add_repo(live, registry)
-            cache = HubSnapshotCache()
+            cache = resources.enter_context(closing(HubSnapshotCache()))
             calls = []
             real_build = hub_module.build_dashboard_snapshot
 
@@ -291,7 +292,7 @@ class HubSnapshotCacheTests(unittest.TestCase):
     def test_cache_hit_refreshes_lock_liveness_and_next_action(self) -> None:
         from mergetrain.hub import HubSnapshotCache
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             registry = root / "repos.json"
             live = make_repo(root, "live")
@@ -318,7 +319,7 @@ class HubSnapshotCacheTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            cache = HubSnapshotCache()
+            cache = resources.enter_context(closing(HubSnapshotCache()))
             warm = build_hub_snapshot(load_registry(registry), cache=cache)
             self.assertEqual(warm["repos"][0]["snapshot"]["lock"]["liveness"], "alive")
             self.assertEqual(warm["repos"][0]["snapshot"]["next_action"], "wait_for_runner")
@@ -340,13 +341,13 @@ class HubSnapshotCacheTests(unittest.TestCase):
     def test_cache_evicts_deregistered_repos(self) -> None:
         from mergetrain.hub import HubSnapshotCache
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             registry = root / "repos.json"
             live = make_repo(root, "live")
             seed_queue(live)
             add_repo(live, registry)
-            cache = HubSnapshotCache()
+            cache = resources.enter_context(closing(HubSnapshotCache()))
             build_hub_snapshot(load_registry(registry), cache=cache)
             self.assertEqual(len(cache._entries), 1)
             remove_repo(live, registry)
@@ -356,13 +357,13 @@ class HubSnapshotCacheTests(unittest.TestCase):
     def test_daemon_flag_flip_is_visible_through_a_warm_cache(self) -> None:
         from mergetrain.hub import HubSnapshotCache
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
             root = Path(td)
             registry = root / "repos.json"
             live = make_repo(root, "live")
             seed_queue(live)
             add_repo(live, registry)
-            cache = HubSnapshotCache()
+            cache = resources.enter_context(closing(HubSnapshotCache()))
 
             warm = build_hub_snapshot(load_registry(registry), cache=cache)
             self.assertTrue(warm["repos"][0]["daemon"])

@@ -87,6 +87,24 @@ smaller responsibility-specific budgets can be ratcheted separately. If a new
 legitimate dependency is needed, update this document and the explicit rule in
 the same reviewed change rather than bypassing the check.
 
+### Snapshot cache ownership
+
+`dashboard.py` and `hub.py` share the internal `snapshot_cache.py` read-model
+primitive; its only core dependency is `store.connect`. These explicit adapter
+edges are allowed by the architecture checker. Each cached repository owns one
+read-only connection, serialized across HTTP threads, and compares SQLite
+`PRAGMA data_version` on that same connection. File size is not commit evidence:
+SQLite can reuse a checkpointed WAL without growing it. Database file identity
+changes reopen the observer with a new local generation.
+
+The change token is captured before building the snapshot, so a concurrent
+commit invalidates the result on the next poll. No read transaction is held
+between polls. Missing queues are not created, observation never migrates or
+writes rows, Hub removal closes the observer, and server shutdown closes all
+observers and prevents late handlers from reopening them. Config changes that
+select another database also release the old connection. This is cache
+correctness inside the existing read-only surfaces; it adds no product option.
+
 ## Concepts
 
 **Job** — one task branch in the queue. It records a human-readable `task` name,

@@ -9,10 +9,10 @@ schema migrations inside it. (Honest limit: a WAL reader may create or
 refresh SQLite's sidecar ``-shm``/``-wal`` files next to the database.)
 
 The dashboard rebuilds this payload once per second per connected client, and
-almost every rebuild reads unchanged files. ``HubSnapshotCache`` turns those
-rebuilds into a handful of ``stat`` calls: a repo's entry is reused while its
-config file and queue database (including the SQLite ``-wal`` size, which a
-commit grows) have identical fingerprints. Fields that are functions of
+almost every rebuild reads unchanged files. ``HubSnapshotCache`` uses one
+read-only SQLite observer per repository: a repo's entry is reused
+while its config identity and SQLite ``data_version`` remain unchanged, even
+when checkpoints recycle WAL space without growing the file. Fields that are functions of
 process state or the wall clock rather than of files — the daemon flag
 (registry-derived), lock liveness, and the ``next_action`` — are recomputed
 on every cache hit, so a warm entry never serves a stale runner or a flipped
@@ -30,6 +30,7 @@ from typing import Any
 from .config import load_config
 from .registry import DEFAULT_CONFIG_NAME
 from .snapshot import build_dashboard_snapshot, build_queue_summary, next_action
+from .snapshot_cache import QueueChangeMonitor
 from .store import owner_liveness, utc_now
 
 
@@ -54,53 +55,34 @@ def _fingerprint(*paths: str | Path) -> tuple[Any, ...]:
     return tuple(parts)
 
 
-def _db_fingerprint(db: str | Path) -> tuple[Any, ...]:
-    """Change-detecting fingerprint that is stable across a read-only open.
-
-    Opening a WAL database read-only creates/refreshes the ``-shm`` and an
-    empty ``-wal`` — so those files' mtimes cannot be trusted as change
-    signals. This watches the main file's (mtime, size) — untouched by a
-    pure read — plus the ``-wal`` *size* (a real commit grows it; a
-    checkpoint that truncates it moves the main file instead), and ignores
-    ``-shm`` entirely. That lets the DB fingerprint be captured *before* the
-    snapshot read without the read invalidating its own cache entry.
-    """
-
-    try:
-        stat = os.stat(db)
-        main: Any = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        main = None
-    try:
-        wal_size = os.stat(f"{db}-wal").st_size
-    except OSError:
-        wal_size = 0
-    return (main, wal_size)
-
-
 class HubSnapshotCache:
     """Reuse per-repo entries while their on-disk fingerprints are unchanged.
 
-    Only successful entries (live snapshot or "no queue yet") are cached;
-    error entries are cheap to rebuild and their causes are transient. The
-    cache is shared across dashboard handler threads, hence the lock.
+    Only successful entries (live snapshot or "no queue yet") are cached.
+    Observers are retained until the repository leaves the roster or the server
+    closes; each observer releases a broken connection before surfacing an error.
+    The cache is shared across dashboard handler threads, hence the lock.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._entries: dict[str, dict[str, Any]] = {}
+        self._monitors: dict[str, QueueChangeMonitor] = {}
+        self._closed = False
 
     def get(self, raw_path: str, config_fp: tuple[Any, ...]) -> dict[str, Any] | None:
         with self._lock:
+            if self._closed:
+                raise RuntimeError("snapshot cache is closed")
             cached = self._entries.get(raw_path)
             if cached is None or cached["config_fp"] != config_fp:
                 return None
             db = str(cached["db"])
             db_fp = cached["db_fp"]
             config_version = int(cached["config_version"])
+            if self._monitors[raw_path].token(db) != db_fp:
+                return None
             entry = deepcopy(cached["entry"])
-        if _db_fingerprint(db) != db_fp:
-            return None
         return _refresh_volatile(entry, config_version=config_version)
 
     def put(
@@ -114,6 +96,8 @@ class HubSnapshotCache:
         entry: dict[str, Any],
     ) -> None:
         with self._lock:
+            if self._closed or raw_path not in self._monitors:
+                return
             self._entries[raw_path] = {
                 "config_fp": config_fp,
                 "db": db,
@@ -122,17 +106,27 @@ class HubSnapshotCache:
                 "entry": deepcopy(entry),
             }
 
-    def retain(self, live_paths: set[str]) -> None:
-        """Drop cached entries for repos no longer in the roster.
-
-        Without this a ``hub remove`` would leave the removed repo's full
-        payload resident, and a path re-registered later could momentarily
-        serve the old repo's snapshot.
-        """
-
+    def token(self, raw_path: str, db: str | Path) -> tuple[object, int | None]:
         with self._lock:
-            for stale in [key for key in self._entries if key not in live_paths]:
-                del self._entries[stale]
+            if self._closed:
+                raise RuntimeError("snapshot cache is closed")
+            monitor = self._monitors.setdefault(raw_path, QueueChangeMonitor())
+            return monitor.token(db)
+
+    def retain(self, live_paths: set[str]) -> None:
+        """Release evidence and observers for repositories removed from Hub."""
+        with self._lock:
+            for stale in set(self._monitors) - live_paths:
+                self._monitors.pop(stale).close()
+                self._entries.pop(stale, None)
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            for monitor in self._monitors.values():
+                monitor.close()
+            self._monitors.clear()
+            self._entries.clear()
 
 
 def _refresh_volatile(
@@ -181,11 +175,10 @@ def _repo_entry(raw_path: str, cache: HubSnapshotCache | None) -> dict[str, Any]
             entry.update(ok=False, error="no .mergetrain.yaml in this repo")
             return entry
         db = Path(config.state.db)
-        # Fingerprint BEFORE reading the database: a commit that lands between
-        # the read and the stat would otherwise be recorded under its
-        # post-commit fingerprint against the pre-commit payload, pinning a
-        # stale entry until the next unrelated change.
-        db_fp = _db_fingerprint(db)
+        # Capture the change token BEFORE reading. A commit during snapshot
+        # assembly must invalidate that result on the next poll, not certify
+        # the older snapshot with a newer token.
+        db_fp = cache.token(raw_path, db) if cache is not None else ()
         if not db.is_file():
             # A registered repo with no queue yet is a normal state, not an
             # error — and the hub must not create the database to find out.

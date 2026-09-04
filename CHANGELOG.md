@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix dashboard and Hub snapshots remaining stale after SQLite reuses WAL
+  space. Share one read-only change observer per cached repository, detect
+  concurrent commits and database replacement, and release observers on Hub
+  removal or server shutdown without pinning a read transaction.
+
 - Preserve diagnostic truth across human and structured output: distinguish
   semantic conflicts from textual merge conflicts, show blocked reasons in
   `inspect`, and always render repository health plus a next action in
