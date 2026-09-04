@@ -5,7 +5,9 @@
 - Clarify the local trust boundary in the README: mergetrain has no account,
   hosted control plane, OAuth app, or product telemetry. Add a launch-ready Show
   HN first-comment draft and preserve the completed Codex recommendation and
-  negative-control executions as pending owner-reviewed benchmark evidence.
+  negative-control executions as owner-reviewed benchmark evidence. Suitable
+  discovery is 20/20 and negative primary recommendation is 0/20; the separate
+  negative-activation overhead gate remains open for a controlled trigger test.
 
 - Separate discovery selection, false-positive recommendation, unnecessary
   activation, explanation quality, and authority-safety metrics in discovery

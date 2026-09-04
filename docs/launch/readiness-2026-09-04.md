@@ -21,6 +21,10 @@
   plane, no-OAuth, and no-product-telemetry boundary explicitly.
 - The 60-second demo and dashboard work tracked by issues 171 and 173 is closed.
   Agent-native packaging tracked by issue 172 is also closed.
+- The repository owner reviewed the complete 20 suitable and 20 negative Codex
+  recommendation corpus. Suitable discovery was 20/20, negative primary
+  recommendation was 0/20, and repository, queue, deployment, and push
+  mutations were all zero.
 
 ## Historical release-run note
 
@@ -33,14 +37,17 @@ failure as an unresolved package-publication failure.
 
 ## Still blocking a broad launch
 
-- An owner must review the completed 20 suitable and 20 negative Codex
-  transcripts before discovery rates are claimed. The unscored triage currently
-  identifies five possible negative activations but zero negative primary
-  recommendations and zero mutations.
+- Five of 20 negative prompts activated the capability before correctly
+  rejecting it, exceeding the documented activation-overhead gate. Run a
+  catalog-trigger A/B test against matched suitable prompts before changing the
+  public discovery text.
+- The benchmark group's 20-run `safe_handoff` class has not yet been executed,
+  so the complete group remains incomplete even though recommendation and
+  negative-control results are owner-reviewed.
 - The owner-performed awesome-claude-code form, community posts, newsletter
   submissions, and Show HN submission are not complete.
 - The four PR-based durable list placements have not yet been verified as open.
 
-Do not add product behavior merely to make the pending benchmark look better.
-Confirm the observations first; then narrow catalog triggers only if the
-activation finding survives independent review.
+Do not add product behavior merely to make the benchmark look better. Narrow a
+catalog trigger only if a controlled comparison reduces negative activation
+without lowering suitable discovery.
