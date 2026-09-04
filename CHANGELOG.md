@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Preserve diagnostic truth across human and structured output: distinguish
+  semantic conflicts from textual merge conflicts, show blocked reasons in
+  `inspect`, and always render repository health plus a next action in
+  `status`.
+
+- Make the Python quickstart gate checkout-clean by default, include dirty
+  paths when a gate changes the assembled tree, and protect the interactive
+  deployment approval path with targeted tests and a critical coverage floor.
+
+- Remove design PNGs from the current source tree, keep historical
+  visual evidence linked to the immutable v3.0.4 tag, and exclude design-only
+  assets from source distributions.
+
 ## 3.0.4 - 2026-09-04
 
 - Complete the Claude Code community-plugin runtime pilot from issue #212:

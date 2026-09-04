@@ -13,6 +13,7 @@ from typing import Any
 CRITICAL_MINIMUMS = {
     "src/mergetrain/atomic_push.py": 94.0,
     "src/mergetrain/command_runner.py": 85.0,
+    "src/mergetrain/commands/deploy.py": 80.0,
     "src/mergetrain/gate_runner.py": 94.0,
     "src/mergetrain/git_destination.py": 94.0,
     "src/mergetrain/git_ops.py": 85.0,

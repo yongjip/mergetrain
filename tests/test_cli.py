@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -41,7 +42,47 @@ from mergetrain.store import (
 )
 
 
+class _InteractiveInput(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
 class CliTests(unittest.TestCase):
+    def _ready_deploy_repo(self, repo: Path) -> Path:
+        db = repo / "queue.sqlite"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(
+            ["git", "remote", "add", "upstream", str(repo / "upstream.git")],
+            cwd=repo,
+            check=True,
+        )
+        (repo / ".mergetrain.yaml").write_text(
+            """git:
+  remote: upstream
+  integration_branch: main
+  push_refs:
+    - main
+""",
+            encoding="utf-8",
+        )
+        conn = connect(db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            mark_job(
+                conn,
+                job.id,
+                status="validated",
+                train_id="train-1",
+                train_size=1,
+                validated_at="2026-09-05T00:00:00Z",
+                validation_base_sha="a" * 40,
+                validation_sha="b" * 40,
+                validated_head_sha="c" * 40,
+            )
+        finally:
+            conn.close()
+        return db
+
     def test_history_rejects_invalid_since_with_typed_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             out = io.StringIO()
@@ -798,6 +839,21 @@ class CliTests(unittest.TestCase):
                 "configure_git_remote",
             )
 
+    def test_status_text_always_renders_health_and_commandless_next_action(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("readiness"), encoding="utf-8"
+            )
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "status"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("health: degraded\n", out.getvalue())
+        self.assertIn("next: configure git remote\n", out.getvalue())
+
     def test_status_without_queue_is_read_only_and_does_not_create_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -878,6 +934,46 @@ class CliTests(unittest.TestCase):
                 main(["--repo", str(repo), "status", "--json"])
             payload = json.loads(out.getvalue())
             self.assertEqual(payload["warnings"][0]["code"], "no_configured_gates")
+
+    def test_documented_python_gate_keeps_an_unignored_checkout_clean(self) -> None:
+        command = [sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+        quickstart = Path(__file__).parents[1] / "docs" / "quickstart.md"
+        self.assertIn(
+            "run: python -B -m pytest -q -p no:cacheprovider",
+            quickstart.read_text(encoding="utf-8"),
+        )
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "test_example.py").write_text(
+                "def test_example():\n    assert True\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "test_example.py"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=mergetrain-test",
+                    "-c",
+                    "user.email=mergetrain@example.invalid",
+                    "commit",
+                    "-qm",
+                    "seed",
+                ],
+                cwd=repo,
+                check=True,
+            )
+
+            subprocess.run(command, cwd=repo, check=True, stdout=subprocess.DEVNULL)
+            status = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+
+        self.assertEqual(status, "")
 
     def test_root_typo_lists_only_the_public_command_grammar(self) -> None:
         err = io.StringIO()
@@ -1986,6 +2082,98 @@ class CliTests(unittest.TestCase):
             self.assertNotIn("confirmed_command", payload)
             self.assertNotIn("train_id", payload)
 
+    def test_deploy_text_refuses_confirmation_without_a_tty(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = self._ready_deploy_repo(repo)
+            decision = ReuseDecision(
+                authorized=False,
+                eligible=False,
+                action="rerun",
+                validation_sha="b" * 40,
+                reasons=("reuse not authorized",),
+            )
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                patch(
+                    "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
+                    return_value=decision,
+                ),
+                patch("mergetrain.commands.deploy.sys.stdin", io.StringIO()),
+                redirect_stdout(out),
+                redirect_stderr(err),
+            ):
+                code = main(["--repo", str(repo), "--db", str(db), "deploy"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("Ready to deploy 1 job(s): a", out.getvalue())
+        self.assertIn("requires an interactive terminal", err.getvalue())
+
+    def test_deploy_text_decline_keeps_the_validated_train_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = self._ready_deploy_repo(repo)
+            decision = ReuseDecision(
+                authorized=False,
+                eligible=False,
+                action="rerun",
+                validation_sha="b" * 40,
+                reasons=("reuse not authorized",),
+            )
+            out = io.StringIO()
+            with (
+                patch(
+                    "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
+                    return_value=decision,
+                ),
+                patch("mergetrain.commands.deploy.sys.stdin", _InteractiveInput()),
+                patch("builtins.input", return_value="no"),
+                patch("mergetrain.commands.deploy._execute_batch") as execute,
+                redirect_stdout(out),
+            ):
+                code = main(["--repo", str(repo), "--db", str(db), "deploy"])
+            conn = connect(db)
+            try:
+                status = get_job(conn, 1).status
+            finally:
+                conn.close()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(status, "validated")
+        self.assertIn("Deploy declined", out.getvalue())
+        execute.assert_not_called()
+
+    def test_deploy_text_acceptance_executes_only_the_rendered_exact_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = self._ready_deploy_repo(repo)
+            decision = ReuseDecision(
+                authorized=False,
+                eligible=False,
+                action="rerun",
+                validation_sha="b" * 40,
+                reasons=("reuse not authorized",),
+            )
+            with (
+                patch(
+                    "mergetrain.commands.deploy.GitRunner.preview_validated_reuse",
+                    return_value=decision,
+                ),
+                patch("mergetrain.commands.deploy.sys.stdin", _InteractiveInput()),
+                patch("builtins.input", return_value="yes"),
+                patch(
+                    "mergetrain.commands.deploy._execute_batch",
+                    return_value=0,
+                ) as execute,
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main(["--repo", str(repo), "--db", str(db), "deploy"])
+
+        self.assertEqual(code, 0)
+        execute.assert_called_once()
+        self.assertTrue(execute.call_args.kwargs["deploy"])
+        self.assertEqual(len(execute.call_args.kwargs["expected_plan"]), 64)
+
     def test_expected_deploy_plan_rejects_destination_change_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -2376,6 +2564,40 @@ class CliTests(unittest.TestCase):
                     )
                     release_runner_lock(conn, owner=owner, token=current.claim_token)
                 conn.close()
+
+    def test_inspect_text_exposes_the_bounded_block_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                blocked = enqueue_job(conn, task="a", branch="feature/a")
+                mark_job(
+                    conn,
+                    blocked.id,
+                    status="blocked",
+                    conflict_with="2",
+                    note="semantic conflict with job 2",
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--db",
+                        str(db),
+                        "inspect",
+                        str(blocked.id),
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertIn("outcome: failure / semantic_conflict", out.getvalue())
+        self.assertIn("reason: semantic conflict with job 2", out.getvalue())
 
     def test_inspect_train_has_structured_failure_categories(self) -> None:
         with tempfile.TemporaryDirectory() as td:

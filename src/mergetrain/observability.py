@@ -718,6 +718,11 @@ def job_outcome(job: Job) -> dict[str, Any]:
             or "deploy_plan_changed" in lowered
         ):
             category = "deploy_authorization_changed"
+        elif job.conflict_with:
+            # Semantic conflicts are successful individual merges whose
+            # combined tree fails validation.  They require coordination with
+            # the named partner jobs, not a textual merge-conflict repair.
+            category = "semantic_conflict"
         elif "conflict" in lowered:
             category = "merge_conflict"
         elif "head changed" in lowered or "identity" in lowered:

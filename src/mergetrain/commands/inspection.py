@@ -328,10 +328,13 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.json:
         dump_json(payload)
     else:
+        print(f"health: {payload['health']}")
         print(f"{payload['state'].upper()}: {payload['summary']}")
         action = payload["next_action"]
         if action["command"]:
             print(f"next: {action['command']}")
+        else:
+            print(f"next: {action['code'].replace('_', ' ')}")
         if action["requires_approval"] != "none":
             print(f"approval: {action['requires_approval']}")
         for warning in payload["warnings"]:
@@ -513,7 +516,10 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             f"elapsed {progress['elapsed_seconds']}s"
         )
         print(f"heartbeat: {progress['heartbeat_at'] or 'none'} ({progress['lease_liveness']})")
-        print(f"outcome: {payload['outcome']['severity']} / {payload['outcome']['category']}")
+        outcome = payload["outcome"]
+        print(f"outcome: {outcome['severity']} / {outcome['category']}")
+        if outcome["severity"] in {"failure", "warning"} and outcome["message"]:
+            print(f"reason: {outcome['message']}")
     return 0
 
 
