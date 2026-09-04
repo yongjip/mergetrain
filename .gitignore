@@ -28,6 +28,8 @@ dashboard/node_modules/
 dashboard/.npm-cache/
 dashboard/playwright-report/
 dashboard/test-results/
+# Design evidence is archived on signed release tags and linked from design-qa.md.
+dashboard/design/*.png
 
 # IDE / editor
 .idea/

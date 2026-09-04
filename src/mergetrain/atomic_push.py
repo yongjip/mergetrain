@@ -23,6 +23,7 @@ from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .git_ops import (
     delete_pending_ref,
     deploy_audit_ref_name,
+    git_dirty_paths,
     git_remote_ref_sha,
     git_rev_parse,
     git_worktree_clean,
@@ -72,7 +73,12 @@ class AtomicPush:
                 "because unknown worktree state must never be pushed"
             ) from exc
         if head != deploy_sha or not clean:
-            detail = "left the worktree dirty" if not clean else f"moved HEAD to {head[:12]}"
+            if not clean:
+                dirty = git_dirty_paths(worktree)
+                dirty_hint = f" ({', '.join(dirty)})" if dirty else ""
+                detail = f"left the worktree dirty{dirty_hint}"
+            else:
+                detail = f"moved HEAD to {head[:12]}"
             raise MergeBlocked(
                 f"a gate {detail} after gating began; gates must not change the "
                 f"integration tree — blocking so a commit differing from the "

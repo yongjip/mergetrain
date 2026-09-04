@@ -32,8 +32,13 @@ project:
 
 gates:
   - name: tests
-    run: pytest -q
+    run: python -B -m pytest -q -p no:cacheprovider
 ```
+
+Gates must leave the assembled checkout unchanged. For Python, `-B` prevents
+bytecode files and `-p no:cacheprovider` prevents `.pytest_cache`; otherwise a
+repository that does not ignore those paths will safely block after the test
+command succeeds.
 
 `init --write` also creates `AGENTS.mergetrain.md` and
 `CLAUDE.mergetrain.md`. Link the relevant sidecar from your root agent

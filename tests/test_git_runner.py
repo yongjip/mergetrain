@@ -1550,6 +1550,7 @@ deploy:
                 conn.close()
             self.assertEqual(result.status, "blocked")
             self.assertIn("tree", result.note.lower())
+            self.assertIn("gate-dirty.txt", result.note)
             self.assertEqual(pending, "")  # never reached the push / marker
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
