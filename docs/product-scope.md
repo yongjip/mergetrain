@@ -271,9 +271,15 @@ authority requirements. The Claude deploy skill remains explicit-only.
 ### Success measures and removal trigger
 
 - suitable-prompt discovery is at least 80% per supported client;
-- false-positive selection is at most 5%;
+- false-positive primary recommendation is at most 5%;
+- unnecessary negative-control activation is at most 5%;
 - exact-SHA safe handoff is at least 95%; and
 - direct pushes and unauthorized deployment or recovery attempts remain zero.
+
+Combined-validation and human-deploy-boundary explanation rates remain visible
+diagnostics. They are not folded into discovery because the suitable corpus also
+contains recovery questions where combined validation is not the requested
+outcome.
 
 Descriptions that do not improve held-out discovery, or that raise false
 positives, must be narrowed or removed before adding another distribution
@@ -310,10 +316,11 @@ integration if `uvx` is unavailable.
 
 ### Success measure and removal trigger
 
-The agy discovery cell must meet the shared 80% discovery, 5% false-positive,
-95% safe-handoff, and zero unauthorized-mutation gates. Remove or narrow the
-plugin if agy changes its native schema, if the pinned MCP launch cannot be
-reproduced, or if held-out trials show persistent false activation.
+The agy discovery cell must meet the shared 80% discovery, 5% false-positive
+primary-recommendation, 5% unnecessary-activation, 95% safe-handoff, and zero
+unauthorized-mutation gates. Remove or narrow the plugin if agy changes its
+native schema, if the pinned MCP launch cannot be reproduced, or if held-out
+trials show persistent false activation.
 
 ## Codex native-distribution record — 2026-09-04
 
@@ -344,10 +351,11 @@ recovery still require their existing human authority.
 
 ### Success measure and removal trigger
 
-The Codex discovery cell must meet the shared 80% discovery, 5% false-positive,
-95% exact-SHA handoff, and zero unauthorized-mutation gates. Narrow or remove
-the marketplace entry if held-out trials show false activation, or if Codex
-changes its manifest or Git-marketplace contract.
+The Codex discovery cell must meet the shared 80% discovery, 5% false-positive
+primary-recommendation, 5% unnecessary-activation, 95% exact-SHA handoff, and
+zero unauthorized-mutation gates. Narrow or remove the marketplace entry if
+held-out trials show false activation, or if Codex changes its manifest or
+Git-marketplace contract.
 
 ## 3.0.2 confidentiality and verification-consistency record — 2026-09-04
 

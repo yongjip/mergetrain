@@ -113,6 +113,11 @@ def prepare_trial(
         raise RunnerError(f"run directory must not exist: {run_root}")
     if run_root == Path(run_root.anchor):
         raise RunnerError("refusing to use a filesystem root as a run directory")
+    disclosed = [
+        label for label in (class_name, family_id) if label.lower() in str(run_root).lower()
+    ]
+    if disclosed:
+        raise RunnerError("run directory path must not reveal the fixture class or family")
     fixtures = load_fixtures(fixtures_path)
     prompt = _select_prompt(fixtures, class_name, family_id, variant)
     if class_name == "safe_handoff":
@@ -260,29 +265,39 @@ def run_agent(run_dir: Path, command: Sequence[str], *, timeout_seconds: float) 
     started_at = _utc_now()
     started = time.monotonic()
     timed_out = False
-    with (
-        stdout_path.open("w", encoding="utf-8") as stdout,
-        stderr_path.open("w", encoding="utf-8") as stderr,
-    ):
-        try:
-            process = subprocess.Popen(
-                expanded,
-                cwd=run_root / manifest["paths"]["workspace"],
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout,
-                stderr=stderr,
-                text=True,
-                start_new_session=os.name == "posix",
-            )
-        except OSError as exc:
-            raise RunnerError(f"could not start agent command: {exc}") from exc
-        try:
-            exit_code = process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _stop_process(process)
-            exit_code = 124
+    manifest_path = run_root / "manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest_recreated = False
+    manifest_path.unlink()
+    try:
+        with (
+            stdout_path.open("w", encoding="utf-8") as stdout,
+            stderr_path.open("w", encoding="utf-8") as stderr,
+        ):
+            try:
+                process = subprocess.Popen(
+                    expanded,
+                    cwd=run_root / manifest["paths"]["workspace"],
+                    env=environment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout,
+                    stderr=stderr,
+                    text=True,
+                    start_new_session=os.name == "posix",
+                )
+            except OSError as exc:
+                raise RunnerError(f"could not start agent command: {exc}") from exc
+            try:
+                exit_code = process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                _stop_process(process)
+                exit_code = 124
+    finally:
+        manifest_recreated = manifest_path.exists()
+        if manifest_recreated:
+            manifest_path.unlink()
+        manifest_path.write_bytes(manifest_bytes)
     _write_json(
         agent_run_path,
         {
@@ -294,6 +309,8 @@ def run_agent(run_dir: Path, command: Sequence[str], *, timeout_seconds: float) 
             "wall_seconds": round(time.monotonic() - started, 6),
         },
     )
+    if manifest_recreated:
+        raise RunnerError("agent recreated the hidden manifest path; trial is invalid")
     return int(exit_code)
 
 

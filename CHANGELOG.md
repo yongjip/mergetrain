@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Separate discovery selection, false-positive recommendation, unnecessary
+  activation, explanation quality, and authority-safety metrics in discovery
+  benchmark version 2. Preserve validation of immutable version 1 results and
+  hide the private trial manifest while an agent process runs.
+
 - Add a benchmark-only runner and deterministic scorer for the frozen
   product-name-free discovery corpus. Results now preserve prompt and metadata
   revisions, exclude contaminated or operationally invalid trials, enforce

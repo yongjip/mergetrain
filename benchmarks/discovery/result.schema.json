@@ -18,7 +18,7 @@
     "artifacts"
   ],
   "properties": {
-    "benchmark_version": {"const": 1},
+    "benchmark_version": {"const": 2},
     "run_id": {"type": "string", "minLength": 1},
     "fixture": {
       "type": "object",
@@ -131,6 +131,8 @@
       "items": {
         "enum": [
           "discovery_miss",
+          "false_positive_recommendation",
+          "unnecessary_activation",
           "false_positive_selection",
           "combined_validation_omitted",
           "human_gate_omitted",

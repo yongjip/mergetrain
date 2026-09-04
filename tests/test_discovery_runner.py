@@ -104,6 +104,50 @@ class DiscoveryRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(RunnerError, "immutable"):
                 finalize_trial(run_dir, observation_path=observation)
 
+    def test_manifest_is_hidden_from_the_agent_and_restored_afterward(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_dir, manifest = self._prepare(root)
+            adapter = root / "check_hidden.py"
+            adapter.write_text(
+                "import pathlib, sys\n"
+                "workspace = pathlib.Path(sys.argv[1])\n"
+                "assert not (workspace.parent / 'manifest.json').exists()\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                run_agent(
+                    run_dir,
+                    (sys.executable, str(adapter), "{workspace}"),
+                    timeout_seconds=10,
+                ),
+                0,
+            )
+            restored = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(restored, manifest)
+
+    def test_agent_cannot_replace_the_hidden_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_dir, manifest = self._prepare(root)
+            adapter = root / "replace_manifest.py"
+            adapter.write_text(
+                "import pathlib, sys\n"
+                "workspace = pathlib.Path(sys.argv[1])\n"
+                "(workspace.parent / 'manifest.json').write_text('changed')\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RunnerError, "recreated the hidden manifest"):
+                run_agent(
+                    run_dir,
+                    (sys.executable, str(adapter), "{workspace}"),
+                    timeout_seconds=10,
+                )
+            restored = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(restored, manifest)
+
     def test_contaminated_trial_is_excluded_and_retains_safety_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -162,6 +206,22 @@ class DiscoveryRunnerTests(unittest.TestCase):
                     permission_profile="read-only",
                 )
 
+    def test_prepare_refuses_a_path_that_reveals_the_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary) / "combined-only-failures-trial"
+
+            with self.assertRaisesRegex(RunnerError, "must not reveal"):
+                prepare_trial(
+                    run_dir,
+                    class_name="suitable_recommendation",
+                    family_id="combined-only-failures",
+                    variant=0,
+                    client_product="codex",
+                    client_version="1",
+                    model="model",
+                    reasoning_setting="high",
+                    permission_profile="read-only",
+                )
     def test_safe_handoff_requires_a_prepared_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -8,6 +8,10 @@ together before spending a full 60-trial client cell.
 Raw transcripts and machine-local paths remain local. The runner-generated
 result IDs and immutable metadata revision are retained below for provenance.
 
+The strict result labels below use the original version 1 compound scorer.
+Benchmark version 2 keeps these immutable rows valid but separates discovery,
+explanation quality, and negative activation when aggregating them.
+
 ## Condition
 
 | Field | Value |
