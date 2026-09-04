@@ -47,6 +47,15 @@ class JobOutcomeTests(unittest.TestCase):
         ({"status": "blocked", "push_status": "failed", "note": "remote rejected the update"}, "push_rejected", "failure"),
         # push_status wins over a "conflict" note (the ordering trap):
         ({"status": "blocked", "push_status": "failed", "note": "merge conflict in app.txt"}, "push_rejected", "failure"),
+        (
+            {
+                "status": "blocked",
+                "conflict_with": "2",
+                "note": "semantic conflict with job 2",
+            },
+            "semantic_conflict",
+            "failure",
+        ),
         ({"status": "blocked", "note": "merge conflict in app.txt"}, "merge_conflict", "failure"),
         ({"status": "blocked", "note": "source HEAD changed under the runner"}, "source_identity_mismatch", "failure"),
         ({"status": "blocked", "note": "validated reuse mismatch"}, "validated_reuse_mismatch", "failure"),

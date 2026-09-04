@@ -197,7 +197,7 @@ class DemoTests(unittest.TestCase):
             self.assertIn("ready: health=healthy clean=true", rendered)
             self.assertIn("result: partial", rendered)
             self.assertIn("conflict_with: #2", rendered)
-            self.assertIn("outcome: merge_conflict", rendered)
+            self.assertIn("outcome: semantic_conflict", rendered)
             self.assertIn("result: success", rendered)
             self.assertIn("Demo complete:", rendered)
             self.assertIn("Sandbox removed: $DEMO", rendered)

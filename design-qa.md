@@ -3,17 +3,17 @@
 ## Evidence
 
 - Source visual truth:
-  `dashboard/design/hub-table-target-option-1.png`
+  [`hub-table-target-option-1.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-target-option-1.png)
 - Normalized source:
-  `dashboard/design/hub-table-target-normalized.png`
+  [`hub-table-target-normalized.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-target-normalized.png)
 - Browser-rendered implementation:
-  `dashboard/design/hub-table-implementation-v3.png`
+  [`hub-table-implementation-v3.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-implementation-v3.png)
 - Full-view comparison:
-  `dashboard/design/hub-table-comparison-v3.png`
+  [`hub-table-comparison-v3.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-comparison-v3.png)
 - Focused rollup and table comparison:
-  `dashboard/design/hub-table-focused-v3.png`
+  [`hub-table-focused-v3.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-focused-v3.png)
 - Responsive evidence:
-  `dashboard/design/hub-table-responsive-760.png`
+  [`hub-table-responsive-760.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-responsive-760.png)
 - Local preview: `http://127.0.0.1:4175/#`
 - Source pixels: `1672 × 941`; normalized to `1280 × 720`.
 - Implementation pixels: `1280 × 720`.
@@ -89,14 +89,14 @@
 - Initial P1: implementation rows were 148px high and page margins 36px, making
   the table visibly taller and narrower than the selected compact source.
   Fix: rows reduced to 128px, page margins to 22px, and section gap to 18px.
-  Post-fix evidence: `dashboard/design/hub-table-comparison-v3.png`.
+  Post-fix evidence: [`hub-table-comparison-v3.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-comparison-v3.png).
 - Initial P2: canceled jobs were rendered as green successful history marks.
   Fix: canceled outcomes now use neutral marks while failures remain red.
-  Post-fix evidence: `dashboard/design/hub-table-focused-v3.png`.
+  Post-fix evidence: [`hub-table-focused-v3.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-focused-v3.png).
 - Initial P2: table metadata and work text read smaller than the source after
   density normalization. Fix: increased table headings and row typography by
   one pixel while retaining the 128px row height.
-  Post-fix evidence: `dashboard/design/hub-table-focused-v3.png`.
+  Post-fix evidence: [`hub-table-focused-v3.png`](https://raw.githubusercontent.com/yongjip/mergetrain/v3.0.4/dashboard/design/hub-table-focused-v3.png).
 
 ## Findings
 

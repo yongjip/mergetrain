@@ -537,3 +537,50 @@ reports of independently operated enqueue, validation, and deployment. Do not
 add telemetry or a hosted control plane to improve attribution. Defer a custom
 domain, analytics, additional directory-specific pages, and onboarding features
 until repeated external-user evidence shows a concrete discovery failure.
+
+## Diagnostic-truth correction — 2026-09-05
+
+### Evidence
+
+The engine persisted semantic-conflict partners in `conflict_with`, but the
+per-job observability projection classified any blocked note containing the
+word “conflict” as a textual merge conflict. Human `inspect` discarded the
+bounded outcome message, while human `status` omitted repository health and
+any next action whose structured plan intentionally had no shell command. The
+starter Python gate also produced cache files in repositories that did not yet
+ignore them, causing a safe but unexplained dirty-tree block.
+
+The interactive deploy renderer was the lowest-covered non-Hub production
+module at 69.4%, with the terminal check and accept/decline branch uncovered.
+Separately, eleven design PNGs occupied 9.83 MiB and were shipped inside the
+sdist even though runtime and packaged tests do not consume them.
+
+### Existing fit and decision cost
+
+The correction stays inside `status`, `inspect`, the existing outcome category,
+the existing gate tripwire, documentation, and packaging. It adds no command,
+flag, config field, state group, dashboard control, MCP tool, authority path, or
+operator choice. Human status renders the already-stable health and next-action
+fields; semantic conflicts reuse the category already present in aggregate
+evidence.
+
+### Safety impact
+
+Blocked work remains blocked. The change prevents agents from applying a
+merge-conflict remedy to a combined-validation conflict, exposes the redacted
+bounded reason already available in JSON, and makes degraded repository state
+visible without `--json`. The clean-tree invariant remains fail closed while
+naming the paths a gate created. Interactive confirmation behavior is unchanged
+and gains a module coverage floor after accept, decline, and non-interactive
+tests.
+
+### Success measure and removal trigger
+
+Table-driven outcome tests must distinguish semantic and textual merge
+conflicts; text-mode status and inspect tests must preserve health, next action,
+and bounded reason output; Python quickstart gates must leave an unignored test
+checkout clean; and critical coverage must fail below the deploy-module floor.
+Design evidence remains available from the signed v3.0.4 tag, while current
+source distributions exclude the design-only directory. Revert these renderers
+only if the underlying structured fields are removed under a future contract
+change.
