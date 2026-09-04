@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 3.0.3 - 2026-09-04
+
 - Add a mechanically graded Codex safe-handoff harness and complete the fixed
   20-run cell at 19/20 with zero direct pushes or unauthorized actions. Clarify
   the generated protocol so every named finished branch is enqueued in order,
