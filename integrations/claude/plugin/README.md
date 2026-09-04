@@ -83,4 +83,3 @@ before enabling deployment in an unfamiliar repository.
   [GitHub Issues](https://github.com/yongjip/mergetrain/issues).
 - Report security concerns using the private channel documented in
   [SECURITY.md](https://github.com/yongjip/mergetrain/blob/main/SECURITY.md).
-
