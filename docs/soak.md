@@ -72,7 +72,7 @@ killing a push:
 python3 scripts/soak_sim.py \
   --repo /path/to/target \
   --confirm-repo owner/name \
-  --expected-version 3.0.3 \
+  --expected-version 3.0.4 \
   --baseline 2026-07-26T01:56:04Z \
   --mt /tmp/mergetrain-300-soak/bin/mergetrain \
   --skip-crash \
@@ -92,7 +92,7 @@ the issue's minimum):
 python3 scripts/soak_sim.py \
   --repo /path/to/target \
   --confirm-repo owner/name \
-  --expected-version 3.0.3 \
+  --expected-version 3.0.4 \
   --mt /tmp/mergetrain-300-soak/bin/mergetrain
 ```
 
@@ -117,7 +117,7 @@ Every unplanned operator action needs a bug or documentation-gap issue:
 python3 scripts/soak_sim.py \
   --repo /path/to/target \
   --confirm-repo owner/name \
-  --expected-version 3.0.3 \
+  --expected-version 3.0.4 \
   --mt /tmp/mergetrain-091-soak/bin/mergetrain \
   --record-intervention reconcile \
   --classification bug \
