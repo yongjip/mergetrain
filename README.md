@@ -107,6 +107,10 @@ result afterward.
 uv tool install mergetrain          # or: pipx install mergetrain
 # macOS: brew install yongjip/tap/mergetrain
 
+# Codex: add the Git marketplace, then install the native skill + pinned MCP server
+codex plugin marketplace add yongjip/mergetrain --ref main
+codex plugin add mergetrain@mergetrain
+
 # agy: install the native skill + pinned MCP server
 agy plugin install https://github.com/yongjip/mergetrain
 

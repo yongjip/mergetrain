@@ -53,6 +53,22 @@ since a clean CI runner cannot exercise every local Git configuration.
 python -m pip install -e .
 ```
 
+## Codex native plugin
+
+With Codex CLI and `uv` installed, add the repository's Git marketplace and
+install the plugin:
+
+```sh
+codex plugin marketplace add yongjip/mergetrain --ref main
+codex plugin add mergetrain@mergetrain
+```
+
+Adding the marketplace makes the problem-first listing available in Codex;
+installing the plugin loads its skill and the same five-tool, release-pinned
+stdio MCP server. The ordinary agent path remains `status → enqueue → stop`.
+The plugin does not grant deployment, unattended-operation, or recovery
+authority.
+
 ## agy native plugin
 
 With [Antigravity CLI](https://www.agy.dev/docs/cli/plugins/) and `uv` already

@@ -88,6 +88,16 @@ def validate_canonical(data: dict[str, Any]) -> list[str]:
         elif len(values) != len(set(values)):
             errors.append(f"discovery metadata {key} must not contain duplicates")
 
+    codex_prompts = data.get("codex_default_prompts")
+    if not isinstance(codex_prompts, list) or not codex_prompts or not all(
+        isinstance(value, str) and value for value in codex_prompts
+    ):
+        errors.append("discovery metadata codex_default_prompts must be a string list")
+    elif len(codex_prompts) > 3:
+        errors.append("discovery metadata codex_default_prompts must contain at most 3 prompts")
+    elif any(len(value) > 128 for value in codex_prompts):
+        errors.append("discovery metadata codex_default_prompts entries must be at most 128 characters")
+
     github_about = data.get("github_about")
     if not isinstance(github_about, dict):
         errors.append("discovery metadata github_about must be an object")
@@ -219,6 +229,63 @@ def check_discovery_metadata(root: Path = ROOT) -> list[str]:
             canonical["short_description"],
         )
 
+        codex_marketplace = _load_json(root / ".agents/plugins/marketplace.json")
+        codex_plugins = codex_marketplace.get("plugins", [])
+        if codex_marketplace.get("name") != "mergetrain":
+            errors.append(".agents/plugins/marketplace.json: name must be mergetrain")
+        if len(codex_plugins) != 1 or not isinstance(codex_plugins[0], dict):
+            errors.append(".agents/plugins/marketplace.json: expected one plugin object")
+        else:
+            if codex_plugins[0].get("name") != "mergetrain":
+                errors.append(".agents/plugins/marketplace.json: plugin name must be mergetrain")
+
+        codex_root = root / "plugins/mergetrain"
+        codex_manifest = _load_json(codex_root / ".codex-plugin/plugin.json")
+        _expect(
+            errors,
+            "plugins/mergetrain/.codex-plugin/plugin.json",
+            "description",
+            codex_manifest.get("description"),
+            canonical["short_description"],
+        )
+        _expect(
+            errors,
+            "plugins/mergetrain/.codex-plugin/plugin.json",
+            "keywords",
+            codex_manifest.get("keywords"),
+            canonical["catalog_tags"],
+        )
+        codex_interface = codex_manifest.get("interface", {})
+        _expect(
+            errors,
+            "plugins/mergetrain/.codex-plugin/plugin.json",
+            "interface.shortDescription",
+            codex_interface.get("shortDescription"),
+            canonical["headline"],
+        )
+        _expect(
+            errors,
+            "plugins/mergetrain/.codex-plugin/plugin.json",
+            "interface.longDescription",
+            codex_interface.get("longDescription"),
+            canonical["qualified_description"],
+        )
+        _expect(
+            errors,
+            "plugins/mergetrain/.codex-plugin/plugin.json",
+            "interface.defaultPrompt",
+            codex_interface.get("defaultPrompt"),
+            canonical["codex_default_prompts"],
+        )
+        codex_mcp = _load_json(codex_root / ".mcp.json")
+        _expect(
+            errors,
+            "plugins/mergetrain/.mcp.json",
+            "mcpServers.mergetrain.description",
+            codex_mcp.get("mcpServers", {}).get("mergetrain", {}).get("description"),
+            canonical["mcp_description"],
+        )
+
         skill = _frontmatter(
             root / "integrations/claude/plugin/skills/mergetrain/SKILL.md"
         )
@@ -236,6 +303,17 @@ def check_discovery_metadata(root: Path = ROOT) -> list[str]:
             "skills/mergetrain/SKILL.md",
             "description",
             agy_skill.get("description"),
+            canonical["skill_description"],
+        )
+
+        codex_skill = _frontmatter(
+            root / "plugins/mergetrain/skills/mergetrain/SKILL.md"
+        )
+        _expect(
+            errors,
+            "plugins/mergetrain/skills/mergetrain/SKILL.md",
+            "description",
+            codex_skill.get("description"),
             canonical["skill_description"],
         )
 

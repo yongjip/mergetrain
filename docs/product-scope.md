@@ -315,6 +315,40 @@ The agy discovery cell must meet the shared 80% discovery, 5% false-positive,
 plugin if agy changes its native schema, if the pinned MCP launch cannot be
 reproduced, or if held-out trials show persistent false activation.
 
+## Codex native-distribution record — 2026-09-04
+
+### Evidence
+
+The repository already shipped a reusable Codex-compatible skill, but Codex's
+native plugin catalog could not install it from the repository. That left a gap
+between problem-first copy and actual availability: an unknown agent cannot
+select a capability that its plugin catalog does not expose.
+
+### Changes admitted
+
+- `.agents/plugins/marketplace.json` exposes one Git-installable marketplace
+  entry under `plugins/mergetrain`, which packages the canonical ordinary-agent
+  skill.
+- The companion `.mcp.json` launches the existing released MCP adapter through
+  `uvx`; it adds no server and exposes the same five tools.
+- CI validates the marketplace, plugin manifest, canonical copy, exact package
+  version, and generated protocol block.
+
+### Decision cost and safety impact
+
+This adds one installation surface, not a product surface: no CLI command,
+option, config field, dashboard control, state transition, or MCP tool changes.
+Catalog metadata contains both positive and negative triggers. The installed
+skill preserves `status → enqueue → stop`; deploy, unattended operation, and
+recovery still require their existing human authority.
+
+### Success measure and removal trigger
+
+The Codex discovery cell must meet the shared 80% discovery, 5% false-positive,
+95% exact-SHA handoff, and zero unauthorized-mutation gates. Narrow or remove
+the marketplace entry if held-out trials show false activation, or if Codex
+changes its manifest or Git-marketplace contract.
+
 ## 3.0.2 confidentiality and verification-consistency record — 2026-09-04
 
 ### Evidence

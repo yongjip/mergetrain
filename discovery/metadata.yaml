@@ -55,6 +55,11 @@ catalog_tags:
   - parallel-agents
   - push-recovery
 
+codex_default_prompts:
+  - Queue my committed agent branches in order, then stop before deployment.
+  - How should I test parallel worktree branches together before one approved push?
+  - Help me recover safely after an interrupted integration push.
+
 github_about:
   description: >-
     Queue committed branches from parallel coding-agent worktrees, test them

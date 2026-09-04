@@ -22,6 +22,7 @@ SURFACES = (
     ROOT / "llms-full.txt",
     ROOT / "integrations/claude/plugin/skills/mergetrain/SKILL.md",
     ROOT / "skills/mergetrain/SKILL.md",
+    ROOT / "plugins/mergetrain/skills/mergetrain/SKILL.md",
 )
 CORE_COMMANDS = ("init", "status", "enqueue", "validate", "deploy", "inspect")
 GRAMMAR_SURFACES = (
@@ -35,6 +36,7 @@ GRAMMAR_SURFACES = (
     ROOT / "integrations/claude/plugin/skills/deploy/SKILL.md",
     ROOT / "integrations/claude/plugin/skills/mergetrain/SKILL.md",
     ROOT / "skills/mergetrain/SKILL.md",
+    ROOT / "plugins/mergetrain/skills/mergetrain/SKILL.md",
     ROOT / "scripts/mt-status.sh",
     ROOT / "scripts/mt-validate.sh",
     ROOT / "scripts/mt-deploy.sh",

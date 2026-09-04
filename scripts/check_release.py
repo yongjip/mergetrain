@@ -257,6 +257,36 @@ def check_release(*, tag: str = "") -> list[str]:
                 f"uvx --from mergetrain[mcp]=={project_version} mergetrain mcp"
             )
 
+    codex_root = ROOT / "plugins/mergetrain"
+    try:
+        codex_manifest = json.loads(
+            (codex_root / ".codex-plugin/plugin.json").read_text(encoding="utf-8")
+        )
+        codex_mcp = json.loads((codex_root / ".mcp.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"Codex plugin metadata is missing or invalid JSON: {exc}")
+        return errors
+
+    if codex_manifest.get("version") != project_version:
+        errors.append("Codex plugin version must match the release version")
+    codex_servers = (
+        codex_mcp.get("mcpServers") if isinstance(codex_mcp, dict) else None
+    )
+    if not isinstance(codex_servers, dict) or set(codex_servers) != {"mergetrain"}:
+        errors.append("Codex .mcp.json must contain exactly one mergetrain server")
+    else:
+        codex_server = codex_servers["mergetrain"]
+        if codex_server.get("command") != "uvx" or codex_server.get("args") != [
+            "--from",
+            f"mergetrain[mcp]=={project_version}",
+            "mergetrain",
+            "mcp",
+        ]:
+            errors.append(
+                "Codex .mcp.json must launch the exact release with "
+                f"uvx --from mergetrain[mcp]=={project_version} mergetrain mcp"
+            )
+
     return errors
 
 

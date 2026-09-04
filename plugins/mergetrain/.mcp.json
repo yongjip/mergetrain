@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "mergetrain": {
+      "title": "mergetrain",
+      "description": "Queue parallel-agent worktree branches, test together, serialize and recover Git pushes.",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mergetrain[mcp]==3.0.2",
+        "mergetrain",
+        "mcp"
+      ]
+    }
+  }
+}

@@ -145,6 +145,8 @@ include = [
   "/.github/workflows",
   "/.github/release-allowed-signers",
   "/.claude-plugin",
+  "/.agents/plugins",
+  "/plugins/mergetrain",
   "/.mergetrain.yaml",
   "/README.md",
   "/LICENSE",

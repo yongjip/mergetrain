@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a Git-installable Codex marketplace and native plugin that package the
+  problem-first skill with the existing five-tool, release-pinned MCP server.
+  Keep its descriptions and starter prompts bound to the canonical discovery
+  metadata without changing product commands or authority boundaries.
+
 ## 3.0.2 - 2026-09-04
 
 - Bound the problem-first MCP Registry description to the registry's
