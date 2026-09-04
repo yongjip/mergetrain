@@ -197,9 +197,10 @@ not accidental complexity.
 An owner-provided runtime exercise for issue #212 loaded the plugin without a
 global `mergetrain` installation, listed all five MCP tools, enqueued two
 branches in order with exact commits, ran real gates, produced zero pushes after
-a declined deploy, and pushed after human acceptance. The exercise did not run
-the four login-dependent interactive Claude Code behavior cells, so it is
-runtime evidence rather than a completed adoption score.
+a declined deploy, and pushed after human acceptance. The owner later clarified
+that this accepted pilot ran from a Claude Code session; the reported login
+failure applied to an additional nested/fresh session. The completed pilot is
+owner-operated evidence, not a benchmark-rate or external-user adoption claim.
 
 The exercise found four presentation inconsistencies: missing MCP description
 and version metadata, generic agent text that named the CLI-only optional

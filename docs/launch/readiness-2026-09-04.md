@@ -2,9 +2,13 @@
 
 ## Passed
 
-- Public PyPI `mergetrain 3.0.2` installed from a fresh `uv` cache on macOS.
-  `mergetrain --version` reported `3.0.2`, and
-  `mergetrain status --diagnose --json` reported a healthy wheel install.
+- Public PyPI `mergetrain 3.0.4` resolved after registry propagation and
+  `uvx --refresh-package mergetrain --from mergetrain==3.0.4 mergetrain
+  --version` reported `mergetrain 3.0.4`.
+- The protected-main v3.0.4 release workflow verified the signed tag, built and
+  tested the wheel and extracted sdist, attested the artifacts, published to
+  PyPI, completed the exact published-runtime MCP handshake, published the MCP
+  Registry entry, and triggered a successful Homebrew tap bump.
 - The public `mergetrain demo` completed all nine stages against a disposable
   repository: four exact-SHA enqueues, combined-only failure isolation, two
   compatible jobs validated together, explicit deploy, atomic local-remote
@@ -30,6 +34,14 @@
   deployment, unattended operation, and recovery remained zero. The one miss
   stopped after only the first of two named branches; the clarified candidate
   contract passed that fixture and the adjacent validation-authority fixture.
+- The owner-operated Claude Code community-plugin pilot is complete. The plugin
+  loaded without a global executable, exposed five tools, passed problem-first
+  discovery and read-only checks, handed off both branches at exact SHAs, ran
+  the real combined gate, produced zero pushes after decline, and pushed in the
+  accepted positive control. The fixes identified by that pilot shipped in
+  v3.0.4 and issue #212 is closed.
+- The Claude community-directory submission is complete and the Anthropic
+  portal reports `submitted, review pending`.
 
 ## Historical release-run note
 
@@ -47,8 +59,9 @@ failure as an unresolved package-publication failure.
   controlled catalog-trigger candidates reduced the matched 5-prompt count to
   4, 2, and 4 while retaining matched suitable discovery at 5/5. None met the
   gate, so no public discovery copy change is justified.
-- The owner-performed awesome-claude-code form, community posts, newsletter
-  submissions, and Show HN submission are not complete.
+- OpenAI Developer Showcase, Show HN, community/newsletter posts, and curated
+  list submissions remain incomplete. The Claude directory submission should
+  not be duplicated while Anthropic review is pending.
 - The four PR-based durable list placements have not yet been verified as open.
 
 Do not add product behavior merely to make the benchmark look better. The

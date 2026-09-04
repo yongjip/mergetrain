@@ -43,9 +43,14 @@ forge-native pull-request merge queue.
 
 The public submission form adds reviewed third-party plugins to
 `claude-community`, not to the separately curated
-`claude-plugins-official` marketplace. The source is the repository subdirectory
-`integrations/claude/plugin` at the submitted commit. Run strict validation and
-test the release-pinned MCP server immediately before submission.
+`claude-plugins-official` marketplace. The form records a repository URL and
+optional subdirectory; it has no separate version or commit field. Keep the
+default branch's release pins current, run strict validation, and test the
+release-pinned MCP server immediately before submission or review follow-up.
+
+Current status (2026-09-04): submitted; Anthropic review pending. Do not create
+a duplicate submission. Respond through the existing submission if Anthropic
+requests changes.
 
 - Plugin name: `mergetrain`
 - Display name: `mergetrain`

@@ -6,7 +6,7 @@ Evidence type: owner-operated diagnostic pilot, not a benchmark-rate claim
 
 Tracking issue: [#212](https://github.com/yongjip/mergetrain/issues/212)
 
-This pilot has two halves with different evidentiary weight:
+This record contains three evidence layers with different evidentiary weight:
 
 1. **Tool contract** — a scripted MCP client drove the submitted plugin's five
    tools without a separately installed global executable. This is direct
@@ -16,6 +16,11 @@ This pilot has two halves with different evidentiary weight:
    instructions and tools, but not evidence that native Claude Code loads the
    plugin, surfaces its skills, honours `disable-model-invocation`, or resolves
    `/mergetrain:deploy`.
+3. **Owner-confirmed native acceptance** — the owner later clarified that the
+   reported plugin check itself ran from a Claude Code session. The failed
+   authentication applied to an additional nested/fresh session, not to the
+   owner-operated acceptance run. This closes issue #212 without converting a
+   single owner-operated pilot into a benchmark-rate claim.
 
 Raw transcripts and machine-local paths remain local.
 
@@ -133,14 +138,30 @@ It:
 No new command, MCP argument, deployment authority, or compatibility alias is
 added.
 
-## Not covered
+## Native acceptance closure
 
-The authenticated native Claude Code session remains the closing condition for
-#212. It must still verify native skill loading and listing,
-`disable-model-invocation`, `/mergetrain:deploy`, the real permission prompts,
-problem-first and negative discovery, read-only mutation count, ordered
-handoff, and declined deploy behaviour.
+The owner clarified in the
+[#212 correction](https://github.com/yongjip/mergetrain/issues/212#issuecomment-5541465949)
+that the accepted pilot was performed from a Claude Code session. The following
+acceptance evidence is therefore recorded separately from the simulated
+subagent section above:
 
-Additional useful negative cells are log-detail redaction and an accepted
-elicitation response whose confirmation checkbox remains false. None of these
-unexecuted cells are counted as passed.
+| Check | Outcome |
+| --- | --- |
+| Plugin discovery and loading | Pass — the plugin appeared without a global `mergetrain` install and exposed all five tools |
+| Problem-first discovery | Pass — Claude Code selected mergetrain for the integration problem |
+| Read-only boundary | Pass — zero queue mutations and zero pushes |
+| Ordered handoff | Pass — both branches were enqueued in order at their exact SHAs and execution stopped before validation |
+| Combined validation control | Pass — the real combined gate ran |
+| Declined deploy | Pass — zero pushes |
+| Accepted deploy control | Pass — the expected push completed |
+
+The simulation and bridge caveats remain part of the methodological record, but
+they do not invalidate or create another owner action for the native acceptance
+run. The implementation follow-ups shipped in
+[v3.0.4](https://github.com/yongjip/mergetrain/releases/tag/v3.0.4), and #212
+closed with all acceptance criteria complete.
+
+Log-detail redaction and an elicitation response carrying `confirm: false`
+remain useful optional negative cells. They are not claimed as completed here
+and are not release blockers.
