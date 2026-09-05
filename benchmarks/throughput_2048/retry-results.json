@@ -1154,6 +1154,14 @@
     "pre-dispatch timestamps include unseparated scheduling/prompt overhead",
     "recorded command count is not minimum commands or human interventions",
     "no token/account cost data",
-    "no runtime/product edits"
+    "no runtime/product edits",
+    "Five additional version/help outputs were preserved without timed command records; command counts are recorded subsets."
+  ],
+  "uninstrumented_discovery_logs": [
+    "train-deploy-help-1788616719850897000.log",
+    "train-enqueue-help-1788616719833426000.log",
+    "train-retry-help-1788616719795341000.log",
+    "train-validate-help-1788616719871514000.log",
+    "train-version-1788616719813667000.log"
   ]
 }
