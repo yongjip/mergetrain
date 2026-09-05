@@ -5,13 +5,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import random
 import signal
 import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
