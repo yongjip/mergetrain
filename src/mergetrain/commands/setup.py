@@ -24,6 +24,17 @@ def render_agent_contract() -> str:
 
 Purpose: Serialize committed local task branches through one merge/test/push/verify runner.
 
+## Existing queues and explanations
+
+- Existing mergetrain repositories keep status → enqueue → stop even for one branch. Queue counts alone do not establish health, runner ownership, or recovery needs; read `health`, `state`, and `next_action` together.
+- For explanation-only requests, read the skill documentation when permitted and explain the procedure without Git or product commands. Distinguish hypothetical steps from observed state.
+
+## Current command reference
+
+- The v3 core commands are `init`, `status`, `enqueue`, `validate`, `deploy`, and `inspect`.
+- Start with `mergetrain status --json`. Use `mergetrain status --diagnose --json` only for configuration, Git, runtime, or lock detail, and `mergetrain inspect JOB_ID --json` for job evidence. `doctor` is removed, not an alias for `status --diagnose`.
+- Confirm uncertain syntax with the installed `mergetrain --version` and command-specific `--help` only when command execution is permitted. Otherwise use this reference and identify missing details; do not invent commands or copy older syntax from unversioned web results. Inspection and `next_action` do not authorize recovery or deployment.
+
 ## Rules
 
 {rules}

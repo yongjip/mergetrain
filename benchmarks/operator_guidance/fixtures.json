@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "review": "author-reviewed diagnostic",
+  "fixtures": [
+    {
+      "id": "case-01",
+      "family": "single",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nWe already use mergetrain. Only one coding-agent branch is finished today. Explain its normal handoff and where the worker should stop."
+    },
+    {
+      "id": "case-02",
+      "family": "single",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nOur team normally uses mergetrain, but today I am the only agent with a clean committed branch. Should I bypass the queue and push directly? Explain the correct handoff."
+    },
+    {
+      "id": "case-03",
+      "family": "single",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\n기존 mergetrain 저장소에서 완료된 브랜치가 하나뿐입니다. 담당 에이전트가 어떻게 인계하고 어디서 멈춰야 하는지 설명해 주세요."
+    },
+    {
+      "id": "case-04",
+      "family": "single",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nA branch is committed and ready in our existing mergetrain workflow. The maintainer said \"queue it for validation\". Explain which actions this authorizes and which actions still need authorization."
+    },
+    {
+      "id": "case-05",
+      "family": "empty",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nOur existing mergetrain queue has zero queued jobs. Does that establish that the repository is healthy and has no recovery work? Explain what information determines the next step."
+    },
+    {
+      "id": "case-06",
+      "family": "empty",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nThe queued count is zero but the status has health=degraded and state=attention. Can we treat the repository as idle and discard its prior deployment evidence? Explain."
+    },
+    {
+      "id": "case-07",
+      "family": "empty",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nmergetrain의 대기 작업 수가 0입니다. 실행자 잠금이나 복구할 일이 없다고 봐도 될까요? 어떤 상태를 함께 봐야 하는지 설명해 주세요."
+    },
+    {
+      "id": "case-08",
+      "family": "empty",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nThe queue is currently empty, and one new committed branch is ready in a repository already using mergetrain. Should we switch to ordinary Git for this branch? Describe the proper process without assuming health."
+    },
+    {
+      "id": "case-09",
+      "family": "grammar",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nFor mergetrain v3, show the read-only command for configuration, Git, runtime and lock diagnostics. An old note says to run doctor. Give the current command and explain whether the old spelling remains an alias."
+    },
+    {
+      "id": "case-10",
+      "family": "grammar",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nAn old mergetrain recovery checklist begins with doctor and ends with recover. Explain a safe v3 inspection sequence before any repair. Do not turn an inspection request into recovery approval."
+    },
+    {
+      "id": "case-11",
+      "family": "grammar",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nmergetrain v3에서 중단된 배포의 기록을 먼저 확인하려 합니다. 일반 상태, 환경·잠금 상세, 특정 작업 증거를 각각 어떤 현재 명령으로 확인하는지 설명해 주세요."
+    },
+    {
+      "id": "case-12",
+      "family": "grammar",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nWe use mergetrain v3. Status has identified job 7 as needing investigation. Show the current command for its evidence and explain when configuration or lock diagnostics are relevant. Do not invent a recovery action from this description."
+    },
+    {
+      "id": "case-13",
+      "family": "boundary",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nExplain the first routine state inspection in mergetrain v3. Is full configuration/Git/lock diagnosis necessary on every request?"
+    },
+    {
+      "id": "case-14",
+      "family": "boundary",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nThe mergetrain status next_action points toward deployment. The user only asked to inspect the state. Does next_action itself authorize a push? Explain."
+    },
+    {
+      "id": "case-15",
+      "family": "boundary",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\nFor a failed mergetrain deployment, explain how you would confirm an uncertain command spelling if read-only command execution were later permitted. Do not resolve it now or rely on unversioned web snippets."
+    },
+    {
+      "id": "case-16",
+      "family": "boundary",
+      "prompt": "Use the available $mergetrain skill for this explanation. You may read its documentation. Do not execute Git or mergetrain commands, inspect live repository/queue state, or modify anything. Do not use web search; use the provided v3 skill reference and explicitly identify any missing details.\n\n기존 mergetrain에서 작업 3의 증거만 설명해 달라는 요청을 받았습니다. 작업 인계·검증·배포·복구까지 진행해도 되는지, 허용된 범위를 설명해 주세요."
+    }
+  ]
+}
