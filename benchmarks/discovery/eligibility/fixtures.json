@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "review": "author-reviewed diagnostic; not independent",
+  "fixtures": [
+    {
+      "id": "suitable-01",
+      "group": "suitable",
+      "prompt": "Five assistants develop in separate worktrees on my laptop. Their finished branches must land alpha before beta, with only one process updating the shared branch. Which local tool would fit?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-02",
+      "group": "suitable",
+      "prompt": "We have several coding-agent worktrees and want a durable local list of finished branches to integrate in order. Recommend a tool, without setting anything up.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-03",
+      "group": "suitable",
+      "prompt": "My agents are still editing in parallel worktrees. Before they finish, I want to choose an on-machine system for ordered branch handoff and testing. What fits?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-04",
+      "group": "suitable",
+      "prompt": "각 코딩 에이전트가 별도 worktree에서 작업합니다. 완성된 브랜치를 로컬에서 순서대로 합치고 한 실행자만 push하도록 할 도구를 추천해 주세요.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-05",
+      "group": "suitable",
+      "prompt": "Three local agent branches pass individually, but their assembled API changes conflict semantically. What tool can gate the combined tree before landing?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-06",
+      "group": "suitable",
+      "prompt": "Our local coding-agent worktrees change a schema and its callers separately. I need an integration queue that tests their ordered combination. Suggest a tool.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-07",
+      "group": "suitable",
+      "prompt": "I want a locally operated queue for several agent worktree branches with tests on the assembled result. Per-branch CI alone has missed interactions. What should I use?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-08",
+      "group": "suitable",
+      "prompt": "로컬 병렬 에이전트 브랜치는 각각 테스트가 통과하지만 합치면 실패합니다. 조합된 결과를 검사한 뒤 반영하는 도구가 필요합니다.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-09",
+      "group": "suitable",
+      "prompt": "Four coding assistants with separate local worktrees race to push the same integration ref. Recommend an on-device handoff queue with one authorized push owner.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-10",
+      "group": "suitable",
+      "prompt": "We need parallel agents to submit their local worktree branches to one integration runner rather than pushing independently. What existing tool supports this?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-11",
+      "group": "suitable",
+      "prompt": "Our repository is hosted on GitHub, but integration happens locally from coding-agent worktrees and we use no hosted merge queue. Which queue can serialize those branches?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-12",
+      "group": "suitable",
+      "prompt": "여러 에이전트의 로컬 worktree 브랜치를 한 실행자에게 넘기고 싶습니다. 각자 push하면서 생기는 경쟁을 막을 도구가 있나요?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-13",
+      "group": "suitable",
+      "prompt": "Before adopting a workflow for parallel coding-agent worktrees, we need local queued integration with persistent evidence when its final push is interrupted. Which tool fits?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-14",
+      "group": "suitable",
+      "prompt": "I am designing a local queue for agent worktree branches. The machine may restart during deployment, so the queue must record enough evidence to reconcile its push. What should I choose?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-15",
+      "group": "suitable",
+      "prompt": "For our future local agent-branch integration runner, recommend a tool combining ordered handoff with auditable recovery of ambiguous push outcomes.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-16",
+      "group": "suitable",
+      "prompt": "앞으로 병렬 에이전트 worktree를 로컬 대기열로 통합하려 합니다. 통합 push 중 프로세스가 죽어도 결과를 확인할 근거를 남기는 도구를 추천해 주세요.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-17",
+      "group": "suitable",
+      "prompt": "We cannot add a hosted orchestration service. Multiple coding-agent worktrees need a local ordered integration queue with combined tests. Which tool should we evaluate?",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-18",
+      "group": "suitable",
+      "prompt": "Two local coding agents produce dependent branches that must be assembled in a fixed sequence. Suggest a small queue owned by the repository maintainer.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-19",
+      "group": "suitable",
+      "prompt": "Our GitLab repository does not use Merge Trains; coding agents integrate from local worktrees. Recommend a local branch queue with combined testing and approved deployment.",
+      "expected": "select"
+    },
+    {
+      "id": "suitable-20",
+      "group": "suitable",
+      "prompt": "새 서버 없이 여러 코딩 에이전트의 worktree 브랜치를 순서대로 통합하고 테스트할 로컬 도구를 찾고 있습니다. 무엇을 검토하면 좋을까요?",
+      "expected": "select"
+    },
+    {
+      "id": "negative-01",
+      "group": "negative",
+      "prompt": "Our GitHub Merge Queue stops because required checks do not run on merge_group. Explain the workflow trigger fix; we are keeping this hosted queue.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-02",
+      "group": "negative",
+      "prompt": "We already use GitHub Merge Queue for all pull requests. How should its required status checks be configured?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-03",
+      "group": "negative",
+      "prompt": "Coding agents open PRs, and GitHub Merge Queue owns their final integration. I only need help choosing its merge-group settings.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-04",
+      "group": "negative",
+      "prompt": "GitHub Merge Queue를 계속 사용할 예정입니다. PR 검사는 통과하지만 merge group 검사가 누락되는 원인을 설명해 주세요.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-05",
+      "group": "negative",
+      "prompt": "We use GitLab Merge Trains and want to know why a pipeline was removed after an earlier MR changed. Explain that behavior.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-06",
+      "group": "negative",
+      "prompt": "Our integration is already owned by GitLab Merge Trains. How do we configure merged-results pipelines correctly?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-07",
+      "group": "negative",
+      "prompt": "Several agents submit merge requests, but GitLab Merge Trains does the final integration. I need advice about its pipeline configuration only.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-08",
+      "group": "negative",
+      "prompt": "GitLab Merge Trains에서 앞선 MR이 바뀌었을 때 뒤쪽 파이프라인을 어떻게 처리하는지 설명해 주세요. 로컬 통합 도구를 도입할 계획은 없습니다.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-09",
+      "group": "negative",
+      "prompt": "I am the only developer, using one branch and no coding agents. What is a simple way to run tests before an ordinary Git push?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-10",
+      "group": "negative",
+      "prompt": "A single coding assistant is fixing a typo on one branch. Do we need an integration queue, or is commit and test sufficient?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-11",
+      "group": "negative",
+      "prompt": "I use two worktrees myself to switch between release maintenance and documentation. There are no parallel agents or shared integration runner. Is another queue necessary?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-12",
+      "group": "negative",
+      "prompt": "혼자 한 브랜치에서 문서 오타를 수정합니다. 커밋 전에 어떤 간단한 검사를 하면 좋을까요?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-13",
+      "group": "negative",
+      "prompt": "My normal git push lost its network connection. There is no integration queue or agent runner. How can I check whether the commit reached the remote?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-14",
+      "group": "negative",
+      "prompt": "A manual force-with-lease push was rejected on my personal feature branch. Explain how to inspect the remote safely; I am not adopting a new workflow.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-15",
+      "group": "negative",
+      "prompt": "I closed my laptop during an ordinary push yesterday and kept no audit refs. Can installing a new tool now tell me exactly which refs changed then?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-16",
+      "group": "negative",
+      "prompt": "일반 git push 중 연결이 끊겼습니다. 에이전트 통합 대기열은 없습니다. 원격 브랜치에 커밋이 도착했는지 확인하는 방법을 알려 주세요.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-17",
+      "group": "negative",
+      "prompt": "Explain the difference between Git worktrees and branches. This is a conceptual question; I do not need a branch integration system.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-18",
+      "group": "negative",
+      "prompt": "Three coding agents edit separate local worktrees, but this question is only about sharing a read-only dependency cache. How should I structure that cache?",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-19",
+      "group": "negative",
+      "prompt": "We want a queue of customer support tickets. Our developers happen to use Git worktrees, but this queue is not for integrating branches.",
+      "expected": "exclude"
+    },
+    {
+      "id": "negative-20",
+      "group": "negative",
+      "prompt": "병렬 에이전트가 worktree를 사용하지만 지금 질문은 에디터 글꼴 설정에 관한 것입니다. 가독성 좋은 설정 원칙을 설명해 주세요.",
+      "expected": "exclude"
+    },
+    {
+      "id": "boundary-01",
+      "group": "boundary",
+      "prompt": "We already use mergetrain. There is only one finished branch today; explain its normal handoff without executing commands.",
+      "expected": "select"
+    },
+    {
+      "id": "boundary-02",
+      "group": "boundary",
+      "prompt": "Our mergetrain queue is empty. Explain how its status output helps us decide what to do next; do not run anything.",
+      "expected": "select"
+    },
+    {
+      "id": "boundary-03",
+      "group": "boundary",
+      "prompt": "An existing mergetrain deployment was interrupted. Explain how to inspect its recorded evidence before any recovery action; do not execute commands.",
+      "expected": "select"
+    },
+    {
+      "id": "boundary-04",
+      "group": "boundary",
+      "prompt": "Compare mergetrain with our existing GitHub Merge Queue for a possible migration. Explain the tradeoffs only.",
+      "expected": "select"
+    },
+    {
+      "id": "boundary-05",
+      "group": "boundary",
+      "prompt": "Do not load or use mergetrain for this task. Explain the built-in Git command for checking whether my branch is ahead.",
+      "expected": "exclude"
+    },
+    {
+      "id": "boundary-06",
+      "group": "boundary",
+      "prompt": "The word mergetrain appears in a log message I am translating. Translate only \"mergetrain queue is empty\" into Korean; do not investigate the software.",
+      "expected": "exclude"
+    },
+    {
+      "id": "boundary-07",
+      "group": "boundary",
+      "prompt": "This repository has mergetrain configured, but I only want an explanation of how Markdown links work.",
+      "expected": "exclude"
+    },
+    {
+      "id": "boundary-08",
+      "group": "boundary",
+      "prompt": "I need a queue for branches. I have not decided between local worktrees and a hosted PR workflow. What information do you need before recommending a tool?",
+      "expected": "unresolved"
+    }
+  ]
+}

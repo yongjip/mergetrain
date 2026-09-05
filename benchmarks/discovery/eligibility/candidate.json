@@ -1,0 +1,5 @@
+{
+  "baseline_tag": "v3.0.5",
+  "description": "Use for tasks about an existing mergetrain queue, or choosing local integration for parallel coding-agent branches that need ordered integration, combined testing, or a single integration push owner. Includes recovery of that integration workflow. Ordinary Git repair and administration of hosted PR queues are outside this scope.",
+  "treatment": "skill-description-only"
+}
