@@ -97,7 +97,7 @@ def main() -> None:
     config = json.loads(args.config_overrides.read_text())
     fixtures = json.loads((HERE / 'fixtures.json').read_text())['fixtures']
     arms = {
-        'baseline': (ROOT / 'plugins/mergetrain/skills/mergetrain/SKILL.md').read_text(),
+        'baseline': (HERE / 'baseline-skill.md').read_text(),
         'candidate': (HERE / 'candidate-skill.md').read_text(),
     }
     frozen = {
