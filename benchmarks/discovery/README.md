@@ -35,6 +35,11 @@ Diagnostic pilot notes live under [`pilots/`](pilots/). They are evidence about
 the harness and observed failure modes, not benchmark-rate claims unless a full
 20-fixture cell is complete.
 
+The [2026-09-05 eligibility diagnostic](pilots/2026-09-05-eligibility-logic-and-test.md)
+records a frozen logical model and paired local-skill experiment. Its new
+fixtures, runtime exclusions, and boundary reviews are separate from this
+benchmark's independently reviewed corpus and admission scores.
+
 ## Corpus
 
 [`fixtures.json`](fixtures.json) contains five prompt families per class and
