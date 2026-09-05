@@ -41,9 +41,16 @@ queue database, or rewrite `refs/mergetrain/deploys/*`.
 ## State-guided detail
 
 Routine instructions intentionally omit retry, supersede, reuse, daemon, Hub,
-and recovery procedures. When one becomes relevant, `status` returns its exact
-command and approval class. Use `inspect JOB_ID --json` for evidence about one
-job.
+and recovery procedures. Read `status` for the current next step and approval
+class; a blocked job can first direct you to `inspect JOB_ID --json` for its
+evidence. Use the applicable repair procedure after inspecting that evidence.
+
+For a blocked/failed task, inspect its evidence, fix the owning branch, commit
+a clean result, and use `mergetrain retry JOB_ID` to capture the new HEAD and
+replace the old outcome atomically. Re-enqueueing the same active branch is
+rejected. Retry does not apply to queued/in-progress work and does not grant
+new validation or deployment authority; follow status after the replacement.
+A successful retry means the replacement is queued, not integrated or deployed.
 
 The default daemon deploys only jobs explicitly enqueued with `--auto`.
 `daemon --validate-only` handles manual jobs but never pushes. A destination,

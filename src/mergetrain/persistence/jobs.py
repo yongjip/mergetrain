@@ -74,10 +74,11 @@ def enqueue_job(
     with immediate(conn):
         if not allow_duplicate and _active_branch_count(conn, branch):
             raise DuplicateActiveBranch(
-                f"branch '{branch}' already has an active job. If a job on it is "
-                "blocked/failed, dismiss it first (mergetrain dismiss <id>, "
-                "non-destructive) then enqueue the fix, or re-enqueue with "
-                "--allow-duplicate."
+                f"branch '{branch}' already has an active job. "
+                "Read mergetrain status --json. For a blocked/failed job, "
+                "fix its owning branch, commit a clean result, then run "
+                "mergetrain retry <job-id>. Queued or in-progress jobs "
+                "cannot be retried."
             )
         now = utc_now()
         cur = conn.execute(

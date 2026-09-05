@@ -24,7 +24,9 @@ worktrees.
    verify only `--auto` jobs; `daemon --validate-only` handles manual jobs but
    stops at a validated train and never deploys.
 7. Fix blocked or failed work in the owning branch, commit a clean result, then
-   enqueue a new job.
+   run `mergetrain retry <job-id>` to replace that outcome with a freshly pinned
+   job. Do not enqueue the same active branch again. Retry is for blocked/failed
+   jobs only and does not itself authorize validation or deployment.
 8. Do not delete or rewrite remote `refs/mergetrain/deploys/*`; they are
    permanent recovery evidence.
 9. Treat public product surface as an owner-evidence budget. Before
