@@ -1,0 +1,1057 @@
+{
+  "schema_version": 1,
+  "scope": "Single observational pilot; asymmetric orchestration; not causal latency estimate",
+  "timing": {
+    "source_commit": "cb830da",
+    "acceptance_sha256": "0f33a9315813bcf65ba65c649dc510b71453505a6ff89a466aa7f21cc2f855bf",
+    "sequential_dispatched_at": "2026-09-05T13:07:18.418959+00:00",
+    "sequential_observed_complete_at": "2026-09-05T13:14:05.086867+00:00",
+    "sequential_head": "357127f",
+    "parallel_setup_ready_at": "2026-09-05T13:14:05.086981+00:00",
+    "parallel_dispatch_recorded_at": "2026-09-05T13:18:37.438333+00:00",
+    "parallel_dispatch_note": "First three workers dispatched immediately before this timestamp; setup-ready timestamp predates context compaction and is not coding start.",
+    "parallel_storage_dispatch_recorded_at": "2026-09-05T13:21:19.923979+00:00",
+    "parallel_completed_first_wave": {
+      "undo": "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+      "moves": "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+      "analysis": "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a"
+    },
+    "parallel_observed_complete_at": "2026-09-05T13:24:37.465862+00:00",
+    "integration_replays_ready_at": "2026-09-05T13:24:37.466057+00:00",
+    "manual_dispatch_recorded_at": "2026-09-05T13:25:18.944098+00:00",
+    "train_started_at": "2026-09-05T13:25:18.944200+00:00",
+    "train_final_deploy_sha": "d6cffc6963299a94cf1fc8bb3146df980fc2e2b1",
+    "train_deploy_observed_complete_at": "2026-09-05T13:30:38.984535+00:00",
+    "manual_started_at_agent": "2026-09-05T13:25:13+00:00",
+    "manual_finished_at_agent": "2026-09-05T13:27:54+00:00",
+    "manual_final_sha": "4c7e9e0e8afb7a9a3737d5c44db690cc232f13ce",
+    "train_repair_sha": "71d3521d9b6c45726b548fdc0352773d0d637cdb"
+  },
+  "metrics": {
+    "sequential_dispatch_to_all_seconds": 363.567929,
+    "parallel_dispatch_proxy_to_last_feature_commit_seconds": 321.561667,
+    "parallel_dispatch_proxy_to_observed_ready_seconds": 360.027529,
+    "manual_observed_agent_start_to_all_seconds": 129.957897,
+    "manual_observed_agent_start_to_postpush_baseline_seconds": 145.072776,
+    "train_start_to_combined_all_seconds": 292.875961,
+    "train_start_to_deployed_all_seconds": 320.158257,
+    "parallel_dispatch_proxy_to_manual_all_seconds": 525.519564,
+    "parallel_dispatch_proxy_to_train_all_seconds": 694.381828,
+    "parallel_setup_to_dispatch_record_gap_seconds": 272.351352
+  },
+  "commands_summary": {
+    "sequential-": {
+      "recorded_command_count": 9,
+      "recorded_elapsed_sum_seconds": 0.6857263338752091,
+      "failed_labels": []
+    },
+    "parallel-": {
+      "recorded_command_count": 6,
+      "recorded_elapsed_sum_seconds": 0.46456491597928107,
+      "failed_labels": []
+    },
+    "manual-": {
+      "recorded_command_count": 9,
+      "recorded_elapsed_sum_seconds": 0.5941359170246869,
+      "failed_labels": [
+        "manual-merge-moves"
+      ]
+    },
+    "train-": {
+      "recorded_command_count": 32,
+      "recorded_elapsed_sum_seconds": 18.88163654017262,
+      "failed_labels": [
+        "train-validate",
+        "train-partial-strict-all",
+        "train-repair-merge",
+        "train-enqueue-repaired-moves",
+        "train-validate-repaired-pending",
+        "train-suggested-allow-duplicate"
+      ]
+    }
+  },
+  "parallel_shas": {
+    "undo": "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+    "moves": "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+    "analysis": "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a",
+    "storage": "9502c6dcb56b65aee1a8620a8b503f7f68868cc2"
+  },
+  "gate_counts": {
+    "manual_baseline_pre": 1,
+    "manual_baseline_post": 1,
+    "train_baseline_gates": 4,
+    "train_baseline_verify": 2
+  },
+  "selected_evidence": {
+    "train-enqueue-repaired-moves": "mergetrain: error: branch 'codex/moves' already has an active job. If a job on it is blocked/failed, dismiss it first (mergetrain dismiss <id>, non-destructive) then enqueue the fix, or re-enqueue with --allow-duplicate.\n",
+    "train-suggested-allow-duplicate": "mergetrain: v3 removed enqueue option --allow-duplicate; exact SHAs and readiness are always verified\n",
+    "train-validate-repaired-pending": "{\n  \"contract_version\": 4,\n  \"error\": {\n    \"code\": \"validated_train_pending\",\n    \"message\": \"a validated train is already ready; deploy it before validating more work\",\n    \"retryable\": false\n  },\n  \"next_action\": \"deploy_when_approved\",\n  \"ok\": false\n}\n",
+    "train-inspect-blocked": "#2 blocked: codex/moves\nphase: gating \u00b7 success \u00b7 elapsed 0.0s\nheartbeat: none (inactive)\noutcome: failure / merge_conflict\nreason: Auto-merging js/game_manager.js\nCONFLICT (content): Merge conflict in js/game_manager.js\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+    "train-partial-strict-all": "PASS baseline\nPASS undo\nnode:internal/assert/utils:146\n  throw error;\n  ^\n\nAssertionError [ERR_ASSERTION]: moveCount starts at zero\n\nundefined !== 0\n\n    at testMoveCount (/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs:310:10)\n    at Object.runMoves [as moves] (/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs:343:3)\n    at main (/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs:521:19)\n    at Object.<anonymous> (/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs:526:1)\n    at Module._compile (node:internal/modules/cjs/loader:1934:14)\n    at Object..js (node:internal/modules/cjs/loader:2074:10)\n    at Module.load (node:internal/modules/cjs/loader:1656:32)\n    at Module._load (node:internal/modules/cjs/loader:1448:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: undefined,\n  expected: 0,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v26.7.0\n",
+    "train-final-status": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 5,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 5,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T13:30:18Z\"\n    },\n    {\n      \"branch\": \"codex/storage\",\n      \"id\": 4,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"storage\",\n      \"updated_at\": \"2026-09-05T13:29:39Z\"\n    },\n    {\n      \"branch\": \"codex/analysis\",\n      \"id\": 3,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"analysis\",\n      \"updated_at\": \"2026-09-05T13:29:39Z\"\n    },\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 2,\n      \"outcome\": \"canceled\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T13:29:17Z\"\n    },\n    {\n      \"branch\": \"codex/undo\",\n      \"id\": 1,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"undo\",\n      \"updated_at\": \"2026-09-05T13:29:39Z\"\n    }\n  ],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n"
+  },
+  "commands": [
+    {
+      "label": "sequential-baseline",
+      "started_at": "2026-09-05T13:08:26.419498+00:00",
+      "elapsed_seconds": 0.07834583288058639,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "baseline"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-baseline-1788613706419492000.log"
+    },
+    {
+      "label": "sequential-undo",
+      "started_at": "2026-09-05T13:09:56.397766+00:00",
+      "elapsed_seconds": 0.07676508277654648,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-undo-1788613796397753000.log"
+    },
+    {
+      "label": "calibration-baseline",
+      "started_at": "2026-09-05T13:10:23.845059+00:00",
+      "elapsed_seconds": 0.07451058295555413,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-2048-upstream-20260905",
+        "baseline"
+      ],
+      "cwd": "/private/tmp/mt-luna-2048-upstream-20260905",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "calibration-baseline-1788613823845053000.log"
+    },
+    {
+      "label": "sequential-moves",
+      "started_at": "2026-09-05T13:11:25.274200+00:00",
+      "elapsed_seconds": 0.07583283400163054,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-moves-1788613885274194000.log"
+    },
+    {
+      "label": "sequential-moves-cumulative",
+      "started_at": "2026-09-05T13:11:34.453313+00:00",
+      "elapsed_seconds": 0.07545058405958116,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "baseline,undo,moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-moves-cumulative-1788613894453307000.log"
+    },
+    {
+      "label": "sequential-analysis-cumulative",
+      "started_at": "2026-09-05T13:12:19.118013+00:00",
+      "elapsed_seconds": 0.0740167920012027,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "baseline,undo,moves,analysis"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-analysis-cumulative-1788613939118005000.log"
+    },
+    {
+      "label": "sequential-storage-cumulative",
+      "started_at": "2026-09-05T13:13:10.226598+00:00",
+      "elapsed_seconds": 0.07658870797604322,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "baseline,undo,moves,analysis,storage"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-storage-cumulative-1788613990226593000.log"
+    },
+    {
+      "label": "sequential-all",
+      "started_at": "2026-09-05T13:13:21.909692+00:00",
+      "elapsed_seconds": 0.07719612517394125,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-all-1788614001909687000.log"
+    },
+    {
+      "label": "sequential-final",
+      "started_at": "2026-09-05T13:13:31.483591+00:00",
+      "elapsed_seconds": 0.07589974999427795,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-final-1788614011483585000.log"
+    },
+    {
+      "label": "sequential-undo-cumulative",
+      "started_at": "2026-09-05T13:13:34.237203+00:00",
+      "elapsed_seconds": 0.07563062501139939,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/sequential",
+        "baseline,undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/sequential",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "sequential-undo-cumulative-1788614014237196000.log"
+    },
+    {
+      "label": "parallel-analysis-baseline",
+      "started_at": "2026-09-05T13:19:03.019970+00:00",
+      "elapsed_seconds": 0.07666754210367799,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/analysis",
+        "baseline"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/analysis",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parallel-analysis-baseline-1788614343019965000.log"
+    },
+    {
+      "label": "parallel-analysis-check",
+      "started_at": "2026-09-05T13:19:45.970840+00:00",
+      "elapsed_seconds": 0.08158600004389882,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/analysis",
+        "baseline,analysis"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/analysis",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parallel-analysis-check-1788614385970832000.log"
+    },
+    {
+      "label": "parallel-moves-check",
+      "started_at": "2026-09-05T13:19:56.519550+00:00",
+      "elapsed_seconds": 0.0800056669395417,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/moves",
+        "baseline,moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parallel-moves-check-1788614396519543000.log"
+    },
+    {
+      "label": "parallel-undo-check",
+      "started_at": "2026-09-05T13:20:05.594276+00:00",
+      "elapsed_seconds": 0.07729770801961422,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/undo",
+        "baseline,undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/undo",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parallel-undo-check-1788614405594269000.log"
+    },
+    {
+      "label": "parallel-analysis-check-final",
+      "started_at": "2026-09-05T13:20:11.569495+00:00",
+      "elapsed_seconds": 0.0746289158705622,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/analysis",
+        "baseline,analysis"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/analysis",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parallel-analysis-check-final-1788614411569485000.log"
+    },
+    {
+      "label": "parent-parallel-undo",
+      "started_at": "2026-09-05T13:21:20.080872+00:00",
+      "elapsed_seconds": 0.0766911250539124,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/undo",
+        "baseline,undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/undo",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parent-parallel-undo-1788614480080866000.log"
+    },
+    {
+      "label": "parent-parallel-moves",
+      "started_at": "2026-09-05T13:21:20.208462+00:00",
+      "elapsed_seconds": 0.07778641697950661,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/moves",
+        "baseline,moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parent-parallel-moves-1788614480208456000.log"
+    },
+    {
+      "label": "parent-parallel-analysis",
+      "started_at": "2026-09-05T13:21:20.341410+00:00",
+      "elapsed_seconds": 0.07801637495867908,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/analysis",
+        "baseline,analysis"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/analysis",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parent-parallel-analysis-1788614480341405000.log"
+    },
+    {
+      "label": "parallel-storage-check",
+      "started_at": "2026-09-05T13:23:26.536154+00:00",
+      "elapsed_seconds": 0.07437908300198615,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/storage",
+        "baseline,storage"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/storage",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "parallel-storage-check-1788614606536148000.log"
+    },
+    {
+      "label": "train-status",
+      "started_at": "2026-09-05T13:25:18.998918+00:00",
+      "elapsed_seconds": 0.1744132919702679,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-1788614718998910000.log"
+    },
+    {
+      "label": "train-enqueue-undo",
+      "started_at": "2026-09-05T13:25:19.240333+00:00",
+      "elapsed_seconds": 0.2898950830567628,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "undo",
+        "--branch",
+        "codex/undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-enqueue-undo-1788614719240323000.log"
+    },
+    {
+      "label": "train-enqueue-moves",
+      "started_at": "2026-09-05T13:25:19.594313+00:00",
+      "elapsed_seconds": 0.2924182501155883,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "moves",
+        "--branch",
+        "codex/moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-enqueue-moves-1788614719594306000.log"
+    },
+    {
+      "label": "train-enqueue-analysis",
+      "started_at": "2026-09-05T13:25:19.944885+00:00",
+      "elapsed_seconds": 0.23907033307477832,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "analysis",
+        "--branch",
+        "codex/analysis"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-enqueue-analysis-1788614719944879000.log"
+    },
+    {
+      "label": "train-enqueue-storage",
+      "started_at": "2026-09-05T13:25:20.243983+00:00",
+      "elapsed_seconds": 0.2394340408500284,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "storage",
+        "--branch",
+        "codex/storage"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-enqueue-storage-1788614720243976000.log"
+    },
+    {
+      "label": "train-validate",
+      "started_at": "2026-09-05T13:25:20.544002+00:00",
+      "elapsed_seconds": 0.8857332090847194,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "validate",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "train-validate-1788614720543996000.log"
+    },
+    {
+      "label": "train-status-after-validate",
+      "started_at": "2026-09-05T13:25:21.487979+00:00",
+      "elapsed_seconds": 0.18191695818677545,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-after-validate-1788614721487972000.log"
+    },
+    {
+      "label": "train-inspect-blocked",
+      "started_at": "2026-09-05T13:25:35.514664+00:00",
+      "elapsed_seconds": 0.1272330000065267,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "inspect",
+        "2"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-inspect-blocked-1788614735514658000.log"
+    },
+    {
+      "label": "manual-merge-undo",
+      "started_at": "2026-09-05T13:26:13.415468+00:00",
+      "elapsed_seconds": 0.03791970806196332,
+      "command": [
+        "git",
+        "merge",
+        "--no-ff",
+        "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+        "-m",
+        "Merge codex/undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-merge-undo-1788614773415462000.log"
+    },
+    {
+      "label": "manual-merge-moves",
+      "started_at": "2026-09-05T13:26:19.431334+00:00",
+      "elapsed_seconds": 0.03980612498708069,
+      "command": [
+        "git",
+        "merge",
+        "--no-ff",
+        "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+        "-m",
+        "Merge codex/moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "manual-merge-moves-1788614779431328000.log"
+    },
+    {
+      "label": "train-partial-strict-all",
+      "started_at": "2026-09-05T13:26:31.745337+00:00",
+      "elapsed_seconds": 0.07595583307556808,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/train-partial-evidence",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-partial-evidence",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "train-partial-strict-all-1788614791745331000.log"
+    },
+    {
+      "label": "manual-repair-moves",
+      "started_at": "2026-09-05T13:26:52.279313+00:00",
+      "elapsed_seconds": 0.04212216683663428,
+      "command": [
+        "git",
+        "commit",
+        "-m",
+        "Resolve moves merge with undo state"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-repair-moves-1788614812279307000.log"
+    },
+    {
+      "label": "manual-merge-analysis",
+      "started_at": "2026-09-05T13:26:57.681348+00:00",
+      "elapsed_seconds": 0.041444709058851004,
+      "command": [
+        "git",
+        "merge",
+        "--no-ff",
+        "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a",
+        "-m",
+        "Merge codex/analysis"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-merge-analysis-1788614817681343000.log"
+    },
+    {
+      "label": "manual-merge-storage",
+      "started_at": "2026-09-05T13:27:04.032131+00:00",
+      "elapsed_seconds": 0.07799799996428192,
+      "command": [
+        "git",
+        "merge",
+        "--no-ff",
+        "9502c6dcb56b65aee1a8620a8b503f7f68868cc2",
+        "-m",
+        "Merge codex/storage"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-merge-storage-1788614824032125000.log"
+    },
+    {
+      "label": "manual-baseline-prepush",
+      "started_at": "2026-09-05T13:27:16.856974+00:00",
+      "elapsed_seconds": 0.07510058302432299,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/manual",
+        "baseline"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-baseline-prepush-1788614836856967000.log"
+    },
+    {
+      "label": "train-repair-merge",
+      "started_at": "2026-09-05T13:27:19.841585+00:00",
+      "elapsed_seconds": 0.042007625102996826,
+      "command": [
+        "git",
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        "codex/undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "train-repair-merge-1788614839841563000.log"
+    },
+    {
+      "label": "manual-all-prepush",
+      "started_at": "2026-09-05T13:27:22.882632+00:00",
+      "elapsed_seconds": 0.07526462501846254,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/manual",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-all-prepush-1788614842882626000.log"
+    },
+    {
+      "label": "manual-push-head-main",
+      "started_at": "2026-09-05T13:27:31.268509+00:00",
+      "elapsed_seconds": 0.12849625013768673,
+      "command": [
+        "git",
+        "push",
+        "origin",
+        "HEAD:main"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-push-head-main-1788614851268502000.log"
+    },
+    {
+      "label": "manual-baseline-postpush",
+      "started_at": "2026-09-05T13:27:37.996792+00:00",
+      "elapsed_seconds": 0.07598374993540347,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/manual",
+        "baseline"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/manual",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "manual-baseline-postpush-1788614857996785000.log"
+    },
+    {
+      "label": "train-repair-commit",
+      "started_at": "2026-09-05T13:27:58.281600+00:00",
+      "elapsed_seconds": 0.03875537496060133,
+      "command": [
+        "git",
+        "commit",
+        "--no-edit"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-repair-commit-1788614878281587000.log"
+    },
+    {
+      "label": "train-repair-baseline",
+      "started_at": "2026-09-05T13:28:09.601093+00:00",
+      "elapsed_seconds": 0.071761375060305,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+        "baseline"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-repair-baseline-1788614889601087000.log"
+    },
+    {
+      "label": "train-repair-undo",
+      "started_at": "2026-09-05T13:28:09.610742+00:00",
+      "elapsed_seconds": 0.07527599995955825,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+        "undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-repair-undo-1788614889610736000.log"
+    },
+    {
+      "label": "train-repair-moves",
+      "started_at": "2026-09-05T13:28:09.625261+00:00",
+      "elapsed_seconds": 0.07260387483984232,
+      "command": [
+        "node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+        "moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-repair-moves-1788614889625254000.log"
+    },
+    {
+      "label": "train-status-before-reenqueue",
+      "started_at": "2026-09-05T13:28:44.115529+00:00",
+      "elapsed_seconds": 0.18493933300487697,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-before-reenqueue-1788614924115523000.log"
+    },
+    {
+      "label": "train-enqueue-repaired-moves",
+      "started_at": "2026-09-05T13:28:44.354463+00:00",
+      "elapsed_seconds": 0.23744879197329283,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "moves",
+        "--branch",
+        "codex/moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "train-enqueue-repaired-moves-1788614924354454000.log"
+    },
+    {
+      "label": "train-status-after-reenqueue",
+      "started_at": "2026-09-05T13:28:44.646618+00:00",
+      "elapsed_seconds": 0.13040087511762977,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-after-reenqueue-1788614924646609000.log"
+    },
+    {
+      "label": "train-validate-repaired-pending",
+      "started_at": "2026-09-05T13:28:44.827020+00:00",
+      "elapsed_seconds": 0.13324645813554525,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "validate",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "train-validate-repaired-pending-1788614924827013000.log"
+    },
+    {
+      "label": "train-dismiss-help",
+      "started_at": "2026-09-05T13:29:04.885318+00:00",
+      "elapsed_seconds": 0.13018820784054697,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "dismiss",
+        "--help"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-dismiss-help-1788614944885312000.log"
+    },
+    {
+      "label": "train-enqueue-help",
+      "started_at": "2026-09-05T13:29:05.070119+00:00",
+      "elapsed_seconds": 0.12868916615843773,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--help"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-enqueue-help-1788614945070111000.log"
+    },
+    {
+      "label": "train-suggested-allow-duplicate",
+      "started_at": "2026-09-05T13:29:17.469086+00:00",
+      "elapsed_seconds": 0.129829834215343,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "moves",
+        "--branch",
+        "codex/moves",
+        "--allow-duplicate"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 2,
+      "timeout": false,
+      "log": "train-suggested-allow-duplicate-1788614957469080000.log"
+    },
+    {
+      "label": "train-dismiss-repaired-original",
+      "started_at": "2026-09-05T13:29:17.653694+00:00",
+      "elapsed_seconds": 0.12849254091270268,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "dismiss",
+        "2",
+        "--note",
+        "Superseded locally by clean repaired moves commit 71d3521; original evidence retained.",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-dismiss-repaired-original-1788614957653688000.log"
+    },
+    {
+      "label": "train-enqueue-repaired-after-dismiss",
+      "started_at": "2026-09-05T13:29:17.836197+00:00",
+      "elapsed_seconds": 0.2427319169510156,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "enqueue",
+        "--task",
+        "moves",
+        "--branch",
+        "codex/moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-enqueue-repaired-after-dismiss-1788614957836192000.log"
+    },
+    {
+      "label": "train-status-repaired-ready",
+      "started_at": "2026-09-05T13:29:18.135397+00:00",
+      "elapsed_seconds": 0.18417470902204514,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-repaired-ready-1788614958135391000.log"
+    },
+    {
+      "label": "train-deploy-partial",
+      "started_at": "2026-09-05T13:29:33.341762+00:00",
+      "elapsed_seconds": 6.480794207891449,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "deploy"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-deploy-partial-1788614973341757000.log"
+    },
+    {
+      "label": "train-status-after-partial-deploy",
+      "started_at": "2026-09-05T13:29:50.615228+00:00",
+      "elapsed_seconds": 0.13335054111666977,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-after-partial-deploy-1788614990615223000.log"
+    },
+    {
+      "label": "train-validate-repaired",
+      "started_at": "2026-09-05T13:29:50.801843+00:00",
+      "elapsed_seconds": 0.5120077081955969,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "validate",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-validate-repaired-1788614990801836000.log"
+    },
+    {
+      "label": "train-status-after-repaired-validation",
+      "started_at": "2026-09-05T13:29:51.370644+00:00",
+      "elapsed_seconds": 0.18340091709978878,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-status-after-repaired-validation-1788614991370638000.log"
+    },
+    {
+      "label": "train-combined-strict-all",
+      "started_at": "2026-09-05T13:30:11.745696+00:00",
+      "elapsed_seconds": 0.07446470810100436,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/train-combined-evidence",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-combined-evidence",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-combined-strict-all-1788615011745691000.log"
+    },
+    {
+      "label": "train-deploy-final",
+      "started_at": "2026-09-05T13:30:11.936809+00:00",
+      "elapsed_seconds": 6.8624361250549555,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "deploy"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-deploy-final-1788615011936804000.log"
+    },
+    {
+      "label": "train-final-deployed-all",
+      "started_at": "2026-09-05T13:30:39.031074+00:00",
+      "elapsed_seconds": 0.0713828329462558,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-throughput-20260905/train-final-evidence",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train-final-evidence",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-final-deployed-all-1788615039031065000.log"
+    },
+    {
+      "label": "train-final-status",
+      "started_at": "2026-09-05T13:30:39.158727+00:00",
+      "elapsed_seconds": 0.1271834170911461,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-throughput-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-throughput-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "train-final-status-1788615039158722000.log"
+    }
+  ],
+  "raw_evidence": "/Users/yongjip/Projects/mergetrain/.mergetrain/benchmarks/throughput-2048/2026-09-05",
+  "replay_bundles": [
+    "/Users/yongjip/Projects/mergetrain/.mergetrain/benchmarks/throughput-2048/2026-09-05/bundles/train.bundle",
+    "/Users/yongjip/Projects/mergetrain/.mergetrain/benchmarks/throughput-2048/2026-09-05/bundles/manual.bundle",
+    "/Users/yongjip/Projects/mergetrain/.mergetrain/benchmarks/throughput-2048/2026-09-05/bundles/base.bundle",
+    "/Users/yongjip/Projects/mergetrain/.mergetrain/benchmarks/throughput-2048/2026-09-05/bundles/sequential.bundle"
+  ]
+}
