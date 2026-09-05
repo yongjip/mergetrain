@@ -11,8 +11,8 @@ BODY_MARKER = 'Purpose: Serialize committed local task branches'
 
 
 def summarize(evidence: Path) -> dict:
-    rows = json.loads((evidence / 'results.json').read_text())
-    frozen = json.loads((evidence / 'frozen.json').read_text())
+    rows = json.loads((evidence / 'results.json').read_text(encoding='utf-8'))
+    frozen = json.loads((evidence / 'frozen.json').read_text(encoding='utf-8'))
     # Preserve paired comparison: if either arm consults the ambient, unpinned
     # CLI, exclude BOTH arms from the strict suitable-question stratum.
     ambient = {
@@ -79,7 +79,7 @@ def main() -> None:
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     report = summarize(args.evidence)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({k: report[k] for k in ('complete_runs', 'excluded_pairs', 'metrics')},
                      indent=2))
 

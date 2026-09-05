@@ -32,7 +32,7 @@ def run_trial(fixture: dict, arm: str, skill: str, config: list[str], output: Pa
     record.mkdir()
     target = workspace / '.agents/skills/mergetrain/SKILL.md'
     target.parent.mkdir(parents=True)
-    target.write_text(skill)
+    target.write_text(skill, encoding='utf-8')
     before = tree_state(workspace)
     command = [
         'codex', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
@@ -47,10 +47,10 @@ def run_trial(fixture: dict, arm: str, skill: str, config: list[str], output: Pa
         'fixture': fixture, 'arm': arm, 'workspace': str(workspace),
         'skill_sha256': digest(skill.encode()),
         'permission_profile': 'read-only; never-approve; ephemeral; ignore-user-config/rules',
-    }, ensure_ascii=False, indent=2))
+    }, ensure_ascii=False, indent=2), encoding='utf-8')
     started = time.monotonic()
     timeout = False
-    with (record / 'stdout.jsonl').open('w') as out, (record / 'stderr.txt').open('w') as err:
+    with (record / 'stdout.jsonl').open('w', encoding='utf-8') as out, (record / 'stderr.txt').open('w', encoding='utf-8') as err:
         proc = subprocess.Popen(command, stdout=out, stderr=err, start_new_session=True)
         try:
             code = proc.wait(timeout=180)
@@ -70,7 +70,7 @@ def run_trial(fixture: dict, arm: str, skill: str, config: list[str], output: Pa
                 code = proc.wait()
     elapsed = time.monotonic() - started
     events = []
-    for line in (record / 'stdout.jsonl').read_text().splitlines():
+    for line in (record / 'stdout.jsonl').read_text(encoding='utf-8').splitlines():
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
@@ -90,7 +90,7 @@ def run_trial(fixture: dict, arm: str, skill: str, config: list[str], output: Pa
         'stdout_sha256': digest((record / 'stdout.jsonl').read_bytes()),
         'stderr_sha256': digest((record / 'stderr.txt').read_bytes()),
     }
-    (record / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
+    (record / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     return result
 
 
@@ -100,11 +100,11 @@ def main() -> None:
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
-    config = json.loads(args.config_overrides.read_text())
-    fixtures = json.loads((HERE / 'fixtures.json').read_text())['fixtures']
+    config = json.loads(args.config_overrides.read_text(encoding='utf-8'))
+    fixtures = json.loads((HERE / 'fixtures.json').read_text(encoding='utf-8'))['fixtures']
     arms = {
-        'baseline': (HERE / 'baseline-skill.md').read_text(),
-        'candidate': (HERE / 'candidate-skill.md').read_text(),
+        'baseline': (HERE / 'baseline-skill.md').read_text(encoding='utf-8'),
+        'candidate': (HERE / 'candidate-skill.md').read_text(encoding='utf-8'),
     }
     frozen = {
         'client': subprocess.check_output(['codex', '--version'], text=True).strip(),
@@ -116,7 +116,7 @@ def main() -> None:
         'runner_sha256': digest(Path(__file__).read_bytes()),
         'config_overrides': config, 'scope': 'explicit local-skill operator guidance; ambient CLI pinned to 3.0.5',
     }
-    (args.output / 'frozen.json').write_text(json.dumps(frozen, indent=2))
+    (args.output / 'frozen.json').write_text(json.dumps(frozen, indent=2), encoding='utf-8')
     rng = random.Random(306)
     rng.shuffle(fixtures)
     plans = []
@@ -135,7 +135,7 @@ def main() -> None:
         for future in as_completed(futures):
             completed.extend(future.result())
             (args.output / 'results.json').write_text(json.dumps(completed, ensure_ascii=False,
-                                                               indent=2))
+                                                               indent=2), encoding='utf-8')
             print(json.dumps({'finished': len(completed), 'total': len(fixtures) * 2,
                               'complete': sum(r['complete'] for r in completed)}), flush=True)
 

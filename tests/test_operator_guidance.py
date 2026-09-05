@@ -35,6 +35,6 @@ def test_pasted_operator_reference_examples_parse_in_current_cli() -> None:
 def test_operator_experiment_does_not_change_discovery_description() -> None:
     root = Path(__file__).resolve().parents[1]
     evidence = root / 'benchmarks/operator_guidance'
-    baseline = (evidence / 'baseline-skill.md').read_text()
-    candidate = (evidence / 'candidate-skill.md').read_text()
+    baseline = (evidence / 'baseline-skill.md').read_text(encoding='utf-8')
+    candidate = (evidence / 'candidate-skill.md').read_text(encoding='utf-8')
     assert baseline.split('\n---\n', 1)[0] == candidate.split('\n---\n', 1)[0]

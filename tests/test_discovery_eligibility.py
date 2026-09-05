@@ -50,10 +50,10 @@ def test_unknown_is_not_a_reason_to_invent_fit() -> None:
 def test_treatment_preserves_operational_body_and_distinct_prompt_denominators() -> None:
     root = Path(__file__).resolve().parents[1]
     artifacts = root / 'benchmarks/discovery/eligibility'
-    candidate = (artifacts / 'candidate-skill.md').read_text()
-    released = (artifacts / 'baseline-skill.md').read_text()
+    candidate = (artifacts / 'candidate-skill.md').read_text(encoding='utf-8')
+    released = (artifacts / 'baseline-skill.md').read_text(encoding='utf-8')
     assert candidate.split('\n---\n', 1)[1] == released.split('\n---\n', 1)[1]
-    fixtures = json.loads((artifacts / 'fixtures.json').read_text())['fixtures']
+    fixtures = json.loads((artifacts / 'fixtures.json').read_text(encoding='utf-8'))['fixtures']
     assert len({f['prompt'] for f in fixtures}) == 48
     assert len({f['id'] for f in fixtures}) == 48
     assert [sum(f['group'] == group for f in fixtures)
@@ -92,7 +92,7 @@ def test_diagnostic_keeps_labels_outside_child_workspace_and_retains_failed_trac
         '"exit_code":1}}))\n'
         'print(json.dumps({"type":"error","message":"synthetic provider failure"}))\n'
         'sys.exit(1)\n'
-    )
+    , encoding='utf-8')
     original_popen = subprocess.Popen
 
     def launch_fixture(command, **kwargs):
@@ -103,7 +103,7 @@ def test_diagnostic_keeps_labels_outside_child_workspace_and_retains_failed_trac
     record = run_trial(
         {'id': 'private-expected-label', 'group': 'negative', 'expected': 'exclude',
          'prompt': 'Explain a workflow.', 'family': 'boundary'},
-        'candidate', '---\nname: mergetrain\ndescription: test\n---\n', [], tmp_path,
+        'candidate', '---\nname: mergetrain\ndescription: 한글 설명\n---\n', [], tmp_path,
     )
     assert Path(record['workspace']).parent == scratch
     assert record['exit_code'] == 1
@@ -123,7 +123,7 @@ def test_measured_artifacts_keep_frozen_inputs_and_paired_exclusions() -> None:
     import hashlib
 
     root = Path(__file__).resolve().parents[1] / 'benchmarks/discovery/eligibility'
-    result = json.loads((root / 'results-2026-09-05.json').read_text())
+    result = json.loads((root / 'results-2026-09-05.json').read_text(encoding='utf-8'))
     assert result['fixtures_sha256'] == hashlib.sha256(
         (root / 'fixtures.json').read_bytes()).hexdigest()
     for arm in ('baseline', 'candidate'):

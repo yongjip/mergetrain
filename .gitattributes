@@ -1,0 +1,3 @@
+# Frozen benchmark hashes must survive Windows checkout unchanged.
+benchmarks/discovery/eligibility/* text eol=lf
+benchmarks/operator_guidance/* text eol=lf
