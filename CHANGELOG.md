@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.7 - 2026-09-06
+
+- Replace the removed duplicate-enqueue option in error messages with supported
+  status and retry guidance. Identify the owning job when branch changes, failed
+  gates, or semantic conflicts require a clean repair commit and a retry.
+- Align agent instructions and recovery documentation with the existing retry
+  workflow, including the distinction between queued, validated, and deployed.
+- Include reproducible parallel-development and daemon lifecycle experiments;
+  these diagnostic records do not establish a general speed improvement.
+
 ## 3.0.6 - 2026-09-05
 
 - Make the benchmark runners use platform temporary directories and make

@@ -6,7 +6,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "mergetrain[mcp]==3.0.6",
+        "mergetrain[mcp]==3.0.7",
         "mergetrain",
         "mcp"
       ]
