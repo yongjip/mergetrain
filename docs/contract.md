@@ -12,7 +12,7 @@ changes without an explicit compatibility decision.
 | `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
 | Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-mergetrain 3.0.5 uses machine contract **4** and config schema **2**. They move
+mergetrain 3.0.6 uses machine contract **4** and config schema **2**. They move
 only when their own boundary changes; neither is tied to the SQLite schema.
 
 ## Contract 4 envelope

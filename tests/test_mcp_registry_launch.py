@@ -19,7 +19,7 @@ class MCPRegistryLaunchTests(unittest.TestCase):
             [
                 "uvx",
                 "--from",
-                "mergetrain[mcp]==3.0.5",
+                "mergetrain[mcp]==3.0.6",
                 "mergetrain",
                 "mcp",
             ],
@@ -33,7 +33,7 @@ class MCPRegistryLaunchTests(unittest.TestCase):
         self.assertEqual(env["UV_CACHE_DIR"], str(cache))
 
     def test_source_version_matches_release_metadata(self) -> None:
-        self.assertEqual(source_version(), "3.0.5")
+        self.assertEqual(source_version(), "3.0.6")
 
 
 if __name__ == "__main__":

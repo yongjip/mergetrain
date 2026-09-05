@@ -75,7 +75,7 @@ before enabling deployment in an unfamiliar repository.
 
 - Run `claude plugin validate integrations/claude/plugin --strict` in a source
   checkout to validate the package.
-- Run `uvx --from 'mergetrain[mcp]==3.0.5' mergetrain --version` to verify the
+- Run `uvx --from 'mergetrain[mcp]==3.0.6' mergetrain --version` to verify the
   pinned Python runtime is reachable.
 - Start Claude Code with `--debug` and inspect the plugin manager's Errors tab
   if the MCP server or skills do not load.

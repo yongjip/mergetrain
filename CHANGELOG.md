@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.6 - 2026-09-05
+
+- Clarify existing-queue handoff even when only one branch is ready. Queue
+  counts alone do not establish health, runner ownership, or recovery needs.
+- Add the current v3 status, diagnostic and job-evidence command reference to
+  generated agent guidance. Identify removed doctor syntax and preserve the
+  distinction between explanation, inspection and execution authority.
+- Record a frozen 32-run paired operator-guidance comparison and the earlier
+  rejected discovery-copy experiment. Public discovery descriptions remain
+  unchanged; this release does not claim automatic-activation improvement.
+
 ## 3.0.5 - 2026-09-05
 
 - Update the dashboard build's Browserslist dependency to 4.28.9 and refresh
