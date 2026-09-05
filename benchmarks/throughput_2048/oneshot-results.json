@@ -1,0 +1,2240 @@
+{
+  "runtime": "mergetrain 3.0.6",
+  "scope": "POSIX local Git lifecycle verification, not throughput measurement",
+  "runs": {
+    "oneshot-lifecycle-20260905": {
+      "outcomes": {
+        "sequential": "both deployed",
+        "overlap": {
+          "second_exit": 0,
+          "second_output": "mergetrain daemon tick: runner is active; leaving its in-progress train untouched\n",
+          "during": [
+            [
+              1,
+              "in_progress"
+            ],
+            [
+              2,
+              "queued"
+            ]
+          ],
+          "after_both_exited": [
+            [
+              1,
+              "deployed"
+            ],
+            [
+              2,
+              "queued"
+            ]
+          ],
+          "no_b_without_another_trigger": true
+        },
+        "coordinator_recheck": "pending B deployed with one explicit recheck/run",
+        "prepush_crash": {
+          "before": [
+            [
+              1,
+              "in_progress"
+            ]
+          ],
+          "after_kill": [
+            [
+              1,
+              "in_progress"
+            ]
+          ],
+          "after_explicit_restart": [
+            [
+              1,
+              "deployed"
+            ]
+          ],
+          "output": "mergetrain daemon processing 1 auto job(s)\n"
+        }
+      },
+      "commands": [
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.631878,
+          "seconds": 0.0175931453704834,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.649497,
+          "seconds": 0.008059978485107422,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.657571,
+          "seconds": 0.008588075637817383,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.6668658,
+          "seconds": 0.011270284652709961,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.678153,
+          "seconds": 0.022648096084594727,
+          "code": 0,
+          "stdout": "[main (root-commit) 8934abb] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.700906,
+          "seconds": 0.03458595275878906,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-20260905/sequential/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.735507,
+          "seconds": 0.009359121322631836,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.744879,
+          "seconds": 0.0407710075378418,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-20260905/sequential/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.785747,
+          "seconds": 0.034932851791381836,
+          "code": 0,
+          "stdout": "HEAD is now at 8934abb Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/a",
+          "started": 1788620218.821045,
+          "seconds": 0.010869026184082031,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/a",
+          "started": 1788620218.831937,
+          "seconds": 0.025104761123657227,
+          "code": 0,
+          "stdout": "[codex/a 0184d07] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.857132,
+          "seconds": 0.029471158981323242,
+          "code": 0,
+          "stdout": "HEAD is now at 8934abb Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/b",
+          "started": 1788620218.886923,
+          "seconds": 0.011416912078857422,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/b",
+          "started": 1788620218.898355,
+          "seconds": 0.021178007125854492,
+          "code": 0,
+          "stdout": "[codex/b 1cf75b4] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620218.919581,
+          "seconds": 0.1801309585571289,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620219.100031,
+          "seconds": 0.2302401065826416,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620219.3302872,
+          "seconds": 0.7162797451019287,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+            "enqueue",
+            "--task",
+            "b",
+            "--branch",
+            "codex/b",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620220.046589,
+          "seconds": 0.22378110885620117,
+          "code": 0,
+          "stdout": "queued job 2: b (codex/b)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620220.2704,
+          "seconds": 0.7157418727874756,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/sequential/repo",
+          "started": 1788620220.9904032,
+          "seconds": 0.009264707565307617,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nb.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620220.999888,
+          "seconds": 0.012148141860961914,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.01205,
+          "seconds": 0.010515213012695312,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.022578,
+          "seconds": 0.008169889450073242,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.031379,
+          "seconds": 0.009460926055908203,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.04086,
+          "seconds": 0.024485111236572266,
+          "code": 0,
+          "stdout": "[main (root-commit) cc13642] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.0654469,
+          "seconds": 0.02952122688293457,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-20260905/overlap/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.09499,
+          "seconds": 0.009757041931152344,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.104769,
+          "seconds": 0.04761815071105957,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-20260905/overlap/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.152509,
+          "seconds": 0.032540082931518555,
+          "code": 0,
+          "stdout": "HEAD is now at cc13642 Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/a",
+          "started": 1788620221.1853828,
+          "seconds": 0.01156306266784668,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/a",
+          "started": 1788620221.196962,
+          "seconds": 0.021562814712524414,
+          "code": 0,
+          "stdout": "[codex/a b912b4d] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.218633,
+          "seconds": 0.0342562198638916,
+          "code": 0,
+          "stdout": "HEAD is now at cc13642 Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/b",
+          "started": 1788620221.253205,
+          "seconds": 0.012158870697021484,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/b",
+          "started": 1788620221.2653818,
+          "seconds": 0.02367997169494629,
+          "code": 0,
+          "stdout": "[codex/b dd5e6c2] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.289078,
+          "seconds": 0.12068510055541992,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620221.4098182,
+          "seconds": 0.23493480682373047,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "enqueue",
+            "--task",
+            "b",
+            "--branch",
+            "codex/b",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620222.079464,
+          "seconds": 0.22769880294799805,
+          "code": 0,
+          "stdout": "queued job 2: b (codex/b)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620222.3071868,
+          "seconds": 0.0836482048034668,
+          "code": 0,
+          "stdout": "mergetrain daemon tick: runner is active; leaving its in-progress train untouched\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620222.673517,
+          "seconds": 0.009958982467651367,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620222.683504,
+          "seconds": 0.12449789047241211,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 1,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 1\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"run_daemon_when_approved\",\n    \"command\": \"mergetrain daemon\",\n    \"reason_code\": null,\n    \"requires_approval\": \"deploy\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [\n    {\n      \"branch\": \"codex/b\",\n      \"id\": 2,\n      \"outcome\": null,\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"waiting\",\n      \"task\": \"b\",\n      \"updated_at\": \"2026-09-05T14:57:02Z\"\n    },\n    {\n      \"branch\": \"codex/a\",\n      \"id\": 1,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"a\",\n      \"updated_at\": \"2026-09-05T14:57:02Z\"\n    }\n  ],\n  \"state\": \"waiting\",\n  \"summary\": \"1 job(s) are waiting for validation\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620222.8080168,
+          "seconds": 0.7019174098968506,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/overlap/repo",
+          "started": 1788620223.510738,
+          "seconds": 0.010725259780883789,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nb.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.521745,
+          "seconds": 0.013026952743530273,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.5347872,
+          "seconds": 0.009392738342285156,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.5441961,
+          "seconds": 0.009442806243896484,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.554265,
+          "seconds": 0.011722087860107422,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.566002,
+          "seconds": 0.022660017013549805,
+          "code": 0,
+          "stdout": "[main (root-commit) f252169] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.5887418,
+          "seconds": 0.030164241790771484,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.6189198,
+          "seconds": 0.009252071380615234,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.628187,
+          "seconds": 0.04398703575134277,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.672263,
+          "seconds": 0.03088092803955078,
+          "code": 0,
+          "stdout": "HEAD is now at f252169 Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/a",
+          "started": 1788620223.703528,
+          "seconds": 0.011292219161987305,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/a",
+          "started": 1788620223.714834,
+          "seconds": 0.02119588851928711,
+          "code": 0,
+          "stdout": "[codex/a 39681c0] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.7361338,
+          "seconds": 0.03131699562072754,
+          "code": 0,
+          "stdout": "HEAD is now at f252169 Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/b",
+          "started": 1788620223.767725,
+          "seconds": 0.009921073913574219,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/b",
+          "started": 1788620223.7776608,
+          "seconds": 0.02267313003540039,
+          "code": 0,
+          "stdout": "[codex/b 6e97bba] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.800355,
+          "seconds": 0.11959695816040039,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620223.919998,
+          "seconds": 0.22310400009155273,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620224.5270212,
+          "seconds": 0.010526895523071289,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620224.538207,
+          "seconds": 0.6881630420684814,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-20260905/prepush-crash/repo",
+          "started": 1788620225.227032,
+          "seconds": 0.010524988174438477,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nbase.txt\n",
+          "stderr": ""
+        }
+      ]
+    },
+    "oneshot-lifecycle-confirm-20260905": {
+      "outcomes": {
+        "sequential": "both deployed",
+        "overlap": {
+          "second_exit": 0,
+          "second_output": "mergetrain daemon tick: runner is active; leaving its in-progress train untouched\n",
+          "during": [
+            [
+              1,
+              "in_progress"
+            ],
+            [
+              2,
+              "queued"
+            ]
+          ],
+          "after_both_exited": [
+            [
+              1,
+              "deployed"
+            ],
+            [
+              2,
+              "queued"
+            ]
+          ],
+          "no_b_without_another_trigger": true
+        },
+        "coordinator_recheck": "pending B deployed with one explicit recheck/run",
+        "prepush_crash": {
+          "before": [
+            [
+              1,
+              "in_progress"
+            ]
+          ],
+          "after_kill": [
+            [
+              1,
+              "in_progress"
+            ]
+          ],
+          "after_explicit_restart": [
+            [
+              1,
+              "deployed"
+            ]
+          ],
+          "output": "mergetrain daemon processing 1 auto job(s)\n"
+        },
+        "approval_boundary": "manual job not deployed; validate-only remains unpushed"
+      },
+      "commands": [
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.866533,
+          "seconds": 0.018156766891479492,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.8847091,
+          "seconds": 0.008096694946289062,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.892822,
+          "seconds": 0.008529901504516602,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.90181,
+          "seconds": 0.010655879974365234,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.912483,
+          "seconds": 0.02348494529724121,
+          "code": 0,
+          "stdout": "[main (root-commit) 33a0952] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.936068,
+          "seconds": 0.033136844635009766,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.9692202,
+          "seconds": 0.008099794387817383,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620357.977333,
+          "seconds": 0.040585994720458984,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620358.018034,
+          "seconds": 0.0318911075592041,
+          "code": 0,
+          "stdout": "HEAD is now at 33a0952 Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/a",
+          "started": 1788620358.05019,
+          "seconds": 0.013077020645141602,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/a",
+          "started": 1788620358.0632892,
+          "seconds": 0.05509686470031738,
+          "code": 0,
+          "stdout": "[codex/a 2d70755] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620358.118491,
+          "seconds": 0.04387021064758301,
+          "code": 0,
+          "stdout": "HEAD is now at 33a0952 Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/b",
+          "started": 1788620358.1626081,
+          "seconds": 0.01007390022277832,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/b",
+          "started": 1788620358.172699,
+          "seconds": 0.022730112075805664,
+          "code": 0,
+          "stdout": "[codex/b b6f3471] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620358.195505,
+          "seconds": 0.16496920585632324,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620358.360726,
+          "seconds": 0.22536396980285645,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620358.586106,
+          "seconds": 0.6794400215148926,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+            "enqueue",
+            "--task",
+            "b",
+            "--branch",
+            "codex/b",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620359.265567,
+          "seconds": 0.23107504844665527,
+          "code": 0,
+          "stdout": "queued job 2: b (codex/b)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620359.496657,
+          "seconds": 0.6411230564117432,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/sequential/repo",
+          "started": 1788620360.138741,
+          "seconds": 0.009405851364135742,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nb.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.1483798,
+          "seconds": 0.013114213943481445,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.1615129,
+          "seconds": 0.00864410400390625,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.170178,
+          "seconds": 0.00861501693725586,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.179459,
+          "seconds": 0.009961843490600586,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.1894348,
+          "seconds": 0.02064824104309082,
+          "code": 0,
+          "stdout": "[main (root-commit) 46c29eb] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.210183,
+          "seconds": 0.029674053192138672,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.239875,
+          "seconds": 0.008147954940795898,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.2480378,
+          "seconds": 0.041732072830200195,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.2898529,
+          "seconds": 0.03012824058532715,
+          "code": 0,
+          "stdout": "HEAD is now at 46c29eb Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/a",
+          "started": 1788620360.320242,
+          "seconds": 0.01006627082824707,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/a",
+          "started": 1788620360.330323,
+          "seconds": 0.025573015213012695,
+          "code": 0,
+          "stdout": "[codex/a 2729b50] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.355979,
+          "seconds": 0.030514955520629883,
+          "code": 0,
+          "stdout": "HEAD is now at 46c29eb Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/b",
+          "started": 1788620360.3867881,
+          "seconds": 0.01116490364074707,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/b",
+          "started": 1788620360.3979719,
+          "seconds": 0.022017240524291992,
+          "code": 0,
+          "stdout": "[codex/b 799e34f] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.420007,
+          "seconds": 0.1172330379486084,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620360.537279,
+          "seconds": 0.21200013160705566,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "enqueue",
+            "--task",
+            "b",
+            "--branch",
+            "codex/b",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620361.1319108,
+          "seconds": 0.2088310718536377,
+          "code": 0,
+          "stdout": "queued job 2: b (codex/b)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620361.3407621,
+          "seconds": 0.08131885528564453,
+          "code": 0,
+          "stdout": "mergetrain daemon tick: runner is active; leaving its in-progress train untouched\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620361.760107,
+          "seconds": 0.009286880493164062,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620361.769425,
+          "seconds": 0.11838626861572266,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 1,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 1\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"run_daemon_when_approved\",\n    \"command\": \"mergetrain daemon\",\n    \"reason_code\": null,\n    \"requires_approval\": \"deploy\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [\n    {\n      \"branch\": \"codex/b\",\n      \"id\": 2,\n      \"outcome\": null,\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"waiting\",\n      \"task\": \"b\",\n      \"updated_at\": \"2026-09-05T14:59:21Z\"\n    },\n    {\n      \"branch\": \"codex/a\",\n      \"id\": 1,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"a\",\n      \"updated_at\": \"2026-09-05T14:59:21Z\"\n    }\n  ],\n  \"state\": \"waiting\",\n  \"summary\": \"1 job(s) are waiting for validation\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620361.887829,
+          "seconds": 0.6588380336761475,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/overlap/repo",
+          "started": 1788620362.547368,
+          "seconds": 0.009146928787231445,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nb.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.556813,
+          "seconds": 0.013250112533569336,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.570079,
+          "seconds": 0.008768796920776367,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.578861,
+          "seconds": 0.00834798812866211,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.5879328,
+          "seconds": 0.009090185165405273,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.597038,
+          "seconds": 0.02305006980895996,
+          "code": 0,
+          "stdout": "[main (root-commit) 72785da] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.620188,
+          "seconds": 0.03025984764099121,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.650461,
+          "seconds": 0.009077072143554688,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.659552,
+          "seconds": 0.0401458740234375,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.699816,
+          "seconds": 0.030536890029907227,
+          "code": 0,
+          "stdout": "HEAD is now at 72785da Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/a",
+          "started": 1788620362.7306051,
+          "seconds": 0.010344982147216797,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/a",
+          "started": 1788620362.7409651,
+          "seconds": 0.020885705947875977,
+          "code": 0,
+          "stdout": "[codex/a 868d6cf] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.7619488,
+          "seconds": 0.03397035598754883,
+          "code": 0,
+          "stdout": "HEAD is now at 72785da Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/b",
+          "started": 1788620362.796268,
+          "seconds": 0.010425090789794922,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/b",
+          "started": 1788620362.806706,
+          "seconds": 0.02045893669128418,
+          "code": 0,
+          "stdout": "[codex/b d5312ab] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.827182,
+          "seconds": 0.12315177917480469,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a",
+            "--auto"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620362.9503691,
+          "seconds": 0.23154687881469727,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620363.5668979,
+          "seconds": 0.008825063705444336,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620363.5763378,
+          "seconds": 0.6663832664489746,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 auto job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/prepush-crash/repo",
+          "started": 1788620364.24332,
+          "seconds": 0.008987903594970703,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\na.txt\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "init",
+            "-b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.252537,
+          "seconds": 0.013979911804199219,
+          "code": 0,
+          "stdout": "Initialized empty Git repository in /private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo/.git/\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.name",
+            "Local lifecycle test"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.2665348,
+          "seconds": 0.010732173919677734,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "config",
+            "user.email",
+            "local-test@example.invalid"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.277285,
+          "seconds": 0.008714914321899414,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "base.txt",
+            ".mergetrain.yaml"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.286546,
+          "seconds": 0.009884119033813477,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Local fixture base"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.296444,
+          "seconds": 0.021291017532348633,
+          "code": 0,
+          "stdout": "[main (root-commit) 34d528f] Local fixture base\n 2 files changed, 2 insertions(+)\n create mode 100644 .mergetrain.yaml\n create mode 100644 base.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "clone",
+            "--bare",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.317845,
+          "seconds": 0.02971482276916504,
+          "code": 0,
+          "stdout": "",
+          "stderr": "Cloning into bare repository '/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/remote.git'...\ndone.\n"
+        },
+        {
+          "command": [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/remote.git"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.3475788,
+          "seconds": 0.01059412956237793,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "fetch",
+            "origin"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.358191,
+          "seconds": 0.03975200653076172,
+          "code": 0,
+          "stdout": "",
+          "stderr": "From /private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/remote\n * [new branch]      main       -> origin/main\n"
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/a",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/a",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.398056,
+          "seconds": 0.030426025390625,
+          "code": 0,
+          "stdout": "HEAD is now at 34d528f Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/a')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "a.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/a",
+          "started": 1788620364.428782,
+          "seconds": 0.013453960418701172,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/a",
+          "started": 1788620364.442253,
+          "seconds": 0.020476818084716797,
+          "code": 0,
+          "stdout": "[codex/a bfccc96] Add a\n 1 file changed, 1 insertion(+)\n create mode 100644 a.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            "codex/b",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/b",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.4628391,
+          "seconds": 0.03252387046813965,
+          "code": 0,
+          "stdout": "HEAD is now at 34d528f Local fixture base\n",
+          "stderr": "Preparing worktree (new branch 'codex/b')\n"
+        },
+        {
+          "command": [
+            "git",
+            "add",
+            "b.txt"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/b",
+          "started": 1788620364.495651,
+          "seconds": 0.01056218147277832,
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "commit",
+            "-m",
+            "Add b"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/b",
+          "started": 1788620364.506232,
+          "seconds": 0.022136211395263672,
+          "code": 0,
+          "stdout": "[codex/b ac75710] Add b\n 1 file changed, 1 insertion(+)\n create mode 100644 b.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+            "status",
+            "--json"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.528398,
+          "seconds": 0.11635494232177734,
+          "code": 0,
+          "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+            "enqueue",
+            "--task",
+            "a",
+            "--branch",
+            "codex/a"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.64509,
+          "seconds": 0.18749594688415527,
+          "code": 0,
+          "stdout": "queued job 1: a (codex/a)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+            "daemon",
+            "--once"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.8326058,
+          "seconds": 0.08749604225158691,
+          "code": 0,
+          "stdout": "mergetrain daemon tick: no auto-approved queued jobs\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.921173,
+          "seconds": 0.008720874786376953,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\nbase.txt\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+            "--repo",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+            "daemon",
+            "--once",
+            "--validate-only"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620364.929921,
+          "seconds": 0.4313781261444092,
+          "code": 0,
+          "stdout": "mergetrain daemon processing 1 manual validation job(s)\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "git",
+            "--git-dir",
+            "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/remote.git",
+            "ls-tree",
+            "--name-only",
+            "main"
+          ],
+          "cwd": "/private/tmp/mt-oneshot-lifecycle-confirm-20260905/approval-boundary/repo",
+          "started": 1788620365.361985,
+          "seconds": 0.012649059295654297,
+          "code": 0,
+          "stdout": ".mergetrain.yaml\nbase.txt\n",
+          "stderr": ""
+        }
+      ]
+    }
+  },
+  "code_changed": "benchmark only; product unchanged",
+  "static_review_model": "gpt-5.6-luna max"
+}
