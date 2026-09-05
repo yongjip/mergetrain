@@ -2074,6 +2074,8 @@ deploy:
                 conn.close()
             self.assertEqual(result.status, "blocked")
             self.assertIn("HEAD changed since validation", result.note)
+            self.assertIn(f"mergetrain retry {job.id}", result.note)
+            self.assertNotIn("--allow-duplicate", result.note)
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
@@ -2483,6 +2485,11 @@ class BisectIsolationTests(unittest.TestCase):
             by_branch = {job.branch: stored[job.id] for job in jobs}
             self.assertEqual(by_branch["agent/bad"].status, "failed")
             self.assertIn("bisect isolation", by_branch["agent/bad"].note)
+            self.assertIn(
+                f"mergetrain retry {by_branch['agent/bad'].id}",
+                by_branch["agent/bad"].note,
+            )
+            self.assertNotIn("--allow-duplicate", by_branch["agent/bad"].note)
             self.assertEqual(by_branch["agent/bad"].conflict_with, "")
             for branch in ("feature/a", "agent/b", "agent/c", "agent/d"):
                 self.assertEqual(by_branch[branch].status, "validated", branch)
@@ -2528,6 +2535,8 @@ class BisectIsolationTests(unittest.TestCase):
             self.assertEqual(left.conflict_with, str(ids["agent/right"]))
             self.assertEqual(right.conflict_with, str(ids["agent/left"]))
             self.assertIn("semantic conflict", left.note)
+            self.assertIn(f"mergetrain retry {left.id}", left.note)
+            self.assertIn(f"mergetrain retry {right.id}", right.note)
             self.assertIn("agent/right", left.note)
             self.assertIn("agent/left", right.note)
             for branch in ("agent/ok1", "agent/ok2"):

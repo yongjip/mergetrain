@@ -779,7 +779,9 @@ class GitRunner:
             checkpoint = "validation" if deploying_validated else "enqueue"
             raise MergeBlocked(
                 f"branch HEAD changed since {checkpoint}: {job.branch} "
-                f"(expected {expected_sha}, found {current_sha}); dismiss the job (mergetrain dismiss <id>) or use --allow-duplicate, then enqueue the fix"
+                f"(expected {expected_sha}, found {current_sha}); "
+                "commit the intended result in the owning branch with a clean "
+                f"worktree, then run mergetrain retry {job.id}"
             )
         return expected_sha
 
@@ -1339,7 +1341,8 @@ class GitRunner:
                     log_path=str(log_path),
                     note=(
                         "failed train gates individually during bisect isolation; "
-                        "fix the branch and dismiss the job (mergetrain dismiss <id>) or use --allow-duplicate, then enqueue the fix"
+                        "fix the owning branch, commit a clean result, then run "
+                        f"mergetrain retry {job.id}"
                     ),
                 )
             )
@@ -1353,8 +1356,8 @@ class GitRunner:
                 note = (
                     "semantic conflict: passes gates alone but fails combined "
                     f"with {partners}; rebase onto the integration branch with "
-                    "the other side merged, fix the joint breakage, and enqueue "
-                    "a fresh job"
+                    "the other side merged, fix the joint breakage, commit a "
+                    f"clean result, then run mergetrain retry {job.id}"
                 )
                 results.append(
                     self._finish_job(

@@ -115,8 +115,9 @@ class DuplicateActiveBranch(QueueError):
     """Raised when a branch already has a non-terminal job in the queue.
 
     Distinct from a generic queue error so an agent can branch on
-    error.code == "duplicate_active_branch" and take the documented escape
-    (cancel the superseded job, or re-enqueue with --allow-duplicate)."""
+    error.code == "duplicate_active_branch" and inspect the existing job.
+    A blocked/failed job can be replaced with retry after its branch is fixed;
+    queued or in-progress jobs cannot be retried."""
 
 
 class PushRejected(MergetrainError):

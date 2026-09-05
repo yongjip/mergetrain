@@ -1618,6 +1618,22 @@ class CliTests(unittest.TestCase):
             finally:
                 conn.close()
 
+            # Follow the recovery advice after the observed failed re-enqueue.
+            # This must remain a usable CLI path, not a removed v2 option.
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    [
+                        "--repo", str(repo), "enqueue", "--task", "fixed retry",
+                        "--branch", "feature/retry", "--json",
+                    ]
+                )
+            duplicate = json.loads(out.getvalue())
+            self.assertNotEqual(code, 0)
+            self.assertEqual(duplicate["error"]["code"], "duplicate_active_branch")
+            self.assertIn("mergetrain retry <job-id>", duplicate["error"]["message"])
+            self.assertNotIn("--allow-duplicate", duplicate["error"]["message"])
+
             out = io.StringIO()
             with redirect_stdout(out):
                 code = main(["--repo", str(repo), "retry", str(original.id), "--json"])

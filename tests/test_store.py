@@ -436,9 +436,11 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(DuplicateActiveBranch) as raised:
             enqueue_job(conn, task="a2", branch="feature/a")
         msg = str(raised.exception)
-        self.assertIn("dismiss", msg)
-        self.assertIn("--allow-duplicate", msg)
-        # --allow-duplicate still bypasses it.
+        self.assertIn("mergetrain retry <job-id>", msg)
+        self.assertIn("blocked/failed", msg)
+        self.assertIn("cannot be retried", msg)
+        self.assertNotIn("--allow-duplicate", msg)
+        # The internal store option remains available; it is not a CLI escape.
         enqueue_job(conn, task="a3", branch="feature/a", allow_duplicate=True)
 
     def test_retry_atomically_replaces_failed_job_and_preserves_metadata(self) -> None:

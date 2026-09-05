@@ -3,7 +3,9 @@
 ## Merge conflict
 
 A branch that cannot merge into the integration worktree is marked `blocked`.
-Fix it on the owning branch, commit the clean result, and enqueue a new job.
+Fix it on the owning branch, commit the clean result, and run
+`mergetrain retry <blocked-job-id>`. Enqueueing the same active branch again is
+rejected; retry atomically replaces the old blocked/failed outcome.
 
 ```sh
 git switch <blocked-branch>
@@ -11,7 +13,8 @@ git fetch <remote>
 git rebase <remote>/<integration-branch>
 # resolve conflicts
 git add .
-git commit --amend
+git rebase --continue
+# Finish the rebase and commit any further fixes; leave the worktree clean.
 # Atomically dismiss the old outcome and enqueue a fresh SHA-pinned job:
 mergetrain retry <blocked-job-id>
 ```
@@ -34,9 +37,10 @@ push paths are rejected. The daemon checks that identity inside claim, and the
 runner resolves it again after gates immediately before any recovery marker or
 push. A mismatch finishes the job `blocked` with
 `approval_destination_changed` and `inspect` category
-`deploy_authorization_changed`. Review the new destination, then enqueue the
-fixed committed branch with `--auto` only if unattended deployment is approved
-for it.
+`deploy_authorization_changed`. Review the new destination. To create a fresh
+auto-approved job, dismiss the old blocked job, then enqueue the clean committed
+branch with `--auto` only if unattended deployment is approved for that new
+destination. A retry after an identity change creates a manual replacement.
 
 Auto jobs separately bind the execution policy: effective gates, default
 command timeout, validation-reuse configuration and authorization, and verify
@@ -44,8 +48,9 @@ hooks. The daemon compares that identity inside claim, and the runner reloads
 the control checkout before gates and immediately before the push marker. A
 blank legacy identity or mismatch becomes `blocked` with
 `approval_execution_policy_changed`, under the same `inspect` category. Review
-the current QA/deploy/verify policy and enqueue a fresh approved job; do not
-retrofit a hash onto the old row.
+the current QA/deploy/verify policy. Dismiss the old blocked job before enqueueing
+a fresh job with newly authorized `--auto`, or use retry for a manual replacement;
+do not retrofit a hash onto the old row.
 
 MCP and other preview-driven confirmations use the broader deploy-plan hash.
 If the train, destination, gate/reuse policy, or verify hooks change, the CLI
@@ -70,8 +75,9 @@ validate/deploy:
   compatible jobs being added to or removed from the batch.
 
 To resolve a semantic conflict, rebase one side onto the other (or onto the
-integration branch with the other side merged), fix the joint breakage, and
-enqueue a fresh job.
+integration branch with the other side merged), fix the joint breakage, commit
+a clean result, and run `mergetrain retry <blocked-job-id>` for each affected
+job that should rejoin the queue.
 
 ## Push failure
 

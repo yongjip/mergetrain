@@ -57,6 +57,13 @@ grammar, break existing operator muscle memory, and add no decision value when
 
 ## Product layers
 
+Recovery guidance correction (2026-09-06): the local 2048 pilot reproduced a
+duplicate-branch error recommending `--allow-duplicate`, which v3 rejects as a
+removed option. Existing `retry` successfully replaces the fixed blocked/failed
+job. Error messages and repair documentation now direct that existing path.
+Classification: correction of existing recovery guidance, not a new recovery
+action or automatic execution policy. The surface baseline above is unchanged.
+
 ### Core
 
 - exact-SHA enqueue from a clean task worktree;
