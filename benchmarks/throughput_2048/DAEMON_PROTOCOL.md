@@ -1,0 +1,9 @@
+# Existing daemon path verification
+
+One informed GPT-5.6 Luna MAX operator owns all commands and semantic repair, using the same base, frozen original four patches, order undo/moves/analysis/storage, and unchanged acceptance as the retry replay. Product code unchanged. Parent provides no procedural rescue during execution.
+
+Run released 3.0.6. This bounded full local validation/deployment test authorizes unattended execution ONLY to /private/tmp/mt-luna-daemon-check-20260905/train.git with the existing baseline gate/verify policy. Enqueue --auto, run one daemon owner (bounded --once invocations are preferred to a persistent background process), repair a blocked branch, retry, and let that same daemon path finish. No direct integration ref push, external publication, credential changes, DB editing, new agents, config tuning, or product changes. Keep permanent audit refs and failures.
+
+At most ten minutes active execution. Full completion requires actual local deployed SHA passing all six frozen groups in a clean checkout, all four requested features deployed, original failure retained, and no daemon left running. Partial baseline success is not full completion. Capture pre-dispatch, first/final timed command, each command start/end/exit, gate/verify events if available, input/parent/user requests. All version/help/read/write/test/runner commands should use the existing timed.py where practical; unknown uninstrumented time must remain unclassified. Distinguish interval unions from sums for concurrent commands.
+
+This is one additional observational case against the previous informed same-operator manual-train replay. It changes approval/runner mode and task prompt, so it cannot establish a causal speedup. No fresh plain-Git arm or coding rerun. Initial startup, model thinking, UI/tool transport, and untimed commands are not individually observable. Existing gate policy only baseline; final all acceptance is external.
