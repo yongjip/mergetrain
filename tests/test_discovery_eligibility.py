@@ -4,6 +4,8 @@ import itertools
 import json
 from pathlib import Path
 
+import pytest
+
 from benchmarks.discovery.eligibility.policy import Context, Decision, decide
 
 
@@ -60,19 +62,29 @@ def test_treatment_preserves_operational_body_and_distinct_prompt_denominators()
                for f in fixtures if f['group'] != 'boundary')
 
 
+@pytest.mark.parametrize("runner_module", [
+    "benchmarks.discovery.eligibility.run",
+    "benchmarks.operator_guidance.run",
+])
 def test_diagnostic_keeps_labels_outside_child_workspace_and_retains_failed_trace(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, runner_module,
 ) -> None:
+    import importlib
+    import subprocess
     import sys
+    import tempfile
 
-    from benchmarks.discovery.eligibility.run import run_trial
+    run_trial = importlib.import_module(runner_module).run_trial
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
 
     binary = tmp_path / 'codex'
     binary.write_text(
         f'#!{sys.executable}\n'
         'import json, pathlib, sys\n'
         'workspace = pathlib.Path(sys.argv[sys.argv.index("--cd") + 1])\n'
-        'files = [str(p.relative_to(workspace)) for p in workspace.rglob("*") '
+        'files = [p.relative_to(workspace).as_posix() for p in workspace.rglob("*") '
         'if p.is_file()]\n'
         'print(json.dumps({"type":"item.completed","item":{'
         '"type":"command_execution","command":"cat SKILL.md",'
@@ -81,13 +93,19 @@ def test_diagnostic_keeps_labels_outside_child_workspace_and_retains_failed_trac
         'print(json.dumps({"type":"error","message":"synthetic provider failure"}))\n'
         'sys.exit(1)\n'
     )
-    binary.chmod(0o755)
-    monkeypatch.setenv('PATH', str(tmp_path))
+    original_popen = subprocess.Popen
+
+    def launch_fixture(command, **kwargs):
+        assert command[0] == "codex"
+        return original_popen([sys.executable, str(binary), *command[1:]], **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", launch_fixture)
     record = run_trial(
         {'id': 'private-expected-label', 'group': 'negative', 'expected': 'exclude',
-         'prompt': 'Explain a workflow.'},
+         'prompt': 'Explain a workflow.', 'family': 'boundary'},
         'candidate', '---\nname: mergetrain\ndescription: test\n---\n', [], tmp_path,
     )
+    assert Path(record['workspace']).parent == scratch
     assert record['exit_code'] == 1
     assert not record['complete']
     assert record['usage'] is None

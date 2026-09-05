@@ -27,7 +27,7 @@ def tree_state(workspace: Path) -> dict[str, str]:
 
 
 def run_trial(fixture: dict, arm: str, skill: str, config: list[str], output: Path) -> dict:
-    workspace = Path(tempfile.mkdtemp(prefix='mt-e-', dir='/private/tmp'))
+    workspace = Path(tempfile.mkdtemp(prefix='mt-e-'))
     record = output / workspace.name
     record.mkdir()
     target = workspace / '.agents/skills/mergetrain/SKILL.md'
@@ -56,11 +56,17 @@ def run_trial(fixture: dict, arm: str, skill: str, config: list[str], output: Pa
             code = proc.wait(timeout=180)
         except subprocess.TimeoutExpired:
             timeout = True
-            os.killpg(proc.pid, signal.SIGTERM)
+            if os.name == 'posix':
+                os.killpg(proc.pid, signal.SIGTERM)
+            else:
+                proc.terminate()
             try:
                 code = proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
+                if os.name == 'posix':
+                    os.killpg(proc.pid, signal.SIGKILL)
+                else:
+                    proc.kill()
                 code = proc.wait()
     elapsed = time.monotonic() - started
     events = []

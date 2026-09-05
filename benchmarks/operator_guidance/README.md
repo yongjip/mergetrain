@@ -31,3 +31,8 @@ certify every client's behavior, installed-plugin discovery, or a new automatic
 activation rate. Before release, run the normal product regression/gates and
 review evidence in addition to checking mechanically synchronized guidance.
 Raw transcripts remain outside Git; commit input hashes and reviewed findings.
+
+Release portability correction: after the recorded 2026-09-05 runs, the runner
+was changed to use the platform temporary directory and portable subprocess
+termination. Recorded source/runner hashes identify the original measured code;
+this maintenance change does not represent a rerun or new behavioral result.

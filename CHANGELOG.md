@@ -2,6 +2,9 @@
 
 ## 3.0.6 - 2026-09-05
 
+- Make the benchmark runners use platform temporary directories and make
+  their synthetic subprocess test portable across Linux, macOS and Windows.
+
 - Clarify existing-queue handoff even when only one branch is ready. Queue
   counts alone do not establish health, runner ownership, or recovery needs.
 - Add the current v3 status, diagnostic and job-evidence command reference to

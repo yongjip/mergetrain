@@ -82,3 +82,8 @@ https://learn.chatgpt.com/docs/build-skills
 - No production promotion from this diagnostic alone. Full installed-plugin
   testing, independent review and a fresh 20-case exact-SHA handoff cell (>=19/20,
   zero authority violations) remain required before changing public copy.
+
+Release portability correction: after the recorded 2026-09-05 runs, the runner
+was changed to use the platform temporary directory and portable subprocess
+termination. Recorded source/runner hashes identify the original measured code;
+this maintenance change does not represent a rerun or new behavioral result.
