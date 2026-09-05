@@ -1,0 +1,2454 @@
+{
+  "protocol_commit": "72ceee5",
+  "setup": {
+    "base": "c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0",
+    "shas": {
+      "undo": "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+      "moves": "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+      "analysis": "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a",
+      "storage": "9502c6dcb56b65aee1a8620a8b503f7f68868cc2"
+    },
+    "runtime": "mergetrain 3.0.6",
+    "root": "/private/tmp/mt-luna-daemon-check-20260905",
+    "destination": "/private/tmp/mt-luna-daemon-check-20260905/train.git",
+    "scope": "bounded local-only unattended daemon experiment; no external publication"
+  },
+  "acceptance_sha256": "0f33a9315813bcf65ba65c649dc510b71453505a6ff89a466aa7f21cc2f855bf",
+  "timing": {
+    "dispatch_before": "2026-09-05T14:26:07.416345+00:00"
+  },
+  "metrics": {
+    "dispatch_to_deployed_all_seconds": 383.85564637184143,
+    "recorded_command_union_to_all_seconds": 7.588114500045776,
+    "unclassified_seconds_to_all": 376.26753187179565,
+    "dispatch_to_first_recorded_command_seconds": 85.26487112045288,
+    "recorded_command_count": 68,
+    "recorded_command_sum_all_seconds": 8.646244585048407,
+    "daemon_once_seconds": [
+      1.3562698748428375,
+      0.8854582079220563
+    ],
+    "daemon_once_sum_seconds": 2.2417280827648938,
+    "loop_retry_return_to_deployed_seconds": 15.406620833091438,
+    "loop_start_to_verified_seconds": 17.22654079180211
+  },
+  "final": {
+    "operator": {
+      "sha": "92ea44979bd2cfdbce3e06dcdd67b79570db7b0b",
+      "clean": true,
+      "all": "PASS baseline\nPASS undo\nPASS moves\nPASS analysis\nPASS storage\nPASS integration\n",
+      "jobs": [
+        {
+          "id": 1,
+          "task": "probe",
+          "status": "canceled",
+          "head_sha": "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+          "auto_deploy": 1
+        },
+        {
+          "id": 2,
+          "task": "undo",
+          "status": "deployed",
+          "head_sha": "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+          "auto_deploy": 1
+        },
+        {
+          "id": 3,
+          "task": "moves",
+          "status": "canceled",
+          "head_sha": "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+          "auto_deploy": 1
+        },
+        {
+          "id": 4,
+          "task": "analysis",
+          "status": "deployed",
+          "head_sha": "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a",
+          "auto_deploy": 1
+        },
+        {
+          "id": 5,
+          "task": "storage",
+          "status": "deployed",
+          "head_sha": "9502c6dcb56b65aee1a8620a8b503f7f68868cc2",
+          "auto_deploy": 1
+        },
+        {
+          "id": 6,
+          "task": "moves",
+          "status": "deployed",
+          "head_sha": "693d1d4dc3849109c29b9d8c04ee4d50317afe04",
+          "auto_deploy": 1
+        }
+      ]
+    },
+    "loop": {
+      "sha": "c41a0453e1fef43e2e975789e975a29a5be3aba0",
+      "clean": true,
+      "all": "PASS baseline\nPASS undo\nPASS moves\nPASS analysis\nPASS storage\nPASS integration\n",
+      "jobs": [
+        {
+          "id": 1,
+          "task": "undo",
+          "status": "deployed",
+          "head_sha": "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+          "auto_deploy": 1
+        },
+        {
+          "id": 2,
+          "task": "moves",
+          "status": "canceled",
+          "head_sha": "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+          "auto_deploy": 1
+        },
+        {
+          "id": 3,
+          "task": "analysis",
+          "status": "deployed",
+          "head_sha": "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a",
+          "auto_deploy": 1
+        },
+        {
+          "id": 4,
+          "task": "storage",
+          "status": "deployed",
+          "head_sha": "9502c6dcb56b65aee1a8620a8b503f7f68868cc2",
+          "auto_deploy": 1
+        },
+        {
+          "id": 5,
+          "task": "moves",
+          "status": "deployed",
+          "head_sha": "30ce0f6a9f18f8bce4d87f0f70b8ba2259e42d4f",
+          "auto_deploy": 1
+        }
+      ]
+    }
+  },
+  "runner_counts": {
+    "operator": {
+      "gates": 2,
+      "verify": 2,
+      "pushes": 2
+    },
+    "loop": {
+      "gates": 2,
+      "verify": 2,
+      "pushes": 2
+    }
+  },
+  "commands": [
+    {
+      "label": "daemon-status",
+      "started_at": "2026-09-05T14:27:32.681216+00:00",
+      "elapsed_seconds": 0.23376716603524983,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "daemon-status-1788618452681207000.log"
+    },
+    {
+      "label": "pre-refs",
+      "started_at": "2026-09-05T14:28:20.694743+00:00",
+      "elapsed_seconds": 0.028652457986027002,
+      "command": [
+        "git",
+        "show-ref",
+        "--heads",
+        "--dereference"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "pre-refs-1788618500694737000.log"
+    },
+    {
+      "label": "pre-status-git",
+      "started_at": "2026-09-05T14:28:20.695017+00:00",
+      "elapsed_seconds": 0.046424166997894645,
+      "command": [
+        "git",
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "pre-status-git-1788618500695009000.log"
+    },
+    {
+      "label": "pre-worktrees",
+      "started_at": "2026-09-05T14:28:20.695634+00:00",
+      "elapsed_seconds": 0.047675459180027246,
+      "command": [
+        "git",
+        "worktree",
+        "list",
+        "--porcelain"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "pre-worktrees-1788618500695626000.log"
+    },
+    {
+      "label": "pre-config",
+      "started_at": "2026-09-05T14:28:20.708764+00:00",
+      "elapsed_seconds": 0.015938500175252557,
+      "command": [
+        "sed",
+        "-n",
+        "1,260p",
+        ".mergetrain.yaml"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "pre-config-1788618500708754000.log"
+    },
+    {
+      "label": "pre-time",
+      "started_at": "2026-09-05T14:28:20.737623+00:00",
+      "elapsed_seconds": 0.00897566694766283,
+      "command": [
+        "date",
+        "-u",
+        "+%Y-%m-%dT%H:%M:%S.%NZ"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "pre-time-1788618500737617000.log"
+    },
+    {
+      "label": "cli-retry-help",
+      "started_at": "2026-09-05T14:28:20.750304+00:00",
+      "elapsed_seconds": 0.13106095790863037,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "retry",
+        "--help"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "cli-retry-help-1788618500750291000.log"
+    },
+    {
+      "label": "cli-version",
+      "started_at": "2026-09-05T14:28:20.765941+00:00",
+      "elapsed_seconds": 0.1298015417996794,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--version"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "cli-version-1788618500765935000.log"
+    },
+    {
+      "label": "cli-daemon-help",
+      "started_at": "2026-09-05T14:28:20.785470+00:00",
+      "elapsed_seconds": 0.12712833285331726,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "daemon",
+        "--help"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "cli-daemon-help-1788618500785463000.log"
+    },
+    {
+      "label": "cli-enqueue-help",
+      "started_at": "2026-09-05T14:28:30.424320+00:00",
+      "elapsed_seconds": 0.12488087499514222,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "enqueue",
+        "--help"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "cli-enqueue-help-1788618510424313000.log"
+    },
+    {
+      "label": "runtime-path",
+      "started_at": "2026-09-05T14:28:51.271153+00:00",
+      "elapsed_seconds": 0.00677808397449553,
+      "command": [
+        "ls",
+        "-l",
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "runtime-path-1788618531271147000.log"
+    },
+    {
+      "label": "source-cli",
+      "started_at": "2026-09-05T14:28:51.276256+00:00",
+      "elapsed_seconds": 0.1319348751567304,
+      "command": [
+        "rg",
+        "-n",
+        "ArgumentParser|auto_deploy|enqueue",
+        "/private/tmp/mergetrain-306-pypi-smoke/lib/python3.12/site-packages/mergetrain",
+        "/private/tmp/mergetrain-306-pypi-smoke/lib"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "source-cli-1788618531276251000.log"
+    },
+    {
+      "label": "runtime-enqueue-auto-probe",
+      "started_at": "2026-09-05T14:28:51.290117+00:00",
+      "elapsed_seconds": 0.2883033328689635,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "enqueue",
+        "--task",
+        "probe",
+        "--branch",
+        "codex/undo",
+        "--auto",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "runtime-enqueue-auto-probe-1788618531290110000.log"
+    },
+    {
+      "label": "after-probe-status",
+      "started_at": "2026-09-05T14:29:02.256511+00:00",
+      "elapsed_seconds": 0.12875699996948242,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "after-probe-status-1788618542256505000.log"
+    },
+    {
+      "label": "cli-cancel-help",
+      "started_at": "2026-09-05T14:29:08.014228+00:00",
+      "elapsed_seconds": 0.13129483279772103,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "cancel",
+        "--help"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "cli-cancel-help-1788618548014219000.log"
+    },
+    {
+      "label": "cancel-probe-1",
+      "started_at": "2026-09-05T14:29:13.882675+00:00",
+      "elapsed_seconds": 0.12721391604281962,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "cancel",
+        "1",
+        "--note",
+        "operator parser probe; retire before requested train",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "cancel-probe-1-1788618553882667000.log"
+    },
+    {
+      "label": "after-cancel-status",
+      "started_at": "2026-09-05T14:29:19.300246+00:00",
+      "elapsed_seconds": 0.13001879211515188,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "after-cancel-status-1788618559300239000.log"
+    },
+    {
+      "label": "enqueue-undo",
+      "started_at": "2026-09-05T14:29:30.003431+00:00",
+      "elapsed_seconds": 0.34691333398222923,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "enqueue",
+        "--task",
+        "undo",
+        "--branch",
+        "codex/undo",
+        "--auto",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "enqueue-undo-1788618570003424000.log"
+    },
+    {
+      "label": "enqueue-moves",
+      "started_at": "2026-09-05T14:29:30.466187+00:00",
+      "elapsed_seconds": 0.2966981250792742,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "enqueue",
+        "--task",
+        "moves",
+        "--branch",
+        "codex/moves",
+        "--auto",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "enqueue-moves-1788618570466181000.log"
+    },
+    {
+      "label": "enqueue-analysis",
+      "started_at": "2026-09-05T14:29:30.883715+00:00",
+      "elapsed_seconds": 0.2927365410141647,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "enqueue",
+        "--task",
+        "analysis",
+        "--branch",
+        "codex/analysis",
+        "--auto",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "enqueue-analysis-1788618570883708000.log"
+    },
+    {
+      "label": "enqueue-storage",
+      "started_at": "2026-09-05T14:29:31.295247+00:00",
+      "elapsed_seconds": 0.29124925006181,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "enqueue",
+        "--task",
+        "storage",
+        "--branch",
+        "codex/storage",
+        "--auto",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "enqueue-storage-1788618571295239000.log"
+    },
+    {
+      "label": "post-enqueue-status",
+      "started_at": "2026-09-05T14:29:37.118980+00:00",
+      "elapsed_seconds": 0.18277579103596509,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "post-enqueue-status-1788618577118975000.log"
+    },
+    {
+      "label": "daemon-once-1",
+      "started_at": "2026-09-05T14:29:44.762217+00:00",
+      "elapsed_seconds": 1.3562698748428375,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "daemon",
+        "--once"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "daemon-once-1-1788618584762209000.log"
+    },
+    {
+      "label": "post-daemon-1-status",
+      "started_at": "2026-09-05T14:29:54.558757+00:00",
+      "elapsed_seconds": 0.17891787481494248,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "post-daemon-1-status-1788618594558750000.log"
+    },
+    {
+      "label": "inspect-2",
+      "started_at": "2026-09-05T14:29:54.849428+00:00",
+      "elapsed_seconds": 0.13122937502339482,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "2",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "inspect-2-1788618594849414000.log"
+    },
+    {
+      "label": "inspect-3",
+      "started_at": "2026-09-05T14:29:55.093688+00:00",
+      "elapsed_seconds": 0.13178225001320243,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "3",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "inspect-3-1788618595093682000.log"
+    },
+    {
+      "label": "inspect-4",
+      "started_at": "2026-09-05T14:29:55.346199+00:00",
+      "elapsed_seconds": 0.1315203330013901,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "4",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "inspect-4-1788618595346185000.log"
+    },
+    {
+      "label": "inspect-5",
+      "started_at": "2026-09-05T14:29:55.593893+00:00",
+      "elapsed_seconds": 0.12795150000602007,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "5",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "inspect-5-1788618595593888000.log"
+    },
+    {
+      "label": "remote-refs-1",
+      "started_at": "2026-09-05T14:29:55.834377+00:00",
+      "elapsed_seconds": 0.040697542019188404,
+      "command": [
+        "git",
+        "ls-remote",
+        "origin",
+        "refs/heads/main",
+        "refs/mergetrain/deploys/*"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "remote-refs-1-1788618595834370000.log"
+    },
+    {
+      "label": "moves-log",
+      "started_at": "2026-09-05T14:30:14.860116+00:00",
+      "elapsed_seconds": 0.041996250161901116,
+      "command": [
+        "git",
+        "-C",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+        "log",
+        "--oneline",
+        "--decorate",
+        "-4"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "moves-log-1788618614860109000.log"
+    },
+    {
+      "label": "moves-status",
+      "started_at": "2026-09-05T14:30:14.867042+00:00",
+      "elapsed_seconds": 0.04093262483365834,
+      "command": [
+        "git",
+        "-C",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "moves-status-1788618614867034000.log"
+    },
+    {
+      "label": "moves-manager",
+      "started_at": "2026-09-05T14:30:14.880645+00:00",
+      "elapsed_seconds": 0.008305874885991216,
+      "command": [
+        "sed",
+        "-n",
+        "1,360p",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves/js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "moves-manager-1788618614880635000.log"
+    },
+    {
+      "label": "undo-manager",
+      "started_at": "2026-09-05T14:30:14.895091+00:00",
+      "elapsed_seconds": 0.00954033387824893,
+      "command": [
+        "sed",
+        "-n",
+        "1,380p",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-undo/js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "undo-manager-1788618614895085000.log"
+    },
+    {
+      "label": "diff-undo",
+      "started_at": "2026-09-05T14:30:14.916209+00:00",
+      "elapsed_seconds": 0.011271333089098334,
+      "command": [
+        "git",
+        "-C",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "diff",
+        "--no-ext-diff",
+        "--unified=80",
+        "dd4e61662ae01afc3b594eb8e75f35532f791b00",
+        "4d05605f700dbe25a53f63e3466e64a372d0cfbe",
+        "--",
+        "js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "diff-undo-1788618614916203000.log"
+    },
+    {
+      "label": "acceptance-current",
+      "started_at": "2026-09-05T14:30:14.936817+00:00",
+      "elapsed_seconds": 0.07668691617436707,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+        "moves",
+        "undo",
+        "integration"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "acceptance-current-1788618614936804000.log"
+    },
+    {
+      "label": "repair-merge-undo",
+      "started_at": "2026-09-05T14:30:21.711294+00:00",
+      "elapsed_seconds": 0.0385178339201957,
+      "command": [
+        "git",
+        "merge",
+        "--no-edit",
+        "codex/undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "repair-merge-undo-1788618621711285000.log"
+    },
+    {
+      "label": "repair-conflict-status",
+      "started_at": "2026-09-05T14:30:29.681874+00:00",
+      "elapsed_seconds": 0.020795125048607588,
+      "command": [
+        "git",
+        "status",
+        "--short"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-conflict-status-1788618629681868000.log"
+    },
+    {
+      "label": "repair-conflict-diff",
+      "started_at": "2026-09-05T14:30:29.834244+00:00",
+      "elapsed_seconds": 0.011226957896724343,
+      "command": [
+        "git",
+        "diff",
+        "--no-ext-diff",
+        "--cc",
+        "--",
+        "js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-conflict-diff-1788618629834234000.log"
+    },
+    {
+      "label": "repair-conflict-markers",
+      "started_at": "2026-09-05T14:30:29.976860+00:00",
+      "elapsed_seconds": 0.021954625146463513,
+      "command": [
+        "rg",
+        "-n",
+        "-C",
+        "28",
+        "<<<<<<<|=======|>>>>>>>",
+        "js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-conflict-markers-1788618629976855000.log"
+    },
+    {
+      "label": "repair-merge-base",
+      "started_at": "2026-09-05T14:30:30.130812+00:00",
+      "elapsed_seconds": 0.011162500130012631,
+      "command": [
+        "git",
+        "merge-base",
+        "HEAD",
+        "codex/undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-merge-base-1788618630130807000.log"
+    },
+    {
+      "label": "repair-markers-check",
+      "started_at": "2026-09-05T14:31:00.840350+00:00",
+      "elapsed_seconds": 0.021505207987502217,
+      "command": [
+        "rg",
+        "-n",
+        "<<<<<<<|=======|>>>>>>>",
+        "js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 1,
+      "timeout": false,
+      "log": "repair-markers-check-1788618660840345000.log"
+    },
+    {
+      "label": "repair-diff-check",
+      "started_at": "2026-09-05T14:31:00.997803+00:00",
+      "elapsed_seconds": 0.019593499833717942,
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-diff-check-1788618660997792000.log"
+    },
+    {
+      "label": "repair-status",
+      "started_at": "2026-09-05T14:31:01.149712+00:00",
+      "elapsed_seconds": 0.021500458009541035,
+      "command": [
+        "git",
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-status-1788618661149706000.log"
+    },
+    {
+      "label": "repair-accept-moves",
+      "started_at": "2026-09-05T14:31:01.313591+00:00",
+      "elapsed_seconds": 0.08130687498487532,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+        "moves"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-accept-moves-1788618661313581000.log"
+    },
+    {
+      "label": "repair-accept-undo",
+      "started_at": "2026-09-05T14:31:01.502275+00:00",
+      "elapsed_seconds": 0.07389983418397605,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+        "undo"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-accept-undo-1788618661502269000.log"
+    },
+    {
+      "label": "repair-stage",
+      "started_at": "2026-09-05T14:31:12.654611+00:00",
+      "elapsed_seconds": 0.021248875185847282,
+      "command": [
+        "git",
+        "add",
+        "js/game_manager.js"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-stage-1788618672654603000.log"
+    },
+    {
+      "label": "repair-staged-diff",
+      "started_at": "2026-09-05T14:31:12.784563+00:00",
+      "elapsed_seconds": 0.015089833876118064,
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-staged-diff-1788618672784557000.log"
+    },
+    {
+      "label": "repair-commit",
+      "started_at": "2026-09-05T14:31:12.947184+00:00",
+      "elapsed_seconds": 0.040525709046050906,
+      "command": [
+        "git",
+        "commit",
+        "--no-edit"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-commit-1788618672947173000.log"
+    },
+    {
+      "label": "repair-clean-status",
+      "started_at": "2026-09-05T14:31:13.121173+00:00",
+      "elapsed_seconds": 0.01181245781481266,
+      "command": [
+        "git",
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "repair-clean-status-1788618673121162000.log"
+    },
+    {
+      "label": "pre-retry-status",
+      "started_at": "2026-09-05T14:31:25.035324+00:00",
+      "elapsed_seconds": 0.23773754201829433,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "pre-retry-status-1788618685035319000.log"
+    },
+    {
+      "label": "retry-blocked-3",
+      "started_at": "2026-09-05T14:31:31.981617+00:00",
+      "elapsed_seconds": 0.2360208749305457,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "retry",
+        "3",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "retry-blocked-3-1788618691981612000.log"
+    },
+    {
+      "label": "post-retry-status",
+      "started_at": "2026-09-05T14:31:42.989212+00:00",
+      "elapsed_seconds": 0.18042704206891358,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "post-retry-status-1788618702989207000.log"
+    },
+    {
+      "label": "daemon-once-2",
+      "started_at": "2026-09-05T14:31:50.800505+00:00",
+      "elapsed_seconds": 0.8854582079220563,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "daemon",
+        "--once"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "daemon-once-2-1788618710800495000.log"
+    },
+    {
+      "label": "post-daemon-2-status",
+      "started_at": "2026-09-05T14:32:01.124444+00:00",
+      "elapsed_seconds": 0.18533050012774765,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "post-daemon-2-status-1788618721124438000.log"
+    },
+    {
+      "label": "inspect-6",
+      "started_at": "2026-09-05T14:32:01.423147+00:00",
+      "elapsed_seconds": 0.1334205421153456,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "6",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "inspect-6-1788618721423137000.log"
+    },
+    {
+      "label": "remote-refs-2",
+      "started_at": "2026-09-05T14:32:01.675739+00:00",
+      "elapsed_seconds": 0.04135141707956791,
+      "command": [
+        "git",
+        "ls-remote",
+        "origin",
+        "refs/heads/main",
+        "refs/mergetrain/deploys/*"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "remote-refs-2-1788618721675733000.log"
+    },
+    {
+      "label": "integration-branch",
+      "started_at": "2026-09-05T14:32:01.852642+00:00",
+      "elapsed_seconds": 0.01915795891545713,
+      "command": [
+        "git",
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "integration-branch-1788618721852636000.log"
+    },
+    {
+      "label": "clone-final",
+      "started_at": "2026-09-05T14:32:30.796200+00:00",
+      "elapsed_seconds": 0.13073345785960555,
+      "command": [
+        "git",
+        "clone",
+        "--branch",
+        "main",
+        "--single-branch",
+        "/private/tmp/mt-luna-daemon-check-20260905/train.git",
+        "/private/tmp/mt-luna-daemon-check-20260905/final-clean"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "clone-final-1788618750796194000.log"
+    },
+    {
+      "label": "final-sha",
+      "started_at": "2026-09-05T14:32:31.038107+00:00",
+      "elapsed_seconds": 0.011036125011742115,
+      "command": [
+        "git",
+        "-C",
+        "/private/tmp/mt-luna-daemon-check-20260905/final-clean",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "final-sha-1788618751038087000.log"
+    },
+    {
+      "label": "acceptance-all",
+      "started_at": "2026-09-05T14:32:31.196598+00:00",
+      "elapsed_seconds": 0.07539325021207333,
+      "command": [
+        "/opt/homebrew/bin/node",
+        "/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs",
+        "/private/tmp/mt-luna-daemon-check-20260905/final-clean",
+        "all"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "acceptance-all-1788618751196591000.log"
+    },
+    {
+      "label": "final-remote-refs",
+      "started_at": "2026-09-05T14:32:31.384883+00:00",
+      "elapsed_seconds": 0.040300457971170545,
+      "command": [
+        "git",
+        "ls-remote",
+        "/private/tmp/mt-luna-daemon-check-20260905/train.git",
+        "refs/heads/main",
+        "refs/mergetrain/deploys/*"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "final-remote-refs-1788618751384877000.log"
+    },
+    {
+      "label": "daemon-process-check",
+      "started_at": "2026-09-05T14:32:31.556247+00:00",
+      "elapsed_seconds": 0.008969292044639587,
+      "command": [
+        "pgrep",
+        "-fl",
+        "mergetrain"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 3,
+      "timeout": false,
+      "log": "daemon-process-check-1788618751556241000.log"
+    },
+    {
+      "label": "final-status",
+      "started_at": "2026-09-05T14:32:47.418003+00:00",
+      "elapsed_seconds": 0.1854179168585688,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "status",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "final-status-1788618767417998000.log"
+    },
+    {
+      "label": "final-clean-status",
+      "started_at": "2026-09-05T14:32:47.709346+00:00",
+      "elapsed_seconds": 0.02094237506389618,
+      "command": [
+        "git",
+        "-C",
+        "/private/tmp/mt-luna-daemon-check-20260905/final-clean",
+        "status",
+        "--porcelain=v1",
+        "--branch"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "final-clean-status-1788618767709340000.log"
+    },
+    {
+      "label": "original-failure-evidence",
+      "started_at": "2026-09-05T14:32:47.869325+00:00",
+      "elapsed_seconds": 0.1276947499718517,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "3",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "original-failure-evidence-1788618767869320000.log"
+    },
+    {
+      "label": "final-job-evidence",
+      "started_at": "2026-09-05T14:32:48.105826+00:00",
+      "elapsed_seconds": 0.13342370791360736,
+      "command": [
+        "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+        "--repo",
+        "/private/tmp/mt-luna-daemon-check-20260905/train",
+        "inspect",
+        "6",
+        "--json"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "final-job-evidence-1788618768105820000.log"
+    },
+    {
+      "label": "process-check-external",
+      "started_at": "2026-09-05T14:33:04.838985+00:00",
+      "elapsed_seconds": 0.039886125130578876,
+      "command": [
+        "/bin/ps",
+        "-axo",
+        "pid,ppid,command"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "process-check-external-1788618784838976000.log"
+    },
+    {
+      "label": "final-utc",
+      "started_at": "2026-09-05T14:33:42.755357+00:00",
+      "elapsed_seconds": 0.007322167046368122,
+      "command": [
+        "date",
+        "-u",
+        "+%Y-%m-%dT%H:%M:%S.%NZ"
+      ],
+      "cwd": "/private/tmp/mt-luna-daemon-check-20260905/train",
+      "exit_code": 0,
+      "timeout": false,
+      "log": "final-utc-1788618822755350000.log"
+    }
+  ],
+  "key_evidence": {
+    "retry-blocked-3": "{\n  \"contract_version\": 4,\n  \"dismissed_job\": {\n    \"auto_deploy\": true,\n    \"base_sha\": \"c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0\",\n    \"branch\": \"codex/moves\",\n    \"cancel_requested_at\": \"\",\n    \"conflict_with\": \"\",\n    \"deploy_sha\": \"\",\n    \"finished_at\": \"2026-09-05T14:31:32Z\",\n    \"head_sha\": \"dd4e61662ae01afc3b594eb8e75f35532f791b00\",\n    \"id\": 3,\n    \"log_path\": \"/private/tmp/mt-luna-daemon-check-20260905/train/.mergetrain/logs/batch-2-20260905T142944-09b01a2b.log\",\n    \"note\": \"retried as job 6\",\n    \"note_truncated\": false,\n    \"pending_deploy_sha\": \"\",\n    \"push_status\": \"not_run\",\n    \"requested_at\": \"2026-09-05T14:29:30Z\",\n    \"reused_validation_sha\": \"\",\n    \"started_at\": \"2026-09-05T14:29:44Z\",\n    \"status\": \"canceled\",\n    \"supersedes_train_id\": \"\",\n    \"supersession_id\": \"\",\n    \"task\": \"moves\",\n    \"train_id\": \"\",\n    \"train_size\": 0,\n    \"validated_at\": \"\",\n    \"validated_head_sha\": \"\",\n    \"validation_base_sha\": \"\",\n    \"validation_environment_sha\": \"\",\n    \"validation_gate_policy_sha\": \"\",\n    \"validation_sha\": \"\",\n    \"validation_train_sha\": \"\",\n    \"validation_tree_sha\": \"\",\n    \"verify_status\": \"not_run\",\n    \"worktree_path\": \"/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves\"\n  },\n  \"job\": {\n    \"auto_deploy\": true,\n    \"base_sha\": \"c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0\",\n    \"branch\": \"codex/moves\",\n    \"cancel_requested_at\": \"\",\n    \"conflict_with\": \"\",\n    \"deploy_sha\": \"\",\n    \"finished_at\": \"\",\n    \"head_sha\": \"693d1d4dc3849109c29b9d8c04ee4d50317afe04\",\n    \"id\": 6,\n    \"log_path\": \"\",\n    \"note\": \"Auto-merging js/game_manager.js\\nCONFLICT (content): Merge conflict in js/game_manager.js\\nAutomatic merge failed; fix conflicts and then commit the result.\",\n    \"note_truncated\": false,\n    \"pending_deploy_sha\": \"\",\n    \"push_status\": \"not_run\",\n    \"requested_at\": \"2026-09-05T14:31:32Z\",\n    \"reused_validation_sha\": \"\",\n    \"started_at\": \"\",\n    \"status\": \"queued\",\n    \"supersedes_train_id\": \"\",\n    \"supersession_id\": \"\",\n    \"task\": \"moves\",\n    \"train_id\": \"\",\n    \"train_size\": 0,\n    \"validated_at\": \"\",\n    \"validated_head_sha\": \"\",\n    \"validation_base_sha\": \"\",\n    \"validation_environment_sha\": \"\",\n    \"validation_gate_policy_sha\": \"\",\n    \"validation_sha\": \"\",\n    \"validation_train_sha\": \"\",\n    \"validation_tree_sha\": \"\",\n    \"verify_status\": \"not_run\",\n    \"worktree_path\": \"/private/tmp/mt-luna-daemon-check-20260905/train-wt-moves\"\n  },\n  \"next_action\": \"run_daemon_when_approved\",\n  \"ok\": true\n}\n",
+    "daemon-once-1": "mergetrain daemon processing 4 auto job(s)\nmergetrain daemon: 3/4 landed, rest blocked/failed\n",
+    "daemon-once-2": "mergetrain daemon processing 1 auto job(s)\n",
+    "final-status": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 6,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 6,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T14:31:51Z\"\n    },\n    {\n      \"branch\": \"codex/storage\",\n      \"id\": 5,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"storage\",\n      \"updated_at\": \"2026-09-05T14:29:45Z\"\n    },\n    {\n      \"branch\": \"codex/analysis\",\n      \"id\": 4,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"analysis\",\n      \"updated_at\": \"2026-09-05T14:29:45Z\"\n    },\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 3,\n      \"outcome\": \"canceled\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T14:31:32Z\"\n    },\n    {\n      \"branch\": \"codex/undo\",\n      \"id\": 2,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"undo\",\n      \"updated_at\": \"2026-09-05T14:29:45Z\"\n    },\n    {\n      \"branch\": \"codex/undo\",\n      \"id\": 1,\n      \"outcome\": \"canceled\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"probe\",\n      \"updated_at\": \"2026-09-05T14:29:13Z\"\n    }\n  ],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+    "runtime-enqueue-auto-probe": "{\n  \"contract_version\": 4,\n  \"job\": {\n    \"auto_deploy\": true,\n    \"base_sha\": \"c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0\",\n    \"branch\": \"codex/undo\",\n    \"cancel_requested_at\": \"\",\n    \"conflict_with\": \"\",\n    \"deploy_sha\": \"\",\n    \"finished_at\": \"\",\n    \"head_sha\": \"4d05605f700dbe25a53f63e3466e64a372d0cfbe\",\n    \"id\": 1,\n    \"log_path\": \"\",\n    \"note\": \"\",\n    \"note_truncated\": false,\n    \"pending_deploy_sha\": \"\",\n    \"push_status\": \"not_run\",\n    \"requested_at\": \"2026-09-05T14:28:51Z\",\n    \"reused_validation_sha\": \"\",\n    \"started_at\": \"\",\n    \"status\": \"queued\",\n    \"supersedes_train_id\": \"\",\n    \"supersession_id\": \"\",\n    \"task\": \"probe\",\n    \"train_id\": \"\",\n    \"train_size\": 0,\n    \"validated_at\": \"\",\n    \"validated_head_sha\": \"\",\n    \"validation_base_sha\": \"\",\n    \"validation_environment_sha\": \"\",\n    \"validation_gate_policy_sha\": \"\",\n    \"validation_sha\": \"\",\n    \"validation_train_sha\": \"\",\n    \"validation_tree_sha\": \"\",\n    \"verify_status\": \"not_run\",\n    \"worktree_path\": \"/private/tmp/mt-luna-daemon-check-20260905/train-wt-undo\"\n  },\n  \"ok\": true\n}\n",
+    "acceptance-current": "/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs:503\n    if (!GROUPS.includes(group)) throw new Error(`unknown GROUP '${group}'`);\n                                 ^\n\nError: unknown GROUP 'integration'\n    at parseGroups (/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs:503:40)\n    at main (/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs:510:18)\n    at Object.<anonymous> (/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs:526:1)\n    at Module._compile (node:internal/modules/cjs/loader:1934:14)\n    at Object..js (node:internal/modules/cjs/loader:2074:10)\n    at Module.load (node:internal/modules/cjs/loader:1656:32)\n    at Module._load (node:internal/modules/cjs/loader:1448:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47\n\nNode.js v26.7.0\n"
+  },
+  "run_events": {
+    "operator": [
+      {
+        "id": 1,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "claiming",
+        "state": "active",
+        "message": "Deploy runner claimed 4 job(s)",
+        "detail": "mode=deploy",
+        "created_at": "2026-09-05T14:29:44Z"
+      },
+      {
+        "id": 2,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "active",
+        "message": "Fetching origin/main",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:44Z"
+      },
+      {
+        "id": 3,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "success",
+        "message": "Integration worktree prepared",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:44Z"
+      },
+      {
+        "id": 4,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Assembling train with 4 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 5,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 2,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/undo",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 6,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 2,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/undo",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 7,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 3,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/moves",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 8,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 3,
+        "phase": "blocked",
+        "state": "error",
+        "message": "Job #3 blocked",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 9,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 4,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/analysis",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 10,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 4,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/analysis",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 11,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 5,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/storage",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 12,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 5,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/storage",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 13,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Assembled 3 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 14,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running train gates",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 15,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 16,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 17,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 18,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 19,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "All train gates passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 20,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "active",
+        "message": "Pushing verified HEAD atomically",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 21,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "success",
+        "message": "Atomic push completed",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 22,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "active",
+        "message": "Running post-push verification",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 23,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "success",
+        "message": "Post-push verification passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 24,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 2,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #2 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 25,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 4,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #4 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:45Z"
+      },
+      {
+        "id": 26,
+        "claim_token": "8e40368ee1c24647988058f8dcde7a5c",
+        "job_id": 5,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #5 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:29:46Z"
+      },
+      {
+        "id": 27,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "claiming",
+        "state": "active",
+        "message": "Deploy runner claimed 1 job(s)",
+        "detail": "mode=deploy",
+        "created_at": "2026-09-05T14:31:50Z"
+      },
+      {
+        "id": 28,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "active",
+        "message": "Fetching origin/main",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:50Z"
+      },
+      {
+        "id": 29,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "success",
+        "message": "Integration worktree prepared",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 30,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Assembling train with 1 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 31,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": 6,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/moves",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 32,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": 6,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/moves",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 33,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Assembled 1 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 34,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running train gates",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 35,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 36,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 37,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 38,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 39,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "All train gates passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 40,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "active",
+        "message": "Pushing verified HEAD atomically",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 41,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "success",
+        "message": "Atomic push completed",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 42,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "active",
+        "message": "Running post-push verification",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 43,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "success",
+        "message": "Post-push verification passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      },
+      {
+        "id": 44,
+        "claim_token": "f4370b403aa64146bf5c1c3a9b588378",
+        "job_id": 6,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #6 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:31:51Z"
+      }
+    ],
+    "loop": [
+      {
+        "id": 1,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "claiming",
+        "state": "active",
+        "message": "Deploy runner claimed 4 job(s)",
+        "detail": "mode=deploy",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 2,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "active",
+        "message": "Fetching origin/main",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 3,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "success",
+        "message": "Integration worktree prepared",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 4,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Assembling train with 4 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 5,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 1,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/undo",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 6,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 1,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/undo",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 7,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 2,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/moves",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 8,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 2,
+        "phase": "blocked",
+        "state": "error",
+        "message": "Job #2 blocked",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 9,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 3,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/analysis",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 10,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 3,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/analysis",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 11,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 4,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/storage",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 12,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 4,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/storage",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 13,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Assembled 3 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 14,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running train gates",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 15,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 16,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 17,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 18,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 19,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "All train gates passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 20,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "active",
+        "message": "Pushing verified HEAD atomically",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 21,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "success",
+        "message": "Atomic push completed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 22,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "active",
+        "message": "Running post-push verification",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:24Z"
+      },
+      {
+        "id": 23,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "success",
+        "message": "Post-push verification passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:25Z"
+      },
+      {
+        "id": 24,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 1,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #1 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:25Z"
+      },
+      {
+        "id": 25,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 3,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #3 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:25Z"
+      },
+      {
+        "id": 26,
+        "claim_token": "633ec174133743f8882a519d115a9cbc",
+        "job_id": 4,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #4 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:25Z"
+      },
+      {
+        "id": 27,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "claiming",
+        "state": "active",
+        "message": "Deploy runner claimed 1 job(s)",
+        "detail": "mode=deploy",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 28,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "active",
+        "message": "Fetching origin/main",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 29,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "fetching",
+        "state": "success",
+        "message": "Integration worktree prepared",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 30,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Assembling train with 1 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 31,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": 5,
+        "phase": "assembling",
+        "state": "active",
+        "message": "Merging codex/moves",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 32,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": 5,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Merged codex/moves",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 33,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "assembling",
+        "state": "success",
+        "message": "Assembled 1 job(s)",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 34,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running train gates",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 35,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 36,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 1/2: diff-check",
+        "detail": "git diff --check origin/main..HEAD",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 37,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "gating",
+        "state": "active",
+        "message": "Running gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 38,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "Passed gate 2/2: baseline",
+        "detail": "/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 39,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "gating",
+        "state": "success",
+        "message": "All train gates passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 40,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "active",
+        "message": "Pushing verified HEAD atomically",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 41,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "pushing",
+        "state": "success",
+        "message": "Atomic push completed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 42,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "active",
+        "message": "Running post-push verification",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 43,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": null,
+        "phase": "verifying",
+        "state": "success",
+        "message": "Post-push verification passed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      },
+      {
+        "id": 44,
+        "claim_token": "7aeddf82415f4bb5bb8f4286beeef81a",
+        "job_id": 5,
+        "phase": "complete",
+        "state": "success",
+        "message": "Job #5 deployed",
+        "detail": "",
+        "created_at": "2026-09-05T14:39:40Z"
+      }
+    ]
+  },
+  "loop": {
+    "events": [
+      {
+        "name": "daemon-start",
+        "utc": "2026-09-05T14:39:23.932599+00:00",
+        "monotonic": 1437132.979744916
+      },
+      {
+        "name": "daemon-pid",
+        "utc": "2026-09-05T14:39:23.934516+00:00",
+        "monotonic": 1437132.981516333,
+        "pid": 88927
+      },
+      {
+        "name": "partial-observed",
+        "utc": "2026-09-05T14:39:25.089413+00:00",
+        "monotonic": 1437134.13641175
+      },
+      {
+        "name": "retry-start",
+        "utc": "2026-09-05T14:39:25.331984+00:00",
+        "monotonic": 1437134.378980041
+      },
+      {
+        "name": "retry-returned",
+        "utc": "2026-09-05T14:39:25.514119+00:00",
+        "monotonic": 1437134.561116,
+        "replacement": 5
+      },
+      {
+        "name": "all-deployed-observed",
+        "utc": "2026-09-05T14:39:40.920715+00:00",
+        "monotonic": 1437149.967736833,
+        "rows": [
+          {
+            "id": 1,
+            "status": "deployed",
+            "auto_deploy": 1,
+            "head_sha": "4d05605f700dbe25a53f63e3466e64a372d0cfbe"
+          },
+          {
+            "id": 2,
+            "status": "canceled",
+            "auto_deploy": 1,
+            "head_sha": "dd4e61662ae01afc3b594eb8e75f35532f791b00"
+          },
+          {
+            "id": 3,
+            "status": "deployed",
+            "auto_deploy": 1,
+            "head_sha": "6d8b85947cd456c7d63e5eb3f5da85d5cb48864a"
+          },
+          {
+            "id": 4,
+            "status": "deployed",
+            "auto_deploy": 1,
+            "head_sha": "9502c6dcb56b65aee1a8620a8b503f7f68868cc2"
+          },
+          {
+            "id": 5,
+            "status": "deployed",
+            "auto_deploy": 1,
+            "head_sha": "30ce0f6a9f18f8bce4d87f0f70b8ba2259e42d4f"
+          }
+        ]
+      },
+      {
+        "name": "daemon-stopped",
+        "utc": "2026-09-05T14:39:40.938732+00:00",
+        "monotonic": 1437149.985757083,
+        "exit_code": 0
+      },
+      {
+        "name": "verified",
+        "utc": "2026-09-05T14:39:41.159251+00:00",
+        "monotonic": 1437150.206285708,
+        "sha": "c41a0453e1fef43e2e975789e975a29a5be3aba0"
+      }
+    ],
+    "commands": [
+      {
+        "label": "initial-status",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "status",
+          "--json"
+        ],
+        "elapsed_seconds": 0.1752530001103878,
+        "exit_code": 0,
+        "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 0,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+        "stderr": ""
+      },
+      {
+        "label": "destination",
+        "command": [
+          "git",
+          "remote",
+          "get-url",
+          "--push",
+          "origin"
+        ],
+        "elapsed_seconds": 0.008102542022243142,
+        "exit_code": 0,
+        "stdout": "/private/tmp/mt-luna-daemon-loop-20260905/train.git\n",
+        "stderr": ""
+      },
+      {
+        "label": "enqueue-undo",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "enqueue",
+          "--task",
+          "undo",
+          "--branch",
+          "codex/undo",
+          "--auto"
+        ],
+        "elapsed_seconds": 0.2646292089484632,
+        "exit_code": 0,
+        "stdout": "queued job 1: undo (codex/undo)\n",
+        "stderr": ""
+      },
+      {
+        "label": "enqueue-moves",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "enqueue",
+          "--task",
+          "moves",
+          "--branch",
+          "codex/moves",
+          "--auto"
+        ],
+        "elapsed_seconds": 0.20954520883969963,
+        "exit_code": 0,
+        "stdout": "queued job 2: moves (codex/moves)\n",
+        "stderr": ""
+      },
+      {
+        "label": "enqueue-analysis",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "enqueue",
+          "--task",
+          "analysis",
+          "--branch",
+          "codex/analysis",
+          "--auto"
+        ],
+        "elapsed_seconds": 0.2147694998420775,
+        "exit_code": 0,
+        "stdout": "queued job 3: analysis (codex/analysis)\n",
+        "stderr": ""
+      },
+      {
+        "label": "enqueue-storage",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "enqueue",
+          "--task",
+          "storage",
+          "--branch",
+          "codex/storage",
+          "--auto"
+        ],
+        "elapsed_seconds": 0.23197720805183053,
+        "exit_code": 0,
+        "stdout": "queued job 4: storage (codex/storage)\n",
+        "stderr": ""
+      },
+      {
+        "label": "status-before-repair",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "status",
+          "--json"
+        ],
+        "elapsed_seconds": 0.12829004088416696,
+        "exit_code": 0,
+        "stdout": "{\n  \"attention_jobs\": [\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 2,\n      \"outcome\": null,\n      \"reason\": \"Auto-merging js/game_manager.js\\nCONFLICT (content): Merge conflict in js/game_manager.js\\nAutomatic merge failed; fix conflicts and then commit the result.\",\n      \"reason_code\": \"blocked\",\n      \"reason_truncated\": false,\n      \"state\": \"attention\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T14:39:24Z\"\n    }\n  ],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 1,\n    \"done\": 3,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"fix_blocked_job\",\n    \"command\": \"mergetrain inspect 2\",\n    \"reason_code\": \"blocked\",\n    \"requires_approval\": \"none\",\n    \"target_job_id\": 2\n  },\n  \"ok\": true,\n  \"recent_jobs\": [\n    {\n      \"branch\": \"codex/storage\",\n      \"id\": 4,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"storage\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    },\n    {\n      \"branch\": \"codex/analysis\",\n      \"id\": 3,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"analysis\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    },\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 2,\n      \"outcome\": null,\n      \"reason\": \"Auto-merging js/game_manager.js\\nCONFLICT (content): Merge conflict in js/game_manager.js\\nAutomatic merge failed; fix conflicts and then commit the result.\",\n      \"reason_code\": \"blocked\",\n      \"reason_truncated\": false,\n      \"state\": \"attention\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T14:39:24Z\"\n    },\n    {\n      \"branch\": \"codex/undo\",\n      \"id\": 1,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"undo\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    }\n  ],\n  \"state\": \"attention\",\n  \"summary\": \"1 job(s) need attention\",\n  \"warnings\": []\n}\n",
+        "stderr": ""
+      },
+      {
+        "label": "inspect-blocked",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "inspect",
+          "2",
+          "--json"
+        ],
+        "elapsed_seconds": 0.08154954202473164,
+        "exit_code": 0,
+        "stdout": "{\n  \"contract_version\": 4,\n  \"events\": [\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"mode=deploy\",\n      \"id\": 1,\n      \"job_id\": null,\n      \"message\": \"Deploy runner claimed 4 job(s)\",\n      \"phase\": \"claiming\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 2,\n      \"job_id\": null,\n      \"message\": \"Fetching origin/main\",\n      \"phase\": \"fetching\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 3,\n      \"job_id\": null,\n      \"message\": \"Integration worktree prepared\",\n      \"phase\": \"fetching\",\n      \"state\": \"success\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 4,\n      \"job_id\": null,\n      \"message\": \"Assembling train with 4 job(s)\",\n      \"phase\": \"assembling\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 7,\n      \"job_id\": 2,\n      \"message\": \"Merging codex/moves\",\n      \"phase\": \"assembling\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 8,\n      \"job_id\": 2,\n      \"message\": \"Job #2 blocked\",\n      \"phase\": \"blocked\",\n      \"state\": \"error\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 13,\n      \"job_id\": null,\n      \"message\": \"Assembled 3 job(s)\",\n      \"phase\": \"assembling\",\n      \"state\": \"success\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 14,\n      \"job_id\": null,\n      \"message\": \"Running train gates\",\n      \"phase\": \"gating\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"git diff --check origin/main..HEAD\",\n      \"id\": 15,\n      \"job_id\": null,\n      \"message\": \"Running gate 1/2: diff-check\",\n      \"phase\": \"gating\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"git diff --check origin/main..HEAD\",\n      \"id\": 16,\n      \"job_id\": null,\n      \"message\": \"Passed gate 1/2: diff-check\",\n      \"phase\": \"gating\",\n      \"state\": \"success\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline\",\n      \"id\": 17,\n      \"job_id\": null,\n      \"message\": \"Running gate 2/2: baseline\",\n      \"phase\": \"gating\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"/opt/homebrew/bin/node /private/tmp/mergetrain-luna-throughput-pilot-20260905/benchmarks/throughput_2048/acceptance.cjs . baseline\",\n      \"id\": 18,\n      \"job_id\": null,\n      \"message\": \"Passed gate 2/2: baseline\",\n      \"phase\": \"gating\",\n      \"state\": \"success\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 19,\n      \"job_id\": null,\n      \"message\": \"All train gates passed\",\n      \"phase\": \"gating\",\n      \"state\": \"success\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 20,\n      \"job_id\": null,\n      \"message\": \"Pushing verified HEAD atomically\",\n      \"phase\": \"pushing\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 21,\n      \"job_id\": null,\n      \"message\": \"Atomic push completed\",\n      \"phase\": \"pushing\",\n      \"state\": \"success\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:24Z\",\n      \"detail\": \"\",\n      \"id\": 22,\n      \"job_id\": null,\n      \"message\": \"Running post-push verification\",\n      \"phase\": \"verifying\",\n      \"state\": \"active\"\n    },\n    {\n      \"created_at\": \"2026-09-05T14:39:25Z\",\n      \"detail\": \"\",\n      \"id\": 23,\n      \"job_id\": null,\n      \"message\": \"Post-push verification passed\",\n      \"phase\": \"verifying\",\n      \"state\": \"success\"\n    }\n  ],\n  \"job\": {\n    \"auto_deploy\": true,\n    \"base_sha\": \"c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0\",\n    \"branch\": \"codex/moves\",\n    \"cancel_requested_at\": \"\",\n    \"conflict_with\": \"\",\n    \"deploy_sha\": \"\",\n    \"finished_at\": \"2026-09-05T14:39:24Z\",\n    \"head_sha\": \"dd4e61662ae01afc3b594eb8e75f35532f791b00\",\n    \"id\": 2,\n    \"log_path\": \"/private/tmp/mt-luna-daemon-loop-20260905/train/.mergetrain/logs/batch-1-20260905T143924-0d01ca73.log\",\n    \"note\": \"Auto-merging js/game_manager.js\\nCONFLICT (content): Merge conflict in js/game_manager.js\\nAutomatic merge failed; fix conflicts and then commit the result.\",\n    \"note_truncated\": false,\n    \"pending_deploy_sha\": \"\",\n    \"push_status\": \"not_run\",\n    \"requested_at\": \"2026-09-05T14:39:23Z\",\n    \"reused_validation_sha\": \"\",\n    \"started_at\": \"2026-09-05T14:39:24Z\",\n    \"status\": \"blocked\",\n    \"supersedes_train_id\": \"\",\n    \"supersession_id\": \"\",\n    \"task\": \"moves\",\n    \"train_id\": \"\",\n    \"train_size\": 0,\n    \"validated_at\": \"\",\n    \"validated_head_sha\": \"\",\n    \"validation_base_sha\": \"\",\n    \"validation_environment_sha\": \"\",\n    \"validation_gate_policy_sha\": \"\",\n    \"validation_sha\": \"\",\n    \"validation_train_sha\": \"\",\n    \"validation_tree_sha\": \"\",\n    \"verify_status\": \"not_run\",\n    \"worktree_path\": \"/private/tmp/mt-luna-daemon-loop-20260905/wt-moves\"\n  },\n  \"ok\": true,\n  \"outcome\": {\n    \"category\": \"merge_conflict\",\n    \"failure_category\": \"merge_conflict\",\n    \"message\": \"Auto-merging js/game_manager.js\\nCONFLICT (content): Merge conflict in js/game_manager.js\\nAutomatic merge failed; fix conflicts and then commit the result.\",\n    \"message_truncated\": false,\n    \"severity\": \"failure\",\n    \"warning_categories\": []\n  },\n  \"progress\": {\n    \"detail\": \"\",\n    \"elapsed_seconds\": 0.0,\n    \"gate\": null,\n    \"heartbeat_at\": \"\",\n    \"latest_event_id\": 23,\n    \"lease_expires_at\": \"\",\n    \"lease_liveness\": \"inactive\",\n    \"lost_lease\": false,\n    \"message\": \"Post-push verification passed\",\n    \"message_truncated\": false,\n    \"phase\": \"verifying\",\n    \"started_at\": \"2026-09-05T14:39:24Z\",\n    \"state\": \"success\",\n    \"updated_at\": \"2026-09-05T14:39:25Z\"\n  },\n  \"train\": null\n}\n",
+        "stderr": ""
+      },
+      {
+        "label": "replay-accepted-repair",
+        "command": [
+          "git",
+          "merge",
+          "--ff-only",
+          "30ce0f6a9f18f8bce4d87f0f70b8ba2259e42d4f"
+        ],
+        "elapsed_seconds": 0.023404167033731937,
+        "exit_code": 0,
+        "stdout": "Updating dd4e616..30ce0f6\nFast-forward\n js/game_manager.js | 27 +++++++++++++++++++++++++++\n 1 file changed, 27 insertions(+)\n",
+        "stderr": ""
+      },
+      {
+        "label": "repair-clean",
+        "command": [
+          "git",
+          "status",
+          "--porcelain"
+        ],
+        "elapsed_seconds": 0.009180291090160608,
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "label": "retry",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "retry",
+          "2",
+          "--json"
+        ],
+        "elapsed_seconds": 0.18199841701425612,
+        "exit_code": 0,
+        "stdout": "{\n  \"contract_version\": 4,\n  \"dismissed_job\": {\n    \"auto_deploy\": true,\n    \"base_sha\": \"c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0\",\n    \"branch\": \"codex/moves\",\n    \"cancel_requested_at\": \"\",\n    \"conflict_with\": \"\",\n    \"deploy_sha\": \"\",\n    \"finished_at\": \"2026-09-05T14:39:25Z\",\n    \"head_sha\": \"dd4e61662ae01afc3b594eb8e75f35532f791b00\",\n    \"id\": 2,\n    \"log_path\": \"/private/tmp/mt-luna-daemon-loop-20260905/train/.mergetrain/logs/batch-1-20260905T143924-0d01ca73.log\",\n    \"note\": \"retried as job 5\",\n    \"note_truncated\": false,\n    \"pending_deploy_sha\": \"\",\n    \"push_status\": \"not_run\",\n    \"requested_at\": \"2026-09-05T14:39:23Z\",\n    \"reused_validation_sha\": \"\",\n    \"started_at\": \"2026-09-05T14:39:24Z\",\n    \"status\": \"canceled\",\n    \"supersedes_train_id\": \"\",\n    \"supersession_id\": \"\",\n    \"task\": \"moves\",\n    \"train_id\": \"\",\n    \"train_size\": 0,\n    \"validated_at\": \"\",\n    \"validated_head_sha\": \"\",\n    \"validation_base_sha\": \"\",\n    \"validation_environment_sha\": \"\",\n    \"validation_gate_policy_sha\": \"\",\n    \"validation_sha\": \"\",\n    \"validation_train_sha\": \"\",\n    \"validation_tree_sha\": \"\",\n    \"verify_status\": \"not_run\",\n    \"worktree_path\": \"/private/tmp/mt-luna-daemon-loop-20260905/wt-moves\"\n  },\n  \"job\": {\n    \"auto_deploy\": true,\n    \"base_sha\": \"c32408153dbf0ca6f7f483b7e91fff6b18c9e0f0\",\n    \"branch\": \"codex/moves\",\n    \"cancel_requested_at\": \"\",\n    \"conflict_with\": \"\",\n    \"deploy_sha\": \"\",\n    \"finished_at\": \"\",\n    \"head_sha\": \"30ce0f6a9f18f8bce4d87f0f70b8ba2259e42d4f\",\n    \"id\": 5,\n    \"log_path\": \"\",\n    \"note\": \"Auto-merging js/game_manager.js\\nCONFLICT (content): Merge conflict in js/game_manager.js\\nAutomatic merge failed; fix conflicts and then commit the result.\",\n    \"note_truncated\": false,\n    \"pending_deploy_sha\": \"\",\n    \"push_status\": \"not_run\",\n    \"requested_at\": \"2026-09-05T14:39:25Z\",\n    \"reused_validation_sha\": \"\",\n    \"started_at\": \"\",\n    \"status\": \"queued\",\n    \"supersedes_train_id\": \"\",\n    \"supersession_id\": \"\",\n    \"task\": \"moves\",\n    \"train_id\": \"\",\n    \"train_size\": 0,\n    \"validated_at\": \"\",\n    \"validated_head_sha\": \"\",\n    \"validation_base_sha\": \"\",\n    \"validation_environment_sha\": \"\",\n    \"validation_gate_policy_sha\": \"\",\n    \"validation_sha\": \"\",\n    \"validation_train_sha\": \"\",\n    \"validation_tree_sha\": \"\",\n    \"verify_status\": \"not_run\",\n    \"worktree_path\": \"/private/tmp/mt-luna-daemon-loop-20260905/wt-moves\"\n  },\n  \"next_action\": \"run_daemon_when_approved\",\n  \"ok\": true\n}\n",
+        "stderr": ""
+      },
+      {
+        "label": "remote-head",
+        "command": [
+          "git",
+          "--git-dir",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train.git",
+          "rev-parse",
+          "main"
+        ],
+        "elapsed_seconds": 0.008546166820451617,
+        "exit_code": 0,
+        "stdout": "c41a0453e1fef43e2e975789e975a29a5be3aba0\n",
+        "stderr": ""
+      },
+      {
+        "label": "acceptance-checkout",
+        "command": [
+          "git",
+          "worktree",
+          "add",
+          "--detach",
+          "/private/tmp/mt-luna-daemon-loop-20260905/accepted",
+          "c41a0453e1fef43e2e975789e975a29a5be3aba0"
+        ],
+        "elapsed_seconds": 0.027639374835416675,
+        "exit_code": 0,
+        "stdout": "HEAD is now at c41a045 Merge commit '30ce0f6a9f18f8bce4d87f0f70b8ba2259e42d4f' into HEAD\n",
+        "stderr": "Preparing worktree (detached HEAD c41a045)\n"
+      },
+      {
+        "label": "strict-all",
+        "command": [
+          "/opt/homebrew/bin/node",
+          "/private/tmp/mergetrain-luna-daemon-check-20260905/benchmarks/throughput_2048/acceptance.cjs",
+          "/private/tmp/mt-luna-daemon-loop-20260905/accepted",
+          "all"
+        ],
+        "elapsed_seconds": 0.05031541595235467,
+        "exit_code": 0,
+        "stdout": "PASS baseline\nPASS undo\nPASS moves\nPASS analysis\nPASS storage\nPASS integration\n",
+        "stderr": ""
+      },
+      {
+        "label": "final-clean",
+        "command": [
+          "git",
+          "status",
+          "--porcelain"
+        ],
+        "elapsed_seconds": 0.014697207836434245,
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "label": "final-status",
+        "command": [
+          "/private/tmp/mergetrain-306-pypi-smoke/bin/mergetrain",
+          "--repo",
+          "/private/tmp/mt-luna-daemon-loop-20260905/train",
+          "status",
+          "--json"
+        ],
+        "elapsed_seconds": 0.11887554102577269,
+        "exit_code": 0,
+        "stdout": "{\n  \"attention_jobs\": [],\n  \"contract_version\": 4,\n  \"counts\": {\n    \"attention\": 0,\n    \"done\": 5,\n    \"ready\": 0,\n    \"running\": 0,\n    \"waiting\": 0\n  },\n  \"health\": \"healthy\",\n  \"next_action\": {\n    \"code\": \"enqueue_clean_branch\",\n    \"command\": null,\n    \"reason_code\": null,\n    \"requires_approval\": \"none\",\n    \"target_job_id\": null\n  },\n  \"ok\": true,\n  \"recent_jobs\": [\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 5,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T14:39:40Z\"\n    },\n    {\n      \"branch\": \"codex/storage\",\n      \"id\": 4,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"storage\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    },\n    {\n      \"branch\": \"codex/analysis\",\n      \"id\": 3,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"analysis\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    },\n    {\n      \"branch\": \"codex/moves\",\n      \"id\": 2,\n      \"outcome\": \"canceled\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"moves\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    },\n    {\n      \"branch\": \"codex/undo\",\n      \"id\": 1,\n      \"outcome\": \"deployed\",\n      \"reason\": null,\n      \"reason_code\": null,\n      \"reason_truncated\": false,\n      \"state\": \"done\",\n      \"task\": \"undo\",\n      \"updated_at\": \"2026-09-05T14:39:25Z\"\n    }\n  ],\n  \"state\": \"idle\",\n  \"summary\": \"No active work; enqueue a clean task branch when ready\",\n  \"warnings\": []\n}\n",
+        "stderr": ""
+      }
+    ]
+  },
+  "limitations": [
+    "One informed operator sample with preapproved daemon mode; not causal comparison",
+    "Luna final turn errored from usage quota AFTER logs establish completed deployment and acceptance; no replacement agent",
+    "Supplementary script creation first rejected because approval service hit usage quota; after user continue and read-only isolation checks the same creation was approved and execution completed",
+    "Union measures recorded child-command intervals only; no pure model-thinking estimate",
+    "Loop replays previously accepted repair; excludes AI repair time; default interval and 0.1s observation resolution"
+  ],
+  "raw_evidence": "/Users/yongjip/Projects/mergetrain/.mergetrain/benchmarks/throughput-2048/daemon-check-20260905"
+}
