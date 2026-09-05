@@ -615,3 +615,26 @@ shutdown. A 64-request/16-thread unchanged-queue test must use one observer and
 one snapshot build. Existing read-only, schema, recovery, and architecture
 checks remain required. Revisit this internal lifetime only if a measured
 connection cost justifies another equally correct change detector.
+
+## Existing-queue guidance correction — 2026-09-05
+
+The prior operator-boundary diagnostic observed a single-branch handoff that
+omitted enqueue, an empty-queue answer that inferred no recovery state, and
+recovery advice using removed `doctor` syntax. These are incorrect operator
+instructions, distinct from the catalog-selection overhead measured separately.
+
+Consolidate the correction in the existing generated agent contract: preserve
+the status/enqueue/stop workflow for existing queues, interpret counts with
+health/state/next_action, distinguish explanation from execution, and include
+current v3 inspection syntax with version-aware uncertainty handling. The same
+source projects to all six existing protocol surfaces. The measured reading
+cost is 162 additional whitespace-delimited words per full skill read. No
+command, flag, MCP tool, config field, approval flow or skill is added; the
+six-command/five-tool baseline and discovery descriptions remain unchanged.
+
+Retain only if the focused paired explanation diagnostic preserves current
+syntax, existing-queue handoff and authority boundaries without prohibited
+commands. The ordinary product checks remain required. Shorten or revert this
+addition if controlled evidence shows no accuracy benefit or the added reading
+cost outweighs it. This record does not claim improved automatic discovery or
+cross-client behavioral certification.
