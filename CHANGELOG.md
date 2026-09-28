@@ -114,6 +114,11 @@
   answer sent the notification on to whatever host it named, loopback
   included, and the redirected response counted as a successful delivery.
   Redirects are no longer followed, and any 3xx answer is a failed delivery.
+- Stop `init --write` and `init --refresh-instructions` from writing through
+  symbolic links committed where generated files belong (#231). A link could
+  send the write to a file outside the repository, and a dangling one created
+  its target. Both now refuse a symbolic link, create files exclusively, and
+  refresh by replacing the file itself.
 
 ## 3.0.8 - 2026-09-29
 

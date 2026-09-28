@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import uuid
 from pathlib import Path
 
 from ..cli_support import dump_json
@@ -54,6 +56,30 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 """
 
 
+def _write_generated(path: Path, content: str, *, replace: bool) -> None:
+    """Write ``path`` itself, never a file a symbolic link there points to.
+
+    A cloned repository can commit a link where a generated file belongs; a
+    write through it would overwrite, or with a dangling link create, a file
+    outside the repository (#231).
+    """
+
+    if path.is_symlink():
+        raise ConfigError(f"refusing to write through a symbolic link: {path}")
+    exclusive = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    target = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp") if replace else path
+    with os.fdopen(os.open(target, exclusive, 0o666), "w", encoding="utf-8") as handle:
+        handle.write(content)
+    if replace:
+        try:
+            # rename replaces the directory entry, even a link that appeared
+            # since the check above, and never follows it.
+            os.replace(target, path)
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     repo = Path(args.repo or Path.cwd()).expanduser().resolve()
     project = args.project or repo.name or "example-app"
@@ -63,9 +89,14 @@ def cmd_init(args: argparse.Namespace) -> int:
             repo / "AGENTS.mergetrain.md": render_agent_contract(),
             repo / "CLAUDE.mergetrain.md": render_agent_contract(),
         }
+        linked = [str(path) for path in files if path.is_symlink()]
+        if linked:
+            raise ConfigError(
+                "refusing to write through symbolic links: " + ", ".join(linked)
+            )
         refreshed: list[str] = []
         for path, content in files.items():
-            path.write_text(content, encoding="utf-8")
+            _write_generated(path, content, replace=True)
             refreshed.append(str(path))
         dump_json(
             {
@@ -83,7 +114,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         repo / "AGENTS.mergetrain.md": render_agent_contract(),
         repo / "CLAUDE.mergetrain.md": render_agent_contract(),
     }
-    conflicts = [path for path in files if path.exists()]
+    # is_symlink catches a dangling link, which exists() reports as absent.
+    conflicts = [path for path in files if path.exists() or path.is_symlink()]
     if conflicts:
         rendered = ", ".join(str(path) for path in conflicts)
         raise ConfigError(
@@ -92,7 +124,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         )
     written: list[str] = []
     for path, content in files.items():
-        path.write_text(content, encoding="utf-8")
+        _write_generated(path, content, replace=False)
         written.append(str(path))
     # The scaffold is meant to be committed; the .mergetrain/ runtime dir
     # self-ignores. Say so, or the first enqueue trips the clean-worktree check.

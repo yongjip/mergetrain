@@ -1418,6 +1418,48 @@ class CliTests(unittest.TestCase):
             # ...nested job dicts do NOT (the outer frame owns it).
             self.assertNotIn("contract_version", payload["recent_jobs"][0])
 
+    @unittest.skipUnless(os.name == "posix", "creates symbolic links")
+    def test_init_never_writes_through_a_committed_symbolic_link(self) -> None:
+        """#231: generated files must not follow links out of the repository."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            victim = outside / "victim.txt"
+            victim.write_text("keep me\n", encoding="utf-8")
+            (repo / "CLAUDE.mergetrain.md").symlink_to(victim)
+            (repo / "AGENTS.mergetrain.md").symlink_to(outside / "created.md")  # dangling
+
+            for argv, reason in (
+                (["init", "--refresh-instructions"], "symbolic link"),
+                (["init", "--write"], "refusing to overwrite existing files"),
+            ):
+                with self.subTest(argv=argv):
+                    err = io.StringIO()
+                    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                        code = main(["--repo", str(repo), *argv])
+                    self.assertEqual(code, 1)
+                    self.assertIn(reason, err.getvalue())
+
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep me\n")
+            self.assertFalse((outside / "created.md").exists())
+            self.assertFalse((repo / ".mergetrain.yaml").exists())
+
+    def test_refresh_instructions_replaces_regular_generated_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            stale = repo / "AGENTS.mergetrain.md"
+            stale.write_text("stale\n", encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                code = main(["--repo", str(repo), "init", "--refresh-instructions"])
+            self.assertEqual(code, 0)
+            self.assertIn("mergetrain agent contract", stale.read_text(encoding="utf-8"))
+            self.assertTrue((repo / "CLAUDE.mergetrain.md").is_file())
+            self.assertEqual(sorted(path.name for path in repo.iterdir() if path.name.startswith(".")), [])
+
     def test_removed_agent_contract_points_to_instruction_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
