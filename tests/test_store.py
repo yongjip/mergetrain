@@ -1202,6 +1202,52 @@ class StoreTests(unittest.TestCase):
         candidates = terminal_branch_candidates(conn)
         self.assertEqual([candidate["branch"] for candidate in candidates], ["feature/deployed"])
 
+    def test_cancel_that_loses_to_a_deploy_claim_is_never_silently_dropped(self) -> None:
+        """#225: a claim committing between cancel's read and its UPDATE."""
+
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        db = Path(td.name) / "queue.sqlite"
+        conn = connect(db)
+        self.addCleanup(conn.close)
+        first = enqueue_job(conn, task="a", branch="feature/a")
+        second = enqueue_job(conn, task="b", branch="feature/b")
+        for job in (first, second):
+            mark_job(
+                conn,
+                job.id,
+                status="validated",
+                train_id="train-1",
+                train_size=2,
+                validated_at="2026-07-16T00:00:00Z",
+                validation_base_sha="c" * 40,
+                validation_sha="d" * 40,
+                validated_head_sha=str(job.id) * 40,
+            )
+        owner = f"owner:{os.getpid()}"
+        real_get_job = job_store_module.get_job
+        raced: list[list] = []
+
+        def claim_after_first_read(connection, job_id):  # type: ignore[no-untyped-def]
+            job = real_get_job(connection, job_id)
+            if not raced:
+                other = connect(db)
+                try:
+                    raced.append(claim_deploy_batch(other, owner=owner, train_id="train-1"))
+                finally:
+                    other.close()
+            return job
+
+        with patch.object(job_store_module, "get_job", side_effect=claim_after_first_read):
+            result = cancel_job(conn, first.id)
+
+        self.assertEqual([job.id for job in raced[0]], [first.id, second.id])
+        # The deploy owns the train now, so the cancel became its request.
+        self.assertEqual(result.status, "in_progress")
+        self.assertTrue(result.cancel_requested_at)
+        self.assertTrue(get_job(conn, second.id).cancel_requested_at)
+        release_runner_lock(conn, owner=owner, token=raced[0][0].claim_token)
+
     def test_canceling_validated_job_cancels_whole_train(self) -> None:
         conn = self.make_conn()
         first = enqueue_job(conn, task="a", branch="feature/a")

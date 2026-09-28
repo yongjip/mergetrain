@@ -46,6 +46,12 @@
   `dismiss --all` skips them and lists them under the new `skipped` key; after
   inspecting the remote, an operator can pass the new `--force` option to
   `dismiss` or `retry`.
+- Stop `cancel` from reporting success when a deploy claimed the validated train
+  first (#225). The status was read outside the write transaction and the
+  train's UPDATE had no row-count check, so a claim landing in between left the
+  train deploying while `cancel` printed `canceled`. The cancel now re-reads the
+  train inside its transaction; a train that a deploy took over gets a
+  cancellation request instead, and a finished one is refused.
 
 ## 3.0.8 - 2026-09-29
 

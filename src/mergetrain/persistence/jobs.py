@@ -1021,15 +1021,41 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
     if job.status == "validated" and job.train_id:
         cancel_note = note or f"validated train {job.train_id} canceled by user"
         with immediate(conn):
-            conn.execute(
-                """
-                UPDATE deploy_queue
-                SET status = 'canceled', note = ?, finished_at = ?
-                WHERE status = 'validated' AND train_id = ?
-                """,
-                (cancel_note, utc_now(), job.train_id),
-            )
-        return get_job(conn, job_id)
+            # Re-read inside the write transaction: a deploy claim may have taken
+            # the train since the read above, and an UPDATE that then matches
+            # nothing must not be reported as a cancellation (#225).
+            current = conn.execute(
+                "SELECT status, train_id FROM deploy_queue WHERE id = ?", (job_id,)
+            ).fetchone()
+            if (
+                current is not None
+                and str(current["status"]) == "validated"
+                and str(current["train_id"]) == job.train_id
+            ):
+                expected = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM deploy_queue "
+                        "WHERE status = 'validated' AND train_id = ?",
+                        (job.train_id,),
+                    ).fetchone()[0]
+                )
+                cur = conn.execute(
+                    """
+                    UPDATE deploy_queue
+                    SET status = 'canceled', note = ?, finished_at = ?
+                    WHERE status = 'validated' AND train_id = ?
+                    """,
+                    (cancel_note, utc_now(), job.train_id),
+                )
+                if cur.rowcount != expected:
+                    raise QueueError(
+                        f"validated train {job.train_id} changed while canceling job {job_id}"
+                    )
+                return get_job(conn, job_id)
+        # The train moved on first. Cancel it in its current state instead: a
+        # running deploy gets a cancellation request, and a finished one is
+        # reported as not cancelable.
+        return cancel_job(conn, job_id, note=note)
     return mark_job(
         conn,
         job_id,

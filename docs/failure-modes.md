@@ -255,7 +255,10 @@ interrupting the irreversible remote update. If the push outcome is ambiguous,
 the job remains `needs_reconcile` with the cancellation request preserved;
 reconcile records `deployed` when every ref landed or `canceled` when none did.
 Calling `cancel` directly on a `needs_reconcile` job is refused until that
-remote check is applied.
+remote check is applied. Canceling a validated train that a deploy claims at
+the same moment turns into a cancellation request for that running deploy, and
+canceling one that has already finished is refused; it is never reported as
+canceled while the train deploys.
 
 ## Command timeout
 
