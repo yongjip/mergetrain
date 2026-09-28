@@ -31,6 +31,13 @@
   main thread, which then waited for the workers without telling them to stop.
   Their gates ran on in the abandoned worktree, and Ctrl-C blocked until they
   finished. An interrupt now stops every running gate's process group first.
+- Stop `gc --apply --delete-branches` from force-deleting branches that still
+  hold work (#223). It ran `git branch -D` on every deployed or canceled job's
+  branch, losing commits made after the deploy and canceled work that never
+  landed. A branch is now deleted only by compare-and-delete at the head its job
+  recorded, and only when that head has landed. `gc --json` adds `head_sha` and
+  `reason` to each `branch_candidates` entry, and the human output names each
+  branch it keeps and why.
 
 ## 3.0.8 - 2026-09-29
 

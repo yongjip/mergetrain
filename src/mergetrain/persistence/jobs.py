@@ -1059,7 +1059,7 @@ def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, Any]]
     active_placeholders = _status_placeholders(ACTIVE_STATUSES)
     rows = conn.execute(
         f"""
-        SELECT terminal.branch, terminal.id AS job_id, terminal.status
+        SELECT terminal.branch, terminal.id AS job_id, terminal.status, terminal.head_sha
         FROM deploy_queue AS terminal
         WHERE terminal.status IN ({terminal_placeholders})
           AND terminal.id = (
@@ -1082,6 +1082,13 @@ def terminal_branch_candidates(conn: sqlite3.Connection) -> list[dict[str, Any]]
     # result.swept_pending_refs; a string made a join across one payload
     # return nothing, and the fingerprint gate cannot see value types.
     return [
-        {"branch": str(row["branch"]), "job_id": int(row["job_id"]), "status": str(row["status"])}
+        {
+            "branch": str(row["branch"]),
+            "job_id": int(row["job_id"]),
+            "status": str(row["status"]),
+            # The head the job pinned: gc deletes the branch only while it is
+            # still there, so no commit made afterwards is lost (#223).
+            "head_sha": str(row["head_sha"] or ""),
+        }
         for row in rows
     ]

@@ -266,6 +266,14 @@ Delete terminal local branches as well:
 mergetrain gc --apply --delete-branches --json
 ```
 
+A terminal job's branch is deleted only while it still points at the head that
+job recorded, and only when that head has landed: it is merged into the
+integration ref, or into the commit the job pushed. The delete is a
+compare-and-delete, so a commit that arrives in the meantime makes it fail
+rather than disappear. A branch with later commits, a canceled branch that never
+landed, and a branch checked out in a worktree are kept; each
+`branch_candidates[]` entry carries `eligible` and the `reason` it was kept.
+
 ## Why a persisted marker, instead of reconstructing from Git?
 
 A question worth answering once, properly (it came up in the launch thread —

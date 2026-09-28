@@ -18,9 +18,9 @@ from ..deploy_plan import verification_policy_sha
 from ..errors import ConfigError, LockHeld, QueueError, RemoteUnreachable
 from ..git_ops import (
     apply_gc,
+    branch_deletion_blocker,
     branch_exists,
     find_worktree_gc_candidates,
-    git_current_branch,
 )
 from ..git_runner import GitRunner
 from ..recovery import force_unlock, reconcile, recover, sweep_pending_refs
@@ -49,20 +49,27 @@ def cmd_gc(args: argparse.Namespace) -> int:
         protect_worktrees = (
             [lock.worktree_path] if lock and lock.worktree_path and lock.liveness != "dead" else []
         )
-        protected = set(config.git.push_refs) | {
-            config.git.integration_branch,
-            git_current_branch(config.repo),
-        }
         branch_candidates: list[dict[str, Any]] = []
-        delete_branch_names: list[str] = []
+        delete_branch_heads: dict[str, str] = {}
         for candidate in branch_candidates_raw:
             branch = candidate["branch"]
             exists = branch_exists(config.repo, branch)
-            eligible = exists and branch not in protected
-            item = {**candidate, "exists": exists, "eligible": eligible}
+            job = get_job(conn, candidate["job_id"])
+            reason = (
+                branch_deletion_blocker(
+                    config,
+                    branch,
+                    candidate["head_sha"],
+                    landed_sha=job.deploy_sha if job.push_status == "succeeded" else "",
+                )
+                if exists
+                else "branch does not exist"
+            )
+            eligible = not reason
+            item = {**candidate, "exists": exists, "eligible": eligible, "reason": reason}
             branch_candidates.append(item)
             if eligible:
-                delete_branch_names.append(branch)
+                delete_branch_heads[branch] = candidate["head_sha"]
         payload: dict[str, Any] = {
             "ok": True,
             "apply": bool(args.apply),
@@ -77,7 +84,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
             # lock after the protect snapshot must still be spared (#84, defect 5).
             result = apply_gc(
                 config,
-                delete_branches=delete_branch_names if args.delete_branches else (),
+                delete_branches=delete_branch_heads if args.delete_branches else None,
                 protect=protect_worktrees,
                 live_worktree_now=lambda: live_worktree_path(conn),
             )
@@ -90,6 +97,9 @@ def cmd_gc(args: argparse.Namespace) -> int:
     else:
         print(f"worktree candidates: {len(payload['worktree_candidates'])}")
         print(f"branch candidates: {len(payload['branch_candidates'])}")
+        for candidate in payload["branch_candidates"]:
+            if candidate["exists"] and not candidate["eligible"]:
+                print(f"  keeping branch {candidate['branch']}: {candidate['reason']}")
         if args.apply:
             print(f"swept pending refs: {len(payload['result']['swept_pending_refs'])}")
         if args.apply:

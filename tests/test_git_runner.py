@@ -70,7 +70,7 @@ from mergetrain.errors import (
     PushRejected,
     redact_secrets,
 )
-from mergetrain.git_ops import deploy_audit_ref_name
+from mergetrain.git_ops import branch_exists, deploy_audit_ref_name
 from mergetrain.git_runner import GitRunner
 from mergetrain.snapshot import next_action
 from mergetrain.store import (
@@ -3050,6 +3050,82 @@ class PushRejectionTests(unittest.TestCase):
 
 
 class GcWorktreeGuardTests(unittest.TestCase):
+    @staticmethod
+    def _gc_json(repo: Path, *args: str) -> dict:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            main(["--repo", str(repo), "gc", *args, "--json"])
+        return json.loads(out.getvalue())
+
+    def test_gc_deletes_a_branch_only_at_its_recorded_merged_head(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            git(repo, "switch", "-c", "feature/b")
+            (repo / "b.txt").write_text("b\n", encoding="utf-8")
+            git(repo, "add", "b.txt")
+            git(repo, "commit", "-m", "b")
+            git(repo, "switch", "main")
+            config = load_config(repo=repo)
+            head_a = git(repo, "rev-parse", "feature/a")
+            head_b = git(repo, "rev-parse", "feature/b")
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a", head_sha=head_a)
+                deployed = GitRunner(config).process_one(conn, job, deploy=True)
+                self.assertEqual(deployed.status, "deployed")
+                canceled = enqueue_job(conn, task="b", branch="feature/b", head_sha=head_b)
+                cancel_job(conn, canceled.id)
+            finally:
+                conn.close()
+            # Work committed after the deploy and never enqueued.
+            git(repo, "switch", "feature/a")
+            (repo / "follow-up.txt").write_text("y\n", encoding="utf-8")
+            git(repo, "add", "follow-up.txt")
+            git(repo, "commit", "-m", "follow-up")
+            follow_up = git(repo, "rev-parse", "HEAD")
+            git(repo, "switch", "main")
+
+            payload = self._gc_json(repo, "--apply", "--delete-branches")
+
+            reasons = {item["branch"]: item["reason"] for item in payload["branch_candidates"]}
+            self.assertIn(f"moved since its job recorded {head_a[:12]}", reasons["feature/a"])
+            self.assertEqual(reasons["feature/b"], "not merged into origin/main")
+            self.assertEqual(payload["result"]["deleted_branches"], [])
+            self.assertEqual(git(repo, "rev-parse", "feature/a"), follow_up)
+            self.assertEqual(git(repo, "rev-parse", "feature/b"), head_b)
+
+            # Back at the head that landed, the branch loses nothing and goes.
+            git(repo, "branch", "-f", "feature/a", head_a)
+            payload = self._gc_json(repo, "--apply", "--delete-branches")
+
+            self.assertEqual(
+                payload["result"]["deleted_branches"],
+                [{"branch": "feature/a", "reason": "terminal queue branch"}],
+            )
+            self.assertFalse(branch_exists(repo, "feature/a"))
+            self.assertEqual(git(repo, "rev-parse", "feature/b"), head_b)
+
+    def test_gc_keeps_a_branch_that_moves_between_check_and_delete(self) -> None:
+        from mergetrain.git_ops import apply_gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            git(repo, "push", "origin", "feature/a:main")
+            git(repo, "fetch", "origin")
+            config = load_config(repo=repo)
+            head_a = git(repo, "rev-parse", "feature/a")
+            git(repo, "switch", "feature/a")
+            git(repo, "commit", "--allow-empty", "-m", "raced in")
+            git(repo, "switch", "main")
+
+            result = apply_gc(config, delete_branches={"feature/a": head_a})
+
+            self.assertEqual(result["deleted_branches"], [])
+            self.assertEqual([item["branch"] for item in result["failed"]], ["feature/a"])
+            self.assertNotEqual(git(repo, "rev-parse", "feature/a"), head_a)
+
     def test_gc_protects_configured_persistent_workspace_and_removes_it_when_disabled(
         self,
     ) -> None:

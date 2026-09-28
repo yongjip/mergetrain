@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import stat
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any
 
@@ -328,10 +328,6 @@ def branch_exists(repo: Path, branch: str) -> bool:
     )
 
 
-def current_branch(repo: Path) -> str:
-    return git_current_branch(repo)
-
-
 # IsReparseTagNameSurrogate(): the reparse point names another file or
 # directory, as NTFS junctions and symbolic links do.
 _NAME_SURROGATE_REPARSE_TAG = 0x20000000
@@ -405,13 +401,66 @@ def remove_worktree(repo: Path, worktree: Path, *, log: IO[str] | None = None) -
         shutil.rmtree(worktree, ignore_errors=True)
 
 
+def _is_ancestor(repo: Path, commit: str, descendant: str) -> bool:
+    completed = run_command(
+        ["git", "merge-base", "--is-ancestor", commit, descendant],
+        cwd=repo,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def branch_deletion_blocker(
+    config: MergetrainConfig,
+    branch: str,
+    recorded_head: str,
+    *,
+    landed_sha: str = "",
+) -> str:
+    """Why gc must keep ``branch``, or "" when deleting it loses no commit.
+
+    The branch must still point at the head its job recorded, so nothing
+    committed afterwards goes with it (#223). That head must also have landed:
+    it is merged into the integration ref, or into ``landed_sha``, the commit
+    its job pushed. A canceled branch that never landed is kept.
+    """
+
+    integration_ref = config.git.integration_ref
+    if branch in config.git.push_refs or branch == config.git.integration_branch:
+        return "protected integration branch"
+    if not recorded_head:
+        return "its job recorded no head to compare against"
+    current = git_output_or_empty(
+        ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"],
+        cwd=config.repo,
+    )
+    recorded = git_output_or_empty(
+        ["rev-parse", "--verify", "--quiet", f"{recorded_head}^{{commit}}"],
+        cwd=config.repo,
+    )
+    if not current:
+        return "branch does not exist"
+    if not recorded or current != recorded:
+        return f"moved since its job recorded {recorded_head[:12]}"
+    checked_out = git_worktrees_for_branch(config.repo, branch)
+    if checked_out:
+        return f"checked out in {checked_out[0]}"
+    if _is_ancestor(config.repo, recorded, integration_ref):
+        return ""
+    if landed_sha and _is_ancestor(config.repo, recorded, landed_sha):
+        return ""
+    return f"not merged into {integration_ref}"
+
+
 def apply_gc(
     config: MergetrainConfig,
     *,
-    delete_branches: Iterable[str] = (),
+    delete_branches: Mapping[str, str] | None = None,
     protect: Iterable[str] = (),
     live_worktree_now: Callable[[], str | None] | None = None,
 ) -> dict[str, list[dict[str, str]]]:
+    """Remove terminal worktrees and, given ``{branch: recorded head}``, branches."""
+
     removed_worktrees: list[dict[str, str]] = []
     deleted_branches: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
@@ -435,14 +484,20 @@ def apply_gc(
                 config_marker.unlink(missing_ok=True)
         else:
             failed.append({"path": str(path), "reason": "could not remove worktree"})
-    active_branch = current_branch(config.repo)
-    for branch in delete_branches:
-        if branch == active_branch:
-            failed.append({"branch": branch, "reason": "currently checked out"})
-            continue
+    for branch, recorded_head in dict(delete_branches or {}).items():
         if not branch_exists(config.repo, branch):
             continue
-        completed = run_command(["git", "branch", "-D", branch], cwd=config.repo, check=False)
+        checked_out = git_worktrees_for_branch(config.repo, branch)
+        if checked_out:
+            failed.append({"branch": branch, "reason": f"checked out in {checked_out[0]}"})
+            continue
+        # Compare-and-delete: a commit that lands on the branch after the caller
+        # checked it makes the update fail instead of being thrown away (#223).
+        completed = run_command(
+            ["git", "update-ref", "-d", f"refs/heads/{branch}", recorded_head],
+            cwd=config.repo,
+            check=False,
+        )
         if completed.returncode == 0:
             deleted_branches.append({"branch": branch, "reason": "terminal queue branch"})
         else:
