@@ -1292,7 +1292,11 @@ deploy:
         with tempfile.TemporaryDirectory() as td:
             repo, _ = make_demo_repo(Path(td))
             config = load_config(repo=repo)
-            with patch("mergetrain.command_runner.subprocess.Popen") as popen:
+            with (
+                patch("mergetrain.command_runner.subprocess.Popen") as popen,
+                # A fake process cannot join a Windows job object.
+                patch("mergetrain.command_runner.WindowsJob.create", return_value=None),
+            ):
                 popen.return_value.__enter__ = Mock(return_value=popen.return_value)
                 popen.return_value.stdout = io.StringIO("")
                 popen.return_value.stderr = io.StringIO("")
