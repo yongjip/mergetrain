@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Stop validation and deploy cleanup on Windows from emptying directories that
+  gates linked into an integration worktree (#214). Cleanup now removes NTFS
+  junctions and symbolic links as links before it deletes the worktree. If a
+  link cannot be removed on its own, the worktree is kept and the run log says
+  why.
+
 ## 3.0.7 - 2026-09-06
 
 - Replace the removed duplicate-enqueue option in error messages with supported
