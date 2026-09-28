@@ -267,6 +267,8 @@ canceled while the train deploys.
 Git operations, gates, and verify hooks are bounded by
 `queue.command_timeout_seconds`. A timeout terminates the process group and is
 reported as a command failure; pre-push timeouts leave deploy refs unchanged.
+On POSIX the group gets SIGTERM, and any process still in it five seconds later
+gets SIGKILL, even when the command's own process has already exited.
 
 ## Temporary worktrees
 

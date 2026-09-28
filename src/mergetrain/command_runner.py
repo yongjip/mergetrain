@@ -134,30 +134,88 @@ def _stop_windows_process_tree(
         process.terminate()
 
 
-def _stop_process(process: subprocess.Popen[str], job: WindowsJob | None = None) -> bool:
+# How long a stopped command's process group gets to exit after SIGTERM, and
+# then after SIGKILL, before the stop gives up waiting.
+_STOP_GRACE_SECONDS = 5.0
+
+
+def _group_alive(process: subprocess.Popen[str]) -> bool:
+    """Whether any process is left in the command's POSIX process group."""
+
+    process.poll()  # reap an exited leader, which would otherwise count as a member
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_group(process: subprocess.Popen[str], seconds: float) -> bool:
+    """Wait until the process group is gone; return whether it is."""
+
+    deadline = time.monotonic() + seconds
+    while _group_alive(process):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def _stop_posix_group(process: subprocess.Popen[str]) -> bool:
+    """SIGTERM the command's process group, then SIGKILL whatever is left.
+
+    A descendant that traps or ignores SIGTERM keeps running after the group
+    leader exits, so escalation follows the group, not the leader (#228).
+    """
+
+    running = process.poll() is None
+    if not running and not _group_alive(process):
+        return False
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return False
+    if not _wait_for_group(process, _STOP_GRACE_SECONDS):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        _wait_for_group(process, _STOP_GRACE_SECONDS)
+    process.wait()
+    return running
+
+
+def _stop_windows_process(  # pragma: no cover - Windows compatibility
+    process: subprocess.Popen[str], job: WindowsJob | None
+) -> bool:
     if process.poll() is not None:
         return False
     stopped = False
     try:
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:  # pragma: no cover - Windows compatibility
-            _stop_windows_process_tree(process, job)
+        _stop_windows_process_tree(process, job)
         stopped = True
         process.wait(timeout=5)
     except ProcessLookupError:
         process.wait()
     except subprocess.TimeoutExpired:
         if process.poll() is None:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGKILL)
-            else:  # pragma: no cover - Windows compatibility
-                _stop_windows_process_tree(process, job)
-                if process.poll() is None:
-                    process.kill()
+            _stop_windows_process_tree(process, job)
+            if process.poll() is None:
+                process.kill()
             stopped = True
             process.wait()
     return stopped
+
+
+def _stop_process(process: subprocess.Popen[str], job: WindowsJob | None = None) -> bool:
+    """Stop a managed command and everything it started; report if it was running."""
+
+    if os.name == "posix":
+        return _stop_posix_group(process)
+    return _stop_windows_process(process, job)  # pragma: no cover - Windows compatibility
 
 
 def _run_managed(

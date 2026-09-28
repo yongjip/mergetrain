@@ -64,6 +64,11 @@
   suggested enqueueing. A provably dead owner now counts like a missing lock:
   `next_action` is `reconcile_stranded_claim`, and the stranded rows count as
   Attention with the new `reason_code` value `stranded_claim`.
+- Stop timed-out and canceled commands on POSIX from leaving descendants that
+  trap or ignore SIGTERM running (#228). The stop sent SIGKILL only while the
+  process-group leader was still alive, so a child outlived a leader that had
+  already exited, and kept running after the timeout was reported and the
+  worktree deleted. Escalation now follows the whole process group.
 
 ## 3.0.8 - 2026-09-29
 

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -1170,6 +1171,39 @@ deploy:
 
             self.assertEqual(result.status, "validated")
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group escalation")
+    def test_timeout_kills_a_child_that_ignores_sigterm_after_its_leader_exits(
+        self,
+    ) -> None:
+        """#228: the leader shell dies on SIGTERM; its child ignores it."""
+
+        with tempfile.TemporaryDirectory() as td:
+            pid_file = Path(td) / "child.pid"
+            child = (
+                f"{SHELL_PYTHON} -c \"import os, pathlib, signal, time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                f"pathlib.Path('{py_path(pid_file)}').write_text(str(os.getpid())); "
+                'time.sleep(120)"'
+            )
+            with patch.object(command_runner_module, "_STOP_GRACE_SECONDS", 1.0):
+                completed = run_shell(
+                    f"{child} &\nwait",
+                    cwd=td,
+                    env=dict(os.environ),
+                    check=False,
+                    timeout_seconds=2,
+                )
+
+            self.assertEqual(completed.returncode, 124)
+            pid = int(pid_file.read_text(encoding="utf-8"))
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                os.kill(pid, signal.SIGKILL)
+                self.fail(f"TERM-ignoring child {pid} survived the timeout")
 
     def test_windows_stop_uses_taskkill_for_the_process_tree(self) -> None:
         process = Mock()
