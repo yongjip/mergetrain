@@ -24,9 +24,13 @@ from types import SimpleNamespace
 # CreateProcess flag: start the process with its main thread suspended.
 CREATE_SUSPENDED = 0x00000004
 _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+_JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
+_MAX_LISTED_PROCESSES = 4096
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_SUSPEND_RESUME = 0x0800
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_SYNCHRONIZE = 0x00100000
 
 
 @functools.cache
@@ -50,6 +54,13 @@ def _api() -> SimpleNamespace:  # pragma: no cover - Windows only
             ("total_terminated_processes", wintypes.DWORD),
         ]
 
+    class ProcessIdList(ctypes.Structure):
+        _fields_ = [
+            ("assigned", wintypes.DWORD),
+            ("listed", wintypes.DWORD),
+            ("ids", ctypes.c_size_t * _MAX_LISTED_PROCESSES),
+        ]
+
     kernel32 = ctypes.WinDLL("kernel32")
     ntdll = ctypes.WinDLL("ntdll")
     handle, flag, dword = wintypes.HANDLE, wintypes.BOOL, wintypes.DWORD
@@ -62,13 +73,22 @@ def _api() -> SimpleNamespace:  # pragma: no cover - Windows only
         ),
         (kernel32.OpenProcess, (dword, flag, dword), handle),
         (kernel32.AssignProcessToJobObject, (handle, handle), flag),
+        (kernel32.IsProcessInJob, (handle, handle, ctypes.POINTER(flag)), flag),
         (kernel32.TerminateJobObject, (handle, wintypes.UINT), flag),
+        (kernel32.WaitForSingleObject, (handle, dword), dword),
         (kernel32.CloseHandle, (handle,), flag),
         (ntdll.NtResumeProcess, (handle,), ctypes.c_long),
     ):
         function.argtypes = argtypes
         function.restype = restype
-    return SimpleNamespace(ctypes=ctypes, kernel32=kernel32, ntdll=ntdll, Accounting=Accounting)
+    return SimpleNamespace(
+        ctypes=ctypes,
+        wintypes=wintypes,
+        kernel32=kernel32,
+        ntdll=ntdll,
+        Accounting=Accounting,
+        ProcessIdList=ProcessIdList,
+    )
 
 
 class WindowsJob:  # pragma: no cover - Windows only
@@ -123,17 +143,61 @@ class WindowsJob:  # pragma: no cover - Windows only
     def terminate(self, timeout: float = 10.0) -> bool:
         """Kill every process in the job and in nested jobs, then wait for them to exit.
 
-        TerminateJobObject only starts the kill. Callers go on to delete files
-        those processes hold open, so return once the job has no process left,
-        or when ``timeout`` expires first.
+        TerminateJobObject only starts the kill, and a process leaves the job's
+        count before Windows releases its address space and mapped images.
+        Callers go on to delete those files, so wait on each process itself
+        until it has exited, or until ``timeout`` expires first.
         """
 
-        if self._handle is None or not self._api.kernel32.TerminateJobObject(self._handle, 1):
+        if self._handle is None:
             return False
-        deadline = time.monotonic() + timeout
-        while self._active_processes() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        return True
+        kernel32 = self._api.kernel32
+        members = self._open_members()
+        try:
+            if not kernel32.TerminateJobObject(self._handle, 1):
+                return False
+            deadline = time.monotonic() + timeout
+            for member in members:
+                remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+                kernel32.WaitForSingleObject(member, remaining_ms)
+            # The job still counts a process that started after the snapshot.
+            while self._active_processes() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            return True
+        finally:
+            for member in members:
+                kernel32.CloseHandle(member)
+
+    def _open_members(self) -> list[int]:
+        """Open a waitable handle to each process now in the job."""
+
+        api = self._api
+        listing = api.ProcessIdList()
+        if not api.kernel32.QueryInformationJobObject(
+            self._handle,
+            _JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+            api.ctypes.byref(listing),
+            api.ctypes.sizeof(listing),
+            None,
+        ):
+            return []
+        members: list[int] = []
+        for pid in listing.ids[: listing.listed]:
+            handle = api.kernel32.OpenProcess(
+                _SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if not handle:
+                continue
+            # The process may have exited and its id been reused since the listing.
+            in_job = api.wintypes.BOOL()
+            if (
+                api.kernel32.IsProcessInJob(handle, self._handle, api.ctypes.byref(in_job))
+                and in_job.value
+            ):
+                members.append(handle)
+            else:
+                api.kernel32.CloseHandle(handle)
+        return members
 
     def _active_processes(self) -> int:
         accounting = self._api.Accounting()
