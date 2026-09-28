@@ -13,7 +13,7 @@ from mergetrain.daemon import (
     daemon_loop,
     daemon_tick,
 )
-from mergetrain.errors import MergetrainError, QueueError
+from mergetrain.errors import ConfigError, MergetrainError, QueueError
 from mergetrain.models import Job
 from mergetrain.store import (
     claim_all_queued,
@@ -104,6 +104,54 @@ class DaemonTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(blocked.status, "blocked")
             self.assertIn("approval_destination_changed", blocked.note)
+
+    def test_an_unreadable_config_pauses_the_tick_without_blocking_jobs(self) -> None:
+        """#231: one tick with the config missing must not block auto jobs."""
+
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(
+                conn,
+                task="auto",
+                branch="auto",
+                auto_deploy=True,
+                approval_destination_sha="a" * 64,
+                approval_execution_policy_sha="b" * 64,
+            )
+            conn.close()
+
+            def config_missing() -> str:
+                raise ConfigError("no .mergetrain.yaml; run mergetrain init --write")
+
+            with self.assertRaises(ConfigError):
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=lambda conn, jobs: self.fail("ran while config was missing"),
+                    owner="daemon:1",
+                    say=lambda _: None,
+                    approval_destination_sha=config_missing,
+                    approval_execution_policy_sha=lambda: "b" * 64,
+                )
+            conn = connect(db)
+            try:
+                paused = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual((paused.status, paused.note), ("queued", ""))
+
+            # Once the config is back, the same job is claimed and processed.
+            processed: list[int] = []
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: processed.extend(item.id for item in jobs),
+                owner="daemon:1",
+                say=lambda _: None,
+                approval_destination_sha=lambda: "a" * 64,
+                approval_execution_policy_sha=lambda: "b" * 64,
+            )
+            self.assertEqual(processed, [job.id])
+            self.assertEqual(outcome, "processed:1")
 
     def test_execution_policy_mismatch_blocks_auto_jobs_before_runner_work(self) -> None:
         with tempfile.TemporaryDirectory() as td:

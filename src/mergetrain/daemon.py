@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .errors import MergetrainError, QueueError
+from .errors import ConfigError, MergetrainError, QueueError
 from .models import Job
 from .notify import (
     Notifier,
@@ -199,6 +199,12 @@ def daemon_tick(
                     if callable(approval_destination_sha)
                     else approval_destination_sha
                 )
+            except ConfigError:
+                # The config itself could not be read (missing mid-edit, too
+                # new): that says nothing about the destination. Pause this
+                # tick, touching no job, instead of blocking every auto job for
+                # good (#231); the loop reports it and retries.
+                raise
             except MergetrainError:
                 # A destination that cannot resolve to exactly one supported
                 # endpoint is a changed authorization, not a transient daemon
@@ -211,6 +217,8 @@ def daemon_tick(
                     if callable(approval_execution_policy_sha)
                     else approval_execution_policy_sha
                 )
+            except ConfigError:
+                raise
             except MergetrainError:
                 current_execution_policy_sha = "invalid-execution-policy"
             jobs = claim_all_queued(

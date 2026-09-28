@@ -84,6 +84,12 @@
   The lease named only the train worktree, so gc removed the probe mid-run and
   both probed jobs ended `failed` with `[Errno 2]`. While probes run, the lease
   now names the probe worktree, from before it is created.
+- Stop a daemon tick that cannot read the config from blocking queued `--auto`
+  jobs for good (#231). Reloading the config for the approval check turned any
+  config error, such as a file missing mid-edit, into the "destination
+  changed" marker, and the jobs stayed `approval_destination_changed` after the
+  config was restored. A config error now pauses the tick without touching any
+  job, and the next tick retries.
 
 ## 3.0.8 - 2026-09-29
 
