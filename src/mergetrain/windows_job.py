@@ -6,6 +6,11 @@ routinely (#215). A process that starts suspended and joins a job before it
 runs cannot start anything outside that job, and terminating the job reaches
 every process in it, including those in jobs nested below it.
 
+The job deliberately does not allow breakaway. Cygwin-based programs, which
+include Git for Windows' ``sh`` and ``sleep``, ask for CREATE_BREAKAWAY_FROM_JOB
+whenever their job permits it, so a job that allowed it would lose exactly the
+processes it exists to stop.
+
 This module imports nothing from mergetrain, so the thin MCP adapter may use it.
 """
 
@@ -18,9 +23,7 @@ from types import SimpleNamespace
 
 # CreateProcess flag: start the process with its main thread suspended.
 CREATE_SUSPENDED = 0x00000004
-_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
 _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
-_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_SUSPEND_RESUME = 0x0800
@@ -34,35 +37,6 @@ def _api() -> SimpleNamespace:  # pragma: no cover - Windows only
         raise OSError("Windows job objects exist only on Windows")
     import ctypes
     from ctypes import wintypes
-
-    class IoCounters(ctypes.Structure):
-        _fields_ = [
-            (name, ctypes.c_ulonglong)
-            for name in ("reads", "writes", "others", "read_bytes", "write_bytes", "other_bytes")
-        ]
-
-    class BasicLimits(ctypes.Structure):
-        _fields_ = [
-            ("per_process_user_time_limit", ctypes.c_int64),
-            ("per_job_user_time_limit", ctypes.c_int64),
-            ("limit_flags", wintypes.DWORD),
-            ("minimum_working_set_size", ctypes.c_size_t),
-            ("maximum_working_set_size", ctypes.c_size_t),
-            ("active_process_limit", wintypes.DWORD),
-            ("affinity", ctypes.c_size_t),
-            ("priority_class", wintypes.DWORD),
-            ("scheduling_class", wintypes.DWORD),
-        ]
-
-    class ExtendedLimits(ctypes.Structure):
-        _fields_ = [
-            ("basic", BasicLimits),
-            ("io", IoCounters),
-            ("process_memory_limit", ctypes.c_size_t),
-            ("job_memory_limit", ctypes.c_size_t),
-            ("peak_process_memory_used", ctypes.c_size_t),
-            ("peak_job_memory_used", ctypes.c_size_t),
-        ]
 
     class Accounting(ctypes.Structure):
         _fields_ = [
@@ -81,7 +55,6 @@ def _api() -> SimpleNamespace:  # pragma: no cover - Windows only
     handle, flag, dword = wintypes.HANDLE, wintypes.BOOL, wintypes.DWORD
     for function, argtypes, restype in (
         (kernel32.CreateJobObjectW, (wintypes.LPVOID, wintypes.LPCWSTR), handle),
-        (kernel32.SetInformationJobObject, (handle, ctypes.c_int, wintypes.LPVOID, dword), flag),
         (
             kernel32.QueryInformationJobObject,
             (handle, ctypes.c_int, wintypes.LPVOID, dword, wintypes.LPDWORD),
@@ -95,13 +68,7 @@ def _api() -> SimpleNamespace:  # pragma: no cover - Windows only
     ):
         function.argtypes = argtypes
         function.restype = restype
-    return SimpleNamespace(
-        ctypes=ctypes,
-        kernel32=kernel32,
-        ntdll=ntdll,
-        Accounting=Accounting,
-        ExtendedLimits=ExtendedLimits,
-    )
+    return SimpleNamespace(ctypes=ctypes, kernel32=kernel32, ntdll=ntdll, Accounting=Accounting)
 
 
 class WindowsJob:  # pragma: no cover - Windows only
@@ -126,19 +93,7 @@ class WindowsJob:  # pragma: no cover - Windows only
         handle = api.kernel32.CreateJobObjectW(None, None)
         if not handle:
             return None
-        job = cls(api, handle)
-        limits = api.ExtendedLimits()
-        # A program that explicitly breaks away still may, as setsid does on POSIX.
-        limits.basic.limit_flags = _JOB_OBJECT_LIMIT_BREAKAWAY_OK
-        if not api.kernel32.SetInformationJobObject(
-            handle,
-            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-            api.ctypes.byref(limits),
-            api.ctypes.sizeof(limits),
-        ):
-            job.close()
-            return None
-        return job
+        return cls(api, handle)
 
     def adopt(self, pid: int) -> bool:
         """Move a process started with CREATE_SUSPENDED into the job, then resume it.

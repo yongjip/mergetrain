@@ -1264,6 +1264,35 @@ deploy:
                     f"orphaned descendant {pid} survived the timeout",
                 )
 
+    @unittest.skipUnless(os.name == "nt", "Git for Windows sh regression (#215)")
+    def test_timeout_kills_msys_background_processes(self) -> None:
+        # Cygwin-based programs such as Git for Windows' sh ask to break away
+        # from any job that permits it, so a job that allowed breakaway lost
+        # exactly these processes.
+        import ctypes
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            completed = command_runner_module.run_shell(
+                "sleep 60 & cat /proc/$!/winpid > winpid.txt; wait",
+                cwd=root,
+                env=dict(os.environ),
+                check=False,
+                timeout_seconds=5,
+            )
+
+            self.assertEqual(completed.returncode, 124)
+            pid = int((root / "winpid.txt").read_text(encoding="utf-8"))
+            synchronize = 0x00100000
+            wait_object_0 = 0
+            handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+            if handle:
+                try:
+                    exited = ctypes.windll.kernel32.WaitForSingleObject(handle, 5000)
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
+                self.assertEqual(exited, wait_object_0, f"MSYS sleep {pid} survived the timeout")
+
     def test_shell_command_uses_git_for_windows_sh_without_cmd_fallback(self) -> None:
         with (
             patch("mergetrain.command_runner.Path.exists", return_value=False),
