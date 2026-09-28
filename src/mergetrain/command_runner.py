@@ -178,10 +178,15 @@ def _stop_posix_group(process: subprocess.Popen[str]) -> bool:
     except ProcessLookupError:
         process.wait()
         return False
+    except PermissionError:
+        # Only members this user may not signal are left, such as a gate's
+        # sudo child; waiting cannot make them stoppable.
+        process.wait()
+        return running
     if not _wait_for_group(process, _STOP_GRACE_SECONDS):
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         _wait_for_group(process, _STOP_GRACE_SECONDS)
     process.wait()

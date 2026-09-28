@@ -1420,6 +1420,32 @@ deploy:
         self.assertFalse(self._stop_fake_posix_group(process, killpg))
         self.assertEqual(sent, [])
 
+    def test_posix_stop_gives_up_on_members_it_may_not_signal(self) -> None:
+        """A leader-less group of another user's processes, e.g. a sudo child."""
+
+        process = self._running_process()
+        process.poll.return_value = 0
+
+        def killpg(pgid: int, signum: int) -> None:
+            raise PermissionError
+
+        self.assertFalse(self._stop_fake_posix_group(process, killpg))
+        process.wait.assert_called_once_with()
+
+    def test_posix_stop_tolerates_a_sigkill_it_may_not_send(self) -> None:
+        process = self._running_process()
+        sent: list[int] = []
+
+        def killpg(pgid: int, signum: int) -> None:
+            if signum == 9:
+                raise PermissionError
+            if signum:
+                sent.append(signum)
+
+        self.assertTrue(self._stop_fake_posix_group(process, killpg))
+        self.assertEqual(sent, [15])
+        process.wait.assert_called_once_with()
+
     def test_posix_stop_of_a_group_that_vanished_reaps_the_leader(self) -> None:
         process = self._running_process()
 
