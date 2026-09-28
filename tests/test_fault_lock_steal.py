@@ -227,7 +227,8 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.deploy_sha, pending_sha)
             self.assertEqual(healed.push_status, "succeeded")
-            self.assertEqual(healed.verify_status, "unknown")
+            # No verify hooks are configured, so nothing was left unverified.
+            self.assertEqual(healed.verify_status, "not_configured")
             self.assertEqual(healed.pending_deploy_sha, "")
             # Exactly-once, two ways: the verdict came from asking the remote,
             # and reconcile's git seam never pushed. rev-parse alone cannot show

@@ -19,6 +19,7 @@ from typing import Any
 
 from .command_runner import run_command
 from .config import MergetrainConfig
+from .deploy_plan import verification_policy_sha
 from .errors import (
     CancellationRequested,
     LockHeld,
@@ -295,6 +296,23 @@ def _classify(
     )
 
 
+def _reconciled_verify_status(config: MergetrainConfig, job: Job) -> str:
+    """What a crash-free run would have recorded about verification.
+
+    Reconcile cannot know whether verify hooks ran, so a landed push is
+    ``unknown`` -- unless the policy recorded with its marker had no hooks, in
+    which case there was nothing to verify and ``verify --job`` could never
+    clear an ``unknown`` (#231).
+    """
+
+    without_hooks = replace(config, deploy=replace(config.deploy, verify=()))
+    if job.verification_policy_sha and job.verification_policy_sha == (
+        verification_policy_sha(without_hooks)
+    ):
+        return "not_configured"
+    return "unknown"
+
+
 def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision) -> None:
     job = decision.job
     # Compare-and-swap on the source status. reconcile read this job as
@@ -311,7 +329,7 @@ def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDeci
                 status="deployed",
                 deploy_sha=decision.pending_sha,
                 push_status="succeeded",
-                verify_status="unknown",
+                verify_status=_reconciled_verify_status(config, job),
                 note=f"reconciled: {decision.reason}",
                 expected_status=source,
             )

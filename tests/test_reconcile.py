@@ -143,6 +143,62 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(healed.pending_deploy_sha, "")
             self.assertEqual(_pending_refs(repo), "")
 
+    def test_landed_push_without_verify_hooks_is_not_left_unverifiable(self) -> None:
+        """#231: `verify: []` means nothing to verify, not an unknown outcome."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            try:
+                self.assertEqual(config.deploy.verify, ())
+                git(repo, "push", "origin", f"{pending}:main")
+                _set_needs_reconcile(config, conn, job.id, pending)
+                conn.execute(
+                    "UPDATE deploy_queue SET verification_policy_sha=? WHERE id=?",
+                    (verification_policy_sha(config), job.id),
+                )
+                conn.commit()
+                reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(healed.verify_status, "not_configured")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "status", "--json"])
+            status = json.loads(out.getvalue())
+            self.assertNotEqual(status["next_action"]["code"], "verify_reconciled_deploy")
+            self.assertEqual(status["counts"]["attention"], 0)
+
+    def test_landed_push_with_verify_hooks_stays_unknown(self) -> None:
+        from dataclasses import replace
+
+        from mergetrain.config import GateConfig
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            hooked = replace(
+                config,
+                deploy=replace(config.deploy, verify=(GateConfig(name="ci", run="true"),)),
+            )
+            try:
+                git(repo, "push", "origin", f"{pending}:main")
+                _set_needs_reconcile(config, conn, job.id, pending)
+                conn.execute(
+                    "UPDATE deploy_queue SET verification_policy_sha=? WHERE id=?",
+                    (verification_policy_sha(hooked), job.id),
+                )
+                conn.commit()
+                reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            # The hooks that should have run after the push never did.
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(healed.verify_status, "unknown")
+
     def test_unlanded_push_requeues_and_never_repushes(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -560,7 +616,8 @@ class CrashRecoveryTests(unittest.TestCase):
             self.assertEqual(outcome.exit_code, 0)
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.push_status, "succeeded")
-            self.assertEqual(healed.verify_status, "unknown")
+            # No verify hooks are configured, so nothing was left unverified.
+            self.assertEqual(healed.verify_status, "not_configured")
             self.assertEqual(_pending_refs(repo), "")
 
     def test_ambiguous_push_parks_needs_reconcile_then_reconcile_deploys(self) -> None:

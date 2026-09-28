@@ -327,12 +327,12 @@ class PushTimeoutIsAmbiguousTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.push_status, "succeeded")
             self.assertEqual(healed.deploy_sha, parked.pending_deploy_sha)
-            # The refs landed, but the verify hooks never ran — the push was
-            # killed first. `deployed` here must therefore NOT claim a verified
-            # deploy; 'unknown' is the only honest value, and reporting
-            # 'succeeded'/'not_configured' would be the same class of lie as
-            # reporting a failed deploy as deployed.
-            self.assertEqual(healed.verify_status, "unknown")
+            # The refs landed, but the push was killed before verification.
+            # `deployed` must therefore NOT claim a verified deploy. This
+            # fixture configures no verify hooks, so there was nothing to
+            # verify and 'not_configured' is what a crash-free run records;
+            # with hooks configured the honest value is 'unknown' (#231).
+            self.assertEqual(healed.verify_status, "not_configured")
             # The parked job stops blocking deploys once it is resolved.
             self.assertEqual(cleared_blockers, 0)
             self.assertEqual(after, before)  # reconcile never re-pushed

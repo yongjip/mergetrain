@@ -94,6 +94,10 @@
   had not merged yet (#231). Only the merged jobs were finished, and the rest
   stayed `in_progress`, hidden behind `fix_blocked_job`. A claimed job the train
   never reached now returns to the queue with a note saying why.
+- Record `verify_status=not_configured`, not `unknown`, when reconcile settles a
+  landed push whose recorded policy had no verify hooks, the `init` default
+  (#231). `verify --job` refuses to re-run a policy without hooks, so the
+  `unknown` it left could never clear from Attention.
 
 ## 3.0.8 - 2026-09-29
 

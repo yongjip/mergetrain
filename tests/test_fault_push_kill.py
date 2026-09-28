@@ -312,9 +312,10 @@ class KilledAtomicPushTests(unittest.TestCase):
                 # already had and never re-pushed the landed deploy.
                 self.assertEqual(_applied_pushes(counter), 1)
                 self.assertEqual(healed.push_status, "succeeded")
-                # The verify hooks never ran (the client died first), so the
-                # deploy is honestly 'unknown' rather than claimed as verified.
-                self.assertEqual(healed.verify_status, "unknown")
+                # The client died before verification, but the fixture
+                # configures no verify hooks: there was nothing to verify, so
+                # reconcile records what a crash-free run would (#231).
+                self.assertEqual(healed.verify_status, "not_configured")
                 self.assertEqual(healed.deploy_sha, after_push_sha)
                 self.assertEqual(outcome.reconcile.summary["reconciled_deployed"], 1)
                 # Finalized, so the write-ahead marker is retired: a row that
