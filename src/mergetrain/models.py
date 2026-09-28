@@ -14,6 +14,12 @@ PUSH_STATUSES = ("not_run", "pending", "succeeded", "failed")
 VERIFY_STATUSES = ("not_run", "not_configured", "succeeded", "failed", "unknown")
 
 
+def public_owner(owner: str) -> str:
+    """A runner owner without its OS username: ``user:pid`` becomes ``local:pid``."""
+
+    return f"local:{owner.rsplit(':', 1)[-1]}"
+
+
 @dataclass(slots=True)
 class Job:
     id: int

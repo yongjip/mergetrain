@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
@@ -14,7 +15,7 @@ from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
 from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound, redact_secrets
-from .models import Job, RunEvent, RunnerLock
+from .models import Job, RunEvent, RunnerLock, public_owner
 from .observability import _gate_runs, elapsed_seconds
 from .reuse import reuse_explanation
 from .store import (
@@ -329,7 +330,7 @@ def refresh_dashboard_snapshot(
     return refreshed
 
 
-def _public_job(job: Job) -> dict[str, Any]:
+def _public_job(job: Job, *, worktree_root: str = "") -> dict[str, Any]:
     data = job.to_dict()
     worktree_path = str(data.get("worktree_path") or "")
     # The dashboard needs queue identity and reasons, not local filesystem paths.
@@ -344,17 +345,41 @@ def _public_job(job: Job) -> dict[str, Any]:
         public_note = redact_secrets(note)
         if worktree_path:
             public_note = public_note.replace(worktree_path, "[worktree]")
+        if worktree_root:
+            # A failed command's note names the integration worktree it ran in,
+            # and that absolute path carries the user's home directory (#231).
+            public_note = public_note.replace(worktree_root, "[worktrees]")
         data["note"] = public_note
+    return data
+
+
+_EVENT_OWNER = re.compile(r"\(([^()\s]+):(\d+)\)")
+
+
+def _public_event(event: RunEvent) -> dict[str, Any]:
+    """An event without the OS username a runner-lock audit event records."""
+
+    data = event.to_dict()
+    if event.phase != "unlock":
+        return data
+    # Events written before owners were masked at the source still carry it.
+    data["message"] = _EVENT_OWNER.sub(r"(local:\2)", str(data.get("message") or ""))
+    try:
+        detail = json.loads(str(data.get("detail") or ""))
+    except ValueError:
+        detail = None
+    if isinstance(detail, dict) and isinstance(detail.get("owner"), str):
+        detail["owner"] = public_owner(detail["owner"])
+        data["detail"] = json.dumps(detail, sort_keys=True)
     return data
 
 
 def _public_lock(lock: RunnerLock | None) -> dict[str, Any] | None:
     if lock is None:
         return None
-    owner_suffix = lock.owner.rsplit(":", 1)[-1]
     return {
         "name": lock.name,
-        "owner": f"local:{owner_suffix}",
+        "owner": public_owner(lock.owner),
         "head_sha": lock.head_sha,
         "acquired_at": lock.acquired_at,
         "heartbeat_at": lock.heartbeat_at,
@@ -747,6 +772,7 @@ def build_dashboard_snapshot(
     migrating anything — the hub's contract when observing other repos.
     """
 
+    worktree_root = str(config.state.worktree_root)
     conn = connect(config.state.db, read_only=read_only)
     try:
         with read_snapshot(conn):
@@ -792,12 +818,12 @@ def build_dashboard_snapshot(
             },
             "counts": count_data,
             "lock": lock,
-            "jobs": [_public_job(job) for job in recent_jobs],
+            "jobs": [_public_job(job, worktree_root=worktree_root) for job in recent_jobs],
             "train": {
                 "selection": selection,
-                "jobs": [_public_job(job) for job in selected_jobs],
+                "jobs": [_public_job(job, worktree_root=worktree_root) for job in selected_jobs],
             },
-            "events": [event.to_dict() for event in raw_events],
+            "events": [_public_event(event) for event in raw_events],
             "validated_trains": validated_trains,
             "reuse": reuse_explanation(
                 config,

@@ -38,7 +38,7 @@ from .git_ops import (
     git_ref_exists,
     resolve_pending_ref,
 )
-from .models import Job
+from .models import Job, public_owner
 from .push_liveness import push_in_flight
 from .store import (
     acquire_runner_lock,
@@ -676,6 +676,10 @@ def force_unlock(
         "in_progress_with_marker": count_data.get("in_progress_with_marker", 0),
         "forced": bool(force),
     }
+    # The event is served by the dashboard and hub, which never show the OS
+    # username (#231); the command's own output keeps the full owner.
+    audited_owner = public_owner(lock.owner)
+    audited = json.dumps({**context, "owner": audited_owner}, sort_keys=True)
     if lock.liveness == "dead":
         if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
             return _lock_changed(lock, context)
@@ -683,8 +687,8 @@ def force_unlock(
             conn,
             phase="unlock",
             state="cleared",
-            message=f"cleared dead runner lock ({lock.owner})",
-            detail=json.dumps(context, sort_keys=True),
+            message=f"cleared dead runner lock ({audited_owner})",
+            detail=audited,
         )
         return UnlockOutcome(
             cleared=True,
@@ -718,8 +722,8 @@ def force_unlock(
         conn,
         phase="unlock",
         state="forced",
-        message=f"force-cleared {lock.liveness} runner lock ({lock.owner})",
-        detail=json.dumps(context, sort_keys=True),
+        message=f"force-cleared {lock.liveness} runner lock ({audited_owner})",
+        detail=audited,
     )
     return UnlockOutcome(
         cleared=True,

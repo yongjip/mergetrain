@@ -84,6 +84,43 @@ class DashboardTests(unittest.TestCase):
             payload = build_dashboard_snapshot(self.make_config(root))
             self.assertEqual(payload["next_action"], "upgrade_mergetrain")
 
+    def test_snapshot_omits_the_runner_username_and_integration_worktree_paths(self) -> None:
+        """#231: unlock events and command-failure notes leaked both."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            integration = config.state.worktree_root / "demo-mergetrain-7-0a1b2c3d"
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="gate", branch="codex/gate")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="failed",
+                    note=f"command failed (1) in {integration}: /bin/sh -c 'make test'",
+                )
+                # An unlock audit event recorded before owners were masked.
+                record_run_event(
+                    conn,
+                    phase="unlock",
+                    state="cleared",
+                    message="cleared dead runner lock (alice:4242)",
+                    detail=json.dumps({"owner": "alice:4242", "liveness": "dead"}),
+                )
+            finally:
+                conn.close()
+
+            payload = build_dashboard_snapshot(config)
+
+            self.assertNotIn("alice", json.dumps(payload))
+            note = next(item["note"] for item in payload["jobs"] if item["id"] == job.id)
+            self.assertNotIn(str(config.state.worktree_root), note)
+            self.assertIn(os.path.join("[worktrees]", "demo-mergetrain-7-0a1b2c3d"), note)
+            unlock = next(item for item in payload["events"] if item["phase"] == "unlock")
+            self.assertEqual(unlock["message"], "cleared dead runner lock (local:4242)")
+            self.assertEqual(json.loads(unlock["detail"])["owner"], "local:4242")
+
     def test_snapshot_is_live_and_omits_local_paths_and_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

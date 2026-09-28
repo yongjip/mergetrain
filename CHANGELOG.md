@@ -104,6 +104,12 @@
   unplugged drive, and with it commits that only that worktree held. The
   workspace is now created with `git worktree add --force`, which reclaims a
   stale registration of its own path only.
+- Stop the dashboard and hub from showing the runner's OS username and the
+  absolute path of integration worktrees (#231). Unlock audit events recorded
+  the raw `user:pid` owner, and failure notes kept the integration worktree
+  path. Events now record `local:pid`, events recorded earlier are masked when
+  served, and notes show paths under the worktree root as `[worktrees]/...`.
+  `unlock` output itself still reports the full owner.
 
 ## 3.0.8 - 2026-09-29
 
