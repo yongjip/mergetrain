@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.0.8 - 2026-09-29
 
 - Stop worktree removal on Windows from emptying directories that gates linked
   into an integration worktree. Validation and deploy cleanup (#214) and
@@ -13,7 +13,9 @@
   Windows Job Object, and stopping it terminates the job. That reaches
   descendants whose parent already exited, such as the processes that MSYS
   programs re-parent, which `taskkill /T` missed. `taskkill /T` remains the
-  fallback when Windows refuses a job.
+  fallback when Windows refuses a job. The job does not allow breakaway, so a
+  program that insists on `CREATE_BREAKAWAY_FROM_JOB` cannot start inside a
+  managed command.
 - Stop MCP cancellation, shutdown, and timeouts on Windows from leaving gates
   running. The CTRL_BREAK stop ended the CLI without unwinding, so gates it had
   started in their own process groups kept running. The MCP server now starts
