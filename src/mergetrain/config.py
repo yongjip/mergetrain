@@ -561,6 +561,16 @@ def _shared_state_root(repo: Path) -> Path:
     return common_git_dir.parent.resolve()
 
 
+def shared_state_root(repo: str | Path) -> Path:
+    """The checkout whose ``.mergetrain`` state ``repo`` shares.
+
+    A linked worktree resolves to its control checkout, so every worktree of
+    one repository reaches the same queue; anything else is its own root.
+    """
+
+    return _shared_state_root(Path(repo).expanduser().resolve())
+
+
 def _resolve_path(repo: Path, value: Any, default: str, *, key: str) -> Path:
     if value is None:
         raw = default

@@ -251,6 +251,81 @@ class HubSweepTests(unittest.TestCase):
             )
             self.assertEqual(log, [])
 
+    def test_sweep_never_deploys_an_opted_out_repo_through_a_linked_worktree(self) -> None:
+        """#229: a linked worktree is another path to the same queue."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            app = make_repo(root, "app")
+            job_id = seed_jobs(app, auto=True)
+            identity = ["-c", "user.email=t@example.invalid", "-c", "user.name=t"]
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=app, check=True)
+            subprocess.run(
+                ["git", *identity, "commit", "-q", "-m", "configure"], cwd=app, check=True
+            )
+            worktree = root / "wt-one"
+            subprocess.run(
+                ["git", "worktree", "add", "-q", "--detach", str(worktree)],
+                cwd=app,
+                check=True,
+            )
+            self.assertEqual(
+                load_config(repo=worktree).state.db, load_config(repo=app).state.db
+            )
+            add_repo(app, registry, daemon=False)
+            add_repo(worktree, registry)
+
+            log: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(log),
+            )
+
+            self.assertEqual(
+                [item["outcome"] for item in outcomes], ["excluded", "excluded"]
+            )
+            self.assertEqual(log, [])
+            conn = connect(load_config(repo=app).state.db)
+            try:
+                statuses = {job.id: job.status for job in list_jobs(conn)}
+            finally:
+                conn.close()
+            self.assertEqual(statuses, {job_id: "queued"})
+
+    def test_sweep_gives_one_queue_one_turn_through_several_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            app = make_repo(root, "app")
+            seed_jobs(app, auto=True)
+            identity = ["-c", "user.email=t@example.invalid", "-c", "user.name=t"]
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=app, check=True)
+            subprocess.run(
+                ["git", *identity, "commit", "-q", "-m", "configure"], cwd=app, check=True
+            )
+            worktree = root / "wt-one"
+            subprocess.run(
+                ["git", "worktree", "add", "-q", "--detach", str(worktree)],
+                cwd=app,
+                check=True,
+            )
+            add_repo(app, registry)
+            add_repo(worktree, registry)
+
+            log: list = []
+            outcomes = hub_sweep(
+                load_registry(registry),
+                say=lambda _: None,
+                process_batch_factory=recording_factory(log),
+            )
+
+            self.assertEqual(outcomes[0]["outcome"], "processed:1")
+            self.assertEqual(outcomes[1]["outcome"], "skipped")
+            self.assertIn("same queue as", outcomes[1]["error"])
+            self.assertEqual([name for name, *_ in log], ["app"])
+
     def test_sweep_excludes_exact_duplicate_of_opted_out_repo(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

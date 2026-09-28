@@ -10,6 +10,7 @@ default 1, so heavy gates from different repos never stack).
 
 from __future__ import annotations
 
+import os
 import signal
 import threading
 from collections.abc import Callable
@@ -17,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from .config import CONFIG_VERSION, MergetrainConfig, load_config
+from .config import CONFIG_VERSION, MergetrainConfig, load_config, shared_state_root
 from .daemon import ProcessBatch, Say, daemon_tick
 from .deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from .hub import display_path
@@ -55,6 +56,31 @@ def _default_factory(keep_worktree: bool) -> ProcessBatchFactory:
     return factory
 
 
+def _path_key(path: str | Path) -> str:
+    return os.path.normcase(str(Path(path).expanduser().resolve()))
+
+
+def _queue_keys(raw: str) -> set[str]:
+    """Every identity under which a registered path reaches a queue.
+
+    The shared state root needs only the filesystem, so it is known even when
+    the config cannot be loaded; the configured database also covers a queue
+    moved with ``state.db``.
+    """
+
+    if not raw:
+        return set()
+    try:
+        keys = {_path_key(shared_state_root(raw))}
+    except OSError:
+        return set()
+    try:
+        keys.add(_path_key(load_config(repo=raw).state.db))
+    except Exception:  # noqa: BLE001 - an unreadable config still has a state root
+        pass
+    return keys
+
+
 def hub_sweep(
     registered: list[dict[str, Any]],
     *,
@@ -78,22 +104,52 @@ def hub_sweep(
         for item in registered
         if not item.get("daemon", True)
     ]
+    # A linked worktree is a different directory that reaches the same queue,
+    # so the opt-out and de-duplication follow the queue, not the path (#229).
+    queue_keys = [_queue_keys(str(item.get("path") or "")) for item in registered]
+    excluded_queues: set[str] = set().union(
+        *(
+            keys
+            for item, keys in zip(registered, queue_keys, strict=True)
+            if not item.get("daemon", True)
+        )
+    )
+    first_entry: dict[str, int] = {}
+    duplicate_of: dict[int, str] = {}
+    for index, keys in enumerate(queue_keys):
+        earlier = sorted({first_entry[key] for key in keys if key in first_entry})
+        if earlier:
+            duplicate_of[index] = str(registered[earlier[0]].get("path") or "")
+        for key in keys:
+            first_entry.setdefault(key, index)
 
-    def excluded_by_alias(raw: str) -> bool:
+    def excluded_by_alias(raw: str, keys: set[str]) -> bool:
         # Belt-and-braces for the `--no-daemon` guarantee: if ANY roster entry
-        # naming the same physical directory is excluded (case aliases on
-        # macOS, symlinks, historical duplicates), this entry is excluded too.
-        # Do not skip equal strings: an exact hand-edited duplicate can carry a
-        # conflicting daemon flag just as an aliased duplicate can.
-        return any(same_repo(other, raw) for other in excluded_paths)
+        # naming the same physical directory or the same queue is excluded
+        # (case aliases on macOS, symlinks, linked worktrees, historical
+        # duplicates), this entry is excluded too. Do not skip equal strings:
+        # an exact hand-edited duplicate can carry a conflicting daemon flag
+        # just as an aliased duplicate can.
+        return bool(keys & excluded_queues) or any(
+            same_repo(other, raw) for other in excluded_paths
+        )
 
-    def tick_one(item: dict[str, Any]) -> dict[str, Any]:
+    def tick_one(index: int) -> dict[str, Any]:
+        item = registered[index]
         raw = str(item.get("path") or "")
         out: dict[str, Any] = {"path": display_path(raw)}
-        if not item.get("daemon", True) or excluded_by_alias(raw):
+        if not item.get("daemon", True) or excluded_by_alias(raw, queue_keys[index]):
             # Policy-level opt-out (`hub add --no-daemon`): this repo stays on
             # the dashboard but is never swept, regardless of any --auto jobs.
             out.update(ok=True, outcome="excluded", error="daemon excluded by registry flag")
+            return out
+        if index in duplicate_of:
+            # One queue gets one turn per sweep, however many paths reach it.
+            out.update(
+                ok=True,
+                outcome="skipped",
+                error=f"same queue as {display_path(duplicate_of[index])}",
+            )
             return out
         # Same isolation contract as the hub dashboard: any failure in one
         # repo becomes that repo's error outcome, so the catch is broad.
@@ -142,10 +198,11 @@ def hub_sweep(
             out.update(ok=False, outcome="error", error=str(exc) or exc.__class__.__name__)
             return out
 
+    indexes = range(len(registered))
     if concurrency <= 1:
-        return [tick_one(item) for item in registered]
+        return [tick_one(index) for index in indexes]
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        return list(pool.map(tick_one, registered))
+        return list(pool.map(tick_one, indexes))
 
 
 def hub_daemon_loop(

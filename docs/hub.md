@@ -105,7 +105,10 @@ because no `--auto` job happens to exist. Register them with
 `mergetrain hub add REPO --no-daemon`: they stay on the dashboard (marked
 "daemon off") but every `hub daemon` sweep reports them `excluded` without
 claiming anything. Re-run `mergetrain hub add REPO --daemon` to re-enable.
-The flag lives in the registry, not the repo.
+The flag lives in the registry, not the repo. It follows the repo's queue
+rather than the registered path: a linked worktree of an excluded repo, which
+shares its queue, is excluded too. However many registered paths reach one
+queue, a sweep gives it one turn and reports the others `skipped`.
 
 ## Snapshot caching
 

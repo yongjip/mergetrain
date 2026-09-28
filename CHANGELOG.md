@@ -69,6 +69,12 @@
   process-group leader was still alive, so a child outlived a leader that had
   already exited, and kept running after the timeout was reported and the
   worktree deleted. Escalation now follows the whole process group.
+- Stop the hub daemon from deploying a `--no-daemon` repository through one
+  of its linked worktrees (#229). Exclusion compared registered directories,
+  but a linked worktree is a different directory that shares the control
+  checkout's queue, so `hub add .` inside a task worktree bypassed the opt-out.
+  Exclusion and de-duplication now follow the queue a path reaches; a sweep
+  gives each queue one turn and reports other paths to it as `skipped`.
 
 ## 3.0.8 - 2026-09-29
 
