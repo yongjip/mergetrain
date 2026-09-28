@@ -75,6 +75,11 @@
   checkout's queue, so `hub add .` inside a task worktree bypassed the opt-out.
   Exclusion and de-duplication now follow the queue a path reaches; a sweep
   gives each queue one turn and reports other paths to it as `skipped`.
+- Accept SCP-style remotes whose user or host contains the letter "s", such
+  as `git@ssh.dev.azure.com:v3/org/proj/repo` (#230). The pattern's
+  character classes excluded "s" instead of whitespace, so such a remote was
+  classified as a relative filesystem path and both the deploy preview and the
+  deploy were refused.
 
 ## 3.0.8 - 2026-09-29
 

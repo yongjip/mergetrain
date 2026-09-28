@@ -82,6 +82,42 @@ class GitDestinationTests(unittest.TestCase):
             r"C:\repos\repo.git",
         )
 
+    def test_scp_style_remotes_with_an_s_in_user_or_host_are_remote(self) -> None:
+        """#230: the character classes once excluded the letter "s"."""
+
+        for url in (
+            "git@github.com:owner/repo.git",
+            "git@ssh.dev.azure.com:v3/org/proj/repo",
+            "user@host:repo",
+            "sshuser@gitserver.example.com:team/repo.git",
+            "deploys:repo.git",
+            "bitbucket.org:team/repo.git",
+        ):
+            with self.subTest(url=url):
+                self.assertFalse(_is_relative_filesystem_url(url))
+                self.assertEqual(_credential_free_url(url, repo=Path("/unused")), url)
+        for path in (
+            "repo.git",
+            "../remote.git",
+            "sub/dir:branch",
+            "./host:repo",
+            "my host:repo",
+            "back\\slash:repo",
+            "C:repo.git",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(_is_relative_filesystem_url(path))
+
+    def test_scp_style_push_url_with_an_s_can_be_deployed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo, _remote_a, _remote_b, _remote_c = make_repo(Path(td))
+            url = "git@ssh.dev.azure.com:v3/org/proj/repo"
+            git(repo, "remote", "set-url", "--push", "origin", url)
+
+            destination = resolve_git_destination(load_config(repo=repo))
+
+            self.assertEqual(destination.push_url, url)
+
     def test_command_environment_rejects_invalid_inherited_config_count(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo, _remote_a, remote_b, _remote_c = make_repo(Path(td))

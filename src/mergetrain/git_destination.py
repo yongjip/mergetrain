@@ -17,7 +17,9 @@ from .git_ops import DEPLOY_AUDIT_REF_PREFIX, git_remote_push_urls, git_remote_u
 
 _URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 _REMOTE_HELPER = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*::")
-_SCP_LIKE = re.compile(r"^(?:[^/@:\\s]+@)?[^/\\:\\s]+:.+$")
+# `[user@]host:path`. Inside a raw string a character class needs `\s` for
+# whitespace and `\\` for one backslash; `\\s` would exclude the letter "s" (#230).
+_SCP_LIKE = re.compile(r"^(?:[^/@:\s\\]+@)?[^/\\:\s]+:.+$")
 
 
 def _sha256_json(value: object) -> str:
