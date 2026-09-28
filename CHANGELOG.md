@@ -110,6 +110,10 @@
   path. Events now record `local:pid`, events recorded earlier are masked when
   served, and notes show paths under the worktree root as `[worktrees]/...`.
   `unlock` output itself still reports the full owner.
+- Stop webhook delivery from following redirects (#231). A 301, 302, or 303
+  answer sent the notification on to whatever host it named, loopback
+  included, and the redirected response counted as a successful delivery.
+  Redirects are no longer followed, and any 3xx answer is a failed delivery.
 
 ## 3.0.8 - 2026-09-29
 

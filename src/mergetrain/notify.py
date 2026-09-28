@@ -48,6 +48,23 @@ def _dedup_key(outcome: str, error: str) -> str:
     return outcome
 
 
+def _open_webhook(request: Any, *, timeout_seconds: int) -> Any:
+    """Send ``request`` without following redirects.
+
+    A redirect could carry the POST to any host, loopback included, and its
+    answer would then count as delivery (#231). A 3xx is an HTTPError instead.
+    """
+
+    from urllib import request as urllib_request
+
+    class _RefuseRedirects(urllib_request.HTTPRedirectHandler):
+        def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    opener = urllib_request.build_opener(_RefuseRedirects)
+    return opener.open(request, timeout=timeout_seconds)
+
+
 def webhook_notifier(url: str, *, timeout_seconds: int = 10) -> Notifier:
     """Build a notifier that POSTs a small provider-neutral JSON envelope."""
 
@@ -72,7 +89,7 @@ def webhook_notifier(url: str, *, timeout_seconds: int = 10) -> Notifier:
             method="POST",
         )
         try:
-            with urllib_request.urlopen(request, timeout=timeout_seconds) as response:
+            with _open_webhook(request, timeout_seconds=timeout_seconds) as response:
                 status = int(getattr(response, "status", 200))
                 if not 200 <= status < 300:
                     raise RuntimeError(f"webhook delivery returned HTTP {status}")

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import http.server
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -163,14 +165,14 @@ class WebhookNotifierTests(unittest.TestCase):
         response = mock.MagicMock()
         response.__enter__.return_value.status = 204
         response.__enter__.return_value.read.return_value = b""
-        with mock.patch("urllib.request.urlopen", return_value=response) as urlopen:
+        with mock.patch("mergetrain.notify._open_webhook", return_value=response) as urlopen:
             webhook_notifier(
                 "https://notify.example.invalid/hook/token",
                 timeout_seconds=7,
             )("Train", "landed")
 
         request = urlopen.call_args.args[0]
-        self.assertEqual(urlopen.call_args.kwargs["timeout"], 7)
+        self.assertEqual(urlopen.call_args.kwargs["timeout_seconds"], 7)
         self.assertEqual(request.method, "POST")
         self.assertEqual(
             request.data,
@@ -181,11 +183,52 @@ class WebhookNotifierTests(unittest.TestCase):
     def test_failure_never_exposes_secret_webhook_url(self) -> None:
         url = "https://notify.example.invalid/hook/super-secret"
         failure = HTTPError(url, 401, "unauthorized", {}, None)
-        with mock.patch("urllib.request.urlopen", side_effect=failure):
+        with mock.patch("mergetrain.notify._open_webhook", side_effect=failure):
             with self.assertRaises(RuntimeError) as raised:
                 webhook_notifier(url)("Train", "failed")
         self.assertNotIn("super-secret", str(raised.exception))
         self.assertEqual(str(raised.exception), "webhook delivery returned HTTP 401")
+
+    def test_a_redirect_is_a_failed_delivery_and_is_never_followed(self) -> None:
+        """#231: a 3xx could carry the POST to any host, loopback included."""
+
+        hits: list[str] = []
+        redirect = {"code": 302}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802 - http.server API
+                hits.append(self.path)
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path == "/hook":
+                    self.send_response(redirect["code"])
+                    self.send_header("Location", "/internal-admin")
+                else:
+                    self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_GET = do_POST  # noqa: N815 - a followed 303 turns into a GET
+
+            def log_message(self, *args: object) -> None:
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{server.server_address[1]}/hook"
+        try:
+            for code in (301, 302, 303, 307):
+                with self.subTest(code=code):
+                    hits.clear()
+                    redirect["code"] = code
+                    with self.assertRaises(RuntimeError) as raised:
+                        webhook_notifier(url, timeout_seconds=5)("Train", "landed")
+                    self.assertEqual(
+                        str(raised.exception), f"webhook delivery returned HTTP {code}"
+                    )
+                    self.assertEqual(hits, ["/hook"])
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 class SingleDaemonNotifyIntegrationTests(unittest.TestCase):
