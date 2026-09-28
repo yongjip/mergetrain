@@ -85,6 +85,58 @@ same five-tool, release-pinned stdio MCP server. The ordinary agent path remains
 `status → enqueue → stop`; the plugin does not grant deployment,
 unattended-operation, or recovery authority.
 
+## Updating the plugins
+
+The Claude Code and Codex plugins pin their MCP package to one release.
+Publishing a new version to PyPI or upgrading the global `mergetrain` CLI does
+not replace an installed plugin or its running MCP server. Update the plugin
+and start a new session to load its new release pin.
+
+These commands are for the `mergetrain` marketplace installed above. If you
+installed from another catalog, substitute its marketplace name.
+
+### Codex
+
+Refresh the Git marketplace, install the plugin from the refreshed source,
+and inspect the installed version:
+
+```sh
+codex plugin marketplace upgrade mergetrain
+codex plugin add mergetrain@mergetrain
+codex plugin list --marketplace mergetrain --json
+```
+
+Check the `installed` entry for `mergetrain@mergetrain`: `version` should match
+the release you intend to use, and `enabled` should be `true` to use its tools.
+Start a new Codex session after updating; restart the desktop app if it still
+loads the previous plugin. Marketplace refresh can update configured plugin
+files, but publishing a release does not establish when every user's client
+will refresh. See [the official OpenAI marketplace guidance](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli).
+
+### Claude Code
+
+Third-party marketplaces such as `mergetrain` have auto-update off by default.
+To enable it, open `/plugin`, select **Marketplaces → mergetrain → Enable
+auto-update**. For a manual update of the default user-scoped installation:
+
+```sh
+claude plugin marketplace update mergetrain
+claude plugin update mergetrain@mergetrain
+claude plugin list --json
+```
+
+If you installed at project or local scope, add the matching `--scope project`
+or `--scope local` to `claude plugin update`. Confirm the installed mergetrain
+version in the list, then restart Claude Code. Versions that support
+`/reload-plugins` can apply the update in an existing session; otherwise that
+session keeps its previously loaded version. See [Claude's update policy](https://code.claude.com/docs/en/discover-plugins#keep-plugins-updated).
+
+Both clients follow the marketplace's configured Git ref. A fixed tag or
+commit stays fixed when refreshed; use `main` to follow new releases. The
+global `mergetrain --version` reports a separate CLI installation, so use the
+plugin lists above to check plugin versions and the client's MCP view to
+confirm its mergetrain server connects.
+
 ## agy native plugin
 
 With [Antigravity CLI](https://www.agy.dev/docs/cli/plugins/) and `uv` already

@@ -37,6 +37,14 @@ To exercise the product in a disposable repository without installing it:
 uvx mergetrain demo
 ```
 
+## Updates
+
+An installed plugin keeps its released MCP package pinned until the plugin is
+updated. A new PyPI release or a global CLI upgrade does not change that pin.
+See the [plugin update guide](https://github.com/yongjip/mergetrain/blob/main/docs/install.md#updating-the-plugins)
+for manual updates, Claude Code's optional marketplace auto-update, installation
+scopes, and checking the installed version before starting a new session.
+
 ## Example prompts
 
 Read-only status inspection:
