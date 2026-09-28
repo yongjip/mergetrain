@@ -46,6 +46,12 @@ cannot manufacture it in tool arguments. Decline, cancel, an unchecked box, a
 client without form elicitation, or a changed plan produces a typed refusal and
 zero pushes.
 
+From protocol 2026-07-28 the client returns the answer in a retried tool call,
+and the server prepares the plan again before it uses that answer. The
+confirmation schema carries a value derived from the plan hash, so if the plan
+changed while the dialog was open, the retried call asks the human again
+instead of applying the earlier answer to the new plan.
+
 When a client cannot render elicitation, the response includes the reviewed
 summary and the ordinary fallback command:
 

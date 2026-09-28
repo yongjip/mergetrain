@@ -18,6 +18,7 @@ written in prose that an agent may or may not follow.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -585,6 +586,33 @@ def _client_can_elicit(ctx: Any) -> bool:
     )
 
 
+def _plan_bound_confirmation(plan_sha: str) -> Any:
+    """Return the confirmation schema, bound to one exact deploy plan.
+
+    From protocol 2026-07-28 the client answers in a retried tool call, the
+    resolvers run again, and the SDK reuses an answer while the rendered
+    question is unchanged. The summary omits parts of the plan, such as verify
+    hooks, so without this binding an answer given to one plan was applied to a
+    plan that changed while the dialog was open. A changed plan now renders a
+    different question, which the SDK asks again instead of reusing the answer.
+    The binding is derived from the plan hash, so it cannot stand in for it.
+    """
+
+    assert _DeployConfirmation is not None
+    binding = hashlib.sha256(
+        b"mergetrain-deploy-confirmation\0" + plan_sha.encode("utf-8")
+    ).hexdigest()
+
+    class _PlanBoundConfirmation(_DeployConfirmation):  # type: ignore[misc, valid-type]
+        __doc__ = _DeployConfirmation.__doc__
+        model_config = {
+            "title": _DeployConfirmation.__name__,
+            "json_schema_extra": {"x-mergetrain-plan-binding": binding},
+        }
+
+    return _PlanBoundConfirmation
+
+
 def _deploy_approval(result: Any) -> tuple[bool, str]:
     """Require an accepted resolver outcome whose checkbox is explicitly true."""
 
@@ -639,7 +667,7 @@ def build_server(repo: Path) -> Any:
             "mergetrain will atomically push the change set below. "
             "This ships code.\n\n" + plan.summary
         )
-        return Elicit(message=message, schema=_DeployConfirmation)
+        return Elicit(message=message, schema=_plan_bound_confirmation(plan.plan_sha))
 
     # Resolver parameters are deliberately absent from the tool schema. Setting
     # concrete annotations here keeps the optional SDK import out of module load

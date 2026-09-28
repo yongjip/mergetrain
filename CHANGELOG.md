@@ -20,6 +20,14 @@
   The plan is now checked inside the claim transaction on the exact train being
   claimed, a confirmed deploy never falls back to queued jobs, and bisect and
   isolation re-runs keep the push-time plan check.
+- Stop `mergetrain_deploy` from shipping a plan that changed while its
+  confirmation dialog was open, on MCP protocol 2026-07-28 and later. There the
+  client answers in a retried call, and the server prepared the plan again but
+  reused the earlier answer, because the dialog text, which leaves out parts of
+  the plan such as verify hooks, had not changed. The new plan was then passed
+  to the CLI as the confirmed one. The confirmation is now bound to the plan,
+  so a changed plan asks the human again. Earlier protocol versions already
+  refused a changed plan.
 
 ## 3.1.0 - 2026-09-29
 

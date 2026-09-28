@@ -947,6 +947,76 @@ class MCPV2DeployProtocolTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")
+class MCPPlanChangeDuringConfirmationTests(unittest.TestCase):
+    """A plan that changes while the dialog is open never ships on that answer."""
+
+    def _run(self, mode: str) -> tuple[dict[str, Any], list[str], str, str]:
+        from mcp import Client
+        from mcp.types import ElicitResult
+
+        from mergetrain.mcp_server import build_server
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_git_runner import git, make_demo_repo
+
+        from mergetrain.git_runner import GitRunner
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            remote = root / "remote.git"
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                validated = GitRunner(config).process_batch(conn, [job], deploy=False)
+                self.assertEqual(validated[0].status, "validated")
+            finally:
+                conn.close()
+            base = git(remote, "rev-parse", "main")
+            config_path = repo / ".mergetrain.yaml"
+            messages: list[str] = []
+
+            async def change_then_answer(_ctx: Any, params: Any) -> Any:
+                messages.append(params.message)
+                if len(messages) == 1:
+                    # The verify hook is not part of the dialog text, so the
+                    # human cannot see this change. Accept the original plan.
+                    text = config_path.read_text(encoding="utf-8")
+                    changed = text.replace(
+                        "  verify: []",
+                        "  verify:\n    - name: added-after-review\n      run: echo changed",
+                    )
+                    self.assertNotEqual(changed, text)
+                    config_path.write_text(changed, encoding="utf-8")
+                    return ElicitResult(action="accept", content={"confirm": True})
+                return ElicitResult(action="decline")
+
+            async def scenario() -> dict[str, Any]:
+                async with Client(
+                    build_server(repo), mode=mode, elicitation_callback=change_then_answer
+                ) as client:
+                    result = await client.call_tool("mergetrain_deploy", {})
+                return result.model_dump(by_alias=True, exclude_none=True)["structuredContent"]
+
+            with current_checkout_cli():
+                payload = asyncio.run(scenario())
+            return payload, messages, base, git(remote, "rev-parse", "main")
+
+    def test_input_required_protocol_asks_again_for_a_changed_plan(self) -> None:
+        payload, messages, base, after = self._run("auto")
+        self.assertEqual(after, base, payload)
+        self.assertEqual(len(messages), 2, payload)
+        self.assertEqual(payload["error"]["code"], "deploy_not_confirmed")
+
+    def test_legacy_protocol_refuses_a_changed_plan(self) -> None:
+        payload, messages, base, after = self._run("legacy")
+        self.assertEqual(after, base, payload)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(payload["error"]["code"], "deploy_plan_changed")
+
+
+@unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")
 class ServerRegistrationTests(unittest.TestCase):
     def test_every_tool_is_registered_with_truthful_annotations(self) -> None:
         from mergetrain.mcp_server import build_server
