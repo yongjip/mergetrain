@@ -59,6 +59,24 @@ def test_forbidden_layer_edges_and_cycles_are_reported(tmp_path: Path) -> None:
     assert "no-internal-import-cycles" in rules
 
 
+def test_mcp_adapter_may_use_the_windows_job_leaf_only_while_it_stays_a_leaf(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, "src/mergetrain/__init__.py", "")
+    _write(tmp_path, "src/mergetrain/errors.py", "")
+    _write(tmp_path, "src/mergetrain/windows_job.py", "")
+    _write(tmp_path, "src/mergetrain/mcp_server.py", "from .windows_job import WindowsJob\n")
+
+    assert CHECKER.check_repository(tmp_path).violations == ()
+
+    _write(tmp_path, "src/mergetrain/windows_job.py", "from .errors import MergetrainError\n")
+
+    violations = CHECKER.check_repository(tmp_path).violations
+    assert [(item.path, item.rule) for item in violations] == [
+        ("src/mergetrain/windows_job.py", "adapter-must-stay-thin")
+    ]
+
+
 def test_coarse_size_backstops_catch_a_return_to_monoliths(tmp_path: Path) -> None:
     _write(tmp_path, "src/mergetrain/__init__.py", "")
     _write(

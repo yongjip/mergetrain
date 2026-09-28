@@ -13,7 +13,7 @@ from .command_runner import Pulse, run_command
 from .config import MergetrainConfig
 from .errors import MergetrainError
 from .gate_runner import GateRunner
-from .git_ops import git_common_dir, git_worktree_clean
+from .git_ops import git_common_dir, git_worktree_clean, remove_worktree
 from .reuse import gate_policy_sha
 
 
@@ -59,15 +59,7 @@ class WorktreeManager:
             return
         if not worktree.exists():
             return
-        try:
-            run_command(
-                ["git", "worktree", "remove", "--force", str(worktree)],
-                cwd=self.repo,
-                log=log,
-                check=True,
-            )
-        except Exception:
-            shutil.rmtree(worktree, ignore_errors=True)
+        remove_worktree(self.repo, worktree, log=log)
 
     @staticmethod
     def git_common_dir(path: Path) -> Path | None:

@@ -18,6 +18,7 @@ from typing import IO, cast
 
 from .config import MergetrainConfig
 from .errors import CancellationRequested, CommandFailed, MergetrainError, redact_secrets
+from .windows_job import CREATE_SUSPENDED, WindowsJob
 
 Pulse = Callable[[], None]
 
@@ -86,9 +87,39 @@ def _shell_command(command: str) -> list[str]:
     return [_posix_shell(), "-c", command]
 
 
-def _stop_windows_process_tree(process: subprocess.Popen[str]) -> None:
-    """Terminate a Windows child and every descendant it spawned."""
+def _join_job(  # pragma: no cover - Windows compatibility
+    job: WindowsJob, process: subprocess.Popen[str]
+) -> WindowsJob | None:
+    """Move a suspended command into its job and let it run.
 
+    Returns None, with the job closed, when Windows refuses the move;
+    ``taskkill /T`` then remains the way to stop the process tree.
+    """
+
+    try:
+        joined = job.adopt(process.pid)
+    except OSError as exc:
+        process.kill()
+        process.wait()
+        job.close()
+        raise MergetrainError(f"could not start command process {process.pid}: {exc}") from exc
+    if not joined:
+        job.close()
+        return None
+    return job
+
+
+def _stop_windows_process_tree(
+    process: subprocess.Popen[str], job: WindowsJob | None = None
+) -> None:
+    """Terminate a Windows child and every descendant it spawned.
+
+    The command's job reaches descendants whose parent already exited;
+    ``taskkill /T`` walks parent links and is the fallback without a job.
+    """
+
+    if job is not None and job.terminate():
+        return
     try:
         completed = subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
@@ -103,7 +134,7 @@ def _stop_windows_process_tree(process: subprocess.Popen[str]) -> None:
         process.terminate()
 
 
-def _stop_process(process: subprocess.Popen[str]) -> bool:
+def _stop_process(process: subprocess.Popen[str], job: WindowsJob | None = None) -> bool:
     if process.poll() is not None:
         return False
     stopped = False
@@ -111,7 +142,7 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
         if os.name == "posix":
             os.killpg(process.pid, signal.SIGTERM)
         else:  # pragma: no cover - Windows compatibility
-            _stop_windows_process_tree(process)
+            _stop_windows_process_tree(process, job)
         stopped = True
         process.wait(timeout=5)
     except ProcessLookupError:
@@ -121,7 +152,7 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
             if os.name == "posix":
                 os.killpg(process.pid, signal.SIGKILL)
             else:  # pragma: no cover - Windows compatibility
-                _stop_windows_process_tree(process)
+                _stop_windows_process_tree(process, job)
                 if process.poll() is None:
                     process.kill()
             stopped = True
@@ -147,23 +178,37 @@ def _run_managed(
         raise CancellationRequested("command canceled before it started")
     if pulse is not None:
         pulse()
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd),
-        env=env,
-        shell=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        start_new_session=os.name == "posix",
-        creationflags=(
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-        ),
-    )
+    job = WindowsJob.create() if os.name == "nt" else None
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            env=env,
+            shell=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            start_new_session=os.name == "posix",
+            # A job adopts the process before it runs, so no descendant escapes.
+            creationflags=(
+                (
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | (CREATE_SUSPENDED if job is not None else 0)
+                )
+                if os.name == "nt"
+                else 0
+            ),
+        )
+        if job is not None:  # pragma: no cover - Windows compatibility
+            job = _join_job(job, process)
+    except BaseException:
+        if job is not None:  # pragma: no cover - Windows compatibility
+            job.close()
+        raise
     stdout_tail: deque[str] = deque(maxlen=2000)
     stderr_tail: deque[str] = deque(maxlen=2000)
     log_lock = threading.Lock()
@@ -194,13 +239,13 @@ def _run_managed(
         while process.poll() is None:
             now = time.monotonic()
             if cancel_event is not None and cancel_event.is_set():
-                if _stop_process(process):
+                if _stop_process(process, job):
                     canceled = True
                     stderr_tail.append("command canceled by gate scheduler\n")
                     break
                 continue
             if timeout_seconds is not None and now - started >= timeout_seconds:
-                if _stop_process(process):
+                if _stop_process(process, job):
                     timed_out = True
                     stderr_tail.append(f"command timed out after {timeout_seconds:g} seconds\n")
                     break
@@ -213,12 +258,14 @@ def _run_managed(
             except subprocess.TimeoutExpired:
                 pass
     except BaseException:
-        _stop_process(process)
+        _stop_process(process, job)
         raise
     finally:
         join_deadline = time.monotonic() + 2.0
         for reader in readers:
             reader.join(timeout=max(0.0, join_deadline - time.monotonic()))
+        if job is not None:  # pragma: no cover - Windows compatibility
+            job.close()
 
     stdout = "".join(stdout_tail)
     stderr = "".join(stderr_tail)

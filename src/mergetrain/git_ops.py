@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import IO, Any
@@ -298,6 +300,79 @@ def current_branch(repo: Path) -> str:
     return git_current_branch(repo)
 
 
+# IsReparseTagNameSurrogate(): the reparse point names another file or
+# directory, as NTFS junctions and symbolic links do.
+_NAME_SURROGATE_REPARSE_TAG = 0x20000000
+
+
+def _is_link_stat(st: os.stat_result) -> bool:
+    # Windows reports an NTFS junction as an ordinary directory; only its
+    # reparse tag shows that it names a directory somewhere else.
+    tag = getattr(st, "st_reparse_tag", 0)
+    return stat.S_ISLNK(st.st_mode) or bool(tag & _NAME_SURROGATE_REPARSE_TAG)
+
+
+def _is_link(entry: os.DirEntry[str]) -> bool:
+    if entry.is_symlink():
+        return True
+    return entry.is_dir(follow_symlinks=False) and _is_link_stat(
+        entry.stat(follow_symlinks=False)
+    )
+
+
+def _remove_links_below(root: Path) -> None:
+    """Remove every link below ``root`` as a link, never what it points to.
+
+    Git for Windows deletes a worktree by recursing into NTFS junctions, which
+    empties any external directory a gate linked into it (#214, #216). Once the
+    links are gone, a recursive delete can reach only the worktree's own files.
+    """
+
+    if _is_link_stat(os.lstat(root)):
+        raise OSError(f"{root} is itself a link")
+    pending = [os.fspath(root)]
+    while pending:
+        with os.scandir(pending.pop()) as scan:
+            entries = list(scan)
+        for entry in entries:
+            if _is_link(entry):
+                attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+                if attributes & stat.FILE_ATTRIBUTE_DIRECTORY:
+                    os.rmdir(entry.path)  # a Windows directory link; the target is untouched
+                else:
+                    os.unlink(entry.path)
+            elif entry.is_dir(follow_symlinks=False):
+                pending.append(entry.path)
+
+
+def remove_worktree(repo: Path, worktree: Path, *, log: IO[str] | None = None) -> None:
+    """Delete a linked worktree without deleting anything outside it.
+
+    The worktree is kept when its path is itself a link, or when a link inside
+    it cannot be removed on its own, because the recursive delete could then
+    reach through that link.
+    """
+
+    try:
+        _remove_links_below(worktree)
+    except OSError as exc:
+        if log:
+            log.write(
+                f"\nkeeping integration worktree: {worktree} "
+                f"(could not remove it without following a link: {exc})\n"
+            )
+        return
+    try:
+        run_command(
+            ["git", "worktree", "remove", "--force", str(worktree)],
+            cwd=repo,
+            log=log,
+            check=True,
+        )
+    except Exception:
+        shutil.rmtree(worktree, ignore_errors=True)
+
+
 def apply_gc(
     config: MergetrainConfig,
     *,
@@ -316,14 +391,7 @@ def apply_gc(
             active = live_worktree_now()
             if active and Path(active) == path:
                 continue
-        try:
-            run_command(
-                ["git", "worktree", "remove", "--force", str(path)],
-                cwd=config.repo,
-                check=True,
-            )
-        except Exception:
-            shutil.rmtree(path, ignore_errors=True)
+        remove_worktree(config.repo, path)
         if not path.exists():
             removed_worktrees.append(
                 {"path": str(candidate["path"]), "reason": str(candidate["reason"])}

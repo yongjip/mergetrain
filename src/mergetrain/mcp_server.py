@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from .errors import redact_secrets
+from .windows_job import CREATE_SUSPENDED, WindowsJob
 
 try:
     # A real name in module globals, because MCPServer resolves the deploy tool's
@@ -127,9 +128,17 @@ def _replace_local_path_root(text: str, root: str, replacement: str) -> str:
     return text
 
 
-async def _stop_windows_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Terminate a Windows child and its descendants without blocking the loop."""
+async def _stop_windows_process_tree(
+    process: asyncio.subprocess.Process, job: WindowsJob | None = None
+) -> None:
+    """Terminate a Windows child and its descendants without blocking the loop.
 
+    The CLI's job reaches every descendant, including gates in their own
+    process groups; ``taskkill /T`` walks parent links and is the fallback.
+    """
+
+    if job is not None and await asyncio.to_thread(job.terminate):
+        return
     try:
         killer = await asyncio.create_subprocess_exec(
             "taskkill",
@@ -153,7 +162,9 @@ async def _stop_windows_process_tree(process: asyncio.subprocess.Process) -> Non
             process.terminate()
 
 
-async def _stop_cli_process(process: asyncio.subprocess.Process) -> bool:
+async def _stop_cli_process(
+    process: asyncio.subprocess.Process, job: WindowsJob | None = None
+) -> bool:
     """Stop the CLI process group, escalating when graceful shutdown wedges."""
 
     if process.returncode is not None:
@@ -169,14 +180,14 @@ async def _stop_cli_process(process: asyncio.subprocess.Process) -> bool:
         else:  # pragma: no cover - exercised by Windows CI
             ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
             if ctrl_break is None:
-                await _stop_windows_process_tree(process)
+                await _stop_windows_process_tree(process, job)
             else:
                 try:
                     process.send_signal(ctrl_break)
                 except OSError:
                     # GUI/stdio hosts may not own a console that can receive a
-                    # CTRL_BREAK event. taskkill remains the tree-safe fallback.
-                    await _stop_windows_process_tree(process)
+                    # CTRL_BREAK event. The job, or taskkill, stops the tree.
+                    await _stop_windows_process_tree(process, job)
         stopped = True
         await asyncio.wait_for(process.wait(), timeout=_CLI_TERMINATE_GRACE_SECONDS)
     except ProcessLookupError:
@@ -187,21 +198,48 @@ async def _stop_cli_process(process: asyncio.subprocess.Process) -> bool:
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
             else:  # pragma: no cover - exercised by Windows CI
-                await _stop_windows_process_tree(process)
+                await _stop_windows_process_tree(process, job)
                 if process.returncode is None:
                     process.kill()
             stopped = True
             await process.wait()
+    if job is not None:
+        # CTRL_BREAK ends the CLI without unwinding, so gates it started in
+        # their own process groups outlive it. Its job still holds them.
+        await asyncio.to_thread(job.terminate)
     return stopped
+
+
+async def _join_job(  # pragma: no cover - exercised by Windows CI
+    job: WindowsJob, process: asyncio.subprocess.Process
+) -> WindowsJob | None:
+    """Move the suspended CLI into its job and let it run.
+
+    Returns None, with the job closed, when Windows refuses the move;
+    ``taskkill /T`` then remains the way to stop the process tree.
+    """
+
+    try:
+        joined = job.adopt(process.pid)
+    except OSError:
+        process.kill()
+        await process.wait()
+        job.close()
+        raise
+    if not joined:
+        job.close()
+        return None
+    return job
 
 
 async def _stop_and_drain(
     process: asyncio.subprocess.Process,
     communicate_task: asyncio.Task[tuple[bytes, bytes]],
+    job: WindowsJob | None = None,
 ) -> tuple[bytes, bytes]:
     """Complete process-tree cleanup even when the caller is being cancelled."""
 
-    await _stop_cli_process(process)
+    await _stop_cli_process(process, job)
     with suppress(BaseException):
         return await communicate_task
     return b"", b""
@@ -232,26 +270,41 @@ class MergetrainTools:
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
         }
+        # On Windows the CLI starts suspended in a job that will also hold the
+        # jobs of the gates it starts, so stopping it reaches all of them.
+        job = WindowsJob.create() if os.name == "nt" else None
         if os.name == "posix":
             popen_options["start_new_session"] = True
         else:  # pragma: no cover - exercised by Windows CI
-            popen_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        process = await asyncio.create_subprocess_exec(*argv, **popen_options)
+            popen_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | (
+                CREATE_SUSPENDED if job is not None else 0
+            )
+        try:
+            process = await asyncio.create_subprocess_exec(*argv, **popen_options)
+            if job is not None:  # pragma: no cover - exercised by Windows CI
+                job = await _join_job(job, process)
+        except BaseException:
+            if job is not None:  # pragma: no cover - exercised by Windows CI
+                job.close()
+            raise
         communicate_task = asyncio.create_task(process.communicate())
         try:
             stdout, stderr = await asyncio.wait_for(
                 asyncio.shield(communicate_task), timeout=_CLI_TIMEOUT_SECONDS
             )
         except asyncio.TimeoutError as exc:
-            await _stop_and_drain(process, communicate_task)
+            await _stop_and_drain(process, communicate_task, job)
             raise subprocess.TimeoutExpired(cmd=argv, timeout=_CLI_TIMEOUT_SECONDS) from exc
         except BaseException:
             # Shield cleanup so the cancellation already delivered to this task
             # cannot strand the child. Re-raise the original CancelledError (or
             # transport failure) so the MCP SDK keeps its existing semantics.
-            cleanup = asyncio.create_task(_stop_and_drain(process, communicate_task))
+            cleanup = asyncio.create_task(_stop_and_drain(process, communicate_task, job))
             await asyncio.shield(cleanup)
             raise
+        finally:
+            if job is not None:  # pragma: no cover - exercised by Windows CI
+                job.close()
         return subprocess.CompletedProcess(
             argv,
             process.returncode if process.returncode is not None else 1,

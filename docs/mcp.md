@@ -74,7 +74,9 @@ roots in synthesized diagnostics.
 
 Validation can run a real test suite. MCP cancellation, server shutdown, and a
 bounded timeout stop the CLI process group and let mergetrain release its lease;
-the gate process is not left running invisibly.
+the gate process is not left running invisibly. On Windows the CLI runs in a Job
+Object, which also holds the gates that the CLI starts in their own process
+groups, so stopping the CLI stops those gates too.
 
 ## Contract
 

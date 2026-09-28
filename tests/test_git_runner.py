@@ -1136,6 +1136,50 @@ deploy:
         process.terminate.assert_not_called()
         process.kill.assert_not_called()
 
+    def test_windows_stop_terminates_the_job_instead_of_walking_the_tree(self) -> None:
+        process = Mock()
+        process.poll.return_value = None
+        process.wait.return_value = 0
+        job = Mock()
+        job.terminate.return_value = True
+
+        with (
+            patch("mergetrain.command_runner.os.name", "nt"),
+            patch("mergetrain.command_runner.subprocess.run") as run,
+        ):
+            stopped = command_runner_module._stop_process(process, job)
+
+        self.assertTrue(stopped)
+        job.terminate.assert_called_once_with()
+        run.assert_not_called()
+        process.kill.assert_not_called()
+
+    def test_windows_stop_walks_the_tree_when_the_job_cannot_terminate(self) -> None:
+        process = Mock()
+        process.pid = 4321
+        process.poll.return_value = None
+        process.wait.return_value = 0
+        job = Mock()
+        job.terminate.return_value = False
+
+        with (
+            patch("mergetrain.command_runner.os.name", "nt"),
+            patch(
+                "mergetrain.command_runner.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0),
+            ) as run,
+        ):
+            stopped = command_runner_module._stop_process(process, job)
+
+        self.assertTrue(stopped)
+        run.assert_called_once_with(
+            ["taskkill", "/PID", "4321", "/T", "/F"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
     @unittest.skipUnless(os.name == "nt", "Windows process-tree regression")
     def test_timeout_kills_windows_grandchild_process_tree(self) -> None:
         import ctypes
@@ -1173,6 +1217,82 @@ deploy:
                     ctypes.windll.kernel32.CloseHandle(handle)
             self.assertFalse(running, f"grandchild process {pid} survived timeout")
 
+    @unittest.skipUnless(os.name == "nt", "Windows job-object regression (#215)")
+    def test_timeout_kills_windows_descendant_whose_parent_exited(self) -> None:
+        # MSYS programs re-parent their children, so `taskkill /T` could not
+        # reach them (#215). An intermediate that exits breaks the parent
+        # chain the same way; only the command's job still holds the orphan.
+        import ctypes
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pid_file = root / "orphan.pid"
+            orphan = "import time; time.sleep(60)"
+            intermediate = (
+                "import pathlib, subprocess, sys; "
+                f"p=subprocess.Popen([sys.executable, '-c', {orphan!r}]); "
+                f"pathlib.Path({str(pid_file)!r}).write_text(str(p.pid))"
+            )
+            parent = (
+                "import subprocess, sys, time; "
+                f"subprocess.run([sys.executable, '-c', {intermediate!r}], check=True); "
+                "time.sleep(60)"
+            )
+
+            completed = command_runner_module.run_command(
+                [sys.executable, "-c", parent],
+                cwd=root,
+                check=False,
+                timeout_seconds=5,
+            )
+
+            self.assertEqual(completed.returncode, 124)
+            self.assertTrue(pid_file.is_file())
+            pid = int(pid_file.read_text(encoding="utf-8"))
+            synchronize = 0x00100000
+            wait_object_0 = 0
+            handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+            if handle:
+                try:
+                    # Termination is asynchronous; give it a moment to finish.
+                    exited = ctypes.windll.kernel32.WaitForSingleObject(handle, 5000)
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
+                self.assertEqual(
+                    exited,
+                    wait_object_0,
+                    f"orphaned descendant {pid} survived the timeout",
+                )
+
+    @unittest.skipUnless(os.name == "nt", "Git for Windows sh regression (#215)")
+    def test_timeout_kills_msys_background_processes(self) -> None:
+        # Cygwin-based programs such as Git for Windows' sh ask to break away
+        # from any job that permits it, so a job that allowed breakaway lost
+        # exactly these processes.
+        import ctypes
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            completed = command_runner_module.run_shell(
+                "sleep 60 & cat /proc/$!/winpid > winpid.txt; wait",
+                cwd=root,
+                env=dict(os.environ),
+                check=False,
+                timeout_seconds=5,
+            )
+
+            self.assertEqual(completed.returncode, 124)
+            pid = int((root / "winpid.txt").read_text(encoding="utf-8"))
+            synchronize = 0x00100000
+            wait_object_0 = 0
+            handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+            if handle:
+                try:
+                    exited = ctypes.windll.kernel32.WaitForSingleObject(handle, 5000)
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
+                self.assertEqual(exited, wait_object_0, f"MSYS sleep {pid} survived the timeout")
+
     def test_shell_command_uses_git_for_windows_sh_without_cmd_fallback(self) -> None:
         with (
             patch("mergetrain.command_runner.Path.exists", return_value=False),
@@ -1201,7 +1321,11 @@ deploy:
         with tempfile.TemporaryDirectory() as td:
             repo, _ = make_demo_repo(Path(td))
             config = load_config(repo=repo)
-            with patch("mergetrain.command_runner.subprocess.Popen") as popen:
+            with (
+                patch("mergetrain.command_runner.subprocess.Popen") as popen,
+                # A fake process cannot join a Windows job object.
+                patch("mergetrain.command_runner.WindowsJob.create", return_value=None),
+            ):
                 popen.return_value.__enter__ = Mock(return_value=popen.return_value)
                 popen.return_value.stdout = io.StringIO("")
                 popen.return_value.stderr = io.StringIO("")

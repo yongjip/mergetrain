@@ -26,6 +26,7 @@ from mergetrain.mcp_server import (
     _deploy_approval,
     _replace_local_path_root,
     _stop_cli_process,
+    _stop_windows_process_tree,
 )
 from mergetrain.store import connect, enqueue_job, mark_job
 
@@ -495,8 +496,120 @@ class ProcessLifecycleTests(unittest.TestCase):
             patch("mergetrain.mcp_server._stop_windows_process_tree", stop_tree),
         ):
             self.assertTrue(asyncio.run(_stop_cli_process(process)))
-        stop_tree.assert_awaited_once_with(process)
+        stop_tree.assert_awaited_once_with(process, None)
         process.wait.assert_awaited_once()
+
+    def test_windows_stop_terminates_the_cli_job_after_the_cli_exits(self) -> None:
+        # CTRL_BREAK ends the CLI without unwinding, so gates it started in
+        # their own process groups would outlive it; the job still holds them.
+        process = MagicMock()
+        process.pid = 123
+        process.returncode = None
+        process.wait = AsyncMock(return_value=0)
+        job = MagicMock()
+        stop_tree = AsyncMock()
+        with (
+            patch("mergetrain.mcp_server.os.name", "nt"),
+            patch("mergetrain.mcp_server.signal.CTRL_BREAK_EVENT", 1, create=True),
+            patch("mergetrain.mcp_server._stop_windows_process_tree", stop_tree),
+        ):
+            self.assertTrue(asyncio.run(_stop_cli_process(process, job)))
+        process.send_signal.assert_called_once_with(1)
+        stop_tree.assert_not_awaited()
+        job.terminate.assert_called_once_with()
+
+    def test_windows_tree_stop_prefers_the_job_over_taskkill(self) -> None:
+        process = MagicMock()
+        process.returncode = None
+        job = MagicMock()
+        job.terminate.return_value = True
+        with patch("mergetrain.mcp_server.asyncio.create_subprocess_exec") as spawn:
+            asyncio.run(_stop_windows_process_tree(process, job))
+        job.terminate.assert_called_once_with()
+        spawn.assert_not_called()
+        process.terminate.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "Windows job-object regression")
+    def test_cancelling_run_stops_gates_in_their_own_process_groups(self) -> None:
+        # The CLI starts every gate in a new process group, which CTRL_BREAK
+        # does not reach, and the CLI then exits without unwinding. Only the
+        # job that holds the CLI's whole tree can still stop the gate.
+        heartbeat_program = (
+            "from pathlib import Path\n"
+            "import sys, time\n"
+            "heartbeat = Path(sys.argv[1])\n"
+            "counter = 0\n"
+            "while True:\n"
+            "    heartbeat.write_text(str(counter), encoding='utf-8')\n"
+            "    counter += 1\n"
+            "    time.sleep(0.02)\n"
+        )
+        parent_program = (
+            "from pathlib import Path\n"
+            "import os, subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', sys.argv[3], sys.argv[2]], "
+            "creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)\n"
+            "Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}', encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+
+        async def wait_for(condition: Any, what: str) -> None:
+            for _ in range(1000):
+                if condition():
+                    return
+                await asyncio.sleep(0.01)
+            self.fail(f"timed out waiting for {what}")
+
+        async def scenario(root: Path) -> None:
+            pid_path = root / "pids.txt"
+            heartbeat_path = root / "heartbeat.txt"
+            argv = [
+                sys.executable,
+                "-c",
+                parent_program,
+                str(pid_path),
+                str(heartbeat_path),
+                heartbeat_program,
+            ]
+            pids: list[str] = []
+            task: asyncio.Task[subprocess.CompletedProcess[str]] | None = None
+            try:
+                with patch.object(MergetrainTools, "_argv", return_value=argv):
+                    task = asyncio.create_task(self.tools._run(["doctor"]))
+                    await wait_for(
+                        lambda: pid_path.exists() and pid_path.stat().st_size, "the gate pids"
+                    )
+                    pids = pid_path.read_text(encoding="utf-8").split()
+                    await wait_for(heartbeat_path.exists, "the first heartbeat")
+                    before = heartbeat_path.read_text(encoding="utf-8")
+                    await wait_for(
+                        lambda: heartbeat_path.read_text(encoding="utf-8") != before,
+                        "the heartbeat to advance",
+                    )
+                    task.cancel()
+                    done, _ = await asyncio.wait({task}, timeout=30)
+                    self.assertIn(task, done, "cancelling the MCP task did not finish")
+                    with self.assertRaises(asyncio.CancelledError):
+                        task.result()
+                await asyncio.sleep(0.3)
+                stopped = heartbeat_path.read_text(encoding="utf-8")
+                await asyncio.sleep(0.3)
+                self.assertEqual(
+                    heartbeat_path.read_text(encoding="utf-8"),
+                    stopped,
+                    "the gate kept running after the MCP task was cancelled",
+                )
+            finally:
+                for pid in pids:
+                    subprocess.run(
+                        ["taskkill", "/PID", pid, "/T", "/F"],
+                        check=False,
+                        capture_output=True,
+                        timeout=10,
+                    )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(scenario(Path(tmp)))
 
     def test_cancelling_run_stops_the_cli_process_group(self) -> None:
         heartbeat_program = (

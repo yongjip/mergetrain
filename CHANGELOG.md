@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- Stop worktree removal on Windows from emptying directories that gates linked
+  into an integration worktree. Validation and deploy cleanup (#214) and
+  `gc --apply` (#216) now remove NTFS junctions and symbolic links as links
+  before they delete a worktree. If a link cannot be removed on its own, or the
+  worktree path is itself a link, the worktree is kept: cleanup says why in the
+  run log, and `gc --apply` reports the worktree under `failed`.
+- Stop timed-out and canceled commands on Windows from leaving descendant
+  processes running (#215). Each managed command now starts suspended inside a
+  Windows Job Object, and stopping it terminates the job. That reaches
+  descendants whose parent already exited, such as the processes that MSYS
+  programs re-parent, which `taskkill /T` missed. `taskkill /T` remains the
+  fallback when Windows refuses a job.
+- Stop MCP cancellation, shutdown, and timeouts on Windows from leaving gates
+  running. The CTRL_BREAK stop ended the CLI without unwinding, so gates it had
+  started in their own process groups kept running. The MCP server now starts
+  the CLI in a Job Object and terminates that job, together with the gate jobs
+  nested in it, once it has stopped the CLI.
+
 ## 3.0.7 - 2026-09-06
 
 - Replace the removed duplicate-enqueue option in error messages with supported
