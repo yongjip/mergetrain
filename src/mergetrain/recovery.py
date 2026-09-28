@@ -409,6 +409,60 @@ def _job_push_target(
     return remote, tuple(refs), job.pending_deploy_destination_sha
 
 
+def _classify_group(
+    config: MergetrainConfig,
+    target: tuple[str, tuple[str, ...], str],
+    group: list[Job],
+) -> dict[int, JobDecision]:
+    """Classify the jobs whose interrupted push shared one recorded target.
+
+    Raises ``RemoteUnreachable`` when that target can no longer be asked for
+    truth: its endpoint changed or cannot be resolved, or the remote is down.
+    """
+    remote, refs, recorded_destination_sha = target
+    effective = replace(config, git=replace(config.git, remote=remote, push_refs=refs))
+    try:
+        destination = resolve_git_destination(effective)
+    except MergetrainError as exc:
+        raise RemoteUnreachable(
+            f"cannot resolve the recorded push destination {remote!r} "
+            "to reconcile; restore its exact endpoint and retry"
+        ) from exc
+    if destination.push_endpoint_sha != recorded_destination_sha:
+        raise RemoteUnreachable(
+            f"recorded push destination {remote!r} no longer matches "
+            "the endpoint used before the crash; restore it and retry"
+        )
+    if not _fetch(effective, destination):
+        raise RemoteUnreachable(f"cannot reach remote '{remote}' to reconcile")
+    ref_shas: dict[str, str] = {}
+    for ref in refs:
+        _localize_ref(effective, destination, ref)  # bring the tip local so ancestry resolves
+        reachable, remote_sha = _ls_remote(effective, destination, ref)
+        if not reachable:
+            raise RemoteUnreachable(f"cannot ls-remote '{ref}' on '{remote}'")
+        ref_shas[ref] = remote_sha
+    audit_shas: dict[str, str] = {}
+    for job in group:
+        audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
+        if not audit_ref or audit_ref in audit_shas:
+            continue
+        reachable, audit_sha = _ls_remote(effective, destination, audit_ref)
+        if not reachable:
+            raise RemoteUnreachable(f"cannot ls-remote deploy audit ref on '{remote}'")
+        audit_shas[audit_ref] = audit_sha
+    decisions: dict[int, JobDecision] = {}
+    for job in group:
+        audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
+        decisions[job.id] = _classify(
+            effective,
+            job,
+            ref_shas,
+            audit_ref_sha=audit_shas.get(audit_ref, ""),
+        )
+    return decisions
+
+
 # --------------------------------------------------------------------------- #
 # engine — reconcile / recover / unlock
 # --------------------------------------------------------------------------- #
@@ -433,6 +487,9 @@ def reconcile(
     crash-free run would also have produced. Never pushes. If the remote is
     unreachable it raises ``RemoteUnreachable`` **before** any finalize write, so
     the jobs stay parked (a strict no-op for the remote verdict).
+
+    A blocked reconcile conflict is re-checked the same way, but only as far as
+    its recorded target still answers; otherwise it is reported still blocked.
     """
     owner = default_owner()
     lock = acquire_runner_lock(
@@ -480,54 +537,25 @@ def reconcile(
                 )
             groups.setdefault(target, []).append(job)
         decisions_by_id: dict[int, JobDecision] = {}
-        for (remote, refs, recorded_destination_sha), group in groups.items():
-            effective = replace(
-                config, git=replace(config.git, remote=remote, push_refs=refs)
-            )
+        for target, group in groups.items():
             try:
-                destination = resolve_git_destination(effective)
-            except MergetrainError as exc:
-                raise RemoteUnreachable(
-                    f"cannot resolve the recorded push destination {remote!r} "
-                    "to reconcile; restore its exact endpoint and retry"
-                ) from exc
-            if destination.push_endpoint_sha != recorded_destination_sha:
-                raise RemoteUnreachable(
-                    f"recorded push destination {remote!r} no longer matches "
-                    "the endpoint used before the crash; restore it and retry"
-                )
-            if not _fetch(effective, destination):
-                raise RemoteUnreachable(f"cannot reach remote '{remote}' to reconcile")
-            ref_shas: dict[str, str] = {}
-            for ref in refs:
-                _localize_ref(
-                    effective, destination, ref
-                )  # bring the tip local so ancestry resolves
-                reachable, remote_sha = _ls_remote(effective, destination, ref)
-                if not reachable:
-                    raise RemoteUnreachable(f"cannot ls-remote '{ref}' on '{remote}'")
-                ref_shas[ref] = remote_sha
-            audit_shas: dict[str, str] = {}
-            for job in group:
-                audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
-                if not audit_ref or audit_ref in audit_shas:
-                    continue
-                reachable, audit_sha = _ls_remote(
-                    effective, destination, audit_ref
-                )
-                if not reachable:
-                    raise RemoteUnreachable(
-                        f"cannot ls-remote deploy audit ref on '{remote}'"
+                decisions_by_id.update(_classify_group(config, target, group))
+            except RemoteUnreachable as exc:
+                if any(job.status == "needs_reconcile" for job in group):
+                    raise
+                # Re-checking a conflict is best effort. It is already parked
+                # blocked, and an endpoint that has since changed or gone away
+                # must not keep a newer crash from being reconciled.
+                for job in group:
+                    decisions_by_id[job.id] = JobDecision(
+                        job,
+                        job.pending_deploy_sha,
+                        _resolvable(config, job),
+                        [],
+                        "blocked",
+                        f"cannot re-check this conflict: {exc}",
+                        _audit_ref_for_sha(job.pending_deploy_sha),
                     )
-                audit_shas[audit_ref] = audit_sha
-            for job in group:
-                audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
-                decisions_by_id[job.id] = _classify(
-                    effective,
-                    job,
-                    ref_shas,
-                    audit_ref_sha=audit_shas.get(audit_ref, ""),
-                )
         # Emit in the original FIFO order, independent of target grouping.
         decisions = [decisions_by_id[job.id] for job in jobs]
         if apply:

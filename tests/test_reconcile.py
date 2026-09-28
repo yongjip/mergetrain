@@ -335,6 +335,60 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.pending_deploy_sha, "")
 
+    def test_a_conflict_keeps_a_late_cancel_until_the_remote_answers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            try:
+                _set_needs_reconcile(config, conn, job.id, pending, cancel=utc_now())
+                # The first reconcile cannot tell whether the push landed.
+                with patch("mergetrain.recovery._ancestor_state", return_value="unknown"):
+                    first = reconcile(config, conn, apply=True)
+                parked = get_job(conn, job.id)
+                # The next one finds it never landed: the cancel still decides.
+                second = reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(first.jobs[0]["decision"], "blocked")
+            self.assertEqual(parked.status, "blocked")
+            self.assertNotEqual(parked.cancel_requested_at, "")
+            self.assertEqual(second.summary["canceled"], 1)
+            self.assertEqual(healed.status, "canceled")
+
+    def test_a_conflict_that_cannot_be_rechecked_does_not_stop_reconcile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._prepare(root)
+            try:
+                # An old conflict whose recorded endpoint no longer matches.
+                _set_needs_reconcile(config, conn, job.id, pending)
+                conn.execute(
+                    "UPDATE deploy_queue SET status='blocked', "
+                    "pending_deploy_destination_sha=?, note='reconcile conflict: old' "
+                    "WHERE id=?",
+                    ("f" * 64, job.id),
+                )
+                conn.commit()
+                # A newer crash on the current endpoint, whose push never landed.
+                fresh = enqueue_job(conn, task="b", branch="feature/b")
+                _pin(repo, fresh.id, pending)
+                _set_needs_reconcile(config, conn, fresh.id, pending)
+                outcome = reconcile(config, conn, apply=True)
+                conflict = get_job(conn, job.id)
+                requeued = get_job(conn, fresh.id)
+            finally:
+                conn.close()
+            decisions = {item["job_id"]: item for item in outcome.jobs}
+            self.assertEqual(decisions[fresh.id]["decision"], "queued")
+            self.assertEqual(requeued.status, "queued")
+            self.assertEqual(decisions[job.id]["decision"], "blocked")
+            self.assertIn("cannot re-check", decisions[job.id]["reason"])
+            self.assertEqual(outcome.exit_code, 10)
+            self.assertEqual(conflict.status, "blocked")
+            self.assertEqual(conflict.pending_deploy_sha, pending)
+            self.assertEqual(conflict.note, "reconcile conflict: old")
+
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

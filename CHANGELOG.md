@@ -43,7 +43,10 @@
 - Stop treating reconcile conflicts, whose push may have landed, as ordinary
   blocked jobs (#224). `mergetrain reconcile`, the command status recommends for
   them, now checks them against the remote again and settles them with
-  `--apply` once it can. `inspect` reports them as `reconcile_conflict` instead
+  `--apply` once it can. A cancel requested before the job was parked still
+  wins if the push never landed, and a conflict whose recorded endpoint changed
+  or cannot be reached stays blocked without stopping reconcile of other jobs.
+  `inspect` reports them as `reconcile_conflict` instead
   of `merge_conflict`. `dismiss`, `retry`, and `cancel` refuse them, and
   `dismiss --all` skips them and lists them under the new `skipped` key; after
   inspecting the remote, an operator can pass the new `--force` option to

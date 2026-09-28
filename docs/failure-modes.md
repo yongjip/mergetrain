@@ -194,7 +194,12 @@ rewritten afterwards, only some push refs carry the commit, the audit ref points
 somewhere unexpected, or the commit cannot be resolved locally. The job keeps
 its marker and pin ref, `inspect` reports the `reconcile_conflict` category, and
 `status` recommends `mergetrain reconcile`, which checks such jobs against the
-remote again and settles them with `--apply` once the remote does.
+remote again and settles them with `--apply` once the remote does. A cancel
+requested before the job was parked still counts: if the push turns out not to
+have landed, reconcile records `canceled` rather than requeueing the job. When
+the conflict's recorded endpoint has changed or cannot be reached, reconcile
+reports it still blocked with the reason it could not check it, and goes on to
+settle every `needs_reconcile` job.
 
 Because its push may have landed, such a job is not an ordinary blocked job.
 `dismiss`, `retry`, and `cancel` refuse it, and `dismiss --all` skips it and

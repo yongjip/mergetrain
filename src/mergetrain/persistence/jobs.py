@@ -818,6 +818,9 @@ def mark_job(
         # silently overwritten by a stale recovery decision.
         where += " AND status = ?"
         where_values.append(expected_status)
+    # A cancel request survives the states that can still honor it. That
+    # includes a reconcile conflict, which keeps its marker: a later reconcile
+    # that finds the push never landed must cancel the job, not requeue it.
     with immediate(conn):
         cur = conn.execute(
             f"""
@@ -848,6 +851,8 @@ def mark_job(
                 claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
                 cancel_requested_at = CASE
                     WHEN ? IN ('in_progress', 'canceled', 'needs_reconcile')
+                    THEN cancel_requested_at
+                    WHEN ? = 'blocked' AND pending_deploy_sha != ''
                     THEN cancel_requested_at
                     ELSE ''
                 END,
@@ -892,6 +897,7 @@ def mark_job(
                 deployment_destination_sha,
                 verification_policy_sha,
                 conflict_with,
+                status,
                 status,
                 status,
                 status,
