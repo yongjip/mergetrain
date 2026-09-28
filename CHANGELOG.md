@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- Stop validation and deploy cleanup on Windows from emptying directories that
-  gates linked into an integration worktree (#214). Cleanup now removes NTFS
-  junctions and symbolic links as links before it deletes the worktree. If a
-  link cannot be removed on its own, the worktree is kept and the run log says
-  why.
+- Stop worktree removal on Windows from emptying directories that gates linked
+  into an integration worktree. Validation and deploy cleanup (#214) and
+  `gc --apply` (#216) now remove NTFS junctions and symbolic links as links
+  before they delete a worktree. If a link cannot be removed on its own, or the
+  worktree path is itself a link, the worktree is kept: cleanup says why in the
+  run log, and `gc --apply` reports the worktree under `failed`.
 
 ## 3.0.7 - 2026-09-06
 
