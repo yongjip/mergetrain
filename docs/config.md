@@ -357,7 +357,9 @@ parallel group. If one parallel gate fails, times out, or the train is canceled,
 mergetrain terminates every peer subprocess group. Per-gate logs and terminal
 events are then committed in declaration order, so concurrent completion cannot
 make JSON or logs nondeterministic. The same POSIX-shell resolution and process
-tree cleanup apply on Linux, macOS, and Git for Windows.
+tree cleanup apply on Linux, macOS, and Git for Windows. On Windows each command
+runs in a Job Object, so cleanup also reaches descendants whose parent already
+exited, such as the processes that MSYS programs re-parent.
 
 Every `run` string is executed by a **POSIX `sh`, on every platform** — mergetrain
 never falls back to `cmd.exe`. On Windows it uses `sh` from `PATH` or the one Git

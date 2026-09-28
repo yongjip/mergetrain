@@ -8,6 +8,12 @@
   before they delete a worktree. If a link cannot be removed on its own, or the
   worktree path is itself a link, the worktree is kept: cleanup says why in the
   run log, and `gc --apply` reports the worktree under `failed`.
+- Stop timed-out and canceled commands on Windows from leaving descendant
+  processes running (#215). Each managed command now starts suspended inside a
+  Windows Job Object, and stopping it terminates the job. That reaches
+  descendants whose parent already exited, such as the processes that MSYS
+  programs re-parent, which `taskkill /T` missed. `taskkill /T` remains the
+  fallback when Windows refuses a job.
 
 ## 3.0.7 - 2026-09-06
 

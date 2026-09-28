@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import os
 import shlex
@@ -14,6 +15,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import IO, cast
 
 from .config import MergetrainConfig
@@ -86,9 +88,164 @@ def _shell_command(command: str) -> list[str]:
     return [_posix_shell(), "-c", command]
 
 
-def _stop_windows_process_tree(process: subprocess.Popen[str]) -> None:
-    """Terminate a Windows child and every descendant it spawned."""
+# CreateProcess flag: start the process with its main thread suspended.
+_CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_SET_QUOTA = 0x0100
+_PROCESS_SUSPEND_RESUME = 0x0800
 
+
+@functools.cache
+def _windows_job_api() -> SimpleNamespace:  # pragma: no cover - Windows compatibility
+    """Load the kernel32 and ntdll calls that Windows job control needs."""
+
+    if sys.platform != "win32":
+        raise OSError("Windows job objects exist only on Windows")
+    import ctypes
+    from ctypes import wintypes
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [
+            (name, ctypes.c_ulonglong)
+            for name in ("reads", "writes", "others", "read_bytes", "write_bytes", "other_bytes")
+        ]
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("per_process_user_time_limit", ctypes.c_int64),
+            ("per_job_user_time_limit", ctypes.c_int64),
+            ("limit_flags", wintypes.DWORD),
+            ("minimum_working_set_size", ctypes.c_size_t),
+            ("maximum_working_set_size", ctypes.c_size_t),
+            ("active_process_limit", wintypes.DWORD),
+            ("affinity", ctypes.c_size_t),
+            ("priority_class", wintypes.DWORD),
+            ("scheduling_class", wintypes.DWORD),
+        ]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("basic", BasicLimits),
+            ("io", IoCounters),
+            ("process_memory_limit", ctypes.c_size_t),
+            ("job_memory_limit", ctypes.c_size_t),
+            ("peak_process_memory_used", ctypes.c_size_t),
+            ("peak_job_memory_used", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32")
+    ntdll = ctypes.WinDLL("ntdll")
+    handle, flag, dword = wintypes.HANDLE, wintypes.BOOL, wintypes.DWORD
+    for function, argtypes, restype in (
+        (kernel32.CreateJobObjectW, (wintypes.LPVOID, wintypes.LPCWSTR), handle),
+        (kernel32.SetInformationJobObject, (handle, ctypes.c_int, wintypes.LPVOID, dword), flag),
+        (kernel32.OpenProcess, (dword, flag, dword), handle),
+        (kernel32.AssignProcessToJobObject, (handle, handle), flag),
+        (kernel32.TerminateJobObject, (handle, wintypes.UINT), flag),
+        (kernel32.CloseHandle, (handle,), flag),
+        (ntdll.NtResumeProcess, (handle,), ctypes.c_long),
+    ):
+        function.argtypes = argtypes
+        function.restype = restype
+    return SimpleNamespace(
+        ctypes=ctypes,
+        kernel32=kernel32,
+        ntdll=ntdll,
+        ExtendedLimits=ExtendedLimits,
+    )
+
+
+class _WindowsJob:  # pragma: no cover - Windows compatibility
+    """A Job Object that holds one command and every process it starts.
+
+    ``taskkill /T`` follows parent links, so it misses a descendant whose
+    parent already exited, which MSYS programs such as Git for Windows' ``sh``
+    do routinely (#215). Terminating the job reaches every process in it.
+    """
+
+    def __init__(self, api: SimpleNamespace, handle: int) -> None:
+        self._api = api
+        self._handle: int | None = handle
+
+    @classmethod
+    def create(cls) -> _WindowsJob | None:
+        """Return an empty job, or None when Windows does not provide one."""
+
+        try:
+            api = _windows_job_api()
+        except (AttributeError, OSError):
+            return None
+        handle = api.kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            return None
+        job = cls(api, handle)
+        limits = api.ExtendedLimits()
+        # A program that explicitly breaks away still may, as setsid does on POSIX.
+        limits.basic.limit_flags = _JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        if not api.kernel32.SetInformationJobObject(
+            handle,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            api.ctypes.byref(limits),
+            api.ctypes.sizeof(limits),
+        ):
+            job.close()
+            return None
+        return job
+
+    def adopt(self, process: subprocess.Popen[str]) -> _WindowsJob | None:
+        """Move a suspended process into the job, then let it run.
+
+        Returns None, with the job closed, when Windows refuses the move;
+        ``taskkill /T`` then remains the way to stop the process tree.
+        """
+
+        kernel32 = self._api.kernel32
+        handle = kernel32.OpenProcess(
+            _PROCESS_TERMINATE | _PROCESS_SET_QUOTA | _PROCESS_SUSPEND_RESUME,
+            False,
+            process.pid,
+        )
+        assigned = resumed = False
+        if handle:
+            try:
+                assigned = bool(kernel32.AssignProcessToJobObject(self._handle, handle))
+                resumed = self._api.ntdll.NtResumeProcess(handle) >= 0
+            finally:
+                kernel32.CloseHandle(handle)
+        if not resumed:
+            process.kill()
+            process.wait()
+            self.close()
+            raise MergetrainError(f"could not resume command process {process.pid}")
+        if not assigned:
+            self.close()
+            return None
+        return self
+
+    def terminate(self) -> bool:
+        return self._handle is not None and bool(
+            self._api.kernel32.TerminateJobObject(self._handle, 1)
+        )
+
+    def close(self) -> None:
+        if self._handle is not None:
+            self._api.kernel32.CloseHandle(self._handle)
+            self._handle = None
+
+
+def _stop_windows_process_tree(
+    process: subprocess.Popen[str], job: _WindowsJob | None = None
+) -> None:
+    """Terminate a Windows child and every descendant it spawned.
+
+    The command's job reaches descendants whose parent already exited;
+    ``taskkill /T`` walks parent links and is the fallback without a job.
+    """
+
+    if job is not None and job.terminate():
+        return
     try:
         completed = subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
@@ -103,7 +260,7 @@ def _stop_windows_process_tree(process: subprocess.Popen[str]) -> None:
         process.terminate()
 
 
-def _stop_process(process: subprocess.Popen[str]) -> bool:
+def _stop_process(process: subprocess.Popen[str], job: _WindowsJob | None = None) -> bool:
     if process.poll() is not None:
         return False
     stopped = False
@@ -111,7 +268,7 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
         if os.name == "posix":
             os.killpg(process.pid, signal.SIGTERM)
         else:  # pragma: no cover - Windows compatibility
-            _stop_windows_process_tree(process)
+            _stop_windows_process_tree(process, job)
         stopped = True
         process.wait(timeout=5)
     except ProcessLookupError:
@@ -121,7 +278,7 @@ def _stop_process(process: subprocess.Popen[str]) -> bool:
             if os.name == "posix":
                 os.killpg(process.pid, signal.SIGKILL)
             else:  # pragma: no cover - Windows compatibility
-                _stop_windows_process_tree(process)
+                _stop_windows_process_tree(process, job)
                 if process.poll() is None:
                     process.kill()
             stopped = True
@@ -147,23 +304,37 @@ def _run_managed(
         raise CancellationRequested("command canceled before it started")
     if pulse is not None:
         pulse()
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd),
-        env=env,
-        shell=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        start_new_session=os.name == "posix",
-        creationflags=(
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-        ),
-    )
+    job = _WindowsJob.create() if os.name == "nt" else None
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            env=env,
+            shell=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            start_new_session=os.name == "posix",
+            # A job adopts the process before it runs, so no descendant escapes.
+            creationflags=(
+                (
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | (_CREATE_SUSPENDED if job is not None else 0)
+                )
+                if os.name == "nt"
+                else 0
+            ),
+        )
+        if job is not None:  # pragma: no cover - Windows compatibility
+            job = job.adopt(process)
+    except BaseException:
+        if job is not None:  # pragma: no cover - Windows compatibility
+            job.close()
+        raise
     stdout_tail: deque[str] = deque(maxlen=2000)
     stderr_tail: deque[str] = deque(maxlen=2000)
     log_lock = threading.Lock()
@@ -194,13 +365,13 @@ def _run_managed(
         while process.poll() is None:
             now = time.monotonic()
             if cancel_event is not None and cancel_event.is_set():
-                if _stop_process(process):
+                if _stop_process(process, job):
                     canceled = True
                     stderr_tail.append("command canceled by gate scheduler\n")
                     break
                 continue
             if timeout_seconds is not None and now - started >= timeout_seconds:
-                if _stop_process(process):
+                if _stop_process(process, job):
                     timed_out = True
                     stderr_tail.append(f"command timed out after {timeout_seconds:g} seconds\n")
                     break
@@ -213,12 +384,14 @@ def _run_managed(
             except subprocess.TimeoutExpired:
                 pass
     except BaseException:
-        _stop_process(process)
+        _stop_process(process, job)
         raise
     finally:
         join_deadline = time.monotonic() + 2.0
         for reader in readers:
             reader.join(timeout=max(0.0, join_deadline - time.monotonic()))
+        if job is not None:  # pragma: no cover - Windows compatibility
+            job.close()
 
     stdout = "".join(stdout_tail)
     stderr = "".join(stderr_tail)
