@@ -98,6 +98,12 @@
   landed push whose recorded policy had no verify hooks, the `init` default
   (#231). `verify --job` refuses to re-run a policy without hooks, so the
   `unknown` it left could never clear from Attention.
+- Stop the first persistent validation from pruning other worktrees (#231). It
+  ran a repository-wide `git worktree prune`, which drops the registration of
+  any worktree whose directory is only temporarily missing, such as one on an
+  unplugged drive, and with it commits that only that worktree held. The
+  workspace is now created with `git worktree add --force`, which reclaims a
+  stale registration of its own path only.
 
 ## 3.0.8 - 2026-09-29
 

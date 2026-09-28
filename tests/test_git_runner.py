@@ -961,6 +961,42 @@ deploy:
             self.assertEqual(result.status, "validated")
             self.assertEqual(observed.read_text(encoding="utf-8"), "1")
 
+    def test_persistent_workspace_creation_leaves_other_worktrees_registered(self) -> None:
+        """#231: no repository-wide prune on the first persistent validation."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            (repo / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore generated validation cache")
+            git(repo, "push", "origin", "main")
+            user_worktree = root / "on-an-unplugged-drive"
+            git(repo, "worktree", "add", "-b", "user/local-only", str(user_worktree), "main")
+            git(user_worktree, "commit", "--allow-empty", "-m", "only here")
+            only_here = git(user_worktree, "rev-parse", "HEAD")
+            parked = root / "drive-away"
+            user_worktree.rename(parked)  # the drive is unplugged
+            enable_persistent_validation_workspace(repo)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+                # A workspace whose directory vanished is recreated in place.
+                rmtree(config.validation_worktree_path)
+                again = enqueue_job(conn, task="b", branch="feature/a", allow_duplicate=True)
+                recreated = GitRunner(config).process_batch(conn, [again], deploy=False)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated")
+            self.assertEqual(recreated.status, "validated")
+            listing = git(repo, "worktree", "list", "--porcelain")
+            self.assertIn(f"worktree {user_worktree.resolve()}", listing)
+            parked.rename(user_worktree)  # the drive is back
+            self.assertEqual(git(user_worktree, "rev-parse", "HEAD"), only_here)
+
     def test_leftover_persistent_workspace_never_runs_git_in_the_control_checkout(
         self,
     ) -> None:

@@ -147,17 +147,16 @@ class WorktreeManager:
             )
         else:
             self.persistent_workspace_marker().unlink(missing_ok=True)
-            run_command(
-                ["git", "worktree", "prune"],
-                cwd=self.repo,
-                log=log,
-                check=True,
-            )
+            # --force reclaims a stale registration of this one path (its
+            # directory was deleted). A repository-wide `git worktree prune`
+            # would also drop user worktrees whose directory is only
+            # temporarily missing, and with them any commit only they held.
             run_command(
                 [
                     "git",
                     "worktree",
                     "add",
+                    "--force",
                     "--detach",
                     str(worktree),
                     self.config.git.integration_ref,
