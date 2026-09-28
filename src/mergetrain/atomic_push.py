@@ -317,6 +317,10 @@ class AtomicPush:
                 audit_expected_sha=audit_expected_sha,
                 destination=destination,
             )
+        except CancellationRequested:
+            # Refused before the marker was written: nothing was pushed.
+            state.push_status = "not_run"
+            raise
         except CommandFailed as exc:
             event(
                 conn,

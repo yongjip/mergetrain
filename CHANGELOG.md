@@ -52,6 +52,12 @@
   train deploying while `cancel` printed `canceled`. The cancel now re-reads the
   train inside its transaction; a train that a deploy took over gets a
   cancellation request instead, and a finished one is refused.
+- Honor a cancel recorded before the push marker exists (#226). The deploy
+  audit-ref lookup runs after the last cancel check, and the marker write did
+  not look for a request, so a cancel committed during the lookup was pushed
+  over and then erased when the job was marked deployed. The marker is now
+  written only while no cancellation is requested; otherwise the job ends
+  `canceled` with nothing pushed.
 
 ## 3.0.8 - 2026-09-29
 

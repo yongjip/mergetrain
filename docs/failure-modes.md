@@ -249,7 +249,9 @@ If an orphan already had `cancel_requested_at`, recovery finalizes it as
 
 Cancellation is cooperative until atomic push begins. `cancel` records a
 request for the whole active claim; the runner heartbeat terminates the process
-group and records `canceled`. Once the durable marker exists, cancellation no
+group and records `canceled`. The write-ahead marker is recorded only while no
+request exists, so a request that arrives at any point before it, including
+during the deploy audit-ref lookup, stops the deploy with nothing pushed. Once the durable marker exists, cancellation no
 longer overrides remote truth: the runner continues to renew ownership without
 interrupting the irreversible remote update. If the push outcome is ambiguous,
 the job remains `needs_reconcile` with the cancellation request preserved;

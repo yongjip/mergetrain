@@ -464,7 +464,7 @@ class OrphanSplitTests(unittest.TestCase):
                 _stage_in_progress(conn, clean.id, "t-clean")
                 _stage_in_progress(conn, marked.id, "t-marked")
                 _stage_in_progress(conn, canceled.id, "t-canceled", cancel=utc_now())
-                _stage_in_progress(conn, raced.id, "t-raced", cancel=utc_now())
+                _stage_in_progress(conn, raced.id, "t-raced")
 
                 record_pending_push(
                     conn, job_ids=[marked.id], deploy_sha="a" * 40, claim_token="t-marked"
@@ -472,6 +472,9 @@ class OrphanSplitTests(unittest.TestCase):
                 record_pending_push(
                     conn, job_ids=[raced.id], deploy_sha="b" * 40, claim_token="t-raced"
                 )
+                # A cancel that commits before the marker stops the push (#226),
+                # so the raced state is a cancel recorded just after it.
+                cancel_job(conn, raced.id)
 
                 self._run_split(conn)
 
@@ -488,7 +491,7 @@ class OrphanSplitTests(unittest.TestCase):
             self.assertEqual(marked_j.pending_deploy_sha, "a" * 40)
             # cancel + no marker -> honored offline
             self.assertEqual(canceled_j.status, "canceled")
-            # P6: cancel raced the marker -> needs_reconcile, both signals preserved
+            # P6: cancel landed after the marker -> needs_reconcile, both signals preserved
             self.assertEqual(raced_j.status, "needs_reconcile")
             self.assertEqual(raced_j.pending_deploy_sha, "b" * 40)
             self.assertTrue(raced_j.cancel_requested_at)

@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from collections.abc import Sequence
 
-from ..errors import LostLease, QueueError
+from ..errors import CancellationRequested, LostLease, QueueError
 from .leases import active_runner_lock
 from .transactions import immediate
 
@@ -87,6 +87,7 @@ def record_pending_push(
             WHERE id IN ({placeholders})
               AND status = 'in_progress'
               AND claim_token = ?
+              AND cancel_requested_at = ''
             """,
             (
                 deploy_sha,
@@ -101,6 +102,24 @@ def record_pending_push(
             ),
         )
         if cur.rowcount != len(ids):
+            # Cancellation is honored until this marker exists. A request that
+            # committed first, even during the audit-ref lookup, which checks no
+            # cancel, must stop the push rather than be erased on deploy (#226).
+            canceled = conn.execute(
+                f"""
+                SELECT COUNT(*) FROM deploy_queue
+                WHERE id IN ({placeholders})
+                  AND status = 'in_progress'
+                  AND claim_token = ?
+                  AND cancel_requested_at != ''
+                """,
+                (*ids, claim_token),
+            ).fetchone()[0]
+            if canceled:
+                raise CancellationRequested(
+                    "cancellation requested before the push marker was recorded; "
+                    "nothing was pushed"
+                )
             raise LostLease("pending push is no longer owned by this runner")
 
 

@@ -24,7 +24,7 @@ from test_git_runner import git, make_demo_repo
 from mergetrain import git_runner as git_runner_module
 from mergetrain import recovery as recovery_module
 from mergetrain.config import load_config
-from mergetrain.errors import CancellationRequested, MergetrainError, QueueError
+from mergetrain.errors import MergetrainError, QueueError
 from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import force_unlock
 from mergetrain.store import (
@@ -187,22 +187,58 @@ class AuditPreflightEvidenceTests(unittest.TestCase):
         push_with_marker.assert_not_called()
 
     def test_cancellation_during_audit_preflight_cancels_without_marker(self) -> None:
+        """#226: a real cancel committed during the real audit-ref lookup."""
+
+        from mergetrain import atomic_push as atomic_push_module
+
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker, remote_main, stored, events, push = self._run_preflight_failure(
-                root,
-                CancellationRequested("cancel during audit lookup"),
-            )
+            repo, marker = make_demo_repo(root)
+            remote = root / "remote.git"
+            attempts = root / "push-attempts"
+            hook = remote / "hooks" / "pre-receive"
+            hook.write_text(f"#!/bin/sh\necho attempt >> '{attempts}'\n", encoding="utf-8")
+            hook.chmod(0o755)
+            config = load_config(repo=repo)
+            remote_main = git(remote, "rev-parse", "main")
+            owner = f"runner:{os.getpid()}"
+            real_lookup = atomic_push_module.git_remote_ref_sha
+            canceled_during_lookup: list[str] = []
 
+            def cancel_then_look_up(*args, **kwargs):  # type: ignore[no-untyped-def]
+                control = connect(config.state.db)
+                try:
+                    requested = cancel_job(control, job.id)
+                    canceled_during_lookup.append(requested.cancel_requested_at)
+                finally:
+                    control.close()
+                return real_lookup(*args, **kwargs)
+
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="audit preflight", branch="feature/a")
+                claimed = claim_all_queued(conn, owner=owner)
+                with patch.object(
+                    atomic_push_module, "git_remote_ref_sha", side_effect=cancel_then_look_up
+                ):
+                    GitRunner(config).process_batch(conn, claimed, deploy=True, owner=owner)
+                stored = get_job(conn, job.id)
+                events = list_run_events(conn, limit=200)
+            finally:
+                conn.close()
+
+            self.assertEqual(len(canceled_during_lookup), 1)
+            self.assertTrue(canceled_during_lookup[0])
             self.assertEqual(stored.status, "canceled")
+            self.assertEqual(stored.pending_deploy_sha, "")
+            self.assertEqual(stored.push_status, "not_run")
             self.assertEqual(marker.read_text(encoding="utf-8"), "x")
-            self._assert_no_push_evidence(root, repo, remote_main, stored, push)
-            self.assertFalse(
-                any(event.message == "Deploy audit preflight failed" for event in events)
-            )
-            self.assertTrue(
-                any(event.message.endswith("canceled") for event in events)
-            )
+            # Zero pushes: the remote never saw one, and nothing records one.
+            self.assertFalse(attempts.exists())
+            self.assertEqual(git(remote, "rev-parse", "main"), remote_main)
+            self.assertEqual(_refs(repo, "refs/mergetrain/pending/"), "")
+            self.assertEqual(_refs(remote, "refs/mergetrain/deploys/"), "")
+            self.assertTrue(any(event.message.endswith("canceled") for event in events))
 
     def test_audit_preflight_failure_blocks_without_marker_or_remote_change(self) -> None:
         with tempfile.TemporaryDirectory() as td:
