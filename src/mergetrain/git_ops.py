@@ -50,34 +50,66 @@ def git_common_dir(path: str | Path) -> Path | None:
     return common.resolve()
 
 
-def _parse_worktree_porcelain(output: str, branch: str) -> tuple[Path, ...]:
+def _worktree_records(output: str) -> list[dict[str, str]]:
     """Parse ``git worktree list --porcelain -z`` without path injection."""
 
-    expected_ref = f"refs/heads/{branch}"
-    matches: list[Path] = []
+    records: list[dict[str, str]] = []
     record: dict[str, str] = {}
-
-    def finish() -> None:
-        if (
-            record.get("branch") == expected_ref
-            and "worktree" in record
-            and "prunable" not in record
-        ):
-            # Porcelain -z makes the complete path one NUL-delimited value.
-            # Do not strip it: spaces and newlines are valid path characters.
-            matches.append(Path(record["worktree"]))
-        record.clear()
-
     for field in output.split("\0"):
         if field == "":
             if record:
-                finish()
+                records.append(record)
+                record = {}
             continue
         key, separator, value = field.partition(" ")
         record[key] = value if separator else ""
     if record:
-        finish()
-    return tuple(matches)
+        records.append(record)
+    return records
+
+
+def _parse_worktree_porcelain(output: str, branch: str) -> tuple[Path, ...]:
+    expected_ref = f"refs/heads/{branch}"
+    # Porcelain -z makes the complete path one NUL-delimited value. Do not
+    # strip it: spaces and newlines are valid path characters.
+    return tuple(
+        Path(record["worktree"])
+        for record in _worktree_records(output)
+        if record.get("branch") == expected_ref
+        and "worktree" in record
+        and "prunable" not in record
+    )
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+
+
+def is_linked_worktree(repo: str | Path, path: Path) -> bool:
+    """Whether ``path`` is itself a registered linked worktree of ``repo``.
+
+    Git walks up from a directory without a ``.git`` of its own, so a leftover
+    directory inside the control checkout still answers every Git command, but
+    for the control checkout (#221). Require both that Git places the top of
+    the working tree at ``path`` and that ``repo`` lists ``path`` as a live
+    linked worktree.
+    """
+
+    toplevel = git_repo_root(path)
+    if not toplevel or not _same_path(Path(toplevel), path):
+        return False
+    completed = run_command(
+        ["git", "worktree", "list", "--porcelain", "-z"],
+        cwd=repo,
+        check=True,
+    )
+    # The first record is the main worktree, which is never a linked one.
+    return any(
+        "worktree" in record
+        and "prunable" not in record
+        and _same_path(Path(record["worktree"]), path)
+        for record in _worktree_records(completed.stdout)[1:]
+    )
 
 
 def git_worktrees_for_branch(path: str | Path, branch: str) -> tuple[Path, ...]:

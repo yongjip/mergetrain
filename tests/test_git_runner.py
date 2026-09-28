@@ -959,6 +959,65 @@ deploy:
             self.assertEqual(result.status, "validated")
             self.assertEqual(observed.read_text(encoding="utf-8"), "1")
 
+    def test_leftover_persistent_workspace_never_runs_git_in_the_control_checkout(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            (repo / ".gitignore").write_text(".cache/\n.mergetrain/\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore validation cache and state")
+            git(repo, "push", "origin", "main")
+            config_path = repo / ".mergetrain.yaml"
+            # The default: the workspace lives inside the control checkout, so
+            # Git walks up from a workspace that lost its .git and finds it.
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    f"worktree_root: {root / 'worktrees'}",
+                    "worktree_root: .mergetrain/worktrees",
+                ),
+                encoding="utf-8",
+            )
+            enable_persistent_validation_workspace(repo)
+            config = load_config(repo=repo)
+            workspace = config.validation_worktree_path
+            self.assertTrue(workspace.is_relative_to(repo.resolve()))
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="first", branch="feature/a")
+                runner = GitRunner(config)
+                self.assertEqual(
+                    runner.process_batch(conn, [first], deploy=False)[0].status,
+                    "validated",
+                )
+                # A gc whose rmtree fallback lost .git but not the directory.
+                (workspace / ".git").unlink()
+                git(repo, "worktree", "prune")
+                self.assertTrue(workspace.is_dir())
+
+                (repo / "local.txt").write_text("unpushed\n", encoding="utf-8")
+                git(repo, "add", "local.txt")
+                git(repo, "commit", "-m", "local unpushed commit")
+                local_head = git(repo, "rev-parse", "HEAD")
+                (repo / "app.txt").write_text("uncommitted edit\n", encoding="utf-8")
+
+                second = enqueue_job(
+                    conn, task="second", branch="feature/a", allow_duplicate=True
+                )
+                result = runner.process_batch(conn, [second], deploy=False)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "blocked")
+            self.assertIn("is not a registered worktree", result.note)
+            self.assertEqual(git(repo, "rev-parse", "HEAD"), local_head)
+            self.assertEqual(git(repo, "branch", "--show-current"), "main")
+            self.assertEqual(
+                (repo / "app.txt").read_text(encoding="utf-8"), "uncommitted edit\n"
+            )
+            self.assertNotIn("reset: moving to", git(repo, "reflog", "-n", "5"))
+
     def test_persistent_validation_cache_rejects_tracked_or_unignored_paths(self) -> None:
         cases = (("app.txt", "tracked files"), ("generated-cache", "ignored by Git"))
         for cache_path, expected in cases:

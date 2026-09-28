@@ -117,7 +117,10 @@ backslashes, `.git`, and `.`/`..` segments are rejected. Before every validation
 mergetrain hard-resets tracked inputs to the fetched integration ref and removes
 all ignored and untracked content except those declared directories. A symlink,
 foreign worktree, tracked cache path, non-ignored cache path, or workspace that
-cannot be restored cleanly blocks validation.
+cannot be restored cleanly blocks validation. So does a workspace directory that
+is not itself a registered linked worktree of the repository, such as one a
+failed cleanup left behind without its `.git`: Git would otherwise run the reset
+in the checkout that contains it. Move such a directory aside or delete it.
 
 The cache is retained only while `cache_key`, the gate/fingerprint policy, and
 the configured environment fingerprint outputs match its marker. Change

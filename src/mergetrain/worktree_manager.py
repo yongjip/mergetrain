@@ -13,7 +13,7 @@ from .command_runner import Pulse, run_command
 from .config import MergetrainConfig
 from .errors import MergetrainError
 from .gate_runner import GateRunner
-from .git_ops import git_common_dir, git_worktree_clean, remove_worktree
+from .git_ops import git_common_dir, git_worktree_clean, is_linked_worktree, remove_worktree
 from .reuse import gate_policy_sha
 
 
@@ -124,11 +124,18 @@ class WorktreeManager:
         if reused:
             repo_common = self.git_common_dir(self.repo)
             worktree_common = self.git_common_dir(worktree)
-            if repo_common is None or worktree_common != repo_common:
+            if (
+                repo_common is None
+                or worktree_common != repo_common
+                # A leftover directory without its own .git passes the check
+                # above through the checkout around it, and a reset there would
+                # rewrite that checkout (#221).
+                or not is_linked_worktree(self.repo, worktree)
+            ):
                 raise MergetrainError(
-                    "persistent validation workspace exists but is not a worktree "
-                    "owned by this repository; move it aside or run gc after "
-                    "switching validation_workspace.mode to ephemeral"
+                    f"persistent validation workspace {worktree} exists but is not "
+                    "a registered worktree of this repository, so no Git command "
+                    "runs there; move it aside or delete it, then validate again"
                 )
             run_command(
                 ["git", "reset", "--hard", self.config.git.integration_ref],

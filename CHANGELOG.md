@@ -18,6 +18,14 @@
   landed. The push now inherits a lock (a named Job Object on Windows) that
   lasts until every process of the push has exited. Until then `reconcile`
   refuses with `lock_held` and keeps the job parked.
+- Stop the persistent validation workspace check from running `git reset --hard`
+  in the user's checkout (#221). A workspace directory that had lost its `.git`,
+  for example after a cleanup that could not delete one file, passed the
+  repository check because Git walked up to the enclosing control checkout.
+  Validation then reset, cleaned, and merged in that checkout. mergetrain now
+  also requires the workspace to be the top of its own working tree and a
+  registered linked worktree of the repository, and blocks validation
+  otherwise.
 
 ## 3.0.8 - 2026-09-29
 
