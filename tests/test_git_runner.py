@@ -2805,6 +2805,50 @@ class BisectIsolationTests(unittest.TestCase):
                 self.assertEqual(stored[branch].conflict_with, "")
             self.assertEqual(len(results), 4)
 
+    def test_gc_during_a_bisect_probe_spares_the_probe_worktree(self) -> None:
+        """#231: the lease must name the probe worktree gc would otherwise take."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
+                "sys.exit(1 if (pathlib.Path('left.txt').exists() "
+                "and pathlib.Path('right.txt').exists()) else 0)\""
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            add_branch(repo, "agent/left", "left.txt")
+            add_branch(repo, "agent/right", "right.txt")
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            runner = GitRunner(config)
+            real_run_gates = runner._run_gates
+            gc_runs: list[dict] = []
+
+            def gc_then_run_gates(**kwargs):  # type: ignore[no-untyped-def]
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    main(["--repo", str(repo), "gc", "--apply", "--json"])
+                gc_runs.append(json.loads(out.getvalue()))
+                return real_run_gates(**kwargs)
+
+            conn = connect(config.state.db)
+            try:
+                for name in ("left", "right"):
+                    enqueue_job(conn, task=name, branch=f"agent/{name}")
+                claimed = claim_all_queued(conn, owner=owner)
+                with patch.object(runner, "_run_gates", side_effect=gc_then_run_gates):
+                    runner.process_batch(conn, claimed, deploy=False, owner=owner)
+                stored = [get_job(conn, job.id) for job in claimed]
+            finally:
+                conn.close()
+
+            self.assertGreater(len(gc_runs), 1, "no bisect probe ran")
+            # Before the fix gc took the probe worktree mid-probe, and both jobs
+            # ended failed with [Errno 2]; the idle train worktree may go.
+            self.assertEqual([job.status for job in stored], ["blocked", "blocked"])
+            self.assertTrue(all("semantic conflict" in job.note for job in stored))
+            self.assertFalse(any("Errno" in job.note for job in stored))
+
     def test_bisect_reports_three_way_conflict_and_frees_innocent_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

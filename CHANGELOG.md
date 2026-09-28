@@ -80,6 +80,10 @@
   character classes excluded "s" instead of whitespace, so such a remote was
   classified as a relative filesystem path and both the deploy preview and the
   deploy were refused.
+- Stop `gc --apply` from deleting a live runner's bisect probe worktree (#231).
+  The lease named only the train worktree, so gc removed the probe mid-run and
+  both probed jobs ended `failed` with `[Errno 2]`. While probes run, the lease
+  now names the probe worktree, from before it is created.
 
 ## 3.0.8 - 2026-09-29
 

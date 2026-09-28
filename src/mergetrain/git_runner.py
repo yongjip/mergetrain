@@ -1154,7 +1154,6 @@ class GitRunner:
         keep_worktree: bool,
         owner: str | None,
         ttl_minutes: int,
-        pulse: Pulse,
     ) -> list[Job]:
         """Classify a failed multi-job train with subset gate probes.
 
@@ -1169,6 +1168,17 @@ class GitRunner:
         probe_cache: dict[frozenset[int], bool] = {}
         probe_count = 0
         probe_worktree = self._worktree_path(merged_jobs[0].id)
+
+        def pulse() -> None:
+            # The lease names the one worktree gc must spare. While probes run,
+            # that is the probe worktree, not the idle train worktree (#231).
+            self._refresh_lease(
+                conn,
+                owner=owner,
+                lease_token=lease_token,
+                ttl_minutes=ttl_minutes,
+                worktree=probe_worktree,
+            )
 
         def probe(subset: Sequence[Job]) -> bool:
             """Assemble ``subset`` on the recorded base and run the gates.
@@ -1290,6 +1300,8 @@ class GitRunner:
             minimize_joint_failure(subset)
 
         try:
+            # Claim the path before it exists, so gc never sees it unowned.
+            pulse()
             run_command(
                 [
                     "git",
@@ -1878,7 +1890,6 @@ class GitRunner:
                             keep_worktree=keep_worktree or persistent_workspace,
                             owner=owner,
                             ttl_minutes=ttl_minutes,
-                            pulse=normal_pulse,
                         )
                     )
                     return results
