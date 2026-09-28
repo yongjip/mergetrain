@@ -43,7 +43,11 @@ ADAPTER_ALLOWED = {
     "mergetrain.mcp_server": (
         "mergetrain.contract",
         "mergetrain.errors",
+        # Stops the CLI's Windows process tree; imports nothing from mergetrain.
+        "mergetrain.windows_job",
     ),
+    # A leaf that the MCP adapter may use, so it must stay free of mergetrain imports.
+    "mergetrain.windows_job": (),
     "mergetrain.dashboard": (
         "mergetrain.config",
         "mergetrain.contract",

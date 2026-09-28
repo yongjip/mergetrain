@@ -14,6 +14,11 @@
   descendants whose parent already exited, such as the processes that MSYS
   programs re-parent, which `taskkill /T` missed. `taskkill /T` remains the
   fallback when Windows refuses a job.
+- Stop MCP cancellation, shutdown, and timeouts on Windows from leaving gates
+  running. The CTRL_BREAK stop ended the CLI without unwinding, so gates it had
+  started in their own process groups kept running. The MCP server now starts
+  the CLI in a Job Object and terminates that job, together with the gate jobs
+  nested in it, once it has stopped the CLI.
 
 ## 3.0.7 - 2026-09-06
 
