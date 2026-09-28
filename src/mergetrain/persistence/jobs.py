@@ -115,6 +115,7 @@ def retry_job(
     head_sha: str,
     current_approval_destination_sha: str | None = None,
     current_approval_execution_policy_sha: str | None = None,
+    force: bool = False,
 ) -> tuple[Job, Job]:
     """Atomically dismiss a failed outcome and enqueue its fresh replacement."""
 
@@ -130,6 +131,7 @@ def retry_job(
                 f"only a blocked or failed job can be retried (job {job_id} is "
                 f"{original.status})"
             )
+        refuse_reconcile_conflict(original, "retry", force=force)
         placeholders = _status_placeholders(ACTIVE_STATUSES)
         other_active = conn.execute(
             f"SELECT COUNT(*) AS n FROM deploy_queue "
@@ -469,7 +471,11 @@ def list_history_jobs(
 
 
 def list_dismissable_jobs(conn: sqlite3.Connection) -> list[Job]:
-    """Return every blocked/failed job, without the status display cap."""
+    """Return every blocked/failed job, without the status display cap.
+
+    Reconcile conflicts are included; ``dismiss_job`` refuses them unless the
+    caller holds recovery authority.
+    """
 
     rows = conn.execute(
         "SELECT * FROM deploy_queue WHERE status IN ('blocked', 'failed') "
@@ -958,6 +964,12 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
             f"job {job_id} has an unresolved push; run 'mergetrain reconcile --apply' "
             "before canceling"
         )
+    if is_reconcile_conflict(job):
+        raise QueueError(
+            f"job {job_id} is a reconcile conflict whose push may have landed; run "
+            "'mergetrain reconcile', or dismiss it with recovery authority: "
+            f"'mergetrain dismiss {job_id} --force'"
+        )
     if job.status == "in_progress":
         requested_at = utc_now()
         cancel_note = note or "cancellation requested by user"
@@ -1027,7 +1039,35 @@ def cancel_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
     )
 
 
-def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job:
+def is_reconcile_conflict(job: Job) -> bool:
+    """A blocked job that kept its push marker: its push may have landed."""
+
+    return job.status == "blocked" and bool(job.pending_deploy_sha)
+
+
+def refuse_reconcile_conflict(job: Job, action: str, *, force: bool) -> None:
+    """Keep a push that may have landed from being treated as never landing.
+
+    Reconcile parks a job ``blocked`` with its marker when the remote cannot
+    say whether the push landed, or says it landed and a ref was rewritten
+    afterwards. Dismissing or canceling such a job would record that it never
+    landed, and retrying it could put removed content back on the integration
+    branch (#224). Only an operator with recovery authority may override.
+    """
+
+    if force or not is_reconcile_conflict(job):
+        return
+    raise QueueError(
+        f"job {job.id} is a reconcile conflict: its push of "
+        f"{job.pending_deploy_sha[:12]} may have landed ({job.note}). Run "
+        f"'mergetrain reconcile' and inspect the remote; to {action} it anyway, "
+        "an operator with recovery authority must pass --force"
+    )
+
+
+def dismiss_job(
+    conn: sqlite3.Connection, job_id: int, *, note: str = "", force: bool = False
+) -> Job:
     """Non-destructively clear a blocked/failed job that has been superseded.
 
     A blocked/failed job never lands and never self-clears, yet it keeps
@@ -1036,7 +1076,9 @@ def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job
     is fixed (and enqueued afresh, or abandoned), dismissing it moves it to the
     terminal ``canceled`` state so the queue reflects reality. Unlike
     ``cancel``, this only ever touches an already-failed outcome — never queued
-    or in-progress work — so it is safe for an agent to run unattended.
+    or in-progress work — so it is safe for an agent to run unattended. The
+    exception is a reconcile conflict, whose push may have landed; that needs
+    ``force``.
     """
 
     job = get_job(conn, job_id)
@@ -1045,11 +1087,18 @@ def dismiss_job(conn: sqlite3.Connection, job_id: int, *, note: str = "") -> Job
             f"only a blocked or failed job can be dismissed (job {job_id} is "
             f"{job.status}); use cancel for queued/in-progress work"
         )
+    refuse_reconcile_conflict(job, "dismiss", force=force)
+    default_note = (
+        f"dismissed reconcile conflict whose push of {job.pending_deploy_sha[:12]} "
+        "may have landed"
+        if is_reconcile_conflict(job)
+        else f"dismissed superseded {job.status} job"
+    )
     return mark_job(
         conn,
         job_id,
         status="canceled",
-        note=note or f"dismissed superseded {job.status} job",
+        note=note or default_note,
         expected_status=job.status,
     )
 

@@ -45,6 +45,7 @@ from .store import (
     default_owner,
     force_clear_lock_and_split,
     get_lock,
+    is_reconcile_conflict,
     list_jobs_fifo,
     live_worktree_path,
     mark_job,
@@ -297,9 +298,11 @@ def _classify(
 def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision) -> None:
     job = decision.job
     # Compare-and-swap on the source status. reconcile read this job as
-    # needs_reconcile, then did seconds of remote I/O holding no write lock; if a
-    # concurrent op (e.g. a cancel) moved it since, mark_job raises and we leave
-    # the newer state intact rather than resurrecting a stale recovery decision.
+    # needs_reconcile (or as a blocked conflict), then did seconds of remote I/O
+    # holding no write lock; if a concurrent op (e.g. a cancel) moved it since,
+    # mark_job raises and we leave the newer state intact rather than
+    # resurrecting a stale recovery decision.
+    source = job.status
     try:
         if decision.decision == "deployed":
             mark_job(
@@ -310,26 +313,26 @@ def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDeci
                 push_status="succeeded",
                 verify_status="unknown",
                 note=f"reconciled: {decision.reason}",
-                expected_status="needs_reconcile",
+                expected_status=source,
             )
             delete_pending_ref(config.repo, job.id)
         elif decision.decision == "queued":
             # mark_job clears pending_deploy_sha on 'queued'; delete the pin ref too.
             mark_job(
                 conn, job.id, status="queued",
-                note=f"reconciled: {decision.reason}", expected_status="needs_reconcile",
+                note=f"reconciled: {decision.reason}", expected_status=source,
             )
             delete_pending_ref(config.repo, job.id)
         elif decision.decision == "canceled":
             mark_job(
                 conn, job.id, status="canceled",
-                note=f"reconciled: {decision.reason}", expected_status="needs_reconcile",
+                note=f"reconciled: {decision.reason}", expected_status=source,
             )
             delete_pending_ref(config.repo, job.id)
-        else:  # blocked — PRESERVE the marker and pin ref for forensics.
+        elif source != "blocked":  # PRESERVE the marker and pin ref for forensics.
             mark_job(
                 conn, job.id, status="blocked",
-                note=f"reconcile conflict: {decision.reason}", expected_status="needs_reconcile",
+                note=f"reconcile conflict: {decision.reason}", expected_status=source,
             )
     except QueueBusy:
         # Contention is not "someone else won the race": nothing was written, so
@@ -418,7 +421,19 @@ def reconcile(
         conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes
     )
     try:
-        jobs = list_jobs_fifo(conn, status="needs_reconcile")
+        # An earlier reconcile that could not settle a push parked it blocked
+        # with its marker. Its push may have landed, so the command status
+        # recommends for it must re-ask the remote too (#224). A legacy marker
+        # without a destination identity can never be checked automatically.
+        conflicts = [
+            job
+            for job in list_jobs_fifo(conn, status="blocked")
+            if is_reconcile_conflict(job) and job.pending_deploy_destination_sha
+        ]
+        jobs = sorted(
+            [*list_jobs_fifo(conn, status="needs_reconcile"), *conflicts],
+            key=lambda job: job.id,
+        )
         if not jobs:
             return ReconcileOutcome(jobs=[], applied=apply, summary=_summarize([]), exit_code=0)
         # A runner killed mid-push leaves the push running in its own process

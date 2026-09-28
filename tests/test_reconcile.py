@@ -184,6 +184,79 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(outcome.jobs[0]["audit_ref_sha"], base)
             self.assertTrue(outcome.jobs[0]["push_refs"][0]["contains"])
 
+    def _landed_then_rewritten(self, root: Path):  # type: ignore[no-untyped-def]
+        """A deploy that landed, after which an admin rewrote main without it."""
+
+        repo, config, conn, job, pending = self._prepare(root)
+        base = git(repo, "rev-parse", "main")
+        git(repo, "push", "origin", f"{pending}:main", f"{pending}:{deploy_audit_ref_name(pending)}")
+        git(repo, "push", "--force", "origin", f"{base}:main")
+        _set_needs_reconcile(config, conn, job.id, pending)
+        outcome = reconcile(config, conn, apply=True)
+        self.assertEqual(outcome.exit_code, 10)
+        self.assertIn("audit ref proves the push landed", outcome.jobs[0]["reason"])
+        return repo, config, conn, job, pending
+
+    def test_landed_then_rewritten_deploy_needs_recovery_authority_to_drop(self) -> None:
+        from mergetrain.observability import job_outcome
+        from mergetrain.store import dismiss_job, retry_job
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._landed_then_rewritten(root)
+            try:
+                conflict = get_job(conn, job.id)
+                self.assertEqual(conflict.status, "blocked")
+                self.assertEqual(conflict.pending_deploy_sha, pending)
+                self.assertEqual(
+                    job_outcome(conflict)["category"], "reconcile_conflict"
+                )
+                # The recommended command sees the conflict instead of nothing.
+                again = reconcile(config, conn, apply=False)
+                self.assertEqual([item["job_id"] for item in again.jobs], [job.id])
+                self.assertEqual(again.jobs[0]["decision"], "blocked")
+
+                for attempt in (
+                    lambda: dismiss_job(conn, job.id),
+                    lambda: retry_job(conn, job.id, base_sha=pending, head_sha=pending),
+                    lambda: cancel_job(conn, job.id),
+                ):
+                    with self.assertRaisesRegex(QueueError, "reconcile conflict"):
+                        attempt()
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    main(["--repo", str(repo), "dismiss", "--all", "--json"])
+                payload = json.loads(out.getvalue())
+                self.assertEqual(payload["dismissed"], [])
+                self.assertEqual(
+                    payload["skipped"],
+                    [{"id": job.id, "branch": "feature/a", "reason": "reconcile_conflict"}],
+                )
+                self.assertEqual(get_job(conn, job.id).status, "blocked")
+                self.assertIn(pending_ref_name(job.id), _pending_refs(repo))
+
+                dropped = dismiss_job(conn, job.id, force=True)
+            finally:
+                conn.close()
+            self.assertEqual(dropped.status, "canceled")
+            self.assertIn("may have landed", dropped.note)
+
+    def test_reconcile_settles_a_conflict_once_the_remote_does(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, config, conn, job, pending = self._landed_then_rewritten(root)
+            try:
+                # The rewrite is undone: every push ref carries the deploy again.
+                git(repo, "push", "origin", f"{pending}:main")
+                outcome = reconcile(config, conn, apply=True)
+                healed = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(outcome.exit_code, 0)
+            self.assertEqual(outcome.summary["reconciled_deployed"], 1)
+            self.assertEqual(healed.status, "deployed")
+            self.assertEqual(healed.pending_deploy_sha, "")
+
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

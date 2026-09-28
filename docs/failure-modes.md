@@ -186,6 +186,23 @@ Two consequences worth knowing:
   cannot silently inherit approval. The requeue also records the dissolution
   and prior train in the job note.
 
+## Reconcile conflict
+
+Reconcile parks a job `blocked` instead of deciding when the remote cannot
+settle its push: the audit ref proves the push landed but a payload ref was
+rewritten afterwards, only some push refs carry the commit, the audit ref points
+somewhere unexpected, or the commit cannot be resolved locally. The job keeps
+its marker and pin ref, `inspect` reports the `reconcile_conflict` category, and
+`status` recommends `mergetrain reconcile`, which checks such jobs against the
+remote again and settles them with `--apply` once the remote does.
+
+Because its push may have landed, such a job is not an ordinary blocked job.
+`dismiss`, `retry`, and `cancel` refuse it, and `dismiss --all` skips it and
+lists it under `skipped`: dismissing would record that the push never landed,
+and a retried redeploy could put back content an administrator removed. After
+inspecting the remote, an operator with recovery authority can pass `--force`
+to `dismiss` or `retry`.
+
 ## Stale lock
 
 The runner lock records an owner, unique token, and lease expiry. Claimed jobs

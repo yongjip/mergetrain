@@ -706,7 +706,11 @@ def job_outcome(job: Job) -> dict[str, Any]:
     elif job.status == "blocked":
         severity = "failure"
         lowered = message.lower()
-        if job.push_status == "failed":
+        if job.pending_deploy_sha:
+            # Reconcile could not settle this push and kept its marker: it may
+            # have landed, so it is neither a merge nor a gate problem (#224).
+            category = "reconcile_conflict"
+        elif job.push_status == "failed":
             # Blocked at the push, not the merge/gates: the remote refused the
             # ref update (protected branch / required PR / permission). A
             # repo-config action, not a code fix — agents branch on this

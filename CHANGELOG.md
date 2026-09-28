@@ -38,6 +38,14 @@
   recorded, and only when that head has landed. `gc --json` adds `head_sha` and
   `reason` to each `branch_candidates` entry, and the human output names each
   branch it keeps and why.
+- Stop treating reconcile conflicts, whose push may have landed, as ordinary
+  blocked jobs (#224). `mergetrain reconcile`, the command status recommends for
+  them, now checks them against the remote again and settles them with
+  `--apply` once it can. `inspect` reports them as `reconcile_conflict` instead
+  of `merge_conflict`. `dismiss`, `retry`, and `cancel` refuse them, and
+  `dismiss --all` skips them and lists them under the new `skipped` key; after
+  inspecting the remote, an operator can pass the new `--force` option to
+  `dismiss` or `retry`.
 
 ## 3.0.8 - 2026-09-29
 

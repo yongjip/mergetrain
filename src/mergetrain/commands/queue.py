@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from ..cli_support import (
     _preflight_config,
@@ -32,7 +33,9 @@ from ..store import (
     dismiss_job,
     enqueue_job,
     get_job,
+    is_reconcile_conflict,
     list_dismissable_jobs,
+    refuse_reconcile_conflict,
     retry_job,
     supersede_validated_train,
     validated_train_summaries,
@@ -161,6 +164,8 @@ def cmd_retry(args: argparse.Namespace) -> int:
                 f"only a blocked or failed job can be retried (job {original.id} "
                 f"is {original.status})"
             )
+        # Refuse before the fetch and rebase below touch the worktree.
+        refuse_reconcile_conflict(original, "retry", force=args.force)
         if not original.worktree_path:
             raise QueueError(
                 f"job {original.id} has no recorded worktree path; enqueue its "
@@ -195,6 +200,7 @@ def cmd_retry(args: argparse.Namespace) -> int:
             head_sha=head_sha,
             current_approval_destination_sha=current_destination_sha,
             current_approval_execution_policy_sha=current_execution_policy_sha,
+            force=args.force,
         )
         next_action = _recovery_next_action(conn, config)
     finally:
@@ -291,18 +297,34 @@ def cmd_dismiss(args: argparse.Namespace) -> int:
             if args.job_id is None:
                 raise QueueError("dismiss requires a job id or --all")
             targets = [get_job(conn, args.job_id)]
-        dismissed = [dismiss_job(conn, job.id, note=args.note or "").to_dict() for job in targets]
+        dismissed: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for target in targets:
+            if args.all and not args.force and is_reconcile_conflict(target):
+                # A push that may have landed is never swept up by --all (#224).
+                skipped.append(
+                    {"id": target.id, "branch": target.branch, "reason": "reconcile_conflict"}
+                )
+                continue
+            dismissed.append(
+                dismiss_job(conn, target.id, note=args.note or "", force=args.force).to_dict()
+            )
         next_action = _recovery_next_action(conn, config)
     finally:
         conn.close()
-    payload = {"ok": True, "dismissed": dismissed, "next_action": next_action}
+    payload = {"ok": True, "dismissed": dismissed, "skipped": skipped, "next_action": next_action}
     if args.json:
         dump_json(payload)
     else:
-        if not dismissed:
+        if not dismissed and not skipped:
             print("no blocked/failed jobs to dismiss")
         for job in dismissed:
             print(f"dismissed job {job['id']}: {job['branch']}")
+        for item in skipped:
+            print(
+                f"kept job {item['id']}: {item['branch']} is a reconcile conflict whose "
+                "push may have landed; run 'mergetrain reconcile'"
+            )
         print(f"next action: {next_action}")
     return 0
 

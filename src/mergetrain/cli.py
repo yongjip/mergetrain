@@ -151,6 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fetch and rebase the owning branch before replacing the queue job",
     )
+    p_retry.add_argument(
+        "--force",
+        action="store_true",
+        help="Recovery authority: also retry a reconcile conflict whose push may have landed",
+    )
     p_retry.add_argument("--json", action="store_true")
     p_retry.set_defaults(func=cmd_retry)
 
@@ -270,6 +275,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_dismiss = subparsers.add_parser("dismiss")
     p_dismiss.add_argument("job_id", type=int, nargs="?", help="Job to dismiss (or use --all)")
     p_dismiss.add_argument("--all", action="store_true", help="Dismiss every blocked/failed job")
+    p_dismiss.add_argument(
+        "--force",
+        action="store_true",
+        help="Recovery authority: also dismiss reconcile conflicts whose push may have landed",
+    )
     p_dismiss.add_argument("--note", default="")
     p_dismiss.add_argument("--json", action="store_true")
     p_dismiss.set_defaults(func=cmd_dismiss)

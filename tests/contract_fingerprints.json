@@ -257,7 +257,8 @@
         }
       },
       "next_action": null,
-      "ok": null
+      "ok": null,
+      "skipped": "[]?"
     },
     "enqueue": {
       "contract_version": null,

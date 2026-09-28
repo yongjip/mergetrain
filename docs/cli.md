@@ -121,9 +121,9 @@ grammar.
 | Validate manual jobs continuously | `daemon --validate-only` |
 | Deploy pre-approved auto jobs | `daemon` |
 | Resolve stranded or ambiguous push state | `reconcile [--apply]` |
-| Repair a failed job from its owning branch | `retry JOB_ID [--rebase]` |
+| Repair a failed job from its owning branch | `retry JOB_ID [--rebase] [--force]` |
 | Replace an exact validated train | `supersede --train-id ID --replacement TASK BRANCH WORKTREE` |
-| Cancel or dismiss work | `cancel JOB_ID`, `dismiss JOB_ID`, `dismiss --all` |
+| Cancel or dismiss work | `cancel JOB_ID`, `dismiss JOB_ID [--force]`, `dismiss --all` |
 | Resolve post-push verification | `verify [--job ID] [--ack succeeded|failed]` |
 | Clear a wedged runner lock | `unlock [--force]` |
 | Preview or apply cleanup | `gc [--apply] [--delete-branches]` |
