@@ -36,6 +36,10 @@ _DOUBLE_QUOTE_ESCAPABLE = '$`"\\\n'
 _HERE_DOCUMENT_ESCAPABLE = "$`\\\n"
 # A ${...} that is only a parameter name cannot span lines.
 _SIMPLE_PARAMETER = re.compile(r"\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[#?$!@*-])\}")
+# A line continuation after one of these can spell '$(', '<<', or '((' across
+# the joined lines, which the scan has already read as separate characters.
+_JOINABLE = "$<("
+_JOINED = "a line continuation that joins '$', '<', or '(' to the next line"
 
 # Contexts whose quoting rules are exact; any other context names a construct.
 _UNQUOTED = "unquoted"
@@ -165,6 +169,8 @@ class _Scanner:
                 if char == "\\":
                     if self.at("\\\n"):
                         # Line continuation joins lines without ending the word.
+                        if self.pos and text[self.pos - 1] in _JOINABLE:
+                            self.doubt(_JOINED)
                         self.copy(2)
                         continue
                     self.copy(2)
@@ -264,6 +270,8 @@ class _Scanner:
                 return
             if char == "\\":
                 following = text[self.pos + 1 : self.pos + 2]
+                if following == "\n" and text[self.pos - 1] == "$":
+                    self.doubt(_JOINED)
                 self.copy(2 if following and following in _DOUBLE_QUOTE_ESCAPABLE else 1)
             elif char == "`":
                 self.backquoted()
@@ -287,6 +295,11 @@ class _Scanner:
             self.ansi_c_quoted()
         else:
             self.copy(1)
+            for key, value in self.values.items():
+                if self.at(key) and not _CONTEXT_FREE.fullmatch(value):
+                    # The '$' would join the quoting the path gets, and bash
+                    # reads "$'...'" as a string with escapes.
+                    raise self.refusal(key, value, "right after a '$'")
 
     # -- constructs whose contents stay unproven ------------------------------
 
@@ -462,8 +475,10 @@ class _Scanner:
                 if not continued:
                     parts.append(line)
                     break
-                if document.strip_tabs:
-                    self.doubt("a continued line inside a <<- here-document")
+                # bash joins the lines before it looks for the delimiter, and
+                # dash does not, so the shells can end the body in different
+                # places.
+                self.doubt("a continued line inside a here-document")
                 parts.append(line[:-1])
                 self.copy(1)
             logical = "".join(parts)

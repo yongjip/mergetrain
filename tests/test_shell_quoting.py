@@ -123,7 +123,7 @@ class ShellContextTests(unittest.TestCase):
             "cat <<-EOF >/dev/null\n\tit's\n\tEOF\n",
             "cat <<EOF >/dev/null # don't\nbody's\nEOF\n",
             "cat <<A <<B >/dev/null\na's\nA\nb\"s\nB\n",
-            "cat <<EOF >/dev/null\nabc\\\nEOF\nit's\nEOF\n",
+            "cat <<'EOF' >/dev/null\nabc\\\nEOF\n",
             "cat <<'' >/dev/null\nit's\n\n",
             "cat <<EOF >/dev/null\n${HOME} it's\nEOF\n",
             "x=$(echo \"it's\") # don't\n",
@@ -202,6 +202,7 @@ class ShellContextTests(unittest.TestCase):
             "echo $'${worktree}'",
             "x=$(case a in a) echo;; esac)\necho ${worktree}",
             "# ${worktree}",
+            "echo $${worktree}",
         ):
             with self.subTest(command=command):
                 self.assertEqual(expand(command, SAFE), command.replace("${worktree}", SAFE))
@@ -227,6 +228,9 @@ class RefusalTests(unittest.TestCase):
             "echo ${x:-${worktree}}": "inside a ${...} expansion",
             "echo $((${worktree}))": "inside an arithmetic expansion",
             "echo $'${worktree}'": "inside a $'...' string",
+            # bash would read the quoted path as "$'...'", a string with escapes.
+            "echo $${worktree}": "right after a '$'",
+            'echo "$${worktree}"': "right after a '$'",
         }
         for command, where in cases.items():
             with self.subTest(command=command):
@@ -251,7 +255,16 @@ class RefusalTests(unittest.TestCase):
             "echo $((1+'2'))\necho ${worktree}": "quoting inside an arithmetic expansion",
             "echo $((1)+(2))\necho ${worktree}": "unbalanced parentheses",
             "((x = 1))\necho ${worktree}": "'(('",
-            "cat <<-EOF\nabc\\\n\tEOF\nEOF\necho ${worktree}": "a continued line inside a <<-",
+            "cat <<-EOF\nabc\\\n\tEOF\nEOF\necho ${worktree}": "a continued line inside a here-doc",
+            # bash ends the body at the joined "EOF" line; dash does not.
+            "cat <<EOF\nEO\\\nF\necho ${worktree}\nEOF\n": "a continued line inside a here-doc",
+            "cat <<EOF\nabc\\\nEOF\nit's\nEOF\necho ${worktree}": "a continued line inside a",
+            # Joined across the continuation, these spell '<<', '$(', and '(('.
+            "cat <\\\n<EOF\nx\nEOF\necho ${worktree}": "a line continuation that joins",
+            'echo "$\\\n(echo a)"\necho ${worktree}': "a line continuation that joins",
+            "echo $\\\n(echo a)\necho ${worktree}": "a line continuation that joins",
+            "x=$(\\\n(echo a))\necho ${worktree}": "a line continuation that joins",
+            "(\\\n(x = 1))\necho ${worktree}": "a line continuation that joins",
             "cat <<\"E\\\"F\"\nx\nE\"F\necho ${worktree}": "a here-document delimiter with escapes",
             "cat <<E$x\nbody\nE$x\necho ${worktree}": "a here-document delimiter that contains",
             "cat <<\necho ${worktree}": "a here-document operator without a delimiter",

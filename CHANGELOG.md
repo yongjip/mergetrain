@@ -9,9 +9,11 @@
   directory outside the repository. The scanner now reads commands the way
   `/bin/sh` does, including comments, here-documents, and `$(...)`. Where the
   quoting cannot be proven (here-document bodies, backquotes, `${...}`,
-  `$((...))`, `$'...'`, or after a construct that shells parse differently), a
-  path that needs quoting now fails the gate before anything runs, and a verify
-  hook with that problem blocks the deploy before the push.
+  `$((...))`, `$'...'`, directly after a `$`, or after a construct that shells
+  parse differently, such as a line continuation that joins `$`, `<`, or `(` to
+  the next line or a continued here-document line), a path that needs quoting
+  now fails the gate before anything runs, and a verify hook with that problem
+  blocks the deploy before the push.
 - Stop reconcile from deciding that a push did not land while the push is still
   running (#220). A runner killed mid-push leaves `git push` running in its own
   process group, and reconcile could requeue or cancel the job before that push
