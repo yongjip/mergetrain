@@ -18,6 +18,7 @@ from unittest.mock import Mock, patch
 
 import mergetrain.atomic_push as atomic_push_module
 import mergetrain.command_runner as command_runner_module
+import mergetrain.git_runner as git_runner_module
 
 SHELL_PYTHON = sys.executable.replace("\\", "/")
 
@@ -2804,6 +2805,41 @@ class BisectIsolationTests(unittest.TestCase):
                 self.assertEqual(stored[branch].status, "validated", branch)
                 self.assertEqual(stored[branch].conflict_with, "")
             self.assertEqual(len(results), 4)
+
+    def test_infrastructure_error_mid_assembly_strands_no_claimed_job(self) -> None:
+        """#231: the job after the failure point goes back to the queue."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            add_branch(repo, "agent/b", "b.txt")
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            real_git_output = git_runner_module.git_output
+            calls: list[int] = []
+
+            def fail_on_second_merge(*args, **kwargs):  # type: ignore[no-untyped-def]
+                calls.append(1)
+                if len(calls) == 2:
+                    raise CommandFailed(["git", "rev-parse", "HEAD"], 128, stderr="disk gone")
+                return real_git_output(*args, **kwargs)
+
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="a", branch="feature/a")
+                second = enqueue_job(conn, task="b", branch="agent/b")
+                claimed = claim_all_queued(conn, owner=owner)
+                with patch.object(git_runner_module, "git_output", side_effect=fail_on_second_merge):
+                    GitRunner(config).process_batch(conn, claimed, deploy=False, owner=owner)
+                merged = get_job(conn, first.id)
+                reached = get_job(conn, second.id)
+            finally:
+                conn.close()
+
+            self.assertEqual(merged.status, "failed")
+            self.assertEqual(reached.status, "queued")
+            self.assertIn("stopped before merging this job", reached.note)
+            self.assertEqual(reached.claim_token, "")
 
     def test_gc_during_a_bisect_probe_spares_the_probe_worktree(self) -> None:
         """#231: the lease must name the probe worktree gc would otherwise take."""

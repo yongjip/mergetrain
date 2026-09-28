@@ -1511,6 +1511,23 @@ class GitRunner:
                         deployed_ids.append(item.id)
             if deployed_ids:
                 self._clear_pending_refs(deployed_ids, log=log)
+            # A claimed job the train never reached is still in progress under
+            # this lease. It rode no push and was never judged, so it goes back
+            # to the queue instead of stranding in progress (#231).
+            affected_ids = {item.id for item in affected_jobs}
+            for item in jobs:
+                if item.id in affected_ids:
+                    continue
+                current = get_job(conn, item.id)
+                if current.status == "in_progress" and current.claim_token == lease_token:
+                    results.append(
+                        finish(
+                            item,
+                            status="queued",
+                            log_path=str(log_path),
+                            note=f"requeued: the train stopped before merging this job ({note})",
+                        )
+                    )
             return results
 
         with log_path.open("w", encoding="utf-8") as log:

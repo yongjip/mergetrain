@@ -90,6 +90,10 @@
   changed" marker, and the jobs stayed `approval_destination_changed` after the
   config was restored. A config error now pauses the tick without touching any
   job, and the next tick retries.
+- Stop an infrastructure error during train assembly from stranding the jobs it
+  had not merged yet (#231). Only the merged jobs were finished, and the rest
+  stayed `in_progress`, hidden behind `fix_blocked_job`. A claimed job the train
+  never reached now returns to the queue with a note saying why.
 
 ## 3.0.8 - 2026-09-29
 
