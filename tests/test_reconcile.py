@@ -199,6 +199,28 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.verify_status, "unknown")
 
+    def test_reconcile_waits_while_the_orphaned_push_still_runs(self) -> None:
+        """#220 on every platform: no verdict while a push may yet land."""
+
+        from mergetrain.errors import LockHeld
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _repo, config, conn, job, pending = self._prepare(root)
+            try:
+                _set_needs_reconcile(config, conn, job.id, pending)
+                with (
+                    patch("mergetrain.recovery.push_in_flight", return_value=True),
+                    self.assertRaisesRegex(LockHeld, "still running and may yet land"),
+                ):
+                    reconcile(config, conn, apply=True)
+                parked = get_job(conn, job.id)
+                self.assertIsNone(get_lock(conn))
+            finally:
+                conn.close()
+            self.assertEqual(parked.status, "needs_reconcile")
+            self.assertEqual(parked.pending_deploy_sha, pending)
+
     def test_unlanded_push_requeues_and_never_repushes(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

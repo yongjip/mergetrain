@@ -1310,6 +1310,125 @@ deploy:
             timeout=10,
         )
 
+    def test_an_interrupt_while_gates_run_stops_them_on_every_platform(self) -> None:
+        """#222: the monitor stops its workers' gates before it re-raises."""
+
+        from concurrent.futures import wait as real_wait
+
+        from mergetrain.gate_runner import GateRunner
+        from mergetrain.persistence.leases import owner_liveness
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pid_file = root / "gate.pid"
+            gate = (
+                f'{SHELL_PYTHON} -c "import os, pathlib, time; '
+                f"pathlib.Path('{py_path(pid_file)}').write_text(str(os.getpid())); "
+                'time.sleep(60)"'
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            runner = GateRunner(load_config(repo=repo))
+
+            def interrupt_once_the_gate_runs(*args, **kwargs):  # type: ignore[no-untyped-def]
+                if pid_file.exists():
+                    raise KeyboardInterrupt
+                return real_wait(*args, **kwargs)
+
+            started = time.monotonic()
+            with (
+                patch("mergetrain.gate_runner.wait", side_effect=interrupt_once_the_gate_runs),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                runner.run_configured_plan(
+                    worktree=repo,
+                    log=io.StringIO(),
+                    pulse=None,
+                    on_gate=None,
+                    initial_states={},
+                )
+            self.assertLess(time.monotonic() - started, 30)
+            pid = int(pid_file.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 5
+            while owner_liveness(f"gate:{pid}") != "dead" and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertEqual(owner_liveness(f"gate:{pid}"), "dead")
+
+    def _stop_fake_posix_group(self, process: Mock, killpg) -> bool:  # type: ignore[no-untyped-def]
+        """Run the POSIX group stop against a fake killpg, on any platform."""
+
+        with (
+            patch.object(command_runner_module.os, "name", "posix"),
+            patch.object(command_runner_module.os, "killpg", killpg, create=True),
+            patch.object(command_runner_module.signal, "SIGTERM", 15, create=True),
+            patch.object(command_runner_module.signal, "SIGKILL", 9, create=True),
+            patch.object(command_runner_module, "_STOP_GRACE_SECONDS", 0.05),
+        ):
+            return command_runner_module._stop_process(process)
+
+    @staticmethod
+    def _fake_group(*, survives_term: bool, probe_error=None):  # type: ignore[no-untyped-def]
+        sent: list[int] = []
+        alive = {"group": True}
+
+        def killpg(pgid: int, signum: int) -> None:
+            if signum == 0:
+                if probe_error is not None:
+                    raise probe_error
+                if not alive["group"]:
+                    raise ProcessLookupError
+                return
+            sent.append(signum)
+            if signum == 9 or not survives_term:
+                alive["group"] = False
+
+        return killpg, sent
+
+    @staticmethod
+    def _running_process() -> Mock:
+        process = Mock()
+        process.pid = 4321
+        process.poll.return_value = None
+        return process
+
+    def test_posix_stop_sends_sigkill_while_any_group_member_survives(self) -> None:
+        """#228 on every platform: a group member ignores SIGTERM."""
+
+        process = self._running_process()
+        killpg, sent = self._fake_group(survives_term=True)
+        self.assertTrue(self._stop_fake_posix_group(process, killpg))
+        self.assertEqual(sent, [15, 9])
+        process.wait.assert_called_once_with()
+
+    def test_posix_stop_skips_sigkill_once_the_whole_group_exits(self) -> None:
+        process = self._running_process()
+        killpg, sent = self._fake_group(survives_term=False)
+        self.assertTrue(self._stop_fake_posix_group(process, killpg))
+        self.assertEqual(sent, [15])
+
+    def test_posix_stop_treats_a_group_it_cannot_probe_as_alive(self) -> None:
+        process = self._running_process()
+        killpg, sent = self._fake_group(survives_term=True, probe_error=PermissionError())
+        self.assertTrue(self._stop_fake_posix_group(process, killpg))
+        self.assertEqual(sent, [15, 9])
+
+    def test_posix_stop_leaves_an_exited_group_alone(self) -> None:
+        process = self._running_process()
+        process.poll.return_value = 0
+        killpg, sent = self._fake_group(survives_term=False)
+        killpg(process.pid, 15)  # the group has already gone
+        sent.clear()
+        self.assertFalse(self._stop_fake_posix_group(process, killpg))
+        self.assertEqual(sent, [])
+
+    def test_posix_stop_of_a_group_that_vanished_reaps_the_leader(self) -> None:
+        process = self._running_process()
+
+        def killpg(pgid: int, signum: int) -> None:
+            raise ProcessLookupError
+
+        self.assertFalse(self._stop_fake_posix_group(process, killpg))
+        process.wait.assert_called_once_with()
+
     @unittest.skipUnless(os.name == "nt", "Windows process-tree regression")
     def test_timeout_kills_windows_grandchild_process_tree(self) -> None:
         import ctypes
