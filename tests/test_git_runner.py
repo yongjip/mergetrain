@@ -993,7 +993,13 @@ deploy:
             self.assertEqual(result.status, "validated")
             self.assertEqual(recreated.status, "validated")
             listing = git(repo, "worktree", "list", "--porcelain")
-            self.assertIn(f"worktree {user_worktree.resolve()}", listing)
+            # Git spells Windows paths with forward slashes; compare the paths.
+            registered = [
+                Path(line.split(" ", 1)[1]).resolve()
+                for line in listing.splitlines()
+                if line.startswith("worktree ")
+            ]
+            self.assertIn(user_worktree.resolve(), registered)
             parked.rename(user_worktree)  # the drive is back
             self.assertEqual(git(user_worktree, "rev-parse", "HEAD"), only_here)
 
@@ -1241,6 +1247,15 @@ deploy:
             else:
                 os.kill(pid, signal.SIGKILL)
                 self.fail(f"TERM-ignoring child {pid} survived the timeout")
+
+    def test_redacting_log_wrapper_tolerates_a_closed_log(self) -> None:
+        log = io.StringIO()
+        wrapper = command_runner_module.redacting_log(log)
+        assert wrapper is not None
+        wrapper.write("token=secret\n")
+        log.close()
+        wrapper.flush()  # finalization after the caller closed its log
+        wrapper.close()
 
     def test_windows_stop_uses_taskkill_for_the_process_tree(self) -> None:
         process = Mock()

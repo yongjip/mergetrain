@@ -36,7 +36,10 @@ class _RedactingLog(io.TextIOBase):
         return self._wrapped.write(redact_secrets(text))
 
     def flush(self) -> None:
-        self._wrapped.flush()
+        # Garbage collection can finalize this wrapper after its caller closed
+        # the log, and finalizing flushes.
+        if not getattr(self._wrapped, "closed", False):
+            self._wrapped.flush()
 
 
 def redacting_log(log: IO[str] | None) -> IO[str] | None:

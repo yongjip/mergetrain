@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
 
@@ -78,14 +78,14 @@ class ApostropheInCommentTests(unittest.TestCase):
 
     def test_issue_reproduction_quotes_the_path(self) -> None:
         config = SimpleNamespace(
-            repo=Path("/home/u/My Projects/repo"),
+            repo=PurePosixPath("/home/u/My Projects/repo"),
             project=SimpleNamespace(name="demo"),
             git=SimpleNamespace(integration_ref="origin/main"),
         )
         expanded = expand_command(
             "# don't reuse stale build output\nrm -rf ${worktree}/build",
             config=config,  # type: ignore[arg-type]
-            worktree=Path("/home/u/My Projects/repo/.mergetrain/wt"),
+            worktree=PurePosixPath("/home/u/My Projects/repo/.mergetrain/wt"),  # type: ignore[arg-type]
         )
         self.assertEqual(
             expanded,
