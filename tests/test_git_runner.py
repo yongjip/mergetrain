@@ -1373,6 +1373,50 @@ deploy:
             self.assertFalse((repo / "injected").exists())
             self.assertFalse((repo / "worktree-injected").exists())
 
+    def test_gate_refuses_an_unprovable_placeholder_before_running_anything(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "My Projects"
+            root.mkdir()
+            ran = root / "ran.txt"
+            gate = json.dumps(
+                f"{SHELL_PYTHON} -c \"from pathlib import Path; "
+                f"Path('{py_path(ran)}').write_text('ran')\"\n"
+                "sh <<EOF\nrm -rf ${worktree}/build\nEOF"
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "blocked")
+            self.assertIn("${worktree} inside a here-document", result.note)
+            self.assertIn('"$MERGETRAIN_WORKTREE"', result.note)
+            self.assertFalse(ran.exists())
+
+    def test_deploy_refuses_an_unprovable_verify_hook_before_the_push(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "My Projects"
+            root.mkdir()
+            verify = json.dumps("cat <<EOF\n${repo}\nEOF")
+            repo, _ = make_demo_repo(root, verify_command=verify)
+            config = load_config(repo=repo)
+            before = git(root / "remote.git", "rev-parse", "main")
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_one(conn, job, deploy=True)
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "blocked")
+            self.assertEqual(result.push_status, "not_run")
+            self.assertIn("${repo} inside a here-document", result.note)
+            self.assertEqual(git(root / "remote.git", "rev-parse", "main"), before)
+
     def test_unchanged_validated_train_reuses_gates_and_still_verifies(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

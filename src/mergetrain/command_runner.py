@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -18,6 +17,7 @@ from typing import IO, cast
 
 from .config import MergetrainConfig
 from .errors import CancellationRequested, CommandFailed, MergetrainError, redact_secrets
+from .shell_quoting import expand_path_placeholders
 from .windows_job import CREATE_SUSPENDED, WindowsJob
 
 Pulse = Callable[[], None]
@@ -352,56 +352,23 @@ def run_shell(
 
 
 def expand_command(command: str, *, config: MergetrainConfig, worktree: Path) -> str:
-    """Expand documented placeholders using POSIX-shell-safe quoting."""
+    """Expand documented placeholders, escaping paths for their shell context.
+
+    Raises ``ConfigError`` rather than guess when a path that needs quoting
+    lands where the shell's quoting cannot be proven.
+    """
 
     expanded = command
-
-    def replace_path(placeholder: str, value: str) -> None:
-        nonlocal expanded
-        rendered: list[str] = []
-        quote: str | None = None
-        escaped = False
-        index = 0
-        while index < len(expanded):
-            if not escaped and expanded.startswith(placeholder, index):
-                if quote == "'":
-                    replacement = value.replace("'", "'\"'\"'")
-                elif quote == '"':
-                    replacement = (
-                        value.replace("\\", "\\\\")
-                        .replace('"', '\\"')
-                        .replace("$", "\\$")
-                        .replace("`", "\\`")
-                    )
-                else:
-                    replacement = shlex.quote(value)
-                rendered.append(replacement)
-                index += len(placeholder)
-                continue
-
-            char = expanded[index]
-            rendered.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\" and quote != "'":
-                escaped = True
-            elif char in {"'", '"'}:
-                if quote is None:
-                    quote = char
-                elif quote == char:
-                    quote = None
-            index += 1
-        expanded = "".join(rendered)
-
     replacements = {
         "${integration_ref}": config.git.integration_ref,
         "${project}": config.project.name,
     }
     for key, value in replacements.items():
         expanded = expanded.replace(key, value)
-    replace_path("${repo}", str(config.repo))
-    replace_path("${worktree}", str(worktree))
-    return expanded
+    return expand_path_placeholders(
+        expanded,
+        {"${repo}": str(config.repo), "${worktree}": str(worktree)},
+    )
 
 
 def command_env(*, config: MergetrainConfig, worktree: Path) -> dict[str, str]:

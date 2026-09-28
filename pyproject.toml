@@ -107,6 +107,7 @@ module = [
   "mergetrain.persistence.*",
   "mergetrain.recovery",
   "mergetrain.reuse",
+  "mergetrain.shell_quoting",
   "mergetrain.store",
   "mergetrain.validation_reuse",
   "mergetrain.worktree_manager",

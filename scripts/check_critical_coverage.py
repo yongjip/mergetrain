@@ -29,6 +29,7 @@ CRITICAL_MINIMUMS = {
     "src/mergetrain/persistence/transactions.py": 90.0,
     "src/mergetrain/recovery.py": 93.0,
     "src/mergetrain/reuse.py": 94.0,
+    "src/mergetrain/shell_quoting.py": 97.0,
     "src/mergetrain/validation_reuse.py": 83.0,
     "src/mergetrain/worktree_manager.py": 91.0,
 }

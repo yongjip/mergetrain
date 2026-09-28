@@ -650,6 +650,7 @@ class GitRunner:
                     "deploy_plan_changed: the confirmed train, destination, gates, "
                     "reuse, or verify policy changed before push; nothing was pushed"
                 )
+        self._gates.check_verify_hooks(worktree=worktree)
         self._pushes.deploy_and_verify(
             conn,
             job_ids=job_ids,

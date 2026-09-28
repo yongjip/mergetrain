@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Stop a quote character in a gate comment from unquoting a later `${repo}` or
+  `${worktree}` (#219). The placeholder scanner did not know about `#` comments,
+  so `# don't ...` left the next path placeholder bare, and a path with a space
+  split into two arguments: `rm -rf ${worktree}/build` could delete a sibling
+  directory outside the repository. The scanner now reads commands the way
+  `/bin/sh` does, including comments, here-documents, and `$(...)`. Where the
+  quoting cannot be proven (here-document bodies, backquotes, `${...}`,
+  `$((...))`, `$'...'`, or after a construct that shells parse differently), a
+  path that needs quoting now fails the gate before anything runs, and a verify
+  hook with that problem blocks the deploy before the push.
+
 ## 3.0.8 - 2026-09-29
 
 - Stop worktree removal on Windows from emptying directories that gates linked

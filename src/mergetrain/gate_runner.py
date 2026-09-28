@@ -371,6 +371,16 @@ class GateRunner:
             initial_states=initial_states,
         )
 
+    def check_verify_hooks(self, *, worktree: Path) -> None:
+        """Refuse before the push when a verify hook cannot be expanded safely.
+
+        Verify hooks run after the push, so an expansion error there could no
+        longer stop the deploy.
+        """
+
+        for hook in self.config.deploy.verify:
+            expand_command(hook.run, config=self.config, worktree=worktree)
+
     def run_verify_hooks(self, *, worktree: Path, log: IO[str], pulse: Pulse | None) -> None:
         for hook in self.config.deploy.verify:
             command = expand_command(hook.run, config=self.config, worktree=worktree)
