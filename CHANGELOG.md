@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.1.0 - 2026-09-29
 
 - Stop a quote character in a gate comment from unquoting a later `${repo}` or
   `${worktree}` (#219). The placeholder scanner did not know about `#` comments,

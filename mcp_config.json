@@ -4,7 +4,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "mergetrain[mcp]==3.0.8",
+        "mergetrain[mcp]==3.1.0",
         "mergetrain",
         "mcp"
       ]
