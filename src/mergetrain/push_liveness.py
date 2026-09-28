@@ -24,7 +24,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from .config import MergetrainConfig
-from .errors import AmbiguousPush
+from .errors import AmbiguousPush, MergetrainError
 from .windows_job import named_job_active
 
 if os.name == "posix":
@@ -86,8 +86,13 @@ def holding_push_lock(config: MergetrainConfig, deploy_sha: str) -> Iterator[tup
         yield ()
         return
     path = push_lock_path(config, deploy_sha)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise MergetrainError(
+            f"could not take the push lock {path}: {exc}; push was not attempted"
+        ) from exc
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -98,4 +103,6 @@ def holding_push_lock(config: MergetrainConfig, deploy_sha: str) -> Iterator[tup
         os.close(fd)
         # Only a push that fully exited releases the lock; one of its processes
         # that survived the stop keeps the file, and reconcile keeps waiting.
-        _lock_is_free(path)
+        # Tidying up must never replace the push's own outcome.
+        with suppress(OSError):
+            _lock_is_free(path)

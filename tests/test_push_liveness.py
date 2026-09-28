@@ -8,8 +8,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
-from mergetrain.errors import AmbiguousPush
+from mergetrain.errors import AmbiguousPush, MergetrainError
 from mergetrain.push_liveness import (
     holding_push_lock,
     push_in_flight,
@@ -73,6 +74,16 @@ class PushLockTests(unittest.TestCase):
                 child.wait(timeout=30)
             self.assertFalse(push_in_flight(config, SHA))
             self.assertFalse(push_lock_path(config, SHA).exists())
+
+    def test_a_lock_that_cannot_be_taken_means_the_push_is_not_attempted(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = fake_config(Path(td))
+            with (
+                mock.patch("mergetrain.push_liveness.os.open", side_effect=PermissionError("denied")),
+                self.assertRaisesRegex(MergetrainError, "push was not attempted"),
+            ):
+                with holding_push_lock(config, SHA):
+                    self.fail("the push must not start without its lock")
 
     def test_a_second_push_of_a_commit_still_being_pushed_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as td:
