@@ -795,6 +795,7 @@ class GitRunner:
         keep_worktree: bool = False,
         owner: str | None = None,
         ttl_minutes: int = 30,
+        expected_plan_sha: str = "",
     ) -> Job:
         self._ensure_state_dirs()
         log_path = self._log_path("job", job.id)
@@ -990,6 +991,7 @@ class GitRunner:
                         ownership_pulse=ownership_pulse,
                         state=deploy_state,
                         event_job_id=job.id,
+                        expected_plan_sha=expected_plan_sha,
                     )
                 status = "deployed" if deploy else "validated"
                 note = deploy_state.warning or "ok"
@@ -1087,6 +1089,7 @@ class GitRunner:
         owner: str | None,
         ttl_minutes: int,
         lease_token: str,
+        expected_plan_sha: str = "",
     ) -> list[Job]:
         """Process isolated jobs in order, stopping at an ambiguous deploy.
 
@@ -1106,6 +1109,7 @@ class GitRunner:
                 keep_worktree=keep_worktree,
                 owner=owner,
                 ttl_minutes=ttl_minutes,
+                expected_plan_sha=expected_plan_sha,
             )
             results.append(result)
             if not deploy or result.status != "needs_reconcile":
@@ -1154,6 +1158,7 @@ class GitRunner:
         keep_worktree: bool,
         owner: str | None,
         ttl_minutes: int,
+        expected_plan_sha: str = "",
     ) -> list[Job]:
         """Classify a failed multi-job train with subset gate probes.
 
@@ -1336,6 +1341,7 @@ class GitRunner:
                 owner=owner,
                 ttl_minutes=ttl_minutes,
                 lease_token=lease_token,
+                expected_plan_sha=expected_plan_sha,
             )
 
         culprit_ids = {job.id for job in singles}
@@ -1407,6 +1413,9 @@ class GitRunner:
                     keep_worktree=keep_worktree,
                     owner=owner,
                     ttl_minutes=ttl_minutes,
+                    # A smaller train was never confirmed; the push-time plan
+                    # check must run and refuse it rather than be skipped.
+                    expected_plan_sha=expected_plan_sha,
                 )
             )
         return results
@@ -1875,6 +1884,7 @@ class GitRunner:
                                 owner=owner,
                                 ttl_minutes=ttl_minutes,
                                 lease_token=lease_token,
+                                expected_plan_sha=expected_plan_sha,
                             )
                         )
                         return results
@@ -1907,6 +1917,7 @@ class GitRunner:
                             keep_worktree=keep_worktree or persistent_workspace,
                             owner=owner,
                             ttl_minutes=ttl_minutes,
+                            expected_plan_sha=expected_plan_sha,
                         )
                     )
                     return results

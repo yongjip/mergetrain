@@ -6,6 +6,7 @@ import argparse
 import hmac
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any
 
 from ..cli_support import (
@@ -124,31 +125,29 @@ def _execute_batch(
             pending = deploy_reconcile_pending(conn)
             if pending:
                 return _emit_deploy_reconcile_block(args, pending)
+            confirm_plan = None
             if expected_plan:
-                selected, selected_jobs = select_validated_train(
-                    conn,
-                    train_id=getattr(args, "train_id", ""),
-                )
-                if selected is None or not selected_jobs:
-                    raise DeployPlanChanged(
-                        "deploy_plan_changed: the confirmed validated train is no "
-                        "longer deploy-eligible; nothing was pushed"
+
+                def confirm_plan(selected_jobs: Sequence[Job]) -> None:
+                    # Runs inside the claim transaction, on the exact train
+                    # about to be claimed.
+                    current_plan_sha = deploy_plan_sha(
+                        config,
+                        selected_jobs,
+                        reuse_validated=False,
                     )
-                current_plan_sha = deploy_plan_sha(
-                    config,
-                    selected_jobs,
-                    reuse_validated=False,
-                )
-                if not hmac.compare_digest(current_plan_sha, expected_plan):
-                    raise DeployPlanChanged(
-                        "deploy_plan_changed: the confirmed train, destination, "
-                        "gates, reuse, or verify policy changed; nothing was pushed"
-                    )
+                    if not hmac.compare_digest(current_plan_sha, expected_plan):
+                        raise DeployPlanChanged(
+                            "deploy_plan_changed: the confirmed train, destination, "
+                            "gates, reuse, or verify policy changed; nothing was pushed"
+                        )
+
             jobs = claim_deploy_batch(
                 conn,
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
                 train_id=getattr(args, "train_id", ""),
+                confirm_plan=confirm_plan,
             )
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)

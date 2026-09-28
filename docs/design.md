@@ -464,9 +464,12 @@ omitted field defaults to the integration branch.
 
 Human-gated deploys may carry the `deploy_plan_sha` emitted by preview. The hash
 covers the exact validated train, resolved fetch/push destination identity, pre-push
-gate/reuse policy, and post-push verify hooks. It is checked once before claim
-and again immediately before the recovery marker and atomic push. Auto jobs use
-the narrower persisted destination identity at the same two boundaries.
+gate/reuse policy, and post-push verify hooks. It is checked inside the claim
+transaction, against the exact validated train being claimed, and again
+immediately before the recovery marker and atomic push, including for trains
+that bisect or isolation re-run. A confirmed deploy never claims queued jobs.
+Auto jobs use the narrower persisted destination identity at the same two
+boundaries.
 
 Contract 2 uses the canonical `deploy` vocabulary throughout. Machine state
 remains `deployed`/`deploy_sha`. Completion proves the Git ref update only; it

@@ -54,7 +54,7 @@ do not retrofit a hash onto the old row.
 
 MCP and other preview-driven confirmations use the broader deploy-plan hash.
 If the train, destination, gate/reuse policy, or verify hooks change, the CLI
-returns `deploy_plan_changed` before claim or blocks before push. Generate a new
+returns `deploy_plan_changed` while claiming or blocks before push. Generate a new
 preview/summary; do not reuse the stale hash.
 
 ## Gate failure

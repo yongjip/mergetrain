@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable, Sequence
 
-from ..errors import QueueError
+from ..errors import DeployPlanChanged, QueueError
 from ..models import Job
 from .events import _record_run_event
 from .jobs import get_job, list_jobs_fifo, select_validated_train
@@ -219,8 +220,15 @@ def claim_deploy_batch(
     owner: str | None = None,
     ttl_minutes: int = 30,
     train_id: str = "",
+    confirm_plan: Callable[[Sequence[Job]], None] | None = None,
 ) -> list[Job]:
-    """Claim one exact validated train, or queued jobs when none is pending."""
+    """Claim one exact validated train, or queued jobs when none is pending.
+
+    With ``confirm_plan``, only a validated train may be claimed, and the
+    callback checks that exact train inside the claim transaction; it raises
+    to refuse. A concurrent cancel or supersede therefore cannot slip between
+    the plan check and the claim, and queued jobs are never substituted.
+    """
 
     owner = owner or default_owner()
     with immediate(conn):
@@ -234,6 +242,13 @@ def claim_deploy_batch(
             _release_lock_token(conn, owner=owner, token=lock.token)
             return []
         selected, validated_jobs = select_validated_train(conn, train_id=train_id)
+        if confirm_plan is not None:
+            if selected is None or not validated_jobs:
+                raise DeployPlanChanged(
+                    "deploy_plan_changed: the confirmed validated train is no "
+                    "longer deploy-eligible; nothing was pushed"
+                )
+            confirm_plan(validated_jobs)
         if selected is not None:
             jobs = validated_jobs
         else:

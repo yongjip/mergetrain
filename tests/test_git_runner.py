@@ -2780,6 +2780,118 @@ def add_branch(repo: Path, name: str, filename: str) -> None:
     git(repo, "switch", "main")
 
 
+class ConfirmedPlanDeployTests(unittest.TestCase):
+    """A deploy confirmed against one exact plan ships that plan or nothing."""
+
+    def _prepare(self, root: Path, gate: str) -> tuple[Path, Path]:
+        repo, _ = make_demo_repo(root, gate_command=gate)
+        add_branch(repo, "agent/b", "b.txt")
+        add_branch(repo, "agent/c", "c.txt")
+        return repo, root / "remote.git"
+
+    def _preview_plan(self, repo: Path) -> str:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(main(["--repo", str(repo), "deploy", "--json"]), 0)
+        return json.loads(out.getvalue())["deploy_plan_sha"]
+
+    def _deploy(self, repo: Path, plan: str) -> tuple[int, dict]:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = main(["--repo", str(repo), "deploy", "--expected-plan", plan, "--json"])
+        return code, json.loads(out.getvalue())
+
+    def test_cancel_racing_the_claim_never_substitutes_queued_jobs(self) -> None:
+        # Train [A] is confirmed. A cancel committed by another process between
+        # the plan check and the claim used to let the claim fall back to the
+        # queued, never-approved jobs [B, C] and gate or even push them.
+        for c_fails in (True, False):
+            with self.subTest(c_fails=c_fails), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                gate = (
+                    f'{SHELL_PYTHON} -c "import sys, pathlib; '
+                    "sys.exit(1 if pathlib.Path('c.txt').exists() else 0)\""
+                    if c_fails
+                    else ""
+                )
+                repo, remote = self._prepare(root, gate)
+                config = load_config(repo=repo)
+                base = git(remote, "rev-parse", "main")
+                conn = connect(config.state.db)
+                try:
+                    a = enqueue_job(conn, task="a", branch="feature/a")
+                    validated = GitRunner(config).process_batch(conn, [a], deploy=False)
+                    self.assertEqual(validated[0].status, "validated")
+                    b = enqueue_job(conn, task="b", branch="agent/b")
+                    c = enqueue_job(conn, task="c", branch="agent/c")
+                finally:
+                    conn.close()
+                plan = self._preview_plan(repo)
+
+                import mergetrain.commands.deploy as deploy_module
+
+                real_claim = deploy_module.claim_deploy_batch
+
+                def cancel_then_claim(
+                    *args, _db=config.state.db, _job=a.id, _claim=real_claim, **kwargs
+                ):
+                    racer = connect(_db)
+                    try:
+                        cancel_job(racer, _job, note="canceled by a concurrent operator")
+                    finally:
+                        racer.close()
+                    return _claim(*args, **kwargs)
+
+                with patch.object(deploy_module, "claim_deploy_batch", cancel_then_claim):
+                    code, payload = self._deploy(repo, plan)
+
+                conn = connect(config.state.db)
+                try:
+                    statuses = {job.id: get_job(conn, job.id).status for job in (a, b, c)}
+                finally:
+                    conn.close()
+                self.assertEqual(git(remote, "rev-parse", "main"), base)
+                self.assertEqual(code, 1, payload)
+                self.assertEqual(payload["error"]["code"], "deploy_plan_changed")
+                self.assertEqual(
+                    statuses, {a.id: "canceled", b.id: "queued", c.id: "queued"}
+                )
+
+    def test_isolation_reruns_carry_the_confirmed_plan(self) -> None:
+        # Bisect and isolation re-run surviving jobs as a smaller train. That
+        # train was never confirmed, so the push-time plan check must still run
+        # and refuse it instead of being skipped.
+        from mergetrain.deploy_plan import deploy_plan_sha
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gate = (
+                f'{SHELL_PYTHON} -c "import sys, pathlib; '
+                "sys.exit(1 if pathlib.Path('b.txt').exists() else 0)\""
+            )
+            repo, remote = self._prepare(root, gate)
+            config = load_config(repo=repo)
+            base = git(remote, "rev-parse", "main")
+            conn = connect(config.state.db)
+            try:
+                a = enqueue_job(conn, task="a", branch="feature/a")
+                b = enqueue_job(conn, task="b", branch="agent/b")
+                GitRunner(config).process_batch(
+                    conn,
+                    [a, b],
+                    deploy=True,
+                    expected_plan_sha=deploy_plan_sha(config, [a, b]),
+                )
+                a_after = get_job(conn, a.id)
+                b_after = get_job(conn, b.id)
+            finally:
+                conn.close()
+            self.assertEqual(git(remote, "rev-parse", "main"), base)
+            self.assertEqual(b_after.status, "failed")
+            self.assertEqual(a_after.status, "blocked")
+            self.assertIn("deploy_plan_changed", a_after.note)
+
+
 class BisectIsolationTests(unittest.TestCase):
     def test_semantic_conflict_classification_is_independent_of_batch_size(self) -> None:
         for filler_count in (0, 2):

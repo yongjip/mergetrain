@@ -12,6 +12,14 @@
   fail with a `ConfigError` before anything runs; use `"$MERGETRAIN_REPO"` or
   `"$MERGETRAIN_WORKTREE"` there instead. A path made only of letters, digits,
   and `_@%+=:,./-` still expands anywhere.
+- Stop a confirmed deploy from claiming or pushing jobs outside the confirmed
+  plan. The plan check and the claim ran in separate transactions, so a cancel
+  or supersede that landed between them let the claim fall back to queued jobs
+  that were never validated or approved. Those jobs were gated, and when a gate
+  failed, bisect re-ran the survivors without the plan check and pushed them.
+  The plan is now checked inside the claim transaction on the exact train being
+  claimed, a confirmed deploy never falls back to queued jobs, and bisect and
+  isolation re-runs keep the push-time plan check.
 
 ## 3.1.0 - 2026-09-29
 
