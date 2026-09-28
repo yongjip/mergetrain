@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 # CreateProcess flag: start the process with its main thread suspended.
 CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_QUERY = 0x0004
 _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
 _JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
 _MAX_LISTED_PROCESSES = 4096
@@ -66,6 +67,7 @@ def _api() -> SimpleNamespace:  # pragma: no cover - Windows only
     handle, flag, dword = wintypes.HANDLE, wintypes.BOOL, wintypes.DWORD
     for function, argtypes, restype in (
         (kernel32.CreateJobObjectW, (wintypes.LPVOID, wintypes.LPCWSTR), handle),
+        (kernel32.OpenJobObjectW, (dword, flag, wintypes.LPCWSTR), handle),
         (
             kernel32.QueryInformationJobObject,
             (handle, ctypes.c_int, wintypes.LPVOID, dword, wintypes.LPDWORD),
@@ -103,14 +105,18 @@ class WindowsJob:  # pragma: no cover - Windows only
         self._handle: int | None = handle
 
     @classmethod
-    def create(cls) -> WindowsJob | None:
-        """Return an empty job, or None when Windows does not provide one."""
+    def create(cls, name: str = "") -> WindowsJob | None:
+        """Return an empty job, or None when Windows does not provide one.
+
+        A named job outlives this process for as long as a process in it is
+        alive, so another process can ask ``named_job_active`` about it.
+        """
 
         try:
             api = _api()
         except (AttributeError, OSError):
             return None
-        handle = api.kernel32.CreateJobObjectW(None, None)
+        handle = api.kernel32.CreateJobObjectW(None, name or None)
         if not handle:
             return None
         return cls(api, handle)
@@ -215,3 +221,24 @@ class WindowsJob:  # pragma: no cover - Windows only
         if self._handle is not None:
             self._api.kernel32.CloseHandle(self._handle)
             self._handle = None
+
+
+def named_job_active(name: str) -> bool:  # pragma: no cover - Windows only
+    """Whether the named job still holds a running process.
+
+    A job lives on after its creator exits while any process in it runs, so
+    this still sees a command whose parent was killed. Any failure to open or
+    query the job reads as inactive, which is what a missing job means.
+    """
+
+    try:
+        api = _api()
+    except (AttributeError, OSError):
+        return False
+    handle = api.kernel32.OpenJobObjectW(_JOB_OBJECT_QUERY, False, name)
+    if not handle:
+        return False
+    try:
+        return WindowsJob(api, handle)._active_processes() > 0
+    finally:
+        api.kernel32.CloseHandle(handle)

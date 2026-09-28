@@ -21,6 +21,7 @@ from .command_runner import run_command
 from .config import MergetrainConfig
 from .errors import (
     CancellationRequested,
+    LockHeld,
     MergetrainError,
     QueueBusy,
     QueueError,
@@ -37,6 +38,7 @@ from .git_ops import (
     resolve_pending_ref,
 )
 from .models import Job
+from .push_liveness import push_in_flight
 from .store import (
     acquire_runner_lock,
     counts,
@@ -419,6 +421,16 @@ def reconcile(
         jobs = list_jobs_fifo(conn, status="needs_reconcile")
         if not jobs:
             return ReconcileOutcome(jobs=[], applied=apply, summary=_summarize([]), exit_code=0)
+        # A runner killed mid-push leaves the push running in its own process
+        # group. Until every process of it has exited it can still land, so the
+        # remote cannot yet say whether it did (#220).
+        for job in jobs:
+            if push_in_flight(config, job.pending_deploy_sha):
+                raise LockHeld(
+                    f"job {job.id}: the push of {job.pending_deploy_sha[:12]} started "
+                    "by a runner that stopped is still running and may yet land; "
+                    "wait for it to exit, then rerun reconcile"
+                )
         # One interrupted push parks jobs bound for a single target, but two
         # separate crashes can park jobs bound for different remotes/refs. Ask
         # each group's own recorded target for truth — the refs the push actually

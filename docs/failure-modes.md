@@ -106,6 +106,18 @@ without contacting whichever endpoint happens to be configured now. Resolve
 such an interrupted v2.3.0 deploy before upgrading, or preserve its evidence
 for explicit operator inspection.
 
+A runner that stops mid-push, whether it was killed or crashed, does not stop
+the push: managed commands run in their own process group (a Job Object on
+Windows), so `git push` keeps running and can still land afterwards. The runner
+takes a lock before it pushes and hands it to `git push`, and every process the
+push starts, a local `receive-pack` and its hooks included, inherits it. On
+Windows the push's Job Object is named after the commit instead. While any
+process of that push is alive, `reconcile` refuses with `lock_held` (exit 3)
+and leaves the job parked, so it never reads the remote before the push has
+finished changing it. Rerun reconcile once the push has exited. One gap remains
+for network remotes: a server that already received the whole push can still
+apply it after the client has died.
+
 Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 
 ## Validated-gate reuse declined

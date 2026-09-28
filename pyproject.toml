@@ -105,6 +105,7 @@ module = [
   "mergetrain.git_ops",
   "mergetrain.git_runner",
   "mergetrain.persistence.*",
+  "mergetrain.push_liveness",
   "mergetrain.recovery",
   "mergetrain.reuse",
   "mergetrain.shell_quoting",

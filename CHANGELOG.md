@@ -12,6 +12,12 @@
   `$((...))`, `$'...'`, or after a construct that shells parse differently), a
   path that needs quoting now fails the gate before anything runs, and a verify
   hook with that problem blocks the deploy before the push.
+- Stop reconcile from deciding that a push did not land while the push is still
+  running (#220). A runner killed mid-push leaves `git push` running in its own
+  process group, and reconcile could requeue or cancel the job before that push
+  landed. The push now inherits a lock (a named Job Object on Windows) that
+  lasts until every process of the push has exited. Until then `reconcile`
+  refuses with `lock_held` and keeps the job parked.
 
 ## 3.0.8 - 2026-09-29
 

@@ -171,14 +171,20 @@ def _run_managed(
     pulse_interval_seconds: float,
     timeout_seconds: float | None,
     cancel_event: threading.Event | None = None,
+    pass_fds: Sequence[int] = (),
+    job_name: str = "",
 ) -> subprocess.CompletedProcess[str]:
-    """Run one non-interactive process while enforcing pulse, timeout, and cancel."""
+    """Run one non-interactive process while enforcing pulse, timeout, and cancel.
+
+    ``pass_fds`` stay open in the process and everything it starts (POSIX);
+    ``job_name`` names its Windows job so that other processes can find it.
+    """
 
     if cancel_event is not None and cancel_event.is_set():
         raise CancellationRequested("command canceled before it started")
     if pulse is not None:
         pulse()
-    job = WindowsJob.create() if os.name == "nt" else None
+    job = WindowsJob.create(job_name) if os.name == "nt" else None
     try:
         process = subprocess.Popen(
             command,
@@ -193,6 +199,7 @@ def _run_managed(
             stderr=subprocess.PIPE,
             bufsize=1,
             start_new_session=os.name == "posix",
+            pass_fds=tuple(pass_fds) if os.name == "posix" else (),
             # A job adopts the process before it runs, so no descendant escapes.
             creationflags=(
                 (
@@ -301,6 +308,8 @@ def run_command(
     pulse: Pulse | None = None,
     pulse_interval_seconds: float = 10,
     timeout_seconds: float | None = None,
+    pass_fds: Sequence[int] = (),
+    job_name: str = "",
 ) -> subprocess.CompletedProcess[str]:
     if log:
         log.write(f"\n$ {_render_command(command)}\n")
@@ -317,6 +326,8 @@ def run_command(
         pulse=pulse,
         pulse_interval_seconds=pulse_interval_seconds,
         timeout_seconds=timeout_seconds,
+        pass_fds=pass_fds,
+        job_name=job_name,
     )
 
 

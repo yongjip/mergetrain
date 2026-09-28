@@ -31,6 +31,7 @@ from .git_ops import (
     pending_ref_name,
     resolve_pending_ref,
 )
+from .push_liveness import holding_push_lock, push_job_name
 from .store import clear_rejected_push, record_pending_push
 
 AuditExpectation = Callable[..., tuple[str, str]]
@@ -123,15 +124,20 @@ class AtomicPush:
         push_args.extend(f"{target}:{ref}" for ref in destination.push_refs)
         if audit_ref not in destination.push_refs:
             push_args.append(f"{target}:{audit_ref}")
-        run_command(
-            push_args,
-            cwd=worktree,
-            env=destination.command_env(),
-            log=redacting_log(log),
-            pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
-        )
+        # The push inherits the lock, so recovery can tell that a push whose
+        # runner died is still running and may yet land (#220).
+        with holding_push_lock(self.config, target) as inherited:
+            run_command(
+                push_args,
+                cwd=worktree,
+                env=destination.command_env(),
+                log=redacting_log(log),
+                pulse=pulse,
+                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                timeout_seconds=self.config.queue.command_timeout_seconds,
+                pass_fds=inherited,
+                job_name=push_job_name(target),
+            )
 
     def audit_ref_expectation(
         self,
