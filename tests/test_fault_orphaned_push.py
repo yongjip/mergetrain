@@ -30,7 +30,7 @@ from mergetrain.recovery import recover
 from mergetrain.store import cancel_job, connect, enqueue_job, get_job
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
-HOOK_SECONDS = 4
+HOOK_SECONDS = 8
 WAIT_SECONDS = 30
 
 # The runner claims under its own pid, so the lock it leaves reads as dead.
