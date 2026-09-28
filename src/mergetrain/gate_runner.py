@@ -185,32 +185,39 @@ class GateRunner:
                 max_workers=len(selected),
                 thread_name_prefix="mergetrain-gate",
             ) as executor:
-                for gate in selected:
-                    futures[gate.name] = executor.submit(execute, gate)
-                unfinished = set(futures.values())
-                while unfinished:
-                    _, unfinished = wait(unfinished, timeout=0.1)
-                    now = time.monotonic()
-                    if (
-                        plan_timeout is not None
-                        and now - plan_started >= plan_timeout
-                        and monitor_error is None
-                    ):
-                        monitor_error = CommandFailed(
-                            "configured gate plan",
-                            124,
-                            stderr=(f"gate plan timed out after {plan_timeout:g} seconds"),
-                            cwd=str(worktree),
-                        )
-                        cancel_event.set()
-                    if pulse is not None and now >= next_pulse:
-                        try:
-                            pulse()
-                        except BaseException as exc:
-                            if monitor_error is None:
-                                monitor_error = exc
-                                cancel_event.set()
-                        next_pulse = now + pulse_interval
+                try:
+                    for gate in selected:
+                        futures[gate.name] = executor.submit(execute, gate)
+                    unfinished = set(futures.values())
+                    while unfinished:
+                        _, unfinished = wait(unfinished, timeout=0.1)
+                        now = time.monotonic()
+                        if (
+                            plan_timeout is not None
+                            and now - plan_started >= plan_timeout
+                            and monitor_error is None
+                        ):
+                            monitor_error = CommandFailed(
+                                "configured gate plan",
+                                124,
+                                stderr=(f"gate plan timed out after {plan_timeout:g} seconds"),
+                                cwd=str(worktree),
+                            )
+                            cancel_event.set()
+                        if pulse is not None and now >= next_pulse:
+                            try:
+                                pulse()
+                            except BaseException as exc:
+                                if monitor_error is None:
+                                    monitor_error = exc
+                                    cancel_event.set()
+                            next_pulse = now + pulse_interval
+                except BaseException:
+                    # Signals reach only this thread. Leaving the executor waits
+                    # for every worker, so stop their process groups first, or
+                    # Ctrl-C and MCP cancellation leave the gates running (#222).
+                    cancel_event.set()
+                    raise
 
             outcomes = {gate.name: futures[gate.name].result() for gate in selected}
             for gate in selected:

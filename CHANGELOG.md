@@ -26,6 +26,11 @@
   also requires the workspace to be the top of its own working tree and a
   registered linked worktree of the repository, and blocks validation
   otherwise.
+- Stop Ctrl-C and MCP cancellation from leaving configured gates running on
+  POSIX (#222). Gates run in worker threads, but a signal interrupts only the
+  main thread, which then waited for the workers without telling them to stop.
+  Their gates ran on in the abandoned worktree, and Ctrl-C blocked until they
+  finished. An interrupt now stops every running gate's process group first.
 
 ## 3.0.8 - 2026-09-29
 
