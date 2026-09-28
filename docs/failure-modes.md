@@ -111,12 +111,21 @@ the push: managed commands run in their own process group (a Job Object on
 Windows), so `git push` keeps running and can still land afterwards. The runner
 takes a lock before it pushes and hands it to `git push`, and every process the
 push starts, a local `receive-pack` and its hooks included, inherits it. On
-Windows the push's Job Object is named after the commit instead. While any
-process of that push is alive, `reconcile` refuses with `lock_held` (exit 3)
-and leaves the job parked, so it never reads the remote before the push has
-finished changing it. Rerun reconcile once the push has exited. One gap remains
-for network remotes: a server that already received the whole push can still
-apply it after the client has died.
+Windows the push's Job Object is named after the commit instead, and `git push`
+holds its own handle to it, so the name outlives the runner. While any process
+of that push is alive, `reconcile` refuses with `lock_held` (exit 3) and leaves
+the job parked, so it never reads the remote before the push has finished
+changing it. Rerun reconcile once the push has exited. One gap remains for
+network remotes: a server that already received the whole push can still apply
+it after the client has died.
+
+A long-lived process that the push started, such as
+`git credential-cache--daemon` or a daemon launched by a `pre-push` hook,
+inherits the lock too and holds it after the push itself has exited. The
+`lock_held` error names the lock file under `push-locks/` in the state
+directory. Once no `git` process of that push is left, stop the process that
+holds the file (`lsof <file>` shows it), or delete the file, and rerun
+reconcile.
 
 Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 

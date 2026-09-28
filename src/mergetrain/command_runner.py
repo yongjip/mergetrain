@@ -11,9 +11,10 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, cast
+from typing import IO, Any, cast
 
 from .config import MergetrainConfig
 from .errors import CancellationRequested, CommandFailed, MergetrainError, redact_secrets
@@ -110,6 +111,26 @@ def _join_job(  # pragma: no cover - Windows compatibility
         job.close()
         return None
     return job
+
+
+@contextmanager
+def _job_handle_for_command(job: WindowsJob | None) -> Iterator[Any]:
+    """Yield the ``startupinfo`` that gives the command a handle to its named job.
+
+    Windows forgets an object's name once the last handle to it closes, even
+    while processes still run in it. A command holding its own handle keeps
+    its job findable by name after a runner killed mid-push lost its handle.
+    """
+
+    handle = job.handle if job is not None else None
+    if sys.platform != "win32" or handle is None:
+        yield None
+        return
+    os.set_handle_inheritable(handle, True)  # pragma: no cover - Windows compatibility
+    try:  # pragma: no cover - Windows compatibility
+        yield subprocess.STARTUPINFO(lpAttributeList={"handle_list": [handle]})
+    finally:  # pragma: no cover - Windows compatibility
+        os.set_handle_inheritable(handle, False)
 
 
 def _stop_windows_process_tree(
@@ -252,30 +273,32 @@ def _run_managed(
         pulse()
     job = WindowsJob.create(job_name) if os.name == "nt" else None
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=str(cwd),
-            env=env,
-            shell=False,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=1,
-            start_new_session=os.name == "posix",
-            pass_fds=tuple(pass_fds) if os.name == "posix" else (),
-            # A job adopts the process before it runs, so no descendant escapes.
-            creationflags=(
-                (
-                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                    | (CREATE_SUSPENDED if job is not None else 0)
-                )
-                if os.name == "nt"
-                else 0
-            ),
-        )
+        with _job_handle_for_command(job if job_name else None) as startupinfo:
+            process = subprocess.Popen(
+                command,
+                cwd=str(cwd),
+                env=env,
+                shell=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,
+                start_new_session=os.name == "posix",
+                pass_fds=tuple(pass_fds) if os.name == "posix" else (),
+                startupinfo=startupinfo,
+                # A job adopts the process before it runs, so no descendant escapes.
+                creationflags=(
+                    (
+                        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                        | (CREATE_SUSPENDED if job is not None else 0)
+                    )
+                    if os.name == "nt"
+                    else 0
+                ),
+            )
         if job is not None:  # pragma: no cover - Windows compatibility
             job = _join_job(job, process)
     except BaseException:

@@ -10,8 +10,9 @@ import time
 import unittest
 from pathlib import Path
 
-from mergetrain.windows_job import CREATE_SUSPENDED, WindowsJob
+from mergetrain.windows_job import CREATE_SUSPENDED, WindowsJob, named_job_active
 
+SOURCE = Path(__file__).resolve().parents[1] / "src"
 SYNCHRONIZE = 0x00100000
 WAIT_OBJECT_0 = 0
 
@@ -61,6 +62,34 @@ class WindowsJobTests(unittest.TestCase):
             finally:
                 kernel32.CloseHandle(grandchild)
             self.assertEqual(process.wait(timeout=5), 1)
+
+    def test_a_named_job_stays_visible_after_its_runner_is_killed(self) -> None:
+        # Windows drops a name with the last handle, so this fails unless the
+        # command itself holds a handle to its job (#220).
+        name = f"Local\\mergetrain-test-{os.getpid()}-{time.monotonic_ns()}"
+        runner_code = (
+            "import sys; from mergetrain.command_runner import run_command; "
+            "run_command([sys.executable, '-c', 'import time; time.sleep(8)'], "
+            "cwd='.', job_name=sys.argv[1])"
+        )
+        env = {**os.environ, "PYTHONPATH": str(SOURCE)}
+        runner = subprocess.Popen([sys.executable, "-c", runner_code, name], env=env)
+        self.addCleanup(runner.wait, 10)
+        self.addCleanup(runner.kill)
+        deadline = time.monotonic() + 30
+        while not named_job_active(name):
+            self.assertIsNone(runner.poll(), "the runner exited before its command started")
+            self.assertLess(time.monotonic(), deadline, "the command never started")
+            time.sleep(0.05)
+
+        runner.kill()
+        runner.wait(timeout=10)
+
+        self.assertTrue(named_job_active(name), "the job's name died with its runner")
+        deadline = time.monotonic() + 30
+        while named_job_active(name):
+            self.assertLess(time.monotonic(), deadline, "the command never finished")
+            time.sleep(0.1)
 
 
 if __name__ == "__main__":

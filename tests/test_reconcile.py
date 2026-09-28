@@ -32,6 +32,7 @@ from mergetrain.errors import CommandFailed, QueueError, RemoteUnreachable
 from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
 from mergetrain.git_runner import GitRunner
+from mergetrain.push_liveness import push_lock_path
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
 from mergetrain.store import (
     acquire_runner_lock,
@@ -211,7 +212,7 @@ class ReconcileClassifierTests(unittest.TestCase):
                 _set_needs_reconcile(config, conn, job.id, pending)
                 with (
                     patch("mergetrain.recovery.push_in_flight", return_value=True),
-                    self.assertRaisesRegex(LockHeld, "still running and may yet land"),
+                    self.assertRaisesRegex(LockHeld, "still running and may yet land") as caught,
                 ):
                     reconcile(config, conn, apply=True)
                 parked = get_job(conn, job.id)
@@ -220,6 +221,9 @@ class ReconcileClassifierTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(parked.status, "needs_reconcile")
             self.assertEqual(parked.pending_deploy_sha, pending)
+            # A daemon the push started can hold the lock after the push exits,
+            # so the refusal names the file an operator would clear.
+            self.assertIn(str(push_lock_path(config, pending)), str(caught.exception))
 
     def test_unlanded_push_requeues_and_never_repushes(self) -> None:
         with tempfile.TemporaryDirectory() as td:

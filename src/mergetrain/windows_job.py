@@ -108,8 +108,9 @@ class WindowsJob:  # pragma: no cover - Windows only
     def create(cls, name: str = "") -> WindowsJob | None:
         """Return an empty job, or None when Windows does not provide one.
 
-        A named job outlives this process for as long as a process in it is
-        alive, so another process can ask ``named_job_active`` about it.
+        Another process can ask ``named_job_active`` about a named job, but
+        only while some process holds a handle to it: Windows drops the name
+        with the last handle, even while processes still run in the job.
         """
 
         try:
@@ -120,6 +121,12 @@ class WindowsJob:  # pragma: no cover - Windows only
         if not handle:
             return None
         return cls(api, handle)
+
+    @property
+    def handle(self) -> int | None:
+        """This process's handle to the job, or None once it is closed."""
+
+        return self._handle
 
     def adopt(self, pid: int) -> bool:
         """Move a process started with CREATE_SUSPENDED into the job, then resume it.
@@ -226,9 +233,10 @@ class WindowsJob:  # pragma: no cover - Windows only
 def named_job_active(name: str) -> bool:  # pragma: no cover - Windows only
     """Whether the named job still holds a running process.
 
-    A job lives on after its creator exits while any process in it runs, so
-    this still sees a command whose parent was killed. Any failure to open or
-    query the job reads as inactive, which is what a missing job means.
+    A command started in a named job holds its own handle to that job, so the
+    name, and this check, outlive a parent killed while the command runs. Any
+    failure to open or query the job reads as inactive, which is what a
+    missing job means.
     """
 
     try:

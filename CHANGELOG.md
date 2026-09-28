@@ -17,9 +17,10 @@
 - Stop reconcile from deciding that a push did not land while the push is still
   running (#220). A runner killed mid-push leaves `git push` running in its own
   process group, and reconcile could requeue or cancel the job before that push
-  landed. The push now inherits a lock (a named Job Object on Windows) that
-  lasts until every process of the push has exited. Until then `reconcile`
-  refuses with `lock_held` and keeps the job parked.
+  landed. The push now inherits a lock (a named Job Object on Windows, to which
+  `git push` holds its own handle) that lasts until every process of the push
+  has exited. Until then `reconcile` refuses with `lock_held`, names the lock
+  file, and keeps the job parked.
 - Stop the persistent validation workspace check from running `git reset --hard`
   in the user's checkout (#221). A workspace directory that had lost its `.git`,
   for example after a cleanup that could not delete one file, passed the

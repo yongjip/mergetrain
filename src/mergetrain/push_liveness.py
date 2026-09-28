@@ -9,8 +9,8 @@ On POSIX the runner takes an exclusive ``flock`` before it pushes and hands the
 descriptor to ``git push``. The push's own processes inherit it -- the local
 ``receive-pack`` and its hooks included -- so the lock is released only when
 the runner and every process of the push have exited. On Windows the push's
-Job Object carries a name derived from the commit, and the job lives on while
-any process in it runs.
+Job Object carries a name derived from the commit, and ``git push`` holds its
+own handle to that job, which keeps the name alive after the runner is gone.
 
 Network remotes keep one gap this cannot close: a server that already received
 the whole push may still apply it after the client has died.
