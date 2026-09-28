@@ -43,7 +43,12 @@ from ..observability import (
     stats_payload,
     stream_terminal,
 )
-from ..snapshot import attention_reason_code, plan_next_action, public_reason
+from ..snapshot import (
+    attention_reason_code,
+    claim_is_stranded,
+    plan_next_action,
+    public_reason,
+)
 from ..store import (
     connect,
     counts,
@@ -90,11 +95,12 @@ def _validated_trains_with_integration_state(
     return annotated
 
 
-def _job_display_state(job: Job) -> str:
+def _job_display_state(job: Job, *, stranded: bool = False) -> str:
     if job.status == "queued":
         return "waiting"
     if job.status == "in_progress":
-        return "running"
+        # Claimed work with no live runner is not running; it needs recovery.
+        return "attention" if stranded else "running"
     if job.status == "validated":
         return "ready"
     if job.status in {"blocked", "failed", "needs_reconcile"} or (
@@ -106,19 +112,26 @@ def _job_display_state(job: Job) -> str:
 
 def _job_summary(
     job: Job,
+    *,
+    stranded: bool = False,
 ) -> dict[str, Any]:
-    state = _job_display_state(job)
+    state = _job_display_state(job, stranded=stranded)
     outcome = job.status if state == "done" else None
     reason: str | None = None
+    reason_code: str | None = None
     reason_truncated = False
-    if state == "attention":
+    if state == "attention" and job.status == "in_progress":
+        reason_code = "stranded_claim"
+        reason = "claimed by a runner that is no longer running"
+    elif state == "attention":
+        reason_code = attention_reason_code(job)
         reason, reason_truncated = public_reason(job)
     return {
         "id": job.id,
         "task": job.task,
         "branch": job.branch,
         "state": state,
-        "reason_code": attention_reason_code(job) if state == "attention" else None,
+        "reason_code": reason_code,
         "reason": reason,
         "reason_truncated": reason_truncated,
         "outcome": outcome,
@@ -126,19 +139,21 @@ def _job_summary(
     }
 
 
-def _grouped_counts(raw: dict[str, int]) -> dict[str, int]:
+def _grouped_counts(raw: dict[str, int], *, stranded: bool = False) -> dict[str, int]:
     verify_unknown = raw.get("deployed_verify_unknown", 0)
     verify_failed = raw.get("deployed_verify_failed", 0)
     verify_attention = verify_unknown + verify_failed
+    in_progress = raw.get("in_progress", 0)
     return {
         "waiting": raw.get("queued", 0),
-        "running": raw.get("in_progress", 0),
+        "running": 0 if stranded else in_progress,
         "ready": raw.get("validated", 0),
         "attention": (
             raw.get("blocked", 0)
             + raw.get("failed", 0)
             + raw.get("needs_reconcile", 0)
             + verify_attention
+            + (in_progress if stranded else 0)
         ),
         "done": max(
             0,
@@ -277,8 +292,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         finally:
             conn.close()
 
-    attention_jobs = [job for job in decision_jobs if _job_display_state(job) == "attention"]
-    grouped = _grouped_counts(count_data)
+    stranded = claim_is_stranded(
+        lock.to_dict() if lock else None, count_data.get("in_progress", 0)
+    )
+    attention_jobs = [
+        job
+        for job in decision_jobs
+        if _job_display_state(job, stranded=stranded) == "attention"
+    ]
+    grouped = _grouped_counts(count_data, stranded=stranded)
     system_state = _system_state(grouped)
     repo_root = git_repo_root(config.repo) if config.repo.is_dir() else ""
     remote_ready = bool(repo_root) and git_remote_exists(config.repo, config.git.remote)
@@ -315,8 +337,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         "next_action": plan.to_dict(),
         "warnings": warnings,
         "counts": grouped,
-        "attention_jobs": [_job_summary(job) for job in attention_jobs],
-        "recent_jobs": [_job_summary(job) for job in recent_jobs],
+        "attention_jobs": [_job_summary(job, stranded=stranded) for job in attention_jobs],
+        "recent_jobs": [_job_summary(job, stranded=stranded) for job in recent_jobs],
     }
     if args.diagnose:
         payload["diagnostics"] = _diagnostics(

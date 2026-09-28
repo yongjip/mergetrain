@@ -67,6 +67,10 @@ text.
 
 Unknown and failed post-push verification remain in Attention until explicitly
 resolved; a later deployment does not supersede unresolved health evidence.
+Work still claimed by a runner that is gone, whether its lock row was removed
+or its owner is provably dead, is Attention rather than running: such rows
+carry `reason_code: stranded_claim`, and `next_action` is
+`reconcile_stranded_claim`.
 A missing configured Git remote or integration ref makes the repository
 `degraded`; status will not recommend enqueue until the base can be resolved.
 `resolve_failed_verification` points at one exact deployed job. The existing

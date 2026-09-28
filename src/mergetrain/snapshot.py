@@ -188,6 +188,12 @@ def _plan_for_code(
     )
 
 
+def claim_is_stranded(lock: dict[str, Any] | None, in_progress: int) -> bool:
+    """Whether in-progress work has no live runner: no lock, or a dead owner."""
+
+    return bool(in_progress) and (not lock or lock.get("liveness") == "dead")
+
+
 def _lock_expired(lock: dict[str, Any] | None) -> bool:
     if not lock:
         return False
@@ -265,12 +271,14 @@ def plan_next_action(
     if count_data.get("deployed_verify_unknown", 0):
         target = selected if selected_reason == "post_push_verification_unknown" else None
         return _plan_for_code("verify_reconciled_deploy", job=target)
-    # Work claimed by a runner that is no longer holding the lock: a crash, or a
-    # run that raised after its lease was released (queue contention does this).
+    # Work claimed by a runner that no longer holds the lock: a crash, or a run
+    # that raised after its lease was released (queue contention does this).
     # The next deploy requeues it automatically, which also clears its
     # validated-train identity -- so an approved train can quietly become a
     # different set. Name it instead of letting doctor report an idle queue.
-    if not lock and in_progress:
+    # A crash usually leaves its lock row behind, so a provably dead owner
+    # counts the same as no lock at all (#227).
+    if claim_is_stranded(lock, in_progress):
         return _plan_for_code("reconcile_stranded_claim")
     # Every queue-advancing command refuses without a config -- the deploy path
     # is fail-closed on purpose -- so pointing at queue work here would send the

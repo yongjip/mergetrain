@@ -1028,6 +1028,57 @@ class StatusNextActionTests(unittest.TestCase):
                 "verify_reconciled_deploy",
             )
 
+    def test_dead_owner_lock_reports_the_stranded_claim_like_a_missing_lock(self) -> None:
+        """#227: a crash leaves its lock row behind; nothing is running."""
+
+        for leave_lock in (True, False):
+            with self.subTest(leave_lock=leave_lock), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                repo, _ = make_demo_repo(root)
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    lock = acquire_runner_lock(conn, owner=DEAD_OWNER)
+                    job = enqueue_job(conn, task="a", branch="feature/a")
+                    _stage_in_progress(conn, job.id, lock.token)
+                    if not leave_lock:
+                        release_runner_lock(conn, owner=DEAD_OWNER, token=lock.token)
+                finally:
+                    conn.close()
+
+                status = self._status(repo)
+
+                self.assertEqual(status["next_action"]["code"], "reconcile_stranded_claim")
+                self.assertEqual(
+                    status["next_action"]["command"], "mergetrain reconcile --apply"
+                )
+                self.assertEqual(status["state"], "attention")
+                self.assertEqual(status["counts"]["running"], 0)
+                self.assertEqual(status["counts"]["attention"], 1)
+                stranded = status["attention_jobs"][0]
+                self.assertEqual((stranded["id"], stranded["state"]), (job.id, "attention"))
+                self.assertEqual(stranded["reason_code"], "stranded_claim")
+
+    def test_live_runner_still_reports_running(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                lock = acquire_runner_lock(conn, owner=f"user:{os.getpid()}")
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                _stage_in_progress(conn, job.id, lock.token)
+            finally:
+                conn.close()
+
+            status = self._status(repo)
+
+            self.assertEqual(status["next_action"]["code"], "wait_for_runner")
+            self.assertEqual(status["state"], "running")
+            self.assertEqual(status["counts"]["running"], 1)
+            self.assertEqual(status["attention_jobs"], [])
+
     def test_wedged_lock_reports_unlock_wedged_runner(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

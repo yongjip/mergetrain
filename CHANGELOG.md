@@ -58,6 +58,12 @@
   over and then erased when the job was marked deployed. The marker is now
   written only while no cancellation is requested; otherwise the job ends
   `canceled` with nothing pushed.
+- Report a runner crash as a stranded claim (#227). `status` recommended
+  `reconcile_stranded_claim` only when no lock row existed, but a crash
+  usually leaves the dead owner's row behind, so status said `running` and
+  suggested enqueueing. A provably dead owner now counts like a missing lock:
+  `next_action` is `reconcile_stranded_claim`, and the stranded rows count as
+  Attention with the new `reason_code` value `stranded_claim`.
 
 ## 3.0.8 - 2026-09-29
 
