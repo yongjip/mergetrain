@@ -74,7 +74,7 @@ def _validated_trains_with_integration_state(
     current_sha = (
         _git_object_sha(
             config.repo,
-            ["rev-parse", "--verify", f"{config.git.integration_ref}^{{commit}}"],
+            ["rev-parse", "--verify", f"{config.git.integration_tracking_ref}^{{commit}}"],
         )
         if config.repo.is_dir()
         else ""
@@ -245,7 +245,9 @@ def _diagnostics(
             "remote_exists": bool(repo_root)
             and (bool(remote_url) or git_remote_exists(config.repo, config.git.remote)),
             "integration_ref": config.git.integration_ref,
-            "integration_ref_exists": git_ref_exists(config.repo, config.git.integration_ref)
+            "integration_ref_exists": git_ref_exists(
+                config.repo, config.git.integration_tracking_ref
+            )
             if repo_root
             else False,
         },
@@ -305,7 +307,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     repo_root = git_repo_root(config.repo) if config.repo.is_dir() else ""
     remote_ready = bool(repo_root) and git_remote_exists(config.repo, config.git.remote)
     integration_ref_ready = bool(repo_root) and git_ref_exists(
-        config.repo, config.git.integration_ref
+        config.repo, config.git.integration_tracking_ref
     )
     plan = plan_next_action(
         {
@@ -813,7 +815,7 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
         payload["state"] = "local_config_missing"
         return payload
 
-    integration_ref = config.git.integration_ref
+    integration_ref = config.git.integration_tracking_ref
     ref_exists = git_ref_exists(config.repo, integration_ref)
     payload["integration"]["ref_exists"] = ref_exists
     if not ref_exists:

@@ -62,7 +62,20 @@ class GitConfig:
 
     @property
     def integration_ref(self) -> str:
+        """The name people and payloads see; never hand it to Git to resolve."""
+
         return f"{self.remote}/{self.integration_branch}"
+
+    @property
+    def integration_tracking_ref(self) -> str:
+        """The remote-tracking ref Git resolves for the integration base.
+
+        Git resolves the short ``origin/main`` to a tag or local branch of that
+        name before the remote-tracking ref, so anyone able to push such a tag
+        could choose the commit a train is built on.
+        """
+
+        return f"refs/remotes/{self.remote}/{self.integration_branch}"
 
 
 @dataclass(frozen=True, slots=True)

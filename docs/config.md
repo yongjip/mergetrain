@@ -156,6 +156,14 @@ git:
 {remote}/{integration_branch}
 ```
 
+That short name is what status output and the `${integration_ref}` placeholder
+show. mergetrain itself resolves the integration base through the full
+remote-tracking ref, `refs/remotes/{remote}/{integration_branch}`, because Git
+resolves a short name to a tag or local branch called `origin/main` before the
+remote-tracking ref. A gate that hands `${integration_ref}` to Git keeps that
+short-name lookup; write `refs/remotes/${integration_ref}` where a gate must not
+be redirected.
+
 `remote` names the fetch remote used to assemble the train. Before approval,
 mergetrain separately resolves its effective push endpoint with
 `git remote get-url --push --all` from the control checkout. A split setup such

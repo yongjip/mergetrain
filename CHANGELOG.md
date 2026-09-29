@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Build every train on the integration branch itself, never on a tag or local
+  branch that shares its short name. mergetrain resolved `origin/main` the way
+  Git resolves any short name, which prefers `refs/tags/origin/main` and
+  `refs/heads/origin/main` to the remote-tracking ref. Anyone able to push a
+  tag called `origin/main` could therefore choose the commit a train was built
+  on, and the deploy published that commit to main although nobody had
+  enqueued or approved it. Train assembly, enqueue, retry, supersede, the
+  built-in whitespace check, `gc`, and `status` now resolve
+  `refs/remotes/<remote>/<branch>`. Enqueue, retry, and supersede also record
+  the head of `refs/heads/<branch>`: a tag with the branch's name used to be
+  recorded instead, which blocked the job for good. The `integration_ref`
+  value in JSON output and the `${integration_ref}` placeholder are still
+  `origin/main`.
 - Remove the web dashboard and the web Hub. `mergetrain dashboard` and
   `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
   error that names the replacement: `status`, or `events --follow` for a live

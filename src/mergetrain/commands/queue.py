@@ -122,8 +122,8 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     # v3 has one enqueue path: verify a clean owning worktree and derive both
     # identities from Git. User-supplied SHAs and readiness bypasses no longer
     # exist, so the queue row always describes the branch that was inspected.
-    base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
-    head_sha = _capture_sha_or_error(worktree, args.branch, label="head")
+    base_sha = _capture_sha_or_error(config.repo, config.git.integration_tracking_ref, label="base")
+    head_sha = _capture_sha_or_error(worktree, f"refs/heads/{args.branch}", label="head")
     approval_destination_sha = deploy_destination_sha(config) if args.auto else ""
     approval_execution_policy_sha = deploy_execution_policy_sha(config) if args.auto else ""
     conn = connect(config.state.db)
@@ -178,11 +178,11 @@ def cmd_retry(args: argparse.Namespace) -> int:
             # leaves the worktree in rebase state for the user to resolve, while
             # the original blocked/failed row remains untouched.
             run_command(["git", "fetch", config.git.remote], cwd=worktree)
-            run_command(["git", "rebase", config.git.integration_ref], cwd=worktree)
+            run_command(["git", "rebase", config.git.integration_tracking_ref], cwd=worktree)
             _validate_enqueue_worktree(worktree, original.branch, repo=config.repo)
 
-        base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
-        head_sha = _capture_sha_or_error(worktree, original.branch, label="head")
+        base_sha = _capture_sha_or_error(config.repo, config.git.integration_tracking_ref, label="base")
+        head_sha = _capture_sha_or_error(worktree, f"refs/heads/{original.branch}", label="head")
         current_destination_sha = ""
         current_execution_policy_sha = ""
         if original.auto_deploy:
@@ -227,12 +227,12 @@ def cmd_supersede(args: argparse.Namespace) -> int:
 
     config = config_from_args(args)
     _preflight_config(config)
-    base_sha = _capture_sha_or_error(config.repo, config.git.integration_ref, label="base")
+    base_sha = _capture_sha_or_error(config.repo, config.git.integration_tracking_ref, label="base")
     replacements: list[SupersedeReplacement] = []
     for task, branch, worktree_value in args.replacement:
         worktree = Path(worktree_value).expanduser().resolve()
         _validate_enqueue_worktree(worktree, branch, repo=config.repo)
-        head_sha = _capture_sha_or_error(worktree, branch, label="head")
+        head_sha = _capture_sha_or_error(worktree, f"refs/heads/{branch}", label="head")
         replacements.append(
             SupersedeReplacement(
                 task=task,

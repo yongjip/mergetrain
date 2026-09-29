@@ -445,7 +445,7 @@ def branch_deletion_blocker(
     checked_out = git_worktrees_for_branch(config.repo, branch)
     if checked_out:
         return f"checked out in {checked_out[0]}"
-    if _is_ancestor(config.repo, recorded, integration_ref):
+    if _is_ancestor(config.repo, recorded, config.git.integration_tracking_ref):
         return ""
     if landed_sha and _is_ancestor(config.repo, recorded, landed_sha):
         return ""
