@@ -443,14 +443,14 @@ ${worktree}
 context, so each expands to exactly one path argument even when the path contains
 spaces or shell metacharacters. They may be used unquoted, inside matching single
 or double quotes, in `#` comments, and inside `$(...)`. mergetrain reads the
-command the way `/bin/sh` does, so a quote character inside a comment or a
-here-document does not change how a later placeholder is escaped.
+command the way `/bin/sh` does, so a quote character inside a comment does not
+change how a later placeholder is escaped.
 
-Some places have no escaping mergetrain can prove correct: a here-document body
-(its reader may itself be a shell), backquotes, `${...}`, `$((...))`, and
-`$'...'`. The same holds for everything after a construct that shells parse
-differently, such as a comment, `case` statement, or here-document inside
-`$(...)`. A path made only of letters, digits, and `_@%+=:,./-` needs no
+Some places have no escaping mergetrain can prove correct: backquotes, `${...}`,
+`$((...))`, and `$'...'`. The same holds for everything after a construct that
+shells parse differently: a here-document or here-string (`<<`, `<<<`, and a
+bash arithmetic shift such as `$[1<<2]` look alike), or a comment or `case`
+statement inside `$(...)`. A path made only of letters, digits, and `_@%+=:,./-` needs no
 escaping and expands there as-is. Any other path fails the gate with an error
 before the command runs; use `"$MERGETRAIN_REPO"` or `"$MERGETRAIN_WORKTREE"` in
 those places instead. A verify hook with this problem blocks the deploy before

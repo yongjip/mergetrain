@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Refuse a `${repo}` or `${worktree}` path that needs quoting anywhere after
+  a `<<` or `<<<` in a gate, verify-hook, or reuse-fingerprint command. bash
+  also reads `<<` as a shift inside arithmetic such as `$[1<<2]` or
+  `a[1<<2]=x`, and the placeholder scanner took it for a here-document. It then
+  skipped the following lines as a here-document body and could quote a later
+  path for the wrong context, so a path containing shell syntax could run as a
+  command under bash. Commands that put a here-document before such a path now
+  fail with a `ConfigError` before anything runs; use `"$MERGETRAIN_REPO"` or
+  `"$MERGETRAIN_WORKTREE"` there instead. A path made only of letters, digits,
+  and `_@%+=:,./-` still expands anywhere.
+
 ## 3.1.0 - 2026-09-29
 
 - Stop a quote character in a gate comment from unquoting a later `${repo}` or

@@ -1683,7 +1683,7 @@ deploy:
                 conn.close()
 
             self.assertEqual(result.status, "blocked")
-            self.assertIn("${worktree} inside a here-document", result.note)
+            self.assertIn("${worktree} after a here-document", result.note)
             self.assertIn('"$MERGETRAIN_WORKTREE"', result.note)
             self.assertFalse(ran.exists())
 
@@ -1704,7 +1704,7 @@ deploy:
 
             self.assertEqual(result.status, "blocked")
             self.assertEqual(result.push_status, "not_run")
-            self.assertIn("${repo} inside a here-document", result.note)
+            self.assertIn("${repo} after a here-document", result.note)
             self.assertEqual(git(root / "remote.git", "rev-parse", "main"), before)
 
     def test_unchanged_validated_train_reuses_gates_and_still_verifies(self) -> None:
