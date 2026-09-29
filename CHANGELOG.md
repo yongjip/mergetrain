@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- On Windows, keep a push findable while any process of it still runs.
+  Windows drops a job's name with its last handle, and only `git push` and the
+  runner held one; Git for Windows gives the processes it starts no handle to
+  the job. When `git push` died on its own, a local `receive-pack` that already
+  had the whole push could keep running and land it after `reconcile` had read
+  the remote and found nothing. A small keeper process outside the job now
+  holds its name until the push's last process exits, or until `git push`
+  succeeds.
 - Requeue a deploy instead of blocking it when the remote refuses its push
   because the integration branch moved, after the train was built, to a commit
   that already contains every job of the train. On a network remote, an

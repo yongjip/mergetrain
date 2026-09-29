@@ -115,11 +115,12 @@ def _join_job(  # pragma: no cover - Windows compatibility
 
 @contextmanager
 def _job_handle_for_command(job: WindowsJob | None) -> Iterator[Any]:
-    """Yield the ``startupinfo`` that gives the command a handle to its named job.
+    """Yield the ``startupinfo`` that gives a new process a handle to the named job.
 
     Windows forgets an object's name once the last handle to it closes, even
-    while processes still run in it. A command holding its own handle keeps
-    its job findable by name after a runner killed mid-push lost its handle.
+    while processes still run in it. The command and its keeper each hold one,
+    so the job stays findable by name after a runner killed mid-push lost its
+    handle.
     """
 
     handle = job.handle if job is not None else None
@@ -131,6 +132,47 @@ def _job_handle_for_command(job: WindowsJob | None) -> Iterator[Any]:
         yield subprocess.STARTUPINFO(lpAttributeList={"handle_list": [handle]})
     finally:  # pragma: no cover - Windows compatibility
         os.set_handle_inheritable(handle, False)
+
+
+# Runs outside a named job and holds an inherited handle to it until no process
+# of the job runs, so the job stays findable after its command and runner are
+# gone: a local receive-pack can outlive a git push that dies on its own, and
+# Git for Windows gives it no handle to the job.
+_JOB_KEEPER = (
+    "import sys\n"
+    "from mergetrain.windows_job import hold_until_idle\n"
+    "hold_until_idle(int(sys.argv[1]))\n"
+)
+_KEEPERS: list[subprocess.Popen[bytes]] = []
+
+
+def _start_job_keeper(  # pragma: no cover - Windows compatibility
+    job: WindowsJob,
+) -> subprocess.Popen[bytes] | None:
+    """Start the process that keeps a named job findable; None if it cannot start."""
+
+    _KEEPERS[:] = [keeper for keeper in _KEEPERS if keeper.poll() is None]
+    package_root = str(Path(__file__).resolve().parents[1])
+    search_path = os.pathsep.join(
+        path for path in (package_root, os.environ.get("PYTHONPATH", "")) if path
+    )
+    try:
+        with _job_handle_for_command(job) as startupinfo:
+            keeper = subprocess.Popen(
+                [sys.executable, "-c", _JOB_KEEPER, str(job.handle)],
+                cwd=package_root,
+                env={**os.environ, "PYTHONPATH": search_path},
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+    except OSError:
+        return None
+    _KEEPERS.append(keeper)
+    return keeper
 
 
 def _stop_windows_process_tree(
@@ -264,7 +306,8 @@ def _run_managed(
     """Run one non-interactive process while enforcing pulse, timeout, and cancel.
 
     ``pass_fds`` stay open in the process and everything it starts (POSIX);
-    ``job_name`` names its Windows job so that other processes can find it.
+    ``job_name`` names its Windows job so that other processes can find it for
+    as long as any process of the job runs, or until the command succeeds.
     """
 
     if cancel_event is not None and cancel_event.is_set():
@@ -272,6 +315,7 @@ def _run_managed(
     if pulse is not None:
         pulse()
     job = WindowsJob.create(job_name) if os.name == "nt" else None
+    keeper: subprocess.Popen[bytes] | None = None
     try:
         with _job_handle_for_command(job if job_name else None) as startupinfo:
             process = subprocess.Popen(
@@ -301,6 +345,8 @@ def _run_managed(
             )
         if job is not None:  # pragma: no cover - Windows compatibility
             job = _join_job(job, process)
+            if job is not None and job_name:
+                keeper = _start_job_keeper(job)
     except BaseException:
         if job is not None:  # pragma: no cover - Windows compatibility
             job.close()
@@ -361,6 +407,13 @@ def _run_managed(
         for reader in readers:
             reader.join(timeout=max(0.0, join_deadline - time.monotonic()))
         if job is not None:  # pragma: no cover - Windows compatibility
+            # A command that succeeded has done its work, so what it left
+            # running must not keep it findable. Any other exit keeps the
+            # keeper until the job is empty: Windows reports a killed process
+            # with an ordinary exit status.
+            if keeper is not None and process.returncode == 0:
+                keeper.kill()
+                keeper.wait()
             job.close()
 
     stdout = "".join(stdout_tail)

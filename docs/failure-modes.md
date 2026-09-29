@@ -114,7 +114,11 @@ Windows), so `git push` keeps running and can still land afterwards. The runner
 takes a lock before it pushes and hands it to `git push`, and every process the
 push starts, a local `receive-pack` and its hooks included, inherits it. On
 Windows the push's Job Object is named after the queue and the commit instead,
-and `git push` holds its own handle to it, so the name outlives the runner.
+and a small keeper process outside the job holds a handle to it until no process
+of the push is left, so the name outlives the runner and a `git push` that dies
+on its own. Windows keeps these names per logon session, so a runner and a
+`reconcile` in different sessions, such as a daemon running as a service, do
+not see each other's push.
 While any process of that push is alive, `reconcile` refuses with `lock_held`
 (exit 3) and leaves the job parked, so it never reads the remote before the
 push has finished changing it. Rerun reconcile once the push has exited.
@@ -139,7 +143,10 @@ stopped, nothing releases the lock early, so such a process keeps it after the
 push itself has exited. The `lock_held` error names the lock file under
 `push-locks/` in the state directory. Once no `git` process of that push is
 left, stop the process that holds the file (`lsof <file>` shows it), or delete
-the file, and rerun reconcile.
+the file, and rerun reconcile. On Windows only a `git push` that succeeds
+releases its job early, because Windows reports a killed process with an
+ordinary exit status; otherwise stop the process that still runs in the push's
+job, and the keeper exits with it.
 
 Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 

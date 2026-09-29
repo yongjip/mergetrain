@@ -230,6 +230,19 @@ class WindowsJob:  # pragma: no cover - Windows only
             self._handle = None
 
 
+def hold_until_idle(handle: int, *, interval: float = 0.1) -> None:  # pragma: no cover - Windows only
+    """Keep a handle to a job open until no process runs in the job.
+
+    Run from a process outside the job, this keeps a named job findable for as
+    long as any process of it runs. Windows drops the name with the job's last
+    handle, and a descendant such as a local receive-pack holds none.
+    """
+
+    job = WindowsJob(_api(), handle)
+    while job._active_processes():
+        time.sleep(interval)
+
+
 def named_job_active(name: str) -> bool:  # pragma: no cover - Windows only
     """Whether the named job still holds a running process.
 

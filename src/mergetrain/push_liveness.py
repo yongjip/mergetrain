@@ -15,8 +15,11 @@ status of its own, though, it has waited for the processes that do the push,
 and the runner releases the lock for every copy of the descriptor: helpers the
 push left running, such as a credential cache daemon, then cannot keep a
 finished push "in flight". On Windows the push's Job Object carries a name
-derived from the queue and the commit, and ``git push`` holds its own handle to
-that job, which keeps the name alive after the runner is gone.
+derived from the queue and the commit. ``git push`` and a small keeper process
+outside the job each hold a handle to it, and the keeper holds its handle until
+no process of the push runs, so the name outlives both the runner and a
+``git push`` that dies on its own. Only a ``git push`` that succeeds stops the
+keeper early: Windows reports a killed process with an ordinary exit status.
 
 Network remotes keep one gap this cannot close: a server that already received
 the whole push may still apply it after the client has died.
