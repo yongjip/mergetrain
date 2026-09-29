@@ -42,7 +42,10 @@ def argv(shell: str, command: str) -> list[str]:
         timeout=60,
     )
     if completed.returncode != 0:
-        raise AssertionError(f"{shell} failed: {completed.stderr}")
+        raise AssertionError(
+            f"{shell} failed with exit code {completed.returncode}; "
+            f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
+        )
     return json.loads(completed.stdout.splitlines()[-1])
 
 

@@ -469,6 +469,13 @@ class PayloadTests(unittest.TestCase):
 
 
 class ProcessLifecycleTests(unittest.TestCase):
+    # Every program these tests start exits on its own after about a minute,
+    # so no Windows cleanup has to kill by process ID: Windows soon reuses the
+    # ID of an exited process, and `taskkill /PID <id> /T /F` would then
+    # force-kill an unrelated process and its tree. Each test gives up waiting
+    # well within that minute, so a gate that outlives cancellation fails the
+    # test before it can exit on its own.
+
     def setUp(self) -> None:
         self.tools = MergetrainTools(repo=Path("/repo"))
 
@@ -540,17 +547,16 @@ class ProcessLifecycleTests(unittest.TestCase):
             "import sys, time\n"
             "heartbeat = Path(sys.argv[1])\n"
             "counter = 0\n"
-            "while True:\n"
+            "deadline = time.monotonic() + 60\n"
+            "while time.monotonic() < deadline:\n"
             "    heartbeat.write_text(str(counter), encoding='utf-8')\n"
             "    counter += 1\n"
             "    time.sleep(0.02)\n"
         )
         parent_program = (
-            "from pathlib import Path\n"
-            "import os, subprocess, sys, time\n"
-            "child = subprocess.Popen([sys.executable, '-c', sys.argv[3], sys.argv[2]], "
+            "import subprocess, sys, time\n"
+            "subprocess.Popen([sys.executable, '-c', sys.argv[2], sys.argv[1]], "
             "creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)\n"
-            "Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}', encoding='utf-8')\n"
             "time.sleep(60)\n"
         )
 
@@ -562,52 +568,29 @@ class ProcessLifecycleTests(unittest.TestCase):
             self.fail(f"timed out waiting for {what}")
 
         async def scenario(root: Path) -> None:
-            pid_path = root / "pids.txt"
             heartbeat_path = root / "heartbeat.txt"
-            argv = [
-                sys.executable,
-                "-c",
-                parent_program,
-                str(pid_path),
-                str(heartbeat_path),
-                heartbeat_program,
-            ]
-            pids: list[str] = []
-            task: asyncio.Task[subprocess.CompletedProcess[str]] | None = None
-            try:
-                with patch.object(MergetrainTools, "_argv", return_value=argv):
-                    task = asyncio.create_task(self.tools._run(["doctor"]))
-                    await wait_for(
-                        lambda: pid_path.exists() and pid_path.stat().st_size, "the gate pids"
-                    )
-                    pids = pid_path.read_text(encoding="utf-8").split()
-                    await wait_for(heartbeat_path.exists, "the first heartbeat")
-                    before = heartbeat_path.read_text(encoding="utf-8")
-                    await wait_for(
-                        lambda: heartbeat_path.read_text(encoding="utf-8") != before,
-                        "the heartbeat to advance",
-                    )
-                    task.cancel()
-                    done, _ = await asyncio.wait({task}, timeout=30)
-                    self.assertIn(task, done, "cancelling the MCP task did not finish")
-                    with self.assertRaises(asyncio.CancelledError):
-                        task.result()
-                await asyncio.sleep(0.3)
-                stopped = heartbeat_path.read_text(encoding="utf-8")
-                await asyncio.sleep(0.3)
-                self.assertEqual(
-                    heartbeat_path.read_text(encoding="utf-8"),
-                    stopped,
-                    "the gate kept running after the MCP task was cancelled",
+            argv = [sys.executable, "-c", parent_program, str(heartbeat_path), heartbeat_program]
+            with patch.object(MergetrainTools, "_argv", return_value=argv):
+                task = asyncio.create_task(self.tools._run(["doctor"]))
+                await wait_for(heartbeat_path.exists, "the first heartbeat")
+                before = heartbeat_path.read_text(encoding="utf-8")
+                await wait_for(
+                    lambda: heartbeat_path.read_text(encoding="utf-8") != before,
+                    "the heartbeat to advance",
                 )
-            finally:
-                for pid in pids:
-                    subprocess.run(
-                        ["taskkill", "/PID", pid, "/T", "/F"],
-                        check=False,
-                        capture_output=True,
-                        timeout=10,
-                    )
+                task.cancel()
+                done, _ = await asyncio.wait({task}, timeout=30)
+                self.assertIn(task, done, "cancelling the MCP task did not finish")
+                with self.assertRaises(asyncio.CancelledError):
+                    task.result()
+            await asyncio.sleep(0.3)
+            stopped = heartbeat_path.read_text(encoding="utf-8")
+            await asyncio.sleep(0.3)
+            self.assertEqual(
+                heartbeat_path.read_text(encoding="utf-8"),
+                stopped,
+                "the gate kept running after the MCP task was cancelled",
+            )
 
         with tempfile.TemporaryDirectory() as tmp:
             asyncio.run(scenario(Path(tmp)))
@@ -618,7 +601,8 @@ class ProcessLifecycleTests(unittest.TestCase):
             "import sys, time\n"
             "heartbeat = Path(sys.argv[1])\n"
             "counter = 0\n"
-            "while True:\n"
+            "deadline = time.monotonic() + 60\n"
+            "while time.monotonic() < deadline:\n"
             "    heartbeat.write_text(str(counter), encoding='utf-8')\n"
             "    counter += 1\n"
             "    time.sleep(0.02)\n"
@@ -674,8 +658,10 @@ class ProcessLifecycleTests(unittest.TestCase):
                     before = heartbeat_path.read_text(encoding="utf-8")
                     await wait_for_change(heartbeat_path, before)
                     task.cancel()
+                    done, _ = await asyncio.wait({task}, timeout=30)
+                    self.assertIn(task, done, "cancelling the MCP task did not finish")
                     with self.assertRaises(asyncio.CancelledError):
-                        await task
+                        task.result()
                 await asyncio.sleep(0.1)
                 stopped = heartbeat_path.read_text(encoding="utf-8")
                 await asyncio.sleep(0.15)
@@ -689,17 +675,9 @@ class ProcessLifecycleTests(unittest.TestCase):
                     task.cancel()
                     with suppress(asyncio.CancelledError):
                         await task
-                if parent_pid:
-                    if os.name == "posix":
-                        with suppress(ProcessLookupError):
-                            os.killpg(parent_pid, signal.SIGKILL)
-                    else:  # pragma: no cover - Windows cleanup belt
-                        subprocess.run(
-                            ["taskkill", "/PID", str(parent_pid), "/T", "/F"],
-                            check=False,
-                            capture_output=True,
-                            timeout=10,
-                        )
+                if parent_pid and os.name == "posix":
+                    with suppress(ProcessLookupError):
+                        os.killpg(parent_pid, signal.SIGKILL)
 
         with tempfile.TemporaryDirectory() as tmp:
             asyncio.run(scenario(Path(tmp)))
