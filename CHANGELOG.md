@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.2.1 - 2026-09-29
 
 - Requeue a deploy instead of blocking it when the remote refuses its push
   but already contains every job of the train. On a network remote, an earlier
