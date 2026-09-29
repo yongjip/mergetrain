@@ -762,6 +762,52 @@ def select_validated_train(
     return selected, [job for job in jobs if job.train_id == selected["train_id"]]
 
 
+# Columns a status write keeps when its caller leaves them empty.
+_CARRIED_COLUMNS = (
+    "deploy_sha",
+    "log_path",
+    "push_status",
+    "verify_status",
+    "train_id",
+    "validated_at",
+    "validation_base_sha",
+    "validation_sha",
+    "validated_head_sha",
+    "validation_tree_sha",
+    "validation_gate_policy_sha",
+    "validation_environment_sha",
+    "validation_train_sha",
+    "reused_validation_sha",
+    "deployment_id",
+    "deployment_destination_sha",
+    "verification_policy_sha",
+)
+# The pending-push marker: kept until the push is settled deployed, canceled,
+# or requeued for a fresh attempt.
+_MARKER_COLUMNS = (
+    "pending_deploy_sha",
+    "pending_deploy_remote",
+    "pending_deploy_refs",
+    "pending_deploy_destination_sha",
+)
+_MARK_JOB_UPDATE = (
+    "UPDATE deploy_queue SET status = :status, note = :note, finished_at = :finished_at, "
+    + "".join(f"{column} = COALESCE(NULLIF(:{column}, ''), {column}), " for column in _CARRIED_COLUMNS)
+    + "train_size = COALESCE(NULLIF(:train_size, 0), train_size), "
+    "conflict_with = :conflict_with, "
+    "claim_token = CASE WHEN :status = 'in_progress' THEN claim_token ELSE '' END, "
+    "cancel_requested_at = CASE "
+    "WHEN :status IN ('in_progress', 'canceled', 'needs_reconcile') THEN cancel_requested_at "
+    "WHEN :status = 'blocked' AND pending_deploy_sha != '' THEN cancel_requested_at "
+    "ELSE '' END, "
+    + ", ".join(
+        f"{column} = CASE WHEN :status IN ('deployed', 'canceled', 'queued') "
+        f"THEN '' ELSE {column} END"
+        for column in _MARKER_COLUMNS
+    )
+)
+
+
 def mark_job(
     conn: sqlite3.Connection,
     job_id: int,
@@ -797,13 +843,11 @@ def mark_job(
     if verify_status and verify_status not in VERIFY_STATUSES:
         raise QueueError(f"unknown verify status: {verify_status}")
     finished_at = utc_now() if status in TERMINAL_STATUSES or status in {"blocked", "failed"} else ""
-    where = "id = ?"
-    where_values: list[Any] = [job_id]
+    where = "id = :job_id"
     if expected_claim_token is not None:
         if not expected_claim_token:
             raise LostLease("job claim token is missing")
-        where += " AND status = 'in_progress' AND claim_token = ?"
-        where_values.append(expected_claim_token)
+        where += " AND status = 'in_progress' AND claim_token = :expected_claim_token"
         # A marker-bearing ambiguous push must park for reconcile even when a
         # cancel arrived during remote I/O.  Reconcile, not the cancel request,
         # decides whether the push landed.  Preserve the request below so an
@@ -814,97 +858,39 @@ def mark_job(
         # Compare-and-swap on the source status, so a concurrent transition (e.g.
         # a cancel landing during reconcile's multi-second remote I/O) is never
         # silently overwritten by a stale recovery decision.
-        where += " AND status = ?"
-        where_values.append(expected_status)
+        where += " AND status = :expected_status"
+    params: dict[str, Any] = {
+        "job_id": job_id,
+        "status": status,
+        "note": note,
+        "finished_at": finished_at,
+        "train_size": train_size,
+        "conflict_with": conflict_with,
+        "expected_claim_token": expected_claim_token,
+        "expected_status": expected_status,
+        "deploy_sha": deploy_sha,
+        "log_path": log_path,
+        "push_status": push_status,
+        "verify_status": verify_status,
+        "train_id": train_id,
+        "validated_at": validated_at,
+        "validation_base_sha": validation_base_sha,
+        "validation_sha": validation_sha,
+        "validated_head_sha": validated_head_sha,
+        "validation_tree_sha": validation_tree_sha,
+        "validation_gate_policy_sha": validation_gate_policy_sha,
+        "validation_environment_sha": validation_environment_sha,
+        "validation_train_sha": validation_train_sha,
+        "reused_validation_sha": reused_validation_sha,
+        "deployment_id": deployment_id,
+        "deployment_destination_sha": deployment_destination_sha,
+        "verification_policy_sha": verification_policy_sha,
+    }
     # A cancel request survives the states that can still honor it. That
     # includes a reconcile conflict, which keeps its marker: a later reconcile
     # that finds the push never landed must cancel the job, not requeue it.
     with immediate(conn):
-        cur = conn.execute(
-            f"""
-            UPDATE deploy_queue
-            SET status = ?, deploy_sha = COALESCE(NULLIF(?, ''), deploy_sha),
-                log_path = COALESCE(NULLIF(?, ''), log_path), note = ?, finished_at = ?,
-                push_status = COALESCE(NULLIF(?, ''), push_status),
-                verify_status = COALESCE(NULLIF(?, ''), verify_status),
-                train_id = COALESCE(NULLIF(?, ''), train_id),
-                train_size = COALESCE(NULLIF(?, 0), train_size),
-                validated_at = COALESCE(NULLIF(?, ''), validated_at),
-                validation_base_sha = COALESCE(NULLIF(?, ''), validation_base_sha),
-                validation_sha = COALESCE(NULLIF(?, ''), validation_sha),
-                validated_head_sha = COALESCE(NULLIF(?, ''), validated_head_sha),
-                validation_tree_sha = COALESCE(NULLIF(?, ''), validation_tree_sha),
-                validation_gate_policy_sha = COALESCE(NULLIF(?, ''), validation_gate_policy_sha),
-                validation_environment_sha = COALESCE(NULLIF(?, ''), validation_environment_sha),
-                validation_train_sha = COALESCE(NULLIF(?, ''), validation_train_sha),
-                reused_validation_sha = COALESCE(NULLIF(?, ''), reused_validation_sha),
-                deployment_id = COALESCE(NULLIF(?, ''), deployment_id),
-                deployment_destination_sha = COALESCE(
-                    NULLIF(?, ''), deployment_destination_sha
-                ),
-                verification_policy_sha = COALESCE(
-                    NULLIF(?, ''), verification_policy_sha
-                ),
-                conflict_with = ?,
-                claim_token = CASE WHEN ? = 'in_progress' THEN claim_token ELSE '' END,
-                cancel_requested_at = CASE
-                    WHEN ? IN ('in_progress', 'canceled', 'needs_reconcile')
-                    THEN cancel_requested_at
-                    WHEN ? = 'blocked' AND pending_deploy_sha != ''
-                    THEN cancel_requested_at
-                    ELSE ''
-                END,
-                pending_deploy_sha = CASE
-                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
-                    ELSE pending_deploy_sha
-                END,
-                pending_deploy_remote = CASE
-                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
-                    ELSE pending_deploy_remote
-                END,
-                pending_deploy_refs = CASE
-                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
-                    ELSE pending_deploy_refs
-                END,
-                pending_deploy_destination_sha = CASE
-                    WHEN ? IN ('deployed', 'canceled', 'queued') THEN ''
-                    ELSE pending_deploy_destination_sha
-                END
-            WHERE {where}
-            """,
-            (
-                status,
-                deploy_sha,
-                log_path,
-                note,
-                finished_at,
-                push_status,
-                verify_status,
-                train_id,
-                train_size,
-                validated_at,
-                validation_base_sha,
-                validation_sha,
-                validated_head_sha,
-                validation_tree_sha,
-                validation_gate_policy_sha,
-                validation_environment_sha,
-                validation_train_sha,
-                reused_validation_sha,
-                deployment_id,
-                deployment_destination_sha,
-                verification_policy_sha,
-                conflict_with,
-                status,
-                status,
-                status,
-                status,
-                status,
-                status,
-                status,
-                *where_values,
-            ),
-        )
+        cur = conn.execute(f"{_MARK_JOB_UPDATE} WHERE {where}", params)
         if cur.rowcount != 1:
             row = conn.execute(
                 "SELECT status, claim_token, cancel_requested_at FROM deploy_queue WHERE id = ?",
