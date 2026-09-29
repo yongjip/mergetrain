@@ -18,6 +18,7 @@ from mergetrain.shell_quoting import expand_path_placeholders
 SHELL_PYTHON = sys.executable.replace("\\", "/")
 DUMP = f"{SHELL_PYTHON} -c 'import json,sys; print(json.dumps(sys.argv[1:]))'"
 SAFE = "/srv/build/repo/.mergetrain/worktrees/demo-1"
+_HERE = "after a here-document or here-string"
 
 
 def shells() -> list[str]:
@@ -118,14 +119,6 @@ class ShellContextTests(unittest.TestCase):
     def test_every_proven_context_delivers_the_exact_path(self) -> None:
         prefixes = (
             "",
-            "cat <<EOF >/dev/null\ndon't \"q\"\nEOF\n",
-            "cat <<'EOF' >/dev/null\ndon't $(x\nEOF\n",
-            "cat <<-EOF >/dev/null\n\tit's\n\tEOF\n",
-            "cat <<EOF >/dev/null # don't\nbody's\nEOF\n",
-            "cat <<A <<B >/dev/null\na's\nA\nb\"s\nB\n",
-            "cat <<'EOF' >/dev/null\nabc\\\nEOF\n",
-            "cat <<'' >/dev/null\nit's\n\n",
-            "cat <<EOF >/dev/null\n${HOME} it's\nEOF\n",
             "x=$(echo \"it's\") # don't\n",
             "x=\"$(echo 'a\"b')\"\n",
             "x=$(echo \\)) # it's\n",
@@ -161,11 +154,8 @@ class ShellContextTests(unittest.TestCase):
     def test_nested_constructs_end_where_the_shell_ends_them(self) -> None:
         quoted = "'/a b'"
         for prefix in (
-            'cat <<<"it\'s" >/dev/null; ',
             "echo $HOME; ",
             "x=$( (echo a) ); ",
-            "cat << EOF\nit's\nEOF\n",
-            "cat <<EOF\n\\$HOME \\` it's\nEOF\n",
             "x=`echo \\`date\\``; ",
             "x=${y:-`date`}; ",
             "x=${y:-$(echo \"it's\")}; ",
@@ -219,10 +209,10 @@ class RefusalTests(unittest.TestCase):
 
     def test_unprovable_contexts_refuse_a_path_that_needs_quoting(self) -> None:
         cases: dict[str, Any] = {
-            "cat <<EOF\n${worktree}\nEOF": "inside a here-document",
-            "cat <<'EOF'\nrm -rf ${worktree}\nEOF": "inside a here-document",
-            "sh <<EOF\nrm -rf ${worktree}/build\nEOF": "inside a here-document",
-            "cat <<${worktree}\nx\n": "here-document delimiter",
+            "cat <<EOF\n${worktree}\nEOF": _HERE,
+            "cat <<'EOF'\nrm -rf ${worktree}\nEOF": _HERE,
+            "sh <<EOF\nrm -rf ${worktree}/build\nEOF": _HERE,
+            "cat <<${worktree}\nx\n": _HERE,
             "echo `ls ${worktree}`": "inside a backquoted command substitution",
             "echo \"`ls ${worktree}`\"": "inside a backquoted command substitution",
             "echo ${x:-${worktree}}": "inside a ${...} expansion",
@@ -240,48 +230,67 @@ class RefusalTests(unittest.TestCase):
         cases = {
             "x=$(case a in a) echo;; esac)\necho ${worktree}": "a case statement inside $(...)",
             "x=$(echo a # c\n)\necho ${worktree}": "a comment inside $(...)",
-            "x=$(cat <<EOF\na)\nEOF\n)\necho ${worktree}": "a here-document inside $(...)",
-            "cat <<EOF\n$(date)\nEOF\necho ${worktree}": "an expansion inside a here-document",
-            "cat <<EOF\n`date`\nEOF\necho ${worktree}": "an expansion inside a here-document",
             "echo ${x:-'a'}\necho ${worktree}": "quoting inside a ${...} expansion",
             'echo ${x:-"a"}\necho ${worktree}': "quoting inside a ${...} expansion",
             "echo $((1+\"2\"))\necho ${worktree}": "quoting inside an arithmetic expansion",
             "echo $((1+`echo 2`))\necho ${worktree}": "quoting inside an arithmetic expansion",
             "echo $((1+\\2))\necho ${worktree}": "quoting inside an arithmetic expansion",
-            'cat <<"E$x"\nbody\nE$x\necho ${worktree}': "a here-document delimiter with escapes",
             "echo ${x:-a)b}\necho ${worktree}": "quoting inside a ${...} expansion",
             "echo `echo 'a'`\necho ${worktree}": "quoting inside a backquoted",
             "echo $'a\\'b'\necho ${worktree}": "a backslash inside a $'...' string",
             "echo $((1+'2'))\necho ${worktree}": "quoting inside an arithmetic expansion",
             "echo $((1)+(2))\necho ${worktree}": "unbalanced parentheses",
             "((x = 1))\necho ${worktree}": "'(('",
-            "cat <<-EOF\nabc\\\n\tEOF\nEOF\necho ${worktree}": "a continued line inside a here-doc",
-            # bash ends the body at the joined "EOF" line; dash does not.
-            "cat <<EOF\nEO\\\nF\necho ${worktree}\nEOF\n": "a continued line inside a here-doc",
-            "cat <<EOF\nabc\\\nEOF\nit's\nEOF\necho ${worktree}": "a continued line inside a",
+            # bash pairs quotes inside these and has no comments there, so the
+            # quote after '#' would otherwise leave the path unquoted.
+            "echo $[1 # ' ${worktree} ' ]": "a $[...] arithmetic expansion",
+            'echo "$[1 # \' ${worktree} \' ]"': "a $[...] arithmetic expansion",
+            "echo $(echo $[1 ) # ' ${worktree} ' ])": "a $[...] arithmetic expansion",
+            "a[1 # ' ${worktree} ' ]=x": "an array subscript",
+            "declare a[1 # ' ${worktree} ' ]=x": "an array subscript",
+            # bash reads these '<<' as a shift; the scan once read a here-doc.
+            "echo $[1<<2] >/dev/null\necho ${worktree}": "a $[...] arithmetic expansion",
+            "a[1<<2]=x\necho ${worktree}": "an array subscript",
             # Joined across the continuation, these spell '<<', '$(', and '(('.
             "cat <\\\n<EOF\nx\nEOF\necho ${worktree}": "a line continuation that joins",
             'echo "$\\\n(echo a)"\necho ${worktree}': "a line continuation that joins",
             "echo $\\\n(echo a)\necho ${worktree}": "a line continuation that joins",
             "x=$(\\\n(echo a))\necho ${worktree}": "a line continuation that joins",
             "(\\\n(x = 1))\necho ${worktree}": "a line continuation that joins",
-            "cat <<\"E\\\"F\"\nx\nE\"F\necho ${worktree}": "a here-document delimiter with escapes",
-            "cat <<E$x\nbody\nE$x\necho ${worktree}": "a here-document delimiter that contains",
-            "cat <<\necho ${worktree}": "a here-document operator without a delimiter",
-            "cat <<'EOF\necho ${worktree}": "inside a here-document",
-            "cat <<EOF $(echo a\n)\nEOF\necho ${worktree}": "whose body starts inside $(...)",
-            "cat <<'E\nx\necho ${worktree}": "inside a here-document delimiter",
-            "cat <<'E'\"F\nx\n\"\necho ${worktree}": "inside a here-document",
         }
         for command, where in cases.items():
             with self.subTest(command=command):
                 self.assert_refused(command, where)
 
-    def test_a_delimiter_built_from_a_placeholder_makes_later_ones_unprovable(self) -> None:
-        values = {"${repo}": SAFE, "${worktree}": "/a b"}
-        with self.assertRaises(ConfigError) as caught:
-            expand_path_placeholders("cat <<${repo}\nx\n${repo}\necho ${worktree}", values)
-        self.assertIn("after a here-document delimiter built from a placeholder", str(caught.exception))
+    def test_every_here_document_or_shift_makes_later_placeholders_unprovable(self) -> None:
+        for prefix in (
+            "cat <<EOF >/dev/null\nbody\nEOF\n",
+            "cat <<'EOF' >/dev/null\nbody\nEOF\n",
+            "cat <<-EOF >/dev/null\n\tbody\n\tEOF\n",
+            "cat <<A <<B >/dev/null\na\nA\nb\nB\n",
+            'cat <<<"it\'s" >/dev/null; ',
+            "x=$(cat <<EOF\na)\nEOF\n)\n",
+        ):
+            with self.subTest(prefix=prefix):
+                self.assert_refused(prefix + "echo ${worktree}", _HERE)
+
+    @unittest.skipUnless(os.name == "posix", "runs the command through POSIX shells")
+    def test_a_bash_shift_cannot_hide_a_quote_from_a_later_path(self) -> None:
+        # 3.1.0 skipped the lines after '$[1<<2]' as a here-document body, so it
+        # missed the quote they open and left the path unquoted inside it.
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / "ran"
+            path = f"/tmp/x $(touch {marker})"
+            for first in ("echo $[1<<2] >/dev/null", "a[1<<2]=x"):
+                command = f"{first}\n{DUMP} 'it\n2]\nx ${{worktree}}'"
+                with self.subTest(first=first):
+                    with self.assertRaises(ConfigError):
+                        expand(command, path)
+                    self.assertEqual(
+                        expand(command, SAFE),
+                        f"{first}\n{DUMP} 'it\n2]\nx {SAFE}'",
+                    )
+            self.assertFalse(marker.exists())
 
     def test_a_newline_in_a_path_cannot_end_a_comment(self) -> None:
         self.assert_refused("# uses ${worktree}\ntrue", "inside a comment", "/a\nrm -rf /")

@@ -339,6 +339,23 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.pending_deploy_sha, "")
 
+    def test_stats_and_inspect_classify_a_conflict_alike(self) -> None:
+        from mergetrain.observability import job_outcome, stats_payload
+
+        with tempfile.TemporaryDirectory() as td:
+            _repo, config, conn, job, _pending = self._landed_then_rewritten(Path(td))
+            try:
+                conflict = get_job(conn, job.id)
+            finally:
+                conn.close()
+            stats = stats_payload(config)
+        self.assertEqual(job_outcome(conflict)["failure_category"], "reconcile_conflict")
+        # Its push may have landed: neither a merge conflict nor a code problem.
+        reasons = stats["outcomes"]["not_landed_reason_counts"]
+        self.assertEqual(reasons["reconcile_conflict"], 1)
+        self.assertEqual(reasons["merge_conflict"], 0)
+        self.assertEqual(stats["outcomes"]["conflicts"]["merge_conflict_trains"], 0)
+
     def test_a_conflict_keeps_a_late_cancel_until_the_remote_answers(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -999,38 +1016,6 @@ class CrashRecoveryTests(unittest.TestCase):
                 ).stdout,
                 "",
             )
-
-    def test_isolation_push_site_writes_marker(self) -> None:
-        # Proves the one-by-one process_one push site is instrumented too.
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo, _ = make_demo_repo(root)
-            config = load_config(repo=repo)
-            conn = connect(config.state.db)
-            try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
-                ttl = config.queue.lock_ttl_minutes
-                claimed = claim_next_job(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
-                runner = GitRunner(config)
-                with self._crash_after_push(runner):
-                    with self.assertRaises(_Crash):
-                        runner.process_one(
-                            conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
-                        )
-                crashed = get_job(conn, job.id)
-                self.assertEqual(crashed.status, "in_progress")
-                self.assertNotEqual(crashed.pending_deploy_sha, "")
-                self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
-            finally:
-                conn.close()
-
-            conn = connect(config.state.db)
-            try:
-                recover(config, conn, gc=False)
-                healed = get_job(conn, job.id)
-            finally:
-                conn.close()
-            self.assertEqual(healed.status, "deployed")
 
 
 class DeployGateTests(unittest.TestCase):
@@ -1883,6 +1868,89 @@ class ReviewHardeningTests(unittest.TestCase):
                 any(item["job_id"] == stale.id for item in outcome.gc["swept_pending_refs"])
             )
             self.assertNotIn(pending_ref_name(stale.id), _pending_refs(repo))
+
+
+class RetryReleasesDeploymentIdentityTests(unittest.TestCase):
+    """A retried train member must not strand its siblings' verification.
+
+    A two-job train records one deployment identity with its pending push.
+    Reconcile parks both jobs as conflicts, an operator retries one with
+    ``--force``, and the remote heals. In 3.1.0 the retried row became
+    canceled but kept the shared deployment_id, so ``verify --job`` for the
+    deployed sibling failed with "inconsistent member state" for good.
+    """
+
+    def test_forced_retry_releases_its_deployment_identity(self) -> None:
+        from mergetrain.store import retry_job
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(
+                root, verify_command=f'{SHELL_PYTHON} -c "raise SystemExit(0)"'
+            )
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                first = enqueue_job(conn, task="a", branch="feature/a")
+                second = enqueue_job(conn, task="b", branch="feature/b")
+                pending = _pending_commit(repo)
+                token = "runner-token"
+                for job in (first, second):
+                    _pin(repo, job.id, pending)
+                    _stage_in_progress(conn, job.id, token)
+                record_pending_push(
+                    conn,
+                    job_ids=[first.id, second.id],
+                    deploy_sha=pending,
+                    claim_token=token,
+                    remote=config.git.remote,
+                    push_refs=config.git.push_refs,
+                    destination_sha=resolve_git_destination(config).push_endpoint_sha,
+                    verification_policy_sha=verification_policy_sha(config),
+                )
+                for job in (first, second):
+                    mark_job(
+                        conn,
+                        job.id,
+                        status="needs_reconcile",
+                        note="ambiguous push",
+                        expected_claim_token=token,
+                    )
+                # The push landed, then an administrator rewrote main without it.
+                base = git(repo, "rev-parse", "main")
+                git(
+                    repo,
+                    "push",
+                    "origin",
+                    f"{pending}:main",
+                    f"{pending}:{deploy_audit_ref_name(pending)}",
+                )
+                git(repo, "push", "--force", "origin", f"{base}:main")
+                self.assertEqual(reconcile(config, conn, apply=True).summary["conflicts"], 2)
+
+                dismissed, _replacement = retry_job(
+                    conn, first.id, base_sha=pending, head_sha=pending, force=True
+                )
+                git(repo, "push", "origin", f"{pending}:main")
+                healed = reconcile(config, conn, apply=True)
+                survivor = get_job(conn, second.id)
+            finally:
+                conn.close()
+            self.assertEqual(dismissed.status, "canceled")
+            self.assertEqual(dismissed.deployment_id, "")
+            self.assertEqual(dismissed.deployment_destination_sha, "")
+            self.assertEqual(dismissed.verification_policy_sha, "")
+            self.assertEqual(healed.summary["reconciled_deployed"], 1)
+            self.assertEqual(survivor.verify_status, "unknown")
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "verify", "--job", str(second.id), "--json"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 0, payload)
+            self.assertEqual(
+                payload["resolved"], [{"job_id": second.id, "verify_status": "succeeded"}]
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

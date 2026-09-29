@@ -72,7 +72,6 @@ from mergetrain.git_runner import GitRunner
 from mergetrain.recovery import reconcile
 from mergetrain.store import (
     claim_deploy_batch,
-    claim_next_job,
     connect,
     enqueue_job,
     get_job,
@@ -434,7 +433,7 @@ class ContentionNeverDestroysEvidenceTests(unittest.TestCase):
     with real reproductions:
 
     * The state can belong to a **different frame**. ``_process_isolated_jobs``
-      runs ``process_one`` inside ``process_batch``'s own try, so a nested job's
+      runs a one-job ``process_batch`` inside the outer one's try, so a nested job's
       contention was graded against the batch's ``push_status`` -- ``not_run``
       even when the nested job's refs had just landed -- and requeued it. The
       requeue then ran ``mark_job``, which CLEARS ``pending_deploy_sha`` and the
@@ -668,65 +667,6 @@ class ContentionTranslationTests(unittest.TestCase):
                         reconcile(config, conn, apply=True)
             finally:
                 conn.close()
-
-
-class ProcessOneContentionTests(unittest.TestCase):
-    """process_one has its own QueueBusy clause, and it is the one validate uses.
-
-    Everything else in this module drives process_batch, so the two clauses could
-    drift apart -- an adversarial review found process_one's entered by no test at
-    all, meaning a landed single-job deploy could have been reported as a bare
-    retryable failure without anything going red.
-    """
-
-    def test_prepush_contention_raises_instead_of_blaming_the_branch(self) -> None:
-        # The clause's real job is the NOT-landed case. Without it, QueueBusy
-        # reaches `except MergetrainError` and parks 'blocked' -- "fix the branch
-        # before this can merge" -- for a database that was merely busy. (The
-        # landed case cannot prove the clause: finish_after_error's landed-push
-        # guard overrides any status to 'deployed' there anyway.)
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo, _marker = make_demo_repo(root)
-            config = load_config(repo=repo)
-            conn = connect(config.state.db)
-            conn.execute(f"PRAGMA busy_timeout = {CONTENDED_BUSY_TIMEOUT_MS}")
-            try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
-                claimed = claim_next_job(conn, owner=f"runner:{os.getpid()}", deploy=True)
-                self.assertIsNotNone(claimed)
-                holder = _WriteLockHolder(config.state.db)
-                real_mark_job = git_runner_module.mark_job
-                contended = {"n": 0}
-
-                def wrapper(conn_arg, job_id, **kwargs):
-                    # Contend the opening write, i.e. before anything is pushed.
-                    if kwargs.get("status") == "in_progress" and not contended["n"]:
-                        contended["n"] += 1
-                        holder.start_holding()
-                        try:
-                            return real_mark_job(conn_arg, job_id, **kwargs)
-                        finally:
-                            holder.stop_holding()
-                    return real_mark_job(conn_arg, job_id, **kwargs)
-
-                with patch("mergetrain.git_runner.mark_job", wrapper):
-                    with self.assertRaises(QueueBusy):
-                        GitRunner(config).process_one(
-                            conn, claimed, deploy=True, owner=f"runner:{os.getpid()}"
-                        )
-                holder.assert_clean()
-                self.assertEqual(contended["n"], 1)
-                final = get_job(conn, job.id)
-            finally:
-                conn.close()
-
-            self.assertNotIn(final.status, ("blocked", "failed"))
-            self.assertEqual(final.push_status, "not_run")
-            self.assertEqual(
-                git(root / "remote.git", "rev-parse", "main"),
-                git(repo, "rev-parse", "origin/main"),
-            )
 
 
 class ContentionContractTests(unittest.TestCase):

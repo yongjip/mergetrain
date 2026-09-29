@@ -4,13 +4,14 @@ Gate, verify-hook, and reuse-fingerprint commands run through ``/bin/sh -c``.
 ``${repo}`` and ``${worktree}`` must each become exactly one path, so every
 occurrence is escaped for the context the shell reads it in. The scanner below
 lexes the command the way POSIX ``sh`` does -- quotes, backslashes, comments,
-``$(...)`` command substitutions, and here-documents -- to find that context.
+and ``$(...)`` command substitutions -- to find that context.
 
-Some contexts cannot be escaped with certainty. A here-document body is data
-whose consumer may itself be a shell; backquotes re-parse their contents; and
-``${...}``, ``$((...))``, and ``$'...'`` differ between shells. A path that
-needs quoting is refused there, and anywhere after a construct whose extent the
-scanner cannot pin down, instead of being guessed. A path made only of
+Some contexts cannot be escaped with certainty. Backquotes re-parse their
+contents, and ``${...}``, ``$((...))``, and ``$'...'`` differ between shells. A
+``<<`` may open a here-document, whose body is data that the scan cannot follow,
+or may be a shift inside bash arithmetic such as ``$[1<<2]``. A path that needs
+quoting is refused inside those constructs, and anywhere after one whose extent
+the scanner cannot pin down, instead of being guessed. A path made only of
 characters that are literal in every context is inserted verbatim anywhere.
 """
 
@@ -19,7 +20,6 @@ from __future__ import annotations
 import re
 import shlex
 from collections.abc import Mapping
-from dataclasses import dataclass
 
 from .errors import ConfigError
 
@@ -27,15 +27,12 @@ from .errors import ConfigError
 # comments, here-documents, and every expansion. It is the set shlex.quote
 # leaves bare, so such a value renders the same way in every context.
 _CONTEXT_FREE = re.compile(r"[A-Za-z0-9_@%+=:,./-]+")
-_BLANKS = " \t"
 # Characters that end an unquoted word; a '#' right after one starts a comment.
 _WORD_END = " \t\n;&|()<>"
+# A shell variable name; bash reads 'name[' as the start of an array subscript.
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # After a backslash inside double quotes, only these characters are escaped.
 _DOUBLE_QUOTE_ESCAPABLE = '$`"\\\n'
-# After a backslash in an unquoted here-document body, only these are escaped.
-_HERE_DOCUMENT_ESCAPABLE = "$`\\\n"
-# A ${...} that is only a parameter name cannot span lines.
-_SIMPLE_PARAMETER = re.compile(r"\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[#?$!@*-])\}")
 # A line continuation after one of these can spell '$(', '<<', or '((' across
 # the joined lines, which the scan has already read as separate characters.
 _JOINABLE = "$<("
@@ -62,20 +59,6 @@ def _escape_double_quoted(value: str) -> str:
     )
 
 
-def _ends_with_escaped_newline(line: str) -> bool:
-    """Whether an unquoted here-document line continues onto the next one."""
-
-    trailing = len(line) - len(line.rstrip("\\"))
-    return trailing % 2 == 1
-
-
-@dataclass(frozen=True, slots=True)
-class _HereDocument:
-    delimiter: str
-    strip_tabs: bool
-    quoted: bool
-
-
 class _Scanner:
     """Copy a command while escaping each placeholder for its shell context."""
 
@@ -87,8 +70,6 @@ class _Scanner:
         # Once set, the scanner can no longer prove where later text lands, so
         # every later placeholder that needs quoting is refused.
         self.unproven = ""
-        # Here-documents waiting for the next newline, one list per nesting level.
-        self.pending: list[list[_HereDocument]] = []
 
     def expand(self) -> str:
         self.code(nested=False)
@@ -154,87 +135,81 @@ class _Scanner:
         """
 
         text = self.text
-        pending: list[_HereDocument] = []
-        self.pending.append(pending)
         word_start = True
         word = ""
         plain = True
         depth = 0
-        try:
-            while self.pos < len(text):
-                if self.placeholder(_UNQUOTED):
-                    word_start = plain = False
-                    continue
-                char = text[self.pos]
-                if char == "\\":
-                    if self.at("\\\n"):
-                        # Line continuation joins lines without ending the word.
-                        if self.pos and text[self.pos - 1] in _JOINABLE:
-                            self.doubt(_JOINED)
-                        self.copy(2)
-                        continue
+        while self.pos < len(text):
+            if self.placeholder(_UNQUOTED):
+                word_start = plain = False
+                continue
+            char = text[self.pos]
+            if char == "\\":
+                if self.at("\\\n"):
+                    # Line continuation joins lines without ending the word.
+                    if self.pos and text[self.pos - 1] in _JOINABLE:
+                        self.doubt(_JOINED)
                     self.copy(2)
-                    word_start = plain = False
                     continue
-                if char in "'\"`$":
-                    if char == "'":
-                        self.single_quoted()
-                    elif char == '"':
-                        self.double_quoted()
-                    elif char == "`":
-                        self.backquoted()
-                    else:
-                        self.dollar(quoted=False)
-                    word_start = plain = False
-                    continue
-                if char == "#" and word_start:
-                    if nested:
-                        # bash 3.2, macOS's /bin/sh, misses comments while it
-                        # looks for the ')' that closes a substitution.
-                        self.doubt("a comment inside $(...)")
-                    self.comment()
-                    continue
-                if char not in _WORD_END:
-                    if plain:
-                        word += char
-                    self.copy(1)
-                    word_start = False
-                    continue
-
-                if nested and plain and word == "case":
-                    # A case pattern's ')' does not close the substitution, and
-                    # a pattern scan cannot tell which ')' does.
-                    self.doubt("a case statement inside $(...)")
-                word = ""
-                plain = True
-                word_start = True
-                if char == "\n":
-                    self.copy(1)
-                    if any(outer for outer in self.pending[:-1]):
-                        self.doubt("a here-document whose body starts inside $(...)")
-                    for document in pending:
-                        self.here_document_body(document)
-                    pending.clear()
-                elif char == "(":
-                    if self.at("(("):
-                        # bash reads '((' as arithmetic, dash as two subshells.
-                        self.doubt("'(('")
-                    depth += 1
-                    self.copy(1)
-                elif char == ")":
-                    if nested:
-                        if depth == 0:
-                            return
-                        depth -= 1
-                    self.copy(1)
-                elif self.at("<<<"):
-                    self.copy(3)
-                elif self.at("<<"):
-                    self.here_document_operator(pending)
+                self.copy(2)
+                word_start = plain = False
+                continue
+            if char in "'\"`$":
+                if char == "'":
+                    self.single_quoted()
+                elif char == '"':
+                    self.double_quoted()
+                elif char == "`":
+                    self.backquoted()
                 else:
-                    self.copy(1)
-        finally:
-            self.pending.pop()
+                    self.dollar(quoted=False)
+                word_start = plain = False
+                continue
+            if char == "#" and word_start:
+                if nested:
+                    # bash 3.2, macOS's /bin/sh, misses comments while it
+                    # looks for the ')' that closes a substitution.
+                    self.doubt("a comment inside $(...)")
+                self.comment()
+                continue
+            if char not in _WORD_END:
+                if char == "[" and plain and _NAME.fullmatch(word):
+                    # bash reads 'name[...]' as an array subscript, which pairs
+                    # quotes and has no comments, unlike an ordinary word.
+                    self.doubt("an array subscript")
+                if plain:
+                    word += char
+                self.copy(1)
+                word_start = False
+                continue
+
+            if nested and plain and word == "case":
+                # A case pattern's ')' does not close the substitution, and
+                # a pattern scan cannot tell which ')' does.
+                self.doubt("a case statement inside $(...)")
+            word = ""
+            plain = True
+            word_start = True
+            if char == "(":
+                if self.at("(("):
+                    # bash reads '((' as arithmetic, dash as two subshells.
+                    self.doubt("'(('")
+                depth += 1
+                self.copy(1)
+            elif char == ")":
+                if nested:
+                    if depth == 0:
+                        return
+                    depth -= 1
+                self.copy(1)
+            elif self.at("<<"):
+                # A here-document or here-string, or a shift in bash
+                # arithmetic ('$[1<<2]', 'a[1<<2]=x'): the shells read the
+                # following text in different ways.
+                self.doubt("a here-document or here-string")
+                self.copy(2)
+            else:
+                self.copy(1)
 
     def comment(self) -> None:
         text = self.text
@@ -293,6 +268,11 @@ class _Scanner:
             self.parameter()
         elif not quoted and self.at("$'"):
             self.ansi_c_quoted()
+        elif self.at("$["):
+            # bash arithmetic: it pairs quotes and has no comments inside, so
+            # a '#' or ')' in it would mislead this scan about what follows.
+            self.doubt("a $[...] arithmetic expansion")
+            self.copy(2)
         else:
             self.copy(1)
             for key, value in self.values.items():
@@ -403,109 +383,6 @@ class _Scanner:
             self.copy(1)
             if char == "'":
                 return
-
-    # -- here-documents -------------------------------------------------------
-
-    def here_document_operator(self, pending: list[_HereDocument]) -> None:
-        text = self.text
-        if len(self.pending) > 1:
-            # bash 3.2 closes a substitution at a ')' inside the body.
-            self.doubt("a here-document inside $(...)")
-        self.copy(2)
-        strip_tabs = self.at("-")
-        if strip_tabs:
-            self.copy(1)
-        while self.pos < len(text) and text[self.pos] in _BLANKS:
-            self.copy(1)
-        start = self.pos
-        delimiter: list[str] = []
-        quoted = False
-        quote = ""
-        while self.pos < len(text) and (quote or text[self.pos] not in _WORD_END):
-            before = len(self.out)
-            if self.placeholder("a here-document delimiter"):
-                self.doubt("a here-document delimiter built from a placeholder")
-                delimiter.extend(self.out[before:])
-                continue
-            char = text[self.pos]
-            if char == quote:
-                quote = ""
-                self.copy(1)
-                continue
-            if not quote and char in "'\"":
-                quoted = True
-                quote = char
-                self.copy(1)
-                continue
-            if quote == '"' and char in "$`":
-                self.doubt("a here-document delimiter with escapes")
-            if char == "\\" and quote != "'":
-                quoted = True
-                if quote or self.at("\\\n"):
-                    self.doubt("a here-document delimiter with escapes")
-                delimiter.append(text[self.pos + 1 : self.pos + 2])
-                self.copy(2)
-                continue
-            if not quote and char in "$`":
-                self.doubt("a here-document delimiter that contains an expansion")
-            delimiter.append(char)
-            self.copy(1)
-        if self.pos == start:
-            self.doubt("a here-document operator without a delimiter")
-        pending.append(_HereDocument("".join(delimiter), strip_tabs, quoted))
-
-    def here_document_body(self, document: _HereDocument) -> None:
-        """Copy one body up to and including its delimiter line."""
-
-        text = self.text
-        while self.pos < len(text):
-            parts: list[str] = []
-            while True:
-                end = text.find("\n", self.pos)
-                if end < 0:
-                    end = len(text)
-                before = len(self.out)
-                self.here_document_text(end, expands=not document.quoted)
-                line = "".join(self.out[before:])
-                continued = (
-                    not document.quoted
-                    and end < len(text)
-                    and _ends_with_escaped_newline(line)
-                )
-                if not continued:
-                    parts.append(line)
-                    break
-                # bash joins the lines before it looks for the delimiter, and
-                # dash does not, so the shells can end the body in different
-                # places.
-                self.doubt("a continued line inside a here-document")
-                parts.append(line[:-1])
-                self.copy(1)
-            logical = "".join(parts)
-            if document.strip_tabs:
-                logical = logical.lstrip("\t")
-            self.copy(1)
-            if logical == document.delimiter:
-                return
-
-    def here_document_text(self, end: int, *, expands: bool) -> None:
-        text = self.text
-        while self.pos < end:
-            if self.placeholder("a here-document"):
-                continue
-            if expands:
-                char = text[self.pos]
-                if char == "\\" and self.pos + 1 < end:
-                    if text[self.pos + 1] in _HERE_DOCUMENT_ESCAPABLE:
-                        self.copy(2)
-                        continue
-                elif (char == "`" or self.at("$(")) or (
-                    self.at("${") and not _SIMPLE_PARAMETER.match(text, self.pos)
-                ):
-                    # dash lets a substitution run past the delimiter line;
-                    # bash ends the body there first.
-                    self.doubt("an expansion inside a here-document")
-            self.copy(1)
 
 
 def expand_path_placeholders(command: str, values: Mapping[str, str]) -> str:

@@ -44,7 +44,7 @@ one-way responsibilities:
 | `validation_reuse.py` | validation identity construction and the fail-closed validated-reuse decision table |
 | `worktree_manager.py` | ephemeral and persistent integration-worktree preparation, cleanup, and declared cache handling |
 | `atomic_push.py` | the clean-tree tripwire, durable pending marker, audit ref, atomic push classification, and post-push verification state |
-| `git_runner.py` | queue events and lease fencing plus single-job, batch assembly, failure isolation, and bisection orchestration |
+| `git_runner.py` | queue events and lease fencing plus train assembly, failure isolation, and bisection orchestration |
 
 Dependencies point toward the narrow collaborators: `git_runner` composes
 them, while CLI and recovery code import only the primitives they use. The
@@ -390,15 +390,18 @@ During `validate`, the runner merges all queued jobs into one integration
 worktree in order. A branch that conflicts is marked `blocked`, `git merge
 --abort` is attempted, and the remaining jobs are still tried. Gates then run
 **once** over the whole train. If a pre-push gate fails, the train is torn
-down and the failure is isolated. A one-job train is reprocessed directly;
-multi-job trains use subset re-assembly and gate probes to find either an
+down and the failure is isolated. A one-job train needs no isolation: its
+failed tree is exactly the base plus that job, so the job finishes `failed`
+without its gates running again. Multi-job trains use subset re-assembly and
+gate probes to find either an
 individually failing job (`failed`) or a minimal set of jobs that pass alone but
 fail together — a **semantic conflict**, finished `blocked` with partner job IDs
 in `conflict_with` and partner SHAs in the note. Every conflict member is
 verified to pass alone before being blamed; probes that hit merge conflicts
 or a non-reproducing failure abort probing and fall back to one-by-one
-isolation. Surviving jobs re-run as a fresh train, so nothing ships without
-a full gate pass over the exact final combination. Successful jobs receive
+isolation, which runs each job as a one-job train. Surviving jobs re-run as a
+fresh train, so nothing ships without a full gate pass over the exact final
+combination. Successful jobs receive
 a shared train identity and validation SHA. Path-scoped gates are evaluated
 against each probe's captured base and exact probe SHA, so a skipped gate cannot
 hide a failure during isolation.
@@ -464,9 +467,12 @@ omitted field defaults to the integration branch.
 
 Human-gated deploys may carry the `deploy_plan_sha` emitted by preview. The hash
 covers the exact validated train, resolved fetch/push destination identity, pre-push
-gate/reuse policy, and post-push verify hooks. It is checked once before claim
-and again immediately before the recovery marker and atomic push. Auto jobs use
-the narrower persisted destination identity at the same two boundaries.
+gate/reuse policy, and post-push verify hooks. It is checked inside the claim
+transaction, against the exact validated train being claimed, and again
+immediately before the recovery marker and atomic push, including for trains
+that bisect or isolation re-run. A confirmed deploy never claims queued jobs.
+Auto jobs use the narrower persisted destination identity at the same two
+boundaries.
 
 Contract 2 uses the canonical `deploy` vocabulary throughout. Machine state
 remains `deployed`/`deploy_sha`. Completion proves the Git ref update only; it

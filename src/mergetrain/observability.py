@@ -12,7 +12,13 @@ from typing import Any
 
 from .config import MergetrainConfig, effective_gates
 from .errors import redact_and_bound
-from .evidence import history_groups, history_status, product_evidence, run_mode
+from .evidence import (
+    failure_category,
+    history_groups,
+    history_status,
+    product_evidence,
+    run_mode,
+)
 from .models import Job, RunEvent, RunnerLock
 from .store import (
     RUN_EVENT_RETENTION,
@@ -703,52 +709,9 @@ def job_outcome(job: Job) -> dict[str, Any]:
     elif job.status == "canceled":
         severity = "failure"
         category = "canceled"
-    elif job.status == "blocked":
+    elif job.status in {"blocked", "failed"}:
         severity = "failure"
-        lowered = message.lower()
-        if job.pending_deploy_sha:
-            # Reconcile could not settle this push and kept its marker: it may
-            # have landed, so it is neither a merge nor a gate problem (#224).
-            category = "reconcile_conflict"
-        elif job.push_status == "failed":
-            # Blocked at the push, not the merge/gates: the remote refused the
-            # ref update (protected branch / required PR / permission). A
-            # repo-config action, not a code fix — agents branch on this
-            # category instead of regexing the note.
-            category = "push_rejected"
-        elif (
-            "approval_destination_changed" in lowered
-            or "approval_execution_policy_changed" in lowered
-            or "deploy_plan_changed" in lowered
-        ):
-            category = "deploy_authorization_changed"
-        elif job.conflict_with:
-            # Semantic conflicts are successful individual merges whose
-            # combined tree fails validation.  They require coordination with
-            # the named partner jobs, not a textual merge-conflict repair.
-            category = "semantic_conflict"
-        elif "conflict" in lowered:
-            category = "merge_conflict"
-        elif "head changed" in lowered or "identity" in lowered:
-            category = "source_identity_mismatch"
-        elif "reuse" in lowered or "fingerprint" in lowered:
-            category = "validated_reuse_mismatch"
-        else:
-            category = "merge_blocked"
-    elif job.status == "failed":
-        severity = "failure"
-        lowered = message.lower()
-        if job.push_status == "failed":
-            # Rely on the structured push_status, not a note substring: a gate
-            # named e.g. "no-force-push" fails before any push is attempted
-            # (push_status stays not_run) and must not be mislabeled push_failed.
-            category = "push_failed"
-        elif "timed out" in lowered:
-            category = "command_timeout"
-        elif "gate" in lowered or "command failed" in lowered:
-            category = "gate_failed"
-        else:
-            category = "runner_failed"
+        category = failure_category(job)
     elif job.status == "in_progress":
         category = "running"
 

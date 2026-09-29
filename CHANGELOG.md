@@ -1,5 +1,61 @@
 # Changelog
 
+## 3.1.1 - 2026-09-29
+
+- Refuse a `${repo}` or `${worktree}` path that needs quoting anywhere after
+  a `<<` or `<<<` in a gate, verify-hook, or reuse-fingerprint command. bash
+  also reads `<<` as a shift inside arithmetic such as `$[1<<2]` or
+  `a[1<<2]=x`, and the placeholder scanner took it for a here-document. It then
+  skipped the following lines as a here-document body and could quote a later
+  path for the wrong context, so a path containing shell syntax could run as a
+  command under bash. Commands that put a here-document before such a path now
+  fail with a `ConfigError` before anything runs; use `"$MERGETRAIN_REPO"` or
+  `"$MERGETRAIN_WORKTREE"` there instead. A path made only of letters, digits,
+  and `_@%+=:,./-` still expands anywhere. The same now holds after bash
+  `$[...]` arithmetic or a `name[...]` array subscript: bash pairs quotes inside
+  them and has no comments there, so a `#` followed by a quote in one could also
+  leave a later path unquoted.
+- Stop a confirmed deploy from claiming or pushing jobs outside the confirmed
+  plan. The plan check and the claim ran in separate transactions, so a cancel
+  or supersede that landed between them let the claim fall back to queued jobs
+  that were never validated or approved. Those jobs were gated, and when a gate
+  failed, bisect re-ran the survivors without the plan check and pushed them.
+  The plan is now checked inside the claim transaction on the exact train being
+  claimed, a confirmed deploy never falls back to queued jobs, and bisect and
+  isolation re-runs keep the push-time plan check.
+- Report a deploy that claimed nothing because a reconcile became pending
+  during the claim as `reconcile_pending_deploy`, not as a successful run with
+  "no queued jobs". A confirmed deploy that claims nothing is always refused.
+  An `--expected-plan` value with non-ASCII text is now refused as
+  `deploy_plan_changed` instead of failing with a traceback.
+- Stop `mergetrain_deploy` from shipping a plan that changed while its
+  confirmation dialog was open, on MCP protocol 2026-07-28 and later. There the
+  client answers in a retried call, and the server prepared the plan again but
+  reused the earlier answer, because the dialog text, which leaves out parts of
+  the plan such as verify hooks, had not changed. The new plan was then passed
+  to the CLI as the confirmed one. The confirmation is now bound to the plan,
+  so a changed plan asks the human again. Earlier protocol versions already
+  refused a changed plan.
+- Stop re-running the gates of a one-job train that just failed them. The job
+  was handed to a separate one-job path that merged it onto the same base and
+  ran every gate again, so a flaky gate that passed the second time deployed, or
+  validated, a job whose gate run over that exact tree had failed. The job now
+  finishes `failed` after one gate run; fix the branch and run `mergetrain retry
+  <id>`. Linear isolation after an inconclusive bisect runs each job as a
+  one-job train, and the separate path, about 300 lines, is gone.
+- Stop `retry --force` on one member of a parked multi-job deployment from
+  leaving the other members' verification stuck. The retried row became
+  `canceled` but kept the deployment identity its push had recorded, so once
+  the others were settled `deployed`, `verify --job` and `verify --ack` failed
+  with "inconsistent member state" and `status` kept recommending them. A
+  retried row now drops that identity, as `dismiss` and `cancel` already did.
+- Count a reconcile conflict as `reconcile_conflict` in `stats`, not as a merge
+  conflict. `stats` kept its own copy of the failure classification, which
+  missed the #224 change, and matched the word "conflict" in the note, so every
+  parked push inflated the merge-conflict rate. `inspect` and `stats` now share
+  one classifier, and `not_landed_reason_counts` gains the `reconcile_conflict`
+  key.
+
 ## 3.1.0 - 2026-09-29
 
 - Stop a quote character in a gate comment from unquoting a later `${repo}` or
