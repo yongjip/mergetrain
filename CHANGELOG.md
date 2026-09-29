@@ -41,6 +41,12 @@
   the others were settled `deployed`, `verify --job` and `verify --ack` failed
   with "inconsistent member state" and `status` kept recommending them. A
   retried row now drops that identity, as `dismiss` and `cancel` already did.
+- Count a reconcile conflict as `reconcile_conflict` in `stats`, not as a merge
+  conflict. `stats` kept its own copy of the failure classification, which
+  missed the #224 change, and matched the word "conflict" in the note, so every
+  parked push inflated the merge-conflict rate. `inspect` and `stats` now share
+  one classifier, and `not_landed_reason_counts` gains the `reconcile_conflict`
+  key.
 
 ## 3.1.0 - 2026-09-29
 

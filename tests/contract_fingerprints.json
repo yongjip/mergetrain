@@ -1043,6 +1043,7 @@
           "push_failed": null,
           "push_rejected": null,
           "queued": null,
+          "reconcile_conflict": null,
           "runner_failed": null,
           "running": null,
           "semantic_conflict": null,

@@ -339,6 +339,23 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.pending_deploy_sha, "")
 
+    def test_stats_and_inspect_classify_a_conflict_alike(self) -> None:
+        from mergetrain.observability import job_outcome, stats_payload
+
+        with tempfile.TemporaryDirectory() as td:
+            _repo, config, conn, job, _pending = self._landed_then_rewritten(Path(td))
+            try:
+                conflict = get_job(conn, job.id)
+            finally:
+                conn.close()
+            stats = stats_payload(config)
+        self.assertEqual(job_outcome(conflict)["failure_category"], "reconcile_conflict")
+        # Its push may have landed: neither a merge conflict nor a code problem.
+        reasons = stats["outcomes"]["not_landed_reason_counts"]
+        self.assertEqual(reasons["reconcile_conflict"], 1)
+        self.assertEqual(reasons["merge_conflict"], 0)
+        self.assertEqual(stats["outcomes"]["conflicts"]["merge_conflict_trains"], 0)
+
     def test_a_conflict_keeps_a_late_cancel_until_the_remote_answers(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

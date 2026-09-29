@@ -37,6 +37,7 @@ _NOT_LANDED_REASONS = (
     "running",
     "awaiting_deploy",
     "pending_reconcile",
+    "reconcile_conflict",
     "semantic_conflict",
     "merge_conflict",
     "push_rejected",
@@ -213,6 +214,69 @@ def _run_outcome_summary(attempts: Sequence[RunAttempt], *, mode: str) -> dict[s
     }
 
 
+# Why a blocked or failed job did not land, most specific first. A train takes
+# the first category any of its jobs has.
+_FAILURE_CATEGORIES = (
+    "reconcile_conflict",
+    "push_rejected",
+    "deploy_authorization_changed",
+    "semantic_conflict",
+    "merge_conflict",
+    "source_identity_mismatch",
+    "validated_reuse_mismatch",
+    "merge_blocked",
+    "push_failed",
+    "command_timeout",
+    "gate_failed",
+    "runner_failed",
+)
+
+
+def failure_category(job: Job) -> str:
+    """Classify a blocked or failed job; inspect and stats both read this."""
+
+    note = job.note.lower()
+    if job.status == "blocked":
+        if job.pending_deploy_sha:
+            # Reconcile could not settle this push and kept its marker: it may
+            # have landed, so it is neither a merge nor a gate problem (#224).
+            return "reconcile_conflict"
+        if job.push_status == "failed":
+            # Blocked at the push, not the merge/gates: the remote refused the
+            # ref update (protected branch / required PR / permission). A
+            # repo-config action, not a code fix -- agents branch on this
+            # category instead of regexing the note.
+            return "push_rejected"
+        if (
+            "approval_destination_changed" in note
+            or "approval_execution_policy_changed" in note
+            or "deploy_plan_changed" in note
+        ):
+            return "deploy_authorization_changed"
+        if job.conflict_with or "semantic conflict" in note:
+            # Semantic conflicts are successful individual merges whose
+            # combined tree fails validation. They require coordination with
+            # the named partner jobs, not a textual merge-conflict repair.
+            return "semantic_conflict"
+        if "conflict" in note:
+            return "merge_conflict"
+        if "head changed" in note or "identity" in note:
+            return "source_identity_mismatch"
+        if "reuse" in note or "fingerprint" in note:
+            return "validated_reuse_mismatch"
+        return "merge_blocked"
+    if job.push_status == "failed":
+        # Rely on the structured push_status, not a note substring: a gate
+        # named e.g. "no-force-push" fails before any push is attempted
+        # (push_status stays not_run) and must not be mislabeled push_failed.
+        return "push_failed"
+    if "timed out" in note:
+        return "command_timeout"
+    if "gate" in note or "command failed" in note:
+        return "gate_failed"
+    return "runner_failed"
+
+
 def _not_landed_reason(jobs: Sequence[Job]) -> str | None:
     status = history_status(jobs)
     if status == "deployed":
@@ -227,41 +291,15 @@ def _not_landed_reason(jobs: Sequence[Job]) -> str | None:
         return "pending_reconcile"
 
     relevant = [job for job in jobs if job.status == status]
-    lowered = [job.note.lower() for job in relevant]
     if status == "canceled":
-        if any("superseded by" in note for note in lowered):
+        if any("superseded by" in job.note.lower() for job in relevant):
             return "superseded"
         return "canceled"
-    if status == "blocked":
-        if any(job.push_status == "failed" for job in relevant):
-            return "push_rejected"
-        if any(
-            "approval_destination_changed" in note
-            or "approval_execution_policy_changed" in note
-            or "deploy_plan_changed" in note
-            for note in lowered
-        ):
-            return "deploy_authorization_changed"
-        if any(
-            job.conflict_with or "semantic conflict" in note
-            for job, note in zip(relevant, lowered, strict=True)
-        ):
-            return "semantic_conflict"
-        if any("conflict" in note for note in lowered):
-            return "merge_conflict"
-        if any("head changed" in note or "identity" in note for note in lowered):
-            return "source_identity_mismatch"
-        if any("reuse" in note or "fingerprint" in note for note in lowered):
-            return "validated_reuse_mismatch"
-        return "merge_blocked"
-    if status == "failed":
-        if any(job.push_status == "failed" for job in relevant):
-            return "push_failed"
-        if any("timed out" in note for note in lowered):
-            return "command_timeout"
-        if any("gate" in note or "command failed" in note for note in lowered):
-            return "gate_failed"
-        return "runner_failed"
+    if status in {"blocked", "failed"}:
+        return min(
+            (failure_category(job) for job in relevant),
+            key=_FAILURE_CATEGORIES.index,
+        )
     return "unknown"
 
 
