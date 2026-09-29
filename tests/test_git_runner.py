@@ -2771,6 +2771,59 @@ class ConfirmedPlanDeployTests(unittest.TestCase):
             code = main(["--repo", str(repo), "deploy", "--expected-plan", plan, "--json"])
         return code, json.loads(out.getvalue())
 
+    def _validated_single_train(self, root: Path) -> tuple[Path, Path, int]:
+        repo, remote = self._prepare(root, "")
+        config = load_config(repo=repo)
+        conn = connect(config.state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            validated = GitRunner(config).process_batch(conn, [job], deploy=False)
+            self.assertEqual(validated[0].status, "validated")
+        finally:
+            conn.close()
+        return repo, remote, job.id
+
+    def _status(self, repo: Path, job_id: int) -> str:
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            return get_job(conn, job_id).status
+        finally:
+            conn.close()
+
+    def test_a_confirmed_deploy_that_claims_nothing_is_refused(self) -> None:
+        # A reconcile that becomes pending inside the claim transaction makes
+        # the claim return nothing. That used to print ok/success/"no queued
+        # jobs", so MCP told the agent a confirmed deploy had succeeded.
+        with tempfile.TemporaryDirectory() as td:
+            repo, remote, job_id = self._validated_single_train(Path(td))
+            base = git(remote, "rev-parse", "main")
+            plan = self._preview_plan(repo)
+            with (
+                patch("mergetrain.persistence.claims.deploy_reconcile_pending", return_value=1),
+                patch(
+                    "mergetrain.commands.deploy.deploy_reconcile_pending", side_effect=[0, 1]
+                ),
+            ):
+                code, payload = self._deploy(repo, plan)
+            self.assertEqual(code, 1, payload)
+            self.assertFalse(payload["ok"])
+            self.assertIn("reconcile_pending_deploy", json.dumps(payload))
+            self.assertEqual(self._status(repo, job_id), "validated")
+            self.assertEqual(git(remote, "rev-parse", "main"), base)
+
+    def test_a_malformed_expected_plan_is_refused_as_changed(self) -> None:
+        # compare_digest raised TypeError for non-ASCII text, which escaped
+        # the JSON error contract as a traceback.
+        with tempfile.TemporaryDirectory() as td:
+            repo, remote, job_id = self._validated_single_train(Path(td))
+            base = git(remote, "rev-parse", "main")
+            code, payload = self._deploy(repo, "é" * 64)
+            self.assertNotEqual(code, 0, payload)
+            self.assertFalse(payload["ok"])
+            self.assertIn("deploy_plan_changed", json.dumps(payload))
+            self.assertEqual(self._status(repo, job_id), "validated")
+            self.assertEqual(git(remote, "rev-parse", "main"), base)
+
     def test_cancel_racing_the_claim_never_substitutes_queued_jobs(self) -> None:
         # Train [A] is confirmed. A cancel committed by another process between
         # the plan check and the claim used to let the claim fall back to the

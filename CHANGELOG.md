@@ -23,6 +23,11 @@
   The plan is now checked inside the claim transaction on the exact train being
   claimed, a confirmed deploy never falls back to queued jobs, and bisect and
   isolation re-runs keep the push-time plan check.
+- Report a deploy that claimed nothing because a reconcile became pending
+  during the claim as `reconcile_pending_deploy`, not as a successful run with
+  "no queued jobs". A confirmed deploy that claims nothing is always refused.
+  An `--expected-plan` value with non-ASCII text is now refused as
+  `deploy_plan_changed` instead of failing with a traceback.
 - Stop `mergetrain_deploy` from shipping a plan that changed while its
   confirmation dialog was open, on MCP protocol 2026-07-28 and later. There the
   client answers in a retried call, and the server prepared the plan again but

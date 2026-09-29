@@ -227,7 +227,9 @@ def claim_deploy_batch(
     With ``confirm_plan``, only a validated train may be claimed, and the
     callback checks that exact train inside the claim transaction; it raises
     to refuse. A concurrent cancel or supersede therefore cannot slip between
-    the plan check and the claim, and queued jobs are never substituted.
+    the plan check and the claim, and queued jobs are never substituted. A
+    reconcile that is pending inside the transaction still claims nothing and
+    returns an empty list, which the caller must report as a refusal.
     """
 
     owner = owner or default_owner()

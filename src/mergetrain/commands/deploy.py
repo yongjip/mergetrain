@@ -136,7 +136,11 @@ def _execute_batch(
                         selected_jobs,
                         reuse_validated=False,
                     )
-                    if not hmac.compare_digest(current_plan_sha, expected_plan):
+                    # Bytes: compare_digest refuses a str with non-ASCII text,
+                    # and the hidden flag accepts any string.
+                    if not hmac.compare_digest(
+                        current_plan_sha.encode("utf-8"), expected_plan.encode("utf-8")
+                    ):
                         raise DeployPlanChanged(
                             "deploy_plan_changed: the confirmed train, destination, "
                             "gates, reuse, or verify policy changed; nothing was pushed"
@@ -149,6 +153,18 @@ def _execute_batch(
                 train_id=getattr(args, "train_id", ""),
                 confirm_plan=confirm_plan,
             )
+            if not jobs:
+                # The claim re-checks reconcile inside its own transaction and
+                # claims nothing when one became pending after the check above.
+                # That is a refusal, not an empty success.
+                pending = deploy_reconcile_pending(conn)
+                if pending:
+                    return _emit_deploy_reconcile_block(args, pending)
+                if expected_plan:
+                    raise DeployPlanChanged(
+                        "deploy_plan_changed: the confirmed train was not claimed; "
+                        "nothing was pushed"
+                    )
         else:
             jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
         if not jobs:
