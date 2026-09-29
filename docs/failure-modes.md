@@ -63,7 +63,9 @@ Gate failures are pre-push failures. The deploy ref is not updated. In batch
 mode, mergetrain isolates the failure so unrelated jobs can still
 validate/deploy:
 
-- A **one-job train** is re-run through the full merge → gate → (deploy) path.
+- A **one-job train** finishes `failed`. Its failed tree is exactly the base
+  plus that job, so running the gates again could only retry a failed gate.
+  Fix the branch and run `mergetrain retry <id>`.
 - **Multi-job trains** are probed by re-assembling and gating subsets until the
   failure is pinned to either
   an individually failing job (finished `failed`) or a **semantic conflict**

@@ -1000,38 +1000,6 @@ class CrashRecoveryTests(unittest.TestCase):
                 "",
             )
 
-    def test_isolation_push_site_writes_marker(self) -> None:
-        # Proves the one-by-one process_one push site is instrumented too.
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo, _ = make_demo_repo(root)
-            config = load_config(repo=repo)
-            conn = connect(config.state.db)
-            try:
-                job = enqueue_job(conn, task="a", branch="feature/a")
-                ttl = config.queue.lock_ttl_minutes
-                claimed = claim_next_job(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
-                runner = GitRunner(config)
-                with self._crash_after_push(runner):
-                    with self.assertRaises(_Crash):
-                        runner.process_one(
-                            conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
-                        )
-                crashed = get_job(conn, job.id)
-                self.assertEqual(crashed.status, "in_progress")
-                self.assertNotEqual(crashed.pending_deploy_sha, "")
-                self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
-            finally:
-                conn.close()
-
-            conn = connect(config.state.db)
-            try:
-                recover(config, conn, gc=False)
-                healed = get_job(conn, job.id)
-            finally:
-                conn.close()
-            self.assertEqual(healed.status, "deployed")
-
 
 class DeployGateTests(unittest.TestCase):
     def test_run_next_claim_rechecks_reconcile_after_reaping_dead_owner(self) -> None:

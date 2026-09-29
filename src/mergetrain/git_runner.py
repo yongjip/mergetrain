@@ -786,299 +786,6 @@ class GitRunner:
             )
         return expected_sha
 
-    def process_one(
-        self,
-        conn: sqlite3.Connection,
-        job: Job,
-        *,
-        deploy: bool,
-        keep_worktree: bool = False,
-        owner: str | None = None,
-        ttl_minutes: int = 30,
-        expected_plan_sha: str = "",
-    ) -> Job:
-        self._ensure_state_dirs()
-        log_path = self._log_path("job", job.id)
-        worktree, persistent_workspace = self._primary_worktree_path(job.id, deploy=deploy)
-        lease_token = job.claim_token
-        deploy_sha = ""
-        integration_base_sha = ""
-        merge_sha = ""
-        deploy_state = _PushVerifyState()
-        deploying_validated = deploy and bool(job.train_id)
-
-        def pulse(*, check_cancel: bool = True) -> None:
-            self._refresh_lease(
-                conn,
-                owner=owner,
-                lease_token=lease_token,
-                ttl_minutes=ttl_minutes,
-                worktree=worktree,
-                head_sha=deploy_sha,
-                check_cancel=check_cancel,
-            )
-
-        def normal_pulse() -> None:
-            pulse(check_cancel=True)
-
-        def ownership_pulse() -> None:
-            pulse(check_cancel=False)
-
-        gate_progress = self._gate_progress_callback(conn, lease_token=lease_token, job_id=job.id)
-
-        def finish_after_error(*, status: str, note: str) -> Job:
-            if deploy_state.push_status == "succeeded":
-                status = "deployed"
-                note = f"post-push completion warning: {note}"
-                post_push_verify_status = _post_push_verify_status(deploy_state)
-            else:
-                post_push_verify_status = deploy_state.verify_status
-            result = self._finish_job(
-                conn,
-                job.id,
-                lease_token=lease_token,
-                status=status,
-                deploy_sha=deploy_sha,
-                log_path=str(log_path),
-                note=note,
-                push_status=deploy_state.push_status,
-                verify_status=post_push_verify_status,
-            )
-            if result.status == "deployed":
-                self._clear_pending_refs([job.id], log=log)
-            return result
-
-        with log_path.open("w", encoding="utf-8") as log:
-            log.write(f"mergetrain job {job.id}: {job.task}\n")
-            mode = "deploy" if deploy else "validate"
-            log.write(f"branch: {job.branch}\nmode: {mode}\n")
-            log.flush()
-            try:
-                self._mark_job(
-                    conn,
-                    job.id,
-                    lease_token=lease_token,
-                    status="in_progress",
-                    log_path=str(log_path),
-                    note=job.note,
-                )
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=job.id,
-                    phase="fetching",
-                    state="active",
-                    message=f"Fetching {self.config.git.integration_ref}",
-                )
-                workspace_reused = self._prepare_worktree(
-                    worktree=worktree,
-                    log=log,
-                    pulse=normal_pulse,
-                    persistent=persistent_workspace,
-                )
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=job.id,
-                    phase="fetching",
-                    state="success",
-                    message=(
-                        "Persistent validation workspace reused"
-                        if workspace_reused
-                        else (
-                            "Persistent validation workspace created"
-                            if persistent_workspace
-                            else "Integration worktree prepared"
-                        )
-                    ),
-                )
-                integration_base_sha = git_rev_parse(worktree, "HEAD")
-                if deploying_validated and job.validation_base_sha != integration_base_sha:
-                    log.write(
-                        "\nintegration ref moved since validation; "
-                        "reassembling the train and rerunning gates\n"
-                    )
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=job.id,
-                    phase="assembling",
-                    state="active",
-                    message=f"Merging {job.branch}",
-                )
-                merge_sha = self._merge_sha_for_job(job, deploying_validated=deploying_validated)
-                merge = run_command(
-                    ["git", "merge", "--no-edit", merge_sha],
-                    cwd=worktree,
-                    log=log,
-                    check=False,
-                    pulse=normal_pulse,
-                    pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                    timeout_seconds=self.config.queue.command_timeout_seconds,
-                )
-                if merge.returncode != 0:
-                    raise MergeBlocked(
-                        merge.stderr.strip()
-                        or merge.stdout.strip()
-                        or f"merge failed for {job.branch}"
-                    )
-                if not git_worktree_clean(worktree):
-                    raise MergeBlocked("integration worktree is dirty after merge")
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=job.id,
-                    phase="assembling",
-                    state="success",
-                    message=f"Merged {job.branch}",
-                )
-                deploy_sha = git_rev_parse(worktree, "HEAD")
-                normal_pulse()
-                if deploy:
-                    self._assert_auto_execution_policy([job])
-                if persistent_workspace:
-                    cache_reused = self._activate_persistent_validation_cache(
-                        worktree=worktree,
-                        log=log,
-                        pulse=normal_pulse,
-                    )
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=job.id,
-                        phase="gating",
-                        state="reused" if cache_reused else "success",
-                        message=(
-                            "Persistent validation cache reused"
-                            if cache_reused
-                            else "Persistent validation cache initialized"
-                        ),
-                    )
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=job.id,
-                    phase="gating",
-                    state="active",
-                    message="Running train gates",
-                )
-                self._run_gates(
-                    worktree=worktree,
-                    log=log,
-                    pulse=normal_pulse,
-                    on_gate=gate_progress,
-                    base_ref=integration_base_sha,
-                    head_ref=deploy_sha,
-                )
-                self._assert_tree_unchanged_by_gates(worktree, deploy_sha)
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=job.id,
-                    phase="gating",
-                    state="success",
-                    message="All train gates passed",
-                )
-                if deploy:
-                    self._push_and_verify(
-                        conn,
-                        job_ids=[job.id],
-                        deploy_sha=deploy_sha,
-                        lease_token=lease_token,
-                        worktree=worktree,
-                        log=log,
-                        before_push=normal_pulse,
-                        ownership_pulse=ownership_pulse,
-                        state=deploy_state,
-                        event_job_id=job.id,
-                        expected_plan_sha=expected_plan_sha,
-                    )
-                status = "deployed" if deploy else "validated"
-                note = deploy_state.warning or "ok"
-                validation_fields = {}
-                if not deploy:
-                    train_id = uuid.uuid4().hex
-                    validation_fields = {
-                        "train_id": train_id,
-                        "train_size": 1,
-                        "validated_at": utc_now(),
-                        "validation_base_sha": integration_base_sha,
-                        "validation_sha": deploy_sha,
-                        "validated_head_sha": merge_sha,
-                        **self._validation_identity_fields(
-                            jobs=[job],
-                            train_id=train_id,
-                            validated_heads={job.id: merge_sha},
-                            validation_sha=deploy_sha,
-                            worktree=worktree,
-                            log=log,
-                            pulse=normal_pulse,
-                        ),
-                    }
-                result = self._finish_job(
-                    conn,
-                    job.id,
-                    lease_token=lease_token,
-                    status=status,
-                    deploy_sha=deploy_sha,
-                    log_path=str(log_path),
-                    note=note,
-                    push_status=deploy_state.push_status,
-                    verify_status=deploy_state.verify_status,
-                    **validation_fields,
-                )
-                if deploy and result.status == "deployed":
-                    self._clear_pending_refs([job.id], log=log)
-                return result
-            except LostLease:
-                raise
-            except CancellationRequested:
-                return finish_after_error(
-                    status="canceled",
-                    note="canceled by user while the train was running",
-                )
-            except MergeBlocked as exc:
-                return finish_after_error(status="blocked", note=str(exc))
-            except AmbiguousPush as exc:
-                return finish_after_error(status="needs_reconcile", note=str(exc))
-            except QueueBusy as exc:
-                # This frame pushed and saw the refs land, so it can finalize
-                # honestly -- that is the pre-existing landed-push guard, not a
-                # new decision. Anything less certain writes NOTHING.
-                #
-                # Every status write here goes through the same contended
-                # database, and the ones that succeed destroy durable evidence:
-                # mark_job clears the pending-deploy marker on a requeue. An
-                # in-memory push_status is also not safe to grade from -- it can
-                # belong to a different frame (process_batch catching a nested
-                # process_one) or be optimistic (set before the marker write it
-                # describes), which parks landed pushes as `queued` and
-                # markerless rows as `needs_reconcile`.
-                #
-                # Leaving the row as the last successful write left it makes
-                # contention indistinguishable from a crash at the same instant.
-                # That is what store.recover_orphans exists for -- "a batch that
-                # raised after its lease was already released" -- and its
-                # marker-aware split decides queued vs needs_reconcile from
-                # DURABLE evidence rather than from what this frame believes. If
-                # the finalize below is contended too, it raises and lands on
-                # that same path.
-                if deploy_state.push_status != "succeeded":
-                    raise
-                return finish_after_error(status="deployed", note=str(exc))
-            except CommandFailed as exc:
-                return finish_after_error(status="failed", note=str(exc))
-            except MergetrainError as exc:
-                return finish_after_error(status="blocked", note=str(exc))
-            except Exception as exc:  # pragma: no cover - defensive boundary
-                return finish_after_error(status="failed", note=f"unexpected error: {exc}")
-            finally:
-                self._cleanup_worktree(
-                    worktree,
-                    log=log,
-                    keep_worktree=keep_worktree or persistent_workspace,
-                )
-
     def _process_isolated_jobs(
         self,
         conn: sqlite3.Connection,
@@ -1102,17 +809,17 @@ class GitRunner:
 
         results: list[Job] = []
         for index, job in enumerate(jobs):
-            result = self.process_one(
+            finished = self.process_batch(
                 conn,
-                job,
+                [job],
                 deploy=deploy,
                 keep_worktree=keep_worktree,
                 owner=owner,
                 ttl_minutes=ttl_minutes,
                 expected_plan_sha=expected_plan_sha,
             )
-            results.append(result)
-            if not deploy or result.status != "needs_reconcile":
+            results.extend(finished)
+            if not deploy or not any(item.status == "needs_reconcile" for item in finished):
                 continue
 
             note = (
@@ -1861,33 +1568,10 @@ class GitRunner:
                             for job in jobs
                         ]
                     if len(merged_jobs) == 1:
-                        log.write("\ntrain gate failed; isolating merged jobs one-by-one\n")
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            phase="gating",
-                            state="warning",
-                            message="Train gate failed; isolating jobs",
-                            detail=f"exit_code={exc.returncode}",
-                        )
-                        self._cleanup_worktree(
-                            worktree,
-                            log=log,
-                            keep_worktree=persistent_workspace,
-                        )
-                        results.extend(
-                            self._process_isolated_jobs(
-                                conn,
-                                merged_jobs,
-                                deploy=deploy,
-                                keep_worktree=keep_worktree,
-                                owner=owner,
-                                ttl_minutes=ttl_minutes,
-                                lease_token=lease_token,
-                                expected_plan_sha=expected_plan_sha,
-                            )
-                        )
-                        return results
+                        # The tree that failed is exactly the base plus this one
+                        # job, so there is nothing to isolate: running it again
+                        # would only retry a failed gate, and a pass could ship.
+                        raise
                     log.write(
                         "\ntrain gate failed; probing "
                         f"{len(merged_jobs)} merged jobs for semantic conflicts\n"
@@ -1994,10 +1678,17 @@ class GitRunner:
             except AmbiguousPush as exc:
                 return finish_active_after_error(status="needs_reconcile", note=str(exc))
             except QueueBusy as exc:
-                # See process_one. This frame's own push is the only thing it may
-                # grade from: an isolated job's contention arrives here through
-                # _process_isolated_jobs, where this state describes the batch and
-                # not the job that actually pushed.
+                # This frame pushed and saw the refs land, so it can finalize
+                # honestly. Anything less certain writes NOTHING: every status
+                # write goes through the same contended database, and the ones
+                # that succeed destroy durable evidence (mark_job clears the
+                # pending-deploy marker on a requeue). push_status is also only
+                # this frame's own: an isolated job's contention arrives here
+                # through _process_isolated_jobs, where this state describes
+                # the batch and not the job that actually pushed. Leaving the
+                # rows as the last successful write left them makes contention
+                # indistinguishable from a crash at the same instant, which
+                # store.recover_orphans settles from the durable marker.
                 if deploy_state.push_status != "succeeded":
                     raise
                 return finish_active_after_error(status="deployed", note=str(exc))

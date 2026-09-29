@@ -1698,7 +1698,7 @@ deploy:
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                result = GitRunner(config).process_one(conn, job, deploy=True)
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
             finally:
                 conn.close()
 
@@ -1937,7 +1937,7 @@ deploy:
                 runner = GitRunner(config)
                 failure = CommandFailed(["git", "push"], 1, stderr="remote rejected the update")
                 with patch.object(runner, "push_verified_head", side_effect=failure):
-                    result = runner.process_one(conn, job, deploy=True)
+                    result = runner.process_batch(conn, [job], deploy=True)[0]
             finally:
                 conn.close()
             # A non-rejection push failure is AMBIGUOUS (the remote may have
@@ -1975,7 +1975,7 @@ deploy:
                     stderr="! [rejected] main -> main (fetch first)",
                 )
                 with patch.object(runner, "push_verified_head", side_effect=rejection):
-                    result = runner.process_one(conn, claimed[0], deploy=True, owner=owner)
+                    result = runner.process_batch(conn, [claimed[0]], deploy=True, owner=owner)[0]
                 action = next_action({"counts": counts(conn)})
             finally:
                 conn.close()
@@ -2036,79 +2036,49 @@ deploy:
                 git(root / "remote.git", "show", "main:a.txt")
 
     def test_unexpected_post_push_error_preserves_deployed_truth(self) -> None:
-        for batch in (False, True):
-            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as td:
-                root = Path(td)
-                verify = f'{SHELL_PYTHON} -c "import sys; sys.exit(0)"'
-                repo, _marker = make_demo_repo(root, verify_command=verify)
-                config = load_config(repo=repo)
-                conn = connect(config.state.db)
-                try:
-                    job = enqueue_job(conn, task="a", branch="feature/a")
-                    runner = GitRunner(config)
-                    with patch.object(
-                        runner,
-                        "_run_verify_hooks",
-                        side_effect=RuntimeError("verification crashed"),
-                    ):
-                        result = (
-                            runner.process_batch(conn, [job], deploy=True)[0]
-                            if batch
-                            else runner.process_one(conn, job, deploy=True)
-                        )
-                    events = list_run_events(conn)
-                finally:
-                    conn.close()
-                self.assertEqual(result.status, "deployed")
-                self.assertEqual(result.push_status, "succeeded")
-                # 'unknown', not 'failed': the hook never returned a verdict, it
-                # crashed, so nothing determined that verification failed. A hook
-                # that genuinely fails exits non-zero and is recorded 'failed' on
-                # the normal path; this boundary only ever sees unexpected errors.
-                # 'unknown' is also the value doctor turns into next_action
-                # verify_reconciled_deploy, so the operator gets 'run mergetrain
-                # verify' instead of a dead end.
-                self.assertEqual(result.verify_status, "unknown")
-                self.assertIn("post-push completion warning", result.note)
-                self.assertEqual(events[-1].phase, "complete")
-                # Still a warning, not a plain success: 'unknown' has to draw the
-                # same attention 'failed' did, or the completion event hides the
-                # thing the operator must discharge.
-                self.assertEqual(events[-1].state, "warning")
-                self.assertIn("verification needs attention", events[-1].message)
-                self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
-                pending = git(
-                    repo,
-                    "for-each-ref",
-                    "--format=%(refname)",
-                    "refs/mergetrain/pending/",
-                )
-                self.assertEqual(pending, "")
-
-    def test_single_deploy_records_verify_success_and_failure(self) -> None:
-        for returncode, expected_verify, expected_event_state in [
-            (0, "succeeded", "success"),
-            (7, "failed", "warning"),
-        ]:
-            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as td:
-                root = Path(td)
-                verify = f'{SHELL_PYTHON} -c "import sys; sys.exit({returncode})"'
-                repo, _marker = make_demo_repo(root, verify_command=verify)
-                config = load_config(repo=repo)
-                conn = connect(config.state.db)
-                try:
-                    job = enqueue_job(conn, task="a", branch="feature/a")
-                    result = GitRunner(config).process_one(conn, job, deploy=True)
-                    events = list_run_events(conn)
-                finally:
-                    conn.close()
-                self.assertEqual(result.status, "deployed")
-                self.assertEqual(result.push_status, "succeeded")
-                self.assertEqual(result.verify_status, expected_verify)
-                self.assertEqual(events[-1].phase, "complete")
-                self.assertEqual(events[-1].state, expected_event_state)
-                if returncode:
-                    self.assertIn("verification needs attention", events[-1].message)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            verify = f'{SHELL_PYTHON} -c "import sys; sys.exit(0)"'
+            repo, _marker = make_demo_repo(root, verify_command=verify)
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                runner = GitRunner(config)
+                with patch.object(
+                    runner,
+                    "_run_verify_hooks",
+                    side_effect=RuntimeError("verification crashed"),
+                ):
+                    result = runner.process_batch(conn, [job], deploy=True)[0]
+                events = list_run_events(conn)
+            finally:
+                conn.close()
+            self.assertEqual(result.status, "deployed")
+            self.assertEqual(result.push_status, "succeeded")
+            # 'unknown', not 'failed': the hook never returned a verdict, it
+            # crashed, so nothing determined that verification failed. A hook
+            # that genuinely fails exits non-zero and is recorded 'failed' on
+            # the normal path; this boundary only ever sees unexpected errors.
+            # 'unknown' is also the value doctor turns into next_action
+            # verify_reconciled_deploy, so the operator gets 'run mergetrain
+            # verify' instead of a dead end.
+            self.assertEqual(result.verify_status, "unknown")
+            self.assertIn("post-push completion warning", result.note)
+            self.assertEqual(events[-1].phase, "complete")
+            # Still a warning, not a plain success: 'unknown' has to draw the
+            # same attention 'failed' did, or the completion event hides the
+            # thing the operator must discharge.
+            self.assertEqual(events[-1].state, "warning")
+            self.assertIn("verification needs attention", events[-1].message)
+            self.assertEqual(git(root / "remote.git", "show", "main:a.txt"), "a")
+            pending = git(
+                repo,
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/mergetrain/pending/",
+            )
+            self.assertEqual(pending, "")
 
     def test_batch_deploy_records_verify_success_and_failure(self) -> None:
         for returncode, expected_verify, expected_event_state in [
@@ -2241,7 +2211,7 @@ deploy:
                     ),
                     patch.object(runner, "push_verified_head") as push,
                 ):
-                    result = runner.process_one(conn, job, deploy=True)
+                    result = runner.process_batch(conn, [job], deploy=True)[0]
             finally:
                 conn.close()
 
@@ -2892,6 +2862,86 @@ class ConfirmedPlanDeployTests(unittest.TestCase):
             self.assertIn("deploy_plan_changed", a_after.note)
 
 
+def _fail_first_then_pass_gate(counter: Path) -> str:
+    """A gate that fails on its first run and passes on every later run."""
+
+    return (
+        f'{SHELL_PYTHON} -c "import sys, pathlib; p=pathlib.Path(\'{py_path(counter)}\'); '
+        "n=int(p.read_text()) if p.exists() else 0; p.write_text(str(n + 1)); "
+        'sys.exit(1 if n == 0 else 0)"'
+    )
+
+
+class SingleJobGateFailureTests(unittest.TestCase):
+    """A one-job train that fails its gates is finished, never run again.
+
+    The failed tree is exactly the base plus that job. 3.1.0 re-assembled it
+    and re-ran the gates, so a flaky gate that passed the second time deployed
+    a job whose only gate run over that tree had failed.
+    """
+
+    def test_a_failed_gate_is_not_retried_before_a_deploy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            counter = root / "gate-runs.txt"
+            repo, _ = make_demo_repo(root, gate_command=_fail_first_then_pass_gate(counter))
+            config = load_config(repo=repo)
+            remote_before = git(root / "remote.git", "rev-parse", "main")
+            destination = deploy_destination_sha(config)
+            policy = deploy_execution_policy_sha(config)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            token = ""
+            try:
+                enqueue_job(
+                    conn,
+                    task="only",
+                    branch="feature/a",
+                    auto_deploy=True,
+                    approval_destination_sha=destination,
+                    approval_execution_policy_sha=policy,
+                )
+                claimed = claim_all_queued(
+                    conn,
+                    owner=owner,
+                    auto_only=True,
+                    deploy=True,
+                    approval_destination_sha=destination,
+                    approval_execution_policy_sha=policy,
+                )
+                self.assertEqual(len(claimed), 1)
+                token = claimed[0].claim_token
+                GitRunner(config).process_batch(conn, claimed, deploy=True, owner=owner)
+                stored = get_job(conn, claimed[0].id)
+            finally:
+                if token:
+                    release_runner_lock(conn, owner=owner, token=token)
+                conn.close()
+
+            self.assertEqual(stored.status, "failed", stored.note)
+            self.assertEqual(stored.push_status, "not_run")
+            self.assertEqual(git(root / "remote.git", "rev-parse", "main"), remote_before)
+            self.assertEqual(counter.read_text(), "1", "the failed gate was run again")
+
+    def test_a_failed_gate_is_not_retried_during_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            counter = root / "gate-runs.txt"
+            repo, _ = make_demo_repo(root, gate_command=_fail_first_then_pass_gate(counter))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="only", branch="feature/a")
+                GitRunner(config).process_batch(conn, [job], deploy=False)
+                stored = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+            self.assertEqual(stored.status, "failed", stored.note)
+            self.assertEqual(stored.train_id, "")
+            self.assertEqual(counter.read_text(), "1", "the failed gate was run again")
+
+
 class BisectIsolationTests(unittest.TestCase):
     def test_semantic_conflict_classification_is_independent_of_batch_size(self) -> None:
         for filler_count in (0, 2):
@@ -3494,7 +3544,7 @@ class GcWorktreeGuardTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a", head_sha=head_a)
-                deployed = GitRunner(config).process_one(conn, job, deploy=True)
+                deployed = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
                 self.assertEqual(deployed.status, "deployed")
                 canceled = enqueue_job(conn, task="b", branch="feature/b", head_sha=head_b)
                 cancel_job(conn, canceled.id)

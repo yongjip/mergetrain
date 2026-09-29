@@ -28,6 +28,13 @@
   to the CLI as the confirmed one. The confirmation is now bound to the plan,
   so a changed plan asks the human again. Earlier protocol versions already
   refused a changed plan.
+- Stop re-running the gates of a one-job train that just failed them. The job
+  was handed to a separate one-job path that merged it onto the same base and
+  ran every gate again, so a flaky gate that passed the second time deployed, or
+  validated, a job whose gate run over that exact tree had failed. The job now
+  finishes `failed` after one gate run; fix the branch and run `mergetrain retry
+  <id>`. Linear isolation after an inconclusive bisect runs each job as a
+  one-job train, and the separate path, about 300 lines, is gone.
 
 ## 3.1.0 - 2026-09-29
 
