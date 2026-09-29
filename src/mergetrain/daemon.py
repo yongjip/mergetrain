@@ -227,7 +227,6 @@ def daemon_tick(
                 ttl_minutes=lock_ttl_minutes,
                 auto_only=not validate_only,
                 manual_only=validate_only,
-                deploy=not validate_only,
                 approval_destination_sha=(
                     "" if validate_only else current_destination_sha
                 ),

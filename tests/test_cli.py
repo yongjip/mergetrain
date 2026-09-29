@@ -31,7 +31,7 @@ from mergetrain.errors import CommandFailed
 from mergetrain.models import Job
 from mergetrain.reuse import ReuseDecision
 from mergetrain.store import (
-    claim_next_job,
+    claim_all_queued,
     connect,
     enqueue_job,
     get_job,
@@ -127,7 +127,7 @@ class CliTests(unittest.TestCase):
                 # Claim it rather than marking it terminal directly: started_at
                 # is written by the claim, and without it the train has no
                 # measurable duration and the branch under test prints None.
-                claimed = claim_next_job(conn)
+                claimed = claim_all_queued(conn)[0]
                 assert claimed is not None
                 mark_job(
                     conn,
@@ -2578,7 +2578,7 @@ class CliTests(unittest.TestCase):
             owner = f"owner:{os.getpid()}"
             try:
                 queued = enqueue_job(conn, task="a", branch="feature/a")
-                claimed = claim_next_job(conn, owner=owner)
+                claimed = claim_all_queued(conn, owner=owner)[0]
                 assert claimed is not None
                 record_run_event(
                     conn,
@@ -2711,7 +2711,7 @@ class CliTests(unittest.TestCase):
             owner = f"owner:{os.getpid()}"
             try:
                 queued = enqueue_job(conn, task="a", branch="feature/a")
-                claimed = claim_next_job(conn, owner=owner)
+                claimed = claim_all_queued(conn, owner=owner)[0]
                 assert claimed is not None
                 event = record_run_event(
                     conn,
@@ -2908,7 +2908,7 @@ class CliTests(unittest.TestCase):
             owner = f"owner:{os.getpid()}"
             try:
                 queued = enqueue_job(conn, task="run", branch="feature/run")
-                job = claim_next_job(conn, owner=owner)
+                job = claim_all_queued(conn, owner=owner)[0]
                 assert job is not None
                 mark_job(
                     conn,

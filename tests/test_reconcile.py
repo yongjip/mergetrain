@@ -37,8 +37,8 @@ from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_ref
 from mergetrain.store import (
     acquire_runner_lock,
     cancel_job,
+    claim_all_queued,
     claim_deploy_batch,
-    claim_next_job,
     connect,
     deploy_reconcile_pending,
     enqueue_job,
@@ -1019,7 +1019,7 @@ class CrashRecoveryTests(unittest.TestCase):
 
 
 class DeployGateTests(unittest.TestCase):
-    def test_run_next_claim_rechecks_reconcile_after_reaping_dead_owner(self) -> None:
+    def test_deploy_claim_rechecks_reconcile_after_reaping_dead_owner(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"
             conn = connect(db)
@@ -1034,24 +1034,16 @@ class DeployGateTests(unittest.TestCase):
                 )
                 conn.commit()
 
-                claimed = claim_next_job(
-                    conn,
-                    owner=f"replacement:{os.getpid()}",
-                    deploy=True,
-                )
+                claimed = claim_deploy_batch(conn, owner=f"replacement:{os.getpid()}")
 
-                self.assertIsNone(claimed)
+                self.assertEqual(claimed, [])
                 self.assertEqual(get_job(conn, orphan.id).status, "needs_reconcile")
                 self.assertEqual(get_job(conn, queued.id).status, "queued")
                 self.assertIsNone(get_lock(conn))
 
                 # Validation remains safe and available while remote deploy
                 # truth is unresolved; only a deploy claim is refused.
-                validation = claim_next_job(
-                    conn,
-                    owner=f"validator:{os.getpid()}",
-                    deploy=False,
-                )
+                (validation,) = claim_all_queued(conn, owner=f"validator:{os.getpid()}")
                 self.assertEqual(validation.id, queued.id)
                 release_runner_lock(
                     conn,

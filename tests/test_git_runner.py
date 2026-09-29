@@ -340,7 +340,6 @@ class GitRunnerTests(unittest.TestCase):
                     conn,
                     owner=owner,
                     auto_only=True,
-                    deploy=True,
                     approval_destination_sha=approved_destination,
                     approval_execution_policy_sha=approved_policy,
                 )
@@ -423,7 +422,6 @@ class GitRunnerTests(unittest.TestCase):
                     conn,
                     owner=owner,
                     auto_only=True,
-                    deploy=True,
                     approval_destination_sha=approved_destination,
                     approval_execution_policy_sha=approved_policy,
                 )
@@ -509,7 +507,6 @@ class GitRunnerTests(unittest.TestCase):
                     conn,
                     owner=owner,
                     auto_only=True,
-                    deploy=True,
                     approval_destination_sha=approved_destination,
                     approval_execution_policy_sha=approved_policy,
                 )
@@ -2966,7 +2963,6 @@ class SingleJobGateFailureTests(unittest.TestCase):
                     conn,
                     owner=owner,
                     auto_only=True,
-                    deploy=True,
                     approval_destination_sha=destination,
                     approval_execution_policy_sha=policy,
                 )
@@ -3119,7 +3115,6 @@ class BisectIsolationTests(unittest.TestCase):
                     conn,
                     owner=owner,
                     auto_only=True,
-                    deploy=True,
                     approval_destination_sha=approved_destination,
                     approval_execution_policy_sha=approved_policy,
                 )

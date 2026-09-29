@@ -13,51 +13,68 @@ from .leases import _acquire_runner_lock, _release_lock_token, default_owner
 from .recovery import deploy_reconcile_pending
 from .transactions import immediate, utc_now
 
+# A queued --auto job whose recorded approval no longer matches the current
+# destination or execution policy is blocked, destination first. The notes and
+# event messages are read back by evidence and observability; keep them exact.
+_APPROVAL_CHECKS = (
+    (
+        "approval_destination_sha",
+        "approval_destination_changed: unattended deploy approval does not match "
+        "the current remote or push refs; enqueue again with --auto only after "
+        "approving this destination",
+        "Unattended deploy destination changed",
+        "approval_destination_changed",
+    ),
+    (
+        "approval_execution_policy_sha",
+        "approval_execution_policy_changed: unattended deploy approval does not "
+        "match the configured gates, validation reuse, or verify hooks; enqueue "
+        "again with --auto only after approving this execution policy",
+        "Unattended deploy execution policy changed",
+        "approval_execution_policy_changed",
+    ),
+)
 
-def claim_next_job(
+
+def _claim(
     conn: sqlite3.Connection,
     *,
-    owner: str | None = None,
-    ttl_minutes: int = 30,
-    deploy: bool = False,
-) -> Job | None:
-    owner = owner or default_owner()
-    with immediate(conn):
-        lock = _acquire_runner_lock(conn, owner=owner, ttl_minutes=ttl_minutes)
-        if deploy and deploy_reconcile_pending(conn):
-            # Lock acquisition can park a marker-bearing orphan in this same
-            # transaction. Refuse the new deploy claim after that state change,
-            # just like the daemon and batch claim paths do.
-            _release_lock_token(conn, owner=owner, token=lock.token)
-            return None
-        row = conn.execute(
-            "SELECT * FROM deploy_queue WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
-        ).fetchone()
-        if row is None:
-            _release_lock_token(conn, owner=owner, token=lock.token)
-            return None
-        job_id = int(row["id"])
-        conn.execute(
-            """
-            UPDATE deploy_queue
-            SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
-                cancel_requested_at = ''
-            WHERE id = ? AND status = 'queued'
-            """,
-            (utc_now(), "claimed by mergetrain runner", lock.token, job_id),
+    job_ids: list[int],
+    expected_status: str,
+    token: str,
+    note: str,
+    mode: str,
+) -> list[Job]:
+    """Move exactly these rows to in_progress under one claim token."""
+
+    placeholders = ",".join("?" for _ in job_ids)
+    cur = conn.execute(
+        f"""
+        UPDATE deploy_queue
+        SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
+            cancel_requested_at = ''
+        WHERE id IN ({placeholders}) AND status = ?
+        """,
+        (utc_now(), note, token, *job_ids, expected_status),
+    )
+    if cur.rowcount != len(job_ids):
+        raise QueueError(
+            "validated train changed while it was being claimed"
+            if expected_status == "validated"
+            else "queued jobs changed while they were being claimed"
         )
-        _record_run_event(
-            conn,
-            claim_token=lock.token,
-            job_id=job_id,
-            phase="claiming",
-            state="active",
-            message=(
-                f"{'Deploy' if deploy else 'Validation'} runner claimed 1 job"
-            ),
-            detail=f"mode={'deploy' if deploy else 'validate'}",
-        )
-    return get_job(conn, job_id)
+    _record_run_event(
+        conn,
+        claim_token=token,
+        phase="claiming",
+        state="active",
+        message=(
+            f"{'Deploy' if mode == 'deploy' else 'Validation'} runner claimed "
+            f"{len(job_ids)} job(s)"
+        ),
+        detail=f"mode={mode}",
+    )
+    return [get_job(conn, job_id) for job_id in job_ids]
 
 
 def claim_all_queued(
@@ -67,10 +84,11 @@ def claim_all_queued(
     ttl_minutes: int = 30,
     auto_only: bool = False,
     manual_only: bool = False,
-    deploy: bool = False,
     approval_destination_sha: str = "",
     approval_execution_policy_sha: str = "",
 ) -> list[Job]:
+    """Claim queued jobs: all of them, only --auto ones (deploy), or only manual ones."""
+
     if auto_only and manual_only:
         raise QueueError("auto_only and manual_only are mutually exclusive")
     owner = owner or default_owner()
@@ -96,23 +114,24 @@ def claim_all_queued(
                 _release_lock_token(conn, owner=owner, token=lock.token)
                 return []
         if auto_only:
-            if approval_destination_sha:
+            approvals = {
+                "approval_destination_sha": approval_destination_sha,
+                "approval_execution_policy_sha": approval_execution_policy_sha,
+            }
+            for column, note, message, detail in _APPROVAL_CHECKS:
+                current = approvals[column]
+                if not current:
+                    continue
                 mismatched = conn.execute(
-                    """
+                    f"""
                     SELECT id FROM deploy_queue
-                    WHERE status = 'queued' AND auto_deploy = 1
-                      AND approval_destination_sha != ?
+                    WHERE status = 'queued' AND auto_deploy = 1 AND {column} != ?
                     ORDER BY id ASC
                     """,
-                    (approval_destination_sha,),
+                    (current,),
                 ).fetchall()
                 for row in mismatched:
                     job_id = int(row["id"])
-                    note = (
-                        "approval_destination_changed: unattended deploy approval "
-                        "does not match the current remote or push refs; enqueue "
-                        "again with --auto only after approving this destination"
-                    )
                     conn.execute(
                         """
                         UPDATE deploy_queue
@@ -126,42 +145,8 @@ def claim_all_queued(
                         job_id=job_id,
                         phase="claiming",
                         state="error",
-                        message="Unattended deploy destination changed",
-                        detail="approval_destination_changed",
-                    )
-            if approval_execution_policy_sha:
-                mismatched = conn.execute(
-                    """
-                    SELECT id FROM deploy_queue
-                    WHERE status = 'queued' AND auto_deploy = 1
-                      AND approval_execution_policy_sha != ?
-                    ORDER BY id ASC
-                    """,
-                    (approval_execution_policy_sha,),
-                ).fetchall()
-                for row in mismatched:
-                    job_id = int(row["id"])
-                    note = (
-                        "approval_execution_policy_changed: unattended deploy "
-                        "approval does not match the configured gates, validation "
-                        "reuse, or verify hooks; enqueue again with --auto only "
-                        "after approving this execution policy"
-                    )
-                    conn.execute(
-                        """
-                        UPDATE deploy_queue
-                        SET status = 'blocked', finished_at = ?, note = ?
-                        WHERE id = ? AND status = 'queued' AND auto_deploy = 1
-                        """,
-                        (utc_now(), note, job_id),
-                    )
-                    _record_run_event(
-                        conn,
-                        job_id=job_id,
-                        phase="claiming",
-                        state="error",
-                        message="Unattended deploy execution policy changed",
-                        detail="approval_execution_policy_changed",
+                        message=message,
+                        detail=detail,
                     )
             rows = conn.execute(
                 """
@@ -190,28 +175,14 @@ def claim_all_queued(
         if not job_ids:
             _release_lock_token(conn, owner=owner, token=lock.token)
             return []
-        placeholders = ",".join("?" for _ in job_ids)
-        conn.execute(
-            f"""
-            UPDATE deploy_queue
-            SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
-                cancel_requested_at = ''
-            WHERE id IN ({placeholders}) AND status = 'queued'
-            """,
-            (utc_now(), "claimed by mergetrain batch runner", lock.token, *job_ids),
-        )
-        _record_run_event(
+        return _claim(
             conn,
-            claim_token=lock.token,
-            phase="claiming",
-            state="active",
-            message=(
-                f"{'Deploy' if deploy else 'Validation'} runner claimed "
-                f"{len(job_ids)} job(s)"
-            ),
-            detail=f"mode={'deploy' if deploy else 'validate'}",
+            job_ids=job_ids,
+            expected_status="queued",
+            token=lock.token,
+            note="claimed by mergetrain batch runner",
+            mode="deploy" if auto_only else "validate",
         )
-    return [get_job(conn, job_id) for job_id in job_ids]
 
 
 def claim_deploy_batch(
@@ -258,32 +229,11 @@ def claim_deploy_batch(
         if not jobs:
             _release_lock_token(conn, owner=owner, token=lock.token)
             return []
-        job_ids = [job.id for job in jobs]
-        expected_status = "validated" if selected is not None else "queued"
-        placeholders = ",".join("?" for _ in job_ids)
-        cur = conn.execute(
-            f"""
-            UPDATE deploy_queue
-            SET status = 'in_progress', started_at = ?, note = ?, claim_token = ?,
-                cancel_requested_at = ''
-            WHERE id IN ({placeholders}) AND status = ?
-            """,
-            (
-                utc_now(),
-                "claimed by mergetrain deploy runner",
-                lock.token,
-                *job_ids,
-                expected_status,
-            ),
-        )
-        if cur.rowcount != len(job_ids):
-            raise QueueError("validated train changed while it was being claimed")
-        _record_run_event(
+        return _claim(
             conn,
-            claim_token=lock.token,
-            phase="claiming",
-            state="active",
-            message=f"Deploy runner claimed {len(job_ids)} job(s)",
-            detail="mode=deploy",
+            job_ids=[job.id for job in jobs],
+            expected_status="validated" if selected is not None else "queued",
+            token=lock.token,
+            note="claimed by mergetrain deploy runner",
+            mode="deploy",
         )
-    return [get_job(conn, job_id) for job_id in job_ids]

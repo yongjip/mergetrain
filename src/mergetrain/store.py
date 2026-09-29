@@ -8,7 +8,7 @@ behind a generic data-access abstraction.
 
 from __future__ import annotations
 
-from .persistence.claims import claim_all_queued, claim_deploy_batch, claim_next_job
+from .persistence.claims import claim_all_queued, claim_deploy_batch
 from .persistence.connection import connect
 from .persistence.events import (
     RUN_EVENT_RETENTION,
@@ -91,7 +91,6 @@ __all__ = (
     "cancel_job",
     "claim_all_queued",
     "claim_deploy_batch",
-    "claim_next_job",
     "clear_rejected_push",
     "connect",
     "counts",
