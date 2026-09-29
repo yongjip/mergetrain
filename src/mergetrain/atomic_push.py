@@ -125,7 +125,7 @@ class AtomicPush:
                     pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
                     timeout_seconds=self.config.queue.command_timeout_seconds,
                     pass_fds=inherited,
-                    job_name=push_job_name(target),
+                    job_name=push_job_name(self.config, target),
                 )
             except CommandFailed as exc:
                 # git push chose this status after the processes doing the

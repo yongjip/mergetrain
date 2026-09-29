@@ -27,12 +27,17 @@ def fake_config(root: Path) -> Any:
 
 
 class PushLockNamingTests(unittest.TestCase):
-    def test_lock_and_job_names_are_derived_from_the_commit(self) -> None:
+    def test_lock_and_job_names_are_derived_from_the_queue_and_the_commit(self) -> None:
         config = fake_config(Path("/state"))
         self.assertEqual(
             push_lock_path(config, SHA), Path("/state/.mergetrain/push-locks") / f"{SHA}.lock"
         )
-        self.assertEqual(push_job_name(SHA), f"Local\\mergetrain-push-{SHA}")
+        name = push_job_name(config, SHA)
+        self.assertRegex(name, rf"^Local\\mergetrain-push-[0-9a-f]{{16}}-{SHA}$")
+        self.assertEqual(push_job_name(fake_config(Path("/state")), SHA), name)
+        # Windows shares job names across the login session, so two queues
+        # pushing the same commit must not share one.
+        self.assertNotEqual(push_job_name(fake_config(Path("/other")), SHA), name)
 
     def test_no_marker_means_no_push_in_flight(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- On Windows, stop a push from being parked for reconcile because another
+  queue on the same machine was pushing the same commit. The push's Job Object
+  was named after the commit alone, and Windows shares job names across the
+  login session, so the second push took the first for an earlier push of its
+  own that was still running, refused to start, and parked. Parallel test runs
+  hit this. The name now also identifies the queue, as the location of the
+  POSIX lock file already did.
 - Stop a process that `git push` leaves running from holding the push lock
   once the push has finished. Since 3.1.0 every process the push started
   inherited its lock, including helpers that outlive it, such as a credential

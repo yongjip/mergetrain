@@ -113,13 +113,13 @@ the push: managed commands run in their own process group (a Job Object on
 Windows), so `git push` keeps running and can still land afterwards. The runner
 takes a lock before it pushes and hands it to `git push`, and every process the
 push starts, a local `receive-pack` and its hooks included, inherits it. On
-Windows the push's Job Object is named after the commit instead, and `git push`
-holds its own handle to it, so the name outlives the runner. While any process
-of that push is alive, `reconcile` refuses with `lock_held` (exit 3) and leaves
-the job parked, so it never reads the remote before the push has finished
-changing it. Rerun reconcile once the push has exited. One gap remains for
-network remotes: a server that already received the whole push can still apply
-it after the client has died.
+Windows the push's Job Object is named after the queue and the commit instead,
+and `git push` holds its own handle to it, so the name outlives the runner.
+While any process of that push is alive, `reconcile` refuses with `lock_held`
+(exit 3) and leaves the job parked, so it never reads the remote before the
+push has finished changing it. Rerun reconcile once the push has exited. One gap
+remains for network remotes: a server that already received the whole push can
+still apply it after the client has died.
 
 When `git push` exits with a status of its own while the runner is still there,
 it has already waited for the processes that do the push, so the runner releases
