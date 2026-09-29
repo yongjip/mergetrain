@@ -88,7 +88,7 @@ Luna MAX의 독립적인 읽기 전용 검토에서도 같은 한계를 확인�
 등록 사이의 인계를 별도로 설계해야 한다. 그 비용을 검토하기 전에는
 새 자동 기동 기능을 추가하는 것이 더 단순하다고 단정하지 않는다.
 
-재현 스크립트: [oneshot_lifecycle.py](oneshot_lifecycle.py).
+재현 스크립트: [oneshot_lifecycle.py](https://github.com/yongjip/mergetrain/blob/v3.1.1/benchmarks/throughput_2048/oneshot_lifecycle.py).
 두 실행의 결과와 명령 증거: [oneshot-results.json](oneshot-results.json).
 원시 로그는 프로젝트 `.mergetrain/benchmarks/throughput-2048/` 아래
 `oneshot-lifecycle-20260905` 및 `oneshot-lifecycle-confirm-20260905`에 보존했다.

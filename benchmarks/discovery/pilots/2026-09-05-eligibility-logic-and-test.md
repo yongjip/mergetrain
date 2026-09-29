@@ -132,9 +132,13 @@ measured runner is recoverable at commit `1357f73` and its hash is recorded.
 The frozen baseline was subsequently copied into the experiment directory to
 prevent future product edits from silently changing a historical comparison.
 
-Reproduce aggregation with:
+The oracle, runner, and summarizer were retired from the tree after 3.1.1; the
+frozen inputs and machine-readable results stay as evidence. Reproduce
+aggregation from a `v3.1.1` checkout:
 
 ```sh
+git worktree add ../mergetrain-v3.1.1 v3.1.1
+cd ../mergetrain-v3.1.1
 python -m benchmarks.discovery.eligibility.summarize \
   /path/to/2026-09-05-eligibility \
   --output /tmp/eligibility-results.json

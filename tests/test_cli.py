@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -17,6 +19,7 @@ from mergetrain.cli import (
     _job_result_line,
     _results_payload,
     _run_exit_code,
+    build_parser,
     main,
     normalize_global_options,
 )
@@ -2004,6 +2007,28 @@ class CliTests(unittest.TestCase):
         self.assertIn("last successful enqueue", contract)
         self.assertIn('"Queue for validation" authorizes enqueue only', contract)
         self.assertIn("exact destination and execution policy", contract)
+
+    def test_agent_contract_command_reference_examples_parse(self) -> None:
+        """Agents paste the generated command reference verbatim, so it must parse."""
+
+        reference = render_agent_contract().split("## Current command reference\n", 1)[1]
+        reference = reference.split("\n## Rules\n", 1)[0]
+        commands = re.findall(r"`(mergetrain [^`]+)`", reference)
+        self.assertTrue(commands)
+        seen = set()
+        for command in commands:
+            with self.subTest(command=command):
+                argv = shlex.split(command.replace("JOB_ID", "7"))[1:]
+                parser = build_parser()
+                if argv == ["--version"]:
+                    with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exit_:
+                        parser.parse_args(argv)
+                    self.assertEqual(exit_.exception.code, 0)
+                    continue
+                namespace = parser.parse_args(argv)
+                self.assertTrue(callable(namespace.func))
+                seen.add(argv[0])
+        self.assertEqual(seen, {"status", "inspect"})
 
     def test_validate_pauses_while_one_exact_train_is_ready(self) -> None:
         with tempfile.TemporaryDirectory() as td:

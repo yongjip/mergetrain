@@ -35,8 +35,9 @@ Installing a new queue cannot retroactively create evidence for an old ordinary
 Git push. Generic incident recovery therefore does not qualify on its own.
 An unresolved request is not a mandate to run Git or read the skill to reject it.
 
-`policy.py` models these rules over 432 combinations (four booleans and three
-three-valued facts). Boundary cases verify precedence and the differences
+[`policy.py`](https://github.com/yongjip/mergetrain/blob/v3.1.1/benchmarks/discovery/eligibility/policy.py)
+(retired from the tree after 3.1.1) models these rules over 432 combinations
+(four booleans and three three-valued facts). Boundary cases verify precedence and the differences
 between mentions/tasks, hosting/hosted queues, current/future recovery, and
 adoption/execution preconditions. These tests check the design, not model accuracy.
 

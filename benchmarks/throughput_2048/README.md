@@ -72,3 +72,15 @@ The queue gate runs baseline regression checks only, because a partial train
 cannot yet satisfy all four feature contracts. Both integrations must pass the
 external strict all-feature grader before being counted complete. Branch-level
 feature checks are separate; an API missing from the final result is a failure.
+
+## Retired harness
+
+This pilot is finished. Its protocols, reports, and results files stay here as
+evidence; the harness code was removed from the tree after 3.1.1 and remains
+at the `v3.1.1` tag: the frozen acceptance grader
+[`acceptance.cjs`](https://github.com/yongjip/mergetrain/blob/v3.1.1/benchmarks/throughput_2048/acceptance.cjs)
+(its SHA-256 is recorded in `results.json`, `retry-results.json`, and
+`daemon-results.json`), the command recorder
+[`timed.py`](https://github.com/yongjip/mergetrain/blob/v3.1.1/benchmarks/throughput_2048/timed.py),
+and the one-shot lifecycle checks
+[`oneshot_lifecycle.py`](https://github.com/yongjip/mergetrain/blob/v3.1.1/benchmarks/throughput_2048/oneshot_lifecycle.py).

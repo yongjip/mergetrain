@@ -36,3 +36,13 @@ Release portability correction: after the recorded 2026-09-05 runs, the runner
 was changed to use the platform temporary directory and portable subprocess
 termination. Recorded source/runner hashes identify the original measured code;
 this maintenance change does not represent a rerun or new behavioral result.
+
+## Retired runner
+
+This diagnostic is finished. Its frozen inputs (`fixtures.json` and the two
+skill arms), `report-2026-09-05.md`, and `review-2026-09-05.json` stay here as
+evidence. The runner
+[`run.py`](https://github.com/yongjip/mergetrain/blob/v3.1.1/benchmarks/operator_guidance/run.py)
+and its tests were removed from the tree after 3.1.1 and remain at the `v3.1.1`
+tag. The lasting product check, that every command in the generated command
+reference parses in the current CLI, now lives in `tests/test_cli.py`.
