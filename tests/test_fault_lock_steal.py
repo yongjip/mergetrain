@@ -61,7 +61,11 @@ from mergetrain.persistence.claims import claim_deploy_batch
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.events import list_run_events
 from mergetrain.persistence.jobs import enqueue_job, get_job, mark_job
-from mergetrain.persistence.leases import force_clear_lock_and_split, get_lock
+from mergetrain.persistence.leases import (
+    acquire_runner_lock,
+    force_clear_lock_and_split,
+    get_lock,
+)
 from mergetrain.persistence.recovery import deploy_reconcile_pending, record_pending_push
 from mergetrain.persistence.transactions import utc_now
 from mergetrain.recovery import force_unlock, reconcile
@@ -339,7 +343,8 @@ class ClaimTokenFenceTests(unittest.TestCase):
             conn = connect(Path(td) / "queue.sqlite")
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                token = "lease-token"
+                held = acquire_runner_lock(conn, owner=f"runner:{os.getpid()}")
+                token = held.token
                 conn.execute(
                     "UPDATE deploy_queue SET status='in_progress', claim_token=?, "
                     "started_at=? WHERE id=?",
@@ -357,7 +362,9 @@ class ClaimTokenFenceTests(unittest.TestCase):
 
                 # The operator's forced steal: lock gone, marker-bearing row
                 # parked, claim token cleared.
-                self.assertTrue(force_clear_lock_and_split(conn))
+                self.assertTrue(
+                    force_clear_lock_and_split(conn, owner=held.owner, token=held.token)
+                )
                 parked = get_job(conn, job.id)
                 self.assertEqual(parked.status, "needs_reconcile")
                 self.assertEqual(parked.claim_token, "")

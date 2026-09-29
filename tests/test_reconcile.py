@@ -599,8 +599,9 @@ class OrphanSplitTests(unittest.TestCase):
 
     def _run_split(self, conn) -> None:
         # No prior lock + in_progress orphans triggers the marker-aware split.
-        acquire_runner_lock(conn, owner=f"runner:{os.getpid()}")
-        release_runner_lock(conn, owner=None)
+        owner = f"runner:{os.getpid()}"
+        lock = acquire_runner_lock(conn, owner=owner)
+        release_runner_lock(conn, owner=owner, token=lock.token)
 
     def test_split_routes_by_marker_and_cancel(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -33,7 +33,7 @@ from mergetrain.persistence.claims import claim_all_queued
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.events import record_run_event
 from mergetrain.persistence.jobs import enqueue_job, get_job, list_jobs, mark_job
-from mergetrain.persistence.leases import release_runner_lock
+from mergetrain.persistence.leases import default_owner, release_runner_lock
 from mergetrain.reuse import ReuseDecision
 
 
@@ -150,7 +150,7 @@ class CliTests(unittest.TestCase):
                     state="succeeded",
                     message="Passed gate 1/1: tests",
                 )
-                release_runner_lock(conn)
+                release_runner_lock(conn, owner=default_owner(), token=claimed.claim_token)
             finally:
                 conn.close()
 

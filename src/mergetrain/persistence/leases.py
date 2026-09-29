@@ -82,16 +82,15 @@ def owner_liveness(owner: str) -> str:
     return Liveness.ALIVE
 
 
-def get_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> RunnerLock | None:
-    row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
+def get_lock(conn: sqlite3.Connection) -> RunnerLock | None:
+    row = conn.execute("SELECT * FROM locks WHERE name = ?", (RUNNER_LOCK_NAME,)).fetchone()
     if row is None:
         return None
     return RunnerLock.from_row(row, liveness=owner_liveness(str(row["owner"])))
 
 
 def active_runner_lock(
-    conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME
-) -> RunnerLock | None:
+    conn: sqlite3.Connection) -> RunnerLock | None:
     """Return the lock that still fences work as an active runner.
 
     A live local process remains authoritative even if its wall-clock lease is
@@ -101,7 +100,7 @@ def active_runner_lock(
     push from being misreported as crash evidence.
     """
 
-    lock = get_lock(conn, name=name)
+    lock = get_lock(conn)
     if lock is None or not lock.token:
         return None
     expired = _parse_utc(lock.expires_at) <= datetime.now(timezone.utc)
@@ -112,8 +111,8 @@ def active_runner_lock(
     return None
 
 
-def _delete_lock(conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME) -> None:
-    conn.execute("DELETE FROM locks WHERE name = ?", (name,))
+def _delete_lock(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM locks WHERE name = ?", (RUNNER_LOCK_NAME,))
 
 
 def _release_lock_token(
@@ -121,26 +120,24 @@ def _release_lock_token(
     *,
     owner: str,
     token: str,
-    name: str = RUNNER_LOCK_NAME,
 ) -> bool:
     """Release one exact lease inside the caller's current transaction."""
 
     cur = conn.execute(
         "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-        (name, owner, token),
+        (RUNNER_LOCK_NAME, owner, token),
     )
     return cur.rowcount > 0
 
 
 def live_worktree_path(
-    conn: sqlite3.Connection, *, name: str = RUNNER_LOCK_NAME
-) -> str | None:
+    conn: sqlite3.Connection) -> str | None:
     """The integration worktree of the currently live runner, or ``None``.
 
     Read fresh from the lock table so GC can re-check it immediately before each
     deletion — a runner that acquired the lock after GC's protect snapshot was
     built is invisible to that snapshot but visible here (#84, defect 5)."""
-    lock = get_lock(conn, name=name)
+    lock = get_lock(conn)
     if lock and lock.worktree_path and lock.liveness != Liveness.DEAD:
         return lock.worktree_path
     return None
@@ -230,7 +227,6 @@ def _acquire_runner_lock(
     *,
     owner: str | None = None,
     ttl_minutes: int = 30,
-    name: str = RUNNER_LOCK_NAME,
     worktree_path: str = "",
     head_sha: str = "",
 ) -> RunnerLock:
@@ -238,13 +234,13 @@ def _acquire_runner_lock(
     now = utc_now()
     expires = _plus_minutes(ttl_minutes)
     token = uuid.uuid4().hex
-    row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
+    row = conn.execute("SELECT * FROM locks WHERE name = ?", (RUNNER_LOCK_NAME,)).fetchone()
     if row is not None:
         current_owner = str(row["owner"])
         live = owner_liveness(current_owner)
         expired = _parse_utc(str(row["expires_at"])) <= datetime.now(timezone.utc)
         if live == Liveness.DEAD:
-            _delete_lock(conn, name=name)
+            _delete_lock(conn)
             _requeue_orphans(conn)
         elif not expired:
             raise LockHeld(f"runner lock is held by {live} owner: {current_owner}")
@@ -253,7 +249,7 @@ def _acquire_runner_lock(
                 f"expired runner lock ({live} owner {current_owner}) has in-progress jobs"
             )
         else:
-            _delete_lock(conn, name=name)
+            _delete_lock(conn)
     elif _in_progress_count(conn) > 0:
         _requeue_orphans(conn)
     conn.execute(
@@ -263,9 +259,9 @@ def _acquire_runner_lock(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, owner, worktree_path, head_sha, now, now, expires, token),
+        (RUNNER_LOCK_NAME, owner, worktree_path, head_sha, now, now, expires, token),
     )
-    row = conn.execute("SELECT * FROM locks WHERE name = ?", (name,)).fetchone()
+    row = conn.execute("SELECT * FROM locks WHERE name = ?", (RUNNER_LOCK_NAME,)).fetchone()
     lock = RunnerLock.from_row(row, liveness=owner_liveness(owner)) if row is not None else None
     assert lock is not None
     return lock
@@ -276,7 +272,6 @@ def acquire_runner_lock(
     *,
     owner: str | None = None,
     ttl_minutes: int = 30,
-    name: str = RUNNER_LOCK_NAME,
     worktree_path: str = "",
     head_sha: str = "",
 ) -> RunnerLock:
@@ -285,7 +280,6 @@ def acquire_runner_lock(
             conn,
             owner=owner,
             ttl_minutes=ttl_minutes,
-            name=name,
             worktree_path=worktree_path,
             head_sha=head_sha,
         )
@@ -297,7 +291,6 @@ def refresh_runner_lock(
     owner: str,
     token: str,
     ttl_minutes: int = 30,
-    name: str = RUNNER_LOCK_NAME,
     worktree_path: str | None = None,
     head_sha: str | None = None,
     check_cancel: bool = True,
@@ -313,7 +306,7 @@ def refresh_runner_lock(
                 head_sha = COALESCE(?, head_sha)
             WHERE name = ? AND owner = ? AND token = ?
             """,
-            (utc_now(), _plus_minutes(ttl_minutes), worktree_path, head_sha, name, owner, token),
+            (utc_now(), _plus_minutes(ttl_minutes), worktree_path, head_sha, RUNNER_LOCK_NAME, owner, token),
         )
         if cur.rowcount != 1:
             raise LostLease(f"runner lease is no longer owned by {owner}")
@@ -330,32 +323,14 @@ def refresh_runner_lock(
                 raise CancellationRequested("cancellation requested for the active train")
 
 
-def release_runner_lock(
-    conn: sqlite3.Connection,
-    *,
-    owner: str | None = None,
-    token: str | None = None,
-    name: str = RUNNER_LOCK_NAME,
-) -> bool:
+def release_runner_lock(conn: sqlite3.Connection, *, owner: str, token: str) -> bool:
+    """Release the runner lock only while this exact lease still holds it."""
+
     with immediate(conn):
-        if owner is None:
-            cur = conn.execute("DELETE FROM locks WHERE name = ?", (name,))
-        elif token is not None:
-            return _release_lock_token(
-                conn, owner=owner, token=token, name=name
-            )
-        else:
-            raise LostLease("runner lease token is required for owner-guarded release")
-    return cur.rowcount > 0
+        return _release_lock_token(conn, owner=owner, token=token)
 
 
-def force_clear_lock_and_split(
-    conn: sqlite3.Connection,
-    *,
-    owner: str | None = None,
-    token: str | None = None,
-    name: str = RUNNER_LOCK_NAME,
-) -> bool:
+def force_clear_lock_and_split(conn: sqlite3.Connection, *, owner: str, token: str) -> bool:
     """Delete the runner lock and run the marker-aware orphan split, atomically.
 
     Used by ``unlock`` once it has decided the lock may be cleared (a dead/absent
@@ -364,20 +339,14 @@ def force_clear_lock_and_split(
     orphans are only parked in ``needs_reconcile`` here; the remote verdict comes
     from the subsequent ``reconcile`` (0.3.0 Phase 2).
 
-    When ``owner`` and ``token`` are given the delete is **scoped** to that exact
-    lock: if it matches nothing (the lock changed while unlock was probing the
+    The delete is **scoped** to that exact lock: if it matches nothing (the lock changed while unlock was probing the
     remote — e.g. the wedged runner finished and a fresh runner acquired it), the
     split is skipped and ``False`` is returned, so a healthy in-flight runner is
     never clobbered. Returns ``True`` when the lock was cleared and orphans split.
     """
     with immediate(conn):
-        if owner is not None and token is not None:
-            if not _release_lock_token(
-                conn, owner=owner, token=token, name=name
-            ):
-                return False
-        else:
-            _delete_lock(conn, name=name)
+        if not _release_lock_token(conn, owner=owner, token=token):
+            return False
         _requeue_orphans(conn)
         return True
 
@@ -387,7 +356,6 @@ def recover_orphans(
     *,
     owner: str | None = None,
     ttl_minutes: int = 30,
-    name: str = RUNNER_LOCK_NAME,
 ) -> int:
     """Heal a dead or absent runner's stranded ``in_progress`` jobs without
     claiming new work.
@@ -411,12 +379,12 @@ def recover_orphans(
             return 0
         try:
             lock = _acquire_runner_lock(
-                conn, owner=owner, ttl_minutes=ttl_minutes, name=name
+                conn, owner=owner, ttl_minutes=ttl_minutes
             )
         except LockHeld:
             # A live (or expired-but-not-dead) owner still holds the lock; its
             # in-progress train is not ours to reap. Leave it for its own
             # runner or an operator `unlock`.
             return 0
-        _release_lock_token(conn, owner=owner, token=lock.token, name=name)
+        _release_lock_token(conn, owner=owner, token=lock.token)
         return before - _in_progress_count(conn)
