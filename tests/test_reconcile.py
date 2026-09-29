@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,6 +24,7 @@ from unittest.mock import patch
 # (python -m unittest tests.test_reconcile) resolves the import too.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from mergetrain.atomic_push import AtomicPush
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
@@ -1017,6 +1018,131 @@ class CrashRecoveryTests(unittest.TestCase):
                 ).stdout,
                 "",
             )
+
+
+def _land(repo: Path, sha: str) -> None:
+    """The remote applies an earlier push late: main and its audit ref, atomically."""
+
+    git(repo, "push", "--atomic", "origin", f"{sha}:refs/heads/main", f"{sha}:{deploy_audit_ref_name(sha)}")
+
+
+class LateLandingTests(unittest.TestCase):
+    """A push that reconcile found had not landed can still land on a network remote."""
+
+    def _requeued_after_a_dropped_push(self):  # type: ignore[no-untyped-def]
+        # Registered before the queue connection, so the connection closes
+        # first: Windows cannot remove an open database file.
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        repo, _ = make_demo_repo(root)
+        # Move main past feature/a's base so the deploy is a merge commit, and
+        # date the first attempt's merge so that a later build differs from it.
+        (repo / "main.txt").write_text("main\n", encoding="utf-8")
+        git(repo, "add", "main.txt")
+        git(repo, "commit", "-m", "main moves on")
+        git(repo, "push", "origin", "main")
+        config = load_config(repo=repo)
+        conn = connect(config.state.db)
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="feature/a")
+        runner = GitRunner(config)
+
+        def drop_before_apply(**kwargs):  # type: ignore[no-untyped-def]
+            raise CommandFailed(
+                ["git", "push"], 128, stderr="fatal: the remote end hung up unexpectedly"
+            )
+
+        dated = {
+            "GIT_AUTHOR_DATE": "2001-01-01T00:00:00Z",
+            "GIT_COMMITTER_DATE": "2001-01-01T00:00:00Z",
+        }
+        self._deploy(
+            config,
+            conn,
+            runner,
+            patch.dict(os.environ, dated),
+            patch.object(runner._pushes, "push_verified_head", side_effect=drop_before_apply),
+        )
+        earlier = get_job(conn, job.id).pending_deploy_sha
+        self.assertTrue(earlier)
+        self.assertEqual(reconcile(config, conn, apply=True).summary["requeued"], 1)
+        return root, repo, config, conn, runner, job.id, earlier
+
+    def _deploy(self, config, conn, runner, *patches) -> None:  # type: ignore[no-untyped-def]
+        ttl = config.queue.lock_ttl_minutes
+        claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
+        with ExitStack() as stack:
+            for item in patches:
+                stack.enter_context(item)
+            runner.process_batch(conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl)
+
+    def test_a_late_landing_before_the_next_deploy_is_recorded_deployed(self) -> None:
+        root, repo, config, conn, runner, job_id, earlier = self._requeued_after_a_dropped_push()
+        _land(repo, earlier)
+
+        self._deploy(config, conn, runner)
+
+        job = get_job(conn, job_id)
+        self.assertEqual(job.status, "deployed")
+        self.assertEqual(job.deploy_sha, earlier)
+        self.assertEqual(git(root / "remote.git", "rev-parse", "main"), earlier)
+
+    def test_a_late_landing_that_refuses_the_next_push_requeues_it(self) -> None:
+        root, repo, config, conn, runner, job_id, earlier = self._requeued_after_a_dropped_push()
+        real_push = runner._pushes.push_verified_head
+
+        def land_then_push(**kwargs):  # type: ignore[no-untyped-def]
+            _land(repo, earlier)
+            real_push(**kwargs)
+
+        self._deploy(
+            config,
+            conn,
+            runner,
+            patch.object(runner._pushes, "push_verified_head", side_effect=land_then_push),
+        )
+
+        # The remote refused the new push only because main already carries
+        # the job, so it goes back to the queue instead of reading blocked.
+        requeued = get_job(conn, job_id)
+        self.assertEqual(requeued.status, "queued")
+        self.assertIn("already contain every job of this train", requeued.note)
+        self.assertEqual(git(root / "remote.git", "rev-parse", "main"), earlier)
+
+        self._deploy(config, conn, runner)
+
+        job = get_job(conn, job_id)
+        self.assertEqual(job.status, "deployed")
+        self.assertEqual(job.deploy_sha, earlier)
+
+    def test_containment_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            push = AtomicPush(config)
+            destination = resolve_git_destination(config)
+            base = git(repo, "rev-parse", "main")
+            task = git(repo, "rev-parse", "feature/a")
+
+            def contains(commits: list[str]) -> bool:
+                return push.contains_commits(commits, destination=destination, log=None)
+
+            self.assertTrue(contains([base]))
+            self.assertFalse(contains([task]))
+            self.assertFalse(contains([]))
+            self.assertFalse(contains([base, ""]))
+            # A remote tip this clone has never fetched proves nothing.
+            other = root / "other"
+            git(root, "clone", "-b", "main", str(root / "remote.git"), str(other))
+            git(other, "config", "user.email", "other@example.invalid")
+            git(other, "config", "user.name", "Other")
+            (other / "other.txt").write_text("other\n", encoding="utf-8")
+            git(other, "add", "other.txt")
+            git(other, "commit", "-m", "other")
+            git(other, "push", "origin", "main")
+            self.assertFalse(contains([base]))
 
 
 class DeployGateTests(unittest.TestCase):
