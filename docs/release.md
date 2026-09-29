@@ -12,8 +12,11 @@ upgrade. Between 0.1.0 (2026-07-16) and 3.2.0 (2026-09-29) mergetrain shipped
 download counts without adding users and makes the tool look unstable to the
 people who depend on it.
 
-- Collect changes under `## Unreleased` in `CHANGELOG.md` and release them
-  together.
+- Feature and fix changes add their `CHANGELOG.md` entry under
+  `## Unreleased` and leave every version string alone. Only the
+  release-preparation change bumps the version, once for everything pending:
+  it turns `## Unreleased` into the dated heading and updates every version
+  surface that `scripts/check_release.py` checks.
 - Ship a patch release promptly only for a regression in the latest release, a
   data-loss or safety-boundary bug (an unapproved push, or a cleanup that
   deletes files mergetrain does not own), a security fix, or a broken install
@@ -193,7 +196,8 @@ an upload that already succeeded.
    Compare the second command's description and topic set with GitHub About and
    update that repository setting if it drifted. Do not maintain a second copy
    of the desired text in this checklist.
-3. Update the version and dated changelog heading for the intended release.
+3. Update the version and turn `## Unreleased` into the dated changelog heading
+   for the intended release.
 4. Create a signed annotated tag on the exact verified `main` commit, verify it
    locally against the tracked allowed signer, and push it. Unsigned release
    tags are rejected by the release workflow:
