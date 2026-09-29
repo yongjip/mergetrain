@@ -55,7 +55,8 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
   under `## Unreleased`. Only a requested release-preparation change bumps the
   version, after applying the cadence rules in
   `docs/release.md#when-to-cut-a-release`; recommend waiting when the pending
-  changes do not meet them.
+  changes do not meet them. When a change meets that section's patch-release
+  criteria, say so at handoff and recommend a prompt patch release.
 
 ## GitHub CLI authentication
 

@@ -16,7 +16,9 @@ people who depend on it.
   `## Unreleased` and leave every version string alone. Only the
   release-preparation change bumps the version, once for everything pending:
   it turns `## Unreleased` into the dated heading and updates every version
-  surface that `scripts/check_release.py` checks.
+  surface that `scripts/check_release.py` checks. `.gitattributes` merges
+  `CHANGELOG.md` with Git's union driver, so entries added by parallel
+  branches do not conflict.
 - Ship a patch release promptly only for a regression in the latest release, a
   data-loss or safety-boundary bug (an unapproved push, or a cleanup that
   deletes files mergetrain does not own), a security fix, or a broken install
@@ -33,7 +35,9 @@ people who depend on it.
 
 An agent asked to prepare a release first lists what is pending under
 `## Unreleased` and says whether it meets these rules. If it does not, the
-agent recommends waiting instead of preparing the release.
+agent recommends waiting instead of preparing the release. An agent whose
+change meets the patch-release criteria above says so when it hands the change
+off, and recommends a prompt patch release instead of waiting to be asked.
 
 ## What CI verifies
 
@@ -197,7 +201,9 @@ an upload that already succeeded.
    update that repository setting if it drifted. Do not maintain a second copy
    of the desired text in this checklist.
 3. Update the version and turn `## Unreleased` into the dated changelog heading
-   for the intended release.
+   for the intended release. Read the section first: the union merge that
+   `.gitattributes` sets for `CHANGELOG.md` can splice together two parallel
+   entries that share an identical line.
 4. Create a signed annotated tag on the exact verified `main` commit, verify it
    locally against the tracked allowed signer, and push it. Unsigned release
    tags are rejected by the release workflow:
