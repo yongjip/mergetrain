@@ -2941,6 +2941,47 @@ class SingleJobGateFailureTests(unittest.TestCase):
             self.assertEqual(stored.train_id, "")
             self.assertEqual(counter.read_text(), "1", "the failed gate was run again")
 
+    def test_linear_isolation_keeps_each_jobs_progress_its_own(self) -> None:
+        # The train fails, bisect cannot reproduce the failure, and linear
+        # isolation runs one-job trains under the same claim: the first job's
+        # run fails and the later ones deploy. inspect on the first job must
+        # still show its own failure, not a later job's push.
+        from mergetrain.observability import inspect_job_payload
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            counter = root / "gate-runs.txt"
+            gate = (
+                f'{SHELL_PYTHON} -c "import pathlib, sys; '
+                f"p = pathlib.Path('{py_path(counter)}'); "
+                "n = (int(p.read_text()) + 1) if p.exists() else 1; "
+                'p.write_text(str(n)); sys.exit(1 if n in (1, 5) else 0)"'
+            )
+            repo, _ = make_demo_repo(root, gate_command=gate)
+            for name in ("b", "c", "d"):
+                add_branch(repo, f"agent/{name}", f"{name}.txt")
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            token = ""
+            try:
+                first = enqueue_job(conn, task="a", branch="feature/a")
+                for name in ("b", "c", "d"):
+                    enqueue_job(conn, task=name, branch=f"agent/{name}")
+                claimed = claim_deploy_batch(conn, owner=owner)
+                token = claimed[0].claim_token
+                GitRunner(config).process_batch(conn, claimed, deploy=True, owner=owner)
+                statuses = [get_job(conn, job.id).status for job in claimed]
+            finally:
+                if token:
+                    release_runner_lock(conn, owner=owner, token=token)
+                conn.close()
+            progress = inspect_job_payload(config, first.id)["progress"]
+
+        self.assertEqual(statuses, ["failed", "deployed", "deployed", "deployed"])
+        self.assertEqual((progress["phase"], progress["state"]), ("failed", "error"))
+        self.assertIn(f"Job #{first.id} failed", progress["message"])
+
 
 class BisectIsolationTests(unittest.TestCase):
     def test_semantic_conflict_classification_is_independent_of_batch_size(self) -> None:

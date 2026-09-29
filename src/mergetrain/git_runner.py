@@ -1178,7 +1178,13 @@ class GitRunner:
         def ownership_pulse() -> None:
             pulse(check_cancel=False)
 
-        gate_progress = self._gate_progress_callback(conn, lease_token=lease_token)
+        # A one-job train is that job's own run, so its events carry the job:
+        # linear isolation runs several one-job trains under one claim, and
+        # inspect must never show one job another job's progress.
+        event_job_id = jobs[0].id if len(jobs) == 1 else None
+        gate_progress = self._gate_progress_callback(
+            conn, lease_token=lease_token, job_id=event_job_id
+        )
 
         def finish(item: Job, **values: Any) -> Job:
             return self._finish_job(conn, item.id, lease_token=lease_token, **values)
@@ -1274,6 +1280,7 @@ class GitRunner:
                 self._event(
                     conn,
                     lease_token=lease_token,
+                    job_id=event_job_id,
                     phase="fetching",
                     state="active",
                     message=f"Fetching {self.config.git.integration_ref}",
@@ -1287,6 +1294,7 @@ class GitRunner:
                 self._event(
                     conn,
                     lease_token=lease_token,
+                    job_id=event_job_id,
                     phase="fetching",
                     state="success",
                     message=(
@@ -1327,6 +1335,7 @@ class GitRunner:
                             self._event(
                                 conn,
                                 lease_token=lease_token,
+                                job_id=event_job_id,
                                 phase="assembling",
                                 state="active",
                                 message="Restoring exact validated train commit",
@@ -1351,6 +1360,7 @@ class GitRunner:
                             self._event(
                                 conn,
                                 lease_token=lease_token,
+                                job_id=event_job_id,
                                 phase="assembling",
                                 state="success",
                                 message="Exact validated train commit restored",
@@ -1374,6 +1384,7 @@ class GitRunner:
                     self._event(
                         conn,
                         lease_token=lease_token,
+                        job_id=event_job_id,
                         phase="assembling",
                         state="active",
                         message=f"Assembling train with {len(jobs)} job(s)",
@@ -1479,6 +1490,7 @@ class GitRunner:
                     self._event(
                         conn,
                         lease_token=lease_token,
+                        job_id=event_job_id,
                         phase="assembling",
                         state="success",
                         message=f"Assembled {len(merged_jobs)} job(s)",
@@ -1494,6 +1506,7 @@ class GitRunner:
                     self._event(
                         conn,
                         lease_token=lease_token,
+                        job_id=event_job_id,
                         phase="gating",
                         state="reused" if cache_reused else "success",
                         message=(
@@ -1509,6 +1522,7 @@ class GitRunner:
                         self._event(
                             conn,
                             lease_token=lease_token,
+                            job_id=event_job_id,
                             phase="gating",
                             state="warning",
                             message="Validated gates were not reused; rerunning all gates",
@@ -1517,6 +1531,7 @@ class GitRunner:
                     self._event(
                         conn,
                         lease_token=lease_token,
+                        job_id=event_job_id,
                         phase="gating",
                         state="active",
                         message=(
@@ -1548,6 +1563,7 @@ class GitRunner:
                     self._event(
                         conn,
                         lease_token=lease_token,
+                        job_id=event_job_id,
                         phase="gating",
                         state="success",
                         message="All train gates passed",
@@ -1579,6 +1595,7 @@ class GitRunner:
                     self._event(
                         conn,
                         lease_token=lease_token,
+                        job_id=event_job_id,
                         phase="gating",
                         state="warning",
                         message=(
@@ -1616,6 +1633,7 @@ class GitRunner:
                         before_push=normal_pulse,
                         ownership_pulse=ownership_pulse,
                         state=deploy_state,
+                        event_job_id=event_job_id,
                         expected_plan_sha=expected_plan_sha,
                         reuse_validated=reuse_validated,
                     )
