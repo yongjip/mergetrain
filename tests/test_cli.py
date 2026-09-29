@@ -2185,7 +2185,7 @@ class CliTests(unittest.TestCase):
                 code = main(["--repo", str(repo), "--db", str(db), "deploy"])
 
         self.assertEqual(code, 2)
-        self.assertIn("Ready to deploy 1 job(s): a", out.getvalue())
+        self.assertIn("Ready to deploy 1 job(s):\n  #1 a (feature/a)\n", out.getvalue())
         self.assertIn("requires an interactive terminal", err.getvalue())
 
     def test_deploy_text_decline_keeps_the_validated_train_ready(self) -> None:

@@ -6,27 +6,33 @@ cleanup remove something mergetrain does not own.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_git_runner import add_branch, git, make_demo_repo  # noqa: E402
+from test_mcp_server import FakeContext, completed  # noqa: E402
 
 from mergetrain import runtime  # noqa: E402
 from mergetrain.cli import main  # noqa: E402
 from mergetrain.command_runner import without_repository_env  # noqa: E402
+from mergetrain.commands.deploy import _render_v3_preview  # noqa: E402
 from mergetrain.config import load_config  # noqa: E402
+from mergetrain.mcp_server import MergetrainTools  # noqa: E402
 from mergetrain.persistence.connection import connect  # noqa: E402
-from mergetrain.persistence.jobs import get_job  # noqa: E402
+from mergetrain.persistence.jobs import enqueue_job, get_job  # noqa: E402
 
 
 def _run(argv: list[str]) -> tuple[int, str]:
@@ -229,6 +235,92 @@ class InheritedGitEnvironmentTests(unittest.TestCase):
                 head = runtime._git_output(ours, "rev-parse", "HEAD")
 
             self.assertEqual(head, git(ours, "rev-parse", "HEAD"))
+
+
+# Task text an enqueuing agent controls, crafted to rewrite what a human
+# approves: a carriage return that overwrites the count line, ANSI and C1
+# control sequences, a backspace, a bidirectional override, and a Unicode line
+# separator.
+FORGED_TASKS = (
+    "x\rReady to deploy 1 job(s): Legit fix (#12)",
+    "x\x1b[1A\x1b[2KReady to deploy 1 job(s): Legit fix",
+    "evil\x9b2K\x08\x08",
+    "‮gnp.txe",
+    "a Ready to deploy 1 job(s): Legit fix",
+)
+
+
+def _two_job_plan(forged: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "result": "confirmation_required",
+        "deploy_plan_sha": "f" * 64,
+        "push_plan": {
+            "remote": "origin",
+            "url": "git@github.com:example/checkout.git",
+            "refs": [{"source": "HEAD", "target": "main", "spec": "HEAD:main"}],
+        },
+        "reuse": {"decision": {"action": "rerun"}},
+        "jobs": [
+            {"id": 11, "task": "Legit fix", "branch": "agent/legit"},
+            {"id": 12, "task": forged, "branch": "agent/evil"},
+        ],
+    }
+
+
+def _hidden_characters(text: str) -> list[str]:
+    """Characters that move the cursor, reorder, or hide text, bar line ends."""
+
+    return [
+        char
+        for char in text
+        if char != "\n" and unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"}
+    ]
+
+
+class ConfirmationTextTests(unittest.TestCase):
+    """The plan a human approves must show every job, whatever a task says."""
+
+    def test_the_terminal_confirmation_lists_each_job_with_controls_escaped(self) -> None:
+        for forged in FORGED_TASKS:
+            with self.subTest(forged=forged):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    _render_v3_preview(_two_job_plan(forged))
+                shown = out.getvalue()
+                lines = shown.splitlines()
+                self.assertEqual(_hidden_characters(shown), [])
+                self.assertEqual(lines[0], "Ready to deploy 2 job(s):")
+                self.assertEqual(lines[1], "  #11 Legit fix (agent/legit)")
+                self.assertTrue(lines[2].startswith("  #12 "), lines[2])
+                self.assertTrue(lines[2].endswith(" (agent/evil)"), lines[2])
+                self.assertTrue(lines[3].startswith("Destination: "), lines[3])
+
+    def test_the_mcp_confirmation_counts_the_jobs_and_escapes_controls(self) -> None:
+        tools = MergetrainTools(repo=Path("/repo"))
+        for forged in FORGED_TASKS:
+            with self.subTest(forged=forged):
+                with patch.object(
+                    MergetrainTools,
+                    "_run",
+                    return_value=completed(json.dumps(_two_job_plan(forged))),
+                ):
+                    plan = asyncio.run(tools.prepare_deploy(FakeContext()))
+                lines = plan.summary.splitlines()
+                self.assertEqual(_hidden_characters(plan.summary), [])
+                self.assertEqual(lines[0], "Changes (2 jobs):")
+                self.assertEqual(lines[1], "  #11 Legit fix (agent/legit)")
+                self.assertTrue(lines[2].startswith("  #12 "), lines[2])
+                self.assertTrue(lines[3].startswith("Destination: "), lines[3])
+
+    def test_enqueue_stores_the_task_label_on_one_line(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            conn = connect(Path(td) / "queue.sqlite")
+            try:
+                job = enqueue_job(conn, task="  fix\r\nthe\tbug now  ", branch="agent/x")
+            finally:
+                conn.close()
+            self.assertEqual(job.task, "fix the bug now")
 
 
 if __name__ == "__main__":

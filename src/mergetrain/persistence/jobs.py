@@ -51,6 +51,12 @@ def _active_branch_count(conn: sqlite3.Connection, branch: str) -> int:
     return int(row["n"])
 
 
+def _task_label(task: str) -> str:
+    """A task as one line: line breaks, tabs, and space runs become one space."""
+
+    return " ".join(task.split())
+
+
 def enqueue_job(
     conn: sqlite3.Connection,
     *,
@@ -65,7 +71,7 @@ def enqueue_job(
     approval_destination_sha: str = "",
     approval_execution_policy_sha: str = "",
 ) -> Job:
-    task = task.strip()
+    task = _task_label(task)
     branch = branch.strip()
     if not task:
         raise QueueError("--task is required")
@@ -238,7 +244,7 @@ def supersede_validated_train(
     normalized: list[SupersedeReplacement] = []
     seen_branches: set[str] = set()
     for replacement in replacements:
-        task = replacement.task.strip()
+        task = _task_label(replacement.task)
         branch = replacement.branch.strip()
         if not task:
             raise QueueError("replacement task is required")

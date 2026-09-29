@@ -26,6 +26,17 @@
   demo, and the `status --diagnose` provenance read now drop the variables
   that name a repository, index, or object store, as Git itself does before it
   works in another repository. Config passed with `git -c` still applies.
+- Show every job of a deploy plan the way it is, whatever its task text says.
+  The `mergetrain deploy` confirmation printed each task exactly as the
+  enqueuing agent wrote it. A carriage return or escape sequence in one task
+  could overwrite the job count and the list that the human approved, so a
+  job nobody saw was pushed with the others. The MCP confirmation removed line
+  breaks but kept escape sequences and direction overrides. Both
+  confirmations now list each job on its own line as `#id task (branch)` and
+  print control and formatting characters as visible escapes, and the MCP
+  confirmation states the number of jobs. Enqueue and supersede store the task
+  on one line, with line breaks, tabs, and runs of spaces turned into single
+  spaces.
 - Remove the web dashboard and the web Hub. `mergetrain dashboard` and
   `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
   error that names the replacement: `status`, or `events --follow` for a live

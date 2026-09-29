@@ -32,7 +32,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from .errors import redact_secrets
+from .errors import escape_controls, redact_secrets
 from .windows_job import CREATE_SUSPENDED, WindowsJob
 
 try:
@@ -493,24 +493,40 @@ class MergetrainTools:
             )
         jobs = preview.get("jobs") or []
         push_plan = preview.get("push_plan") or {}
-        tasks = ", ".join(
-            " ".join(str(job.get("task") or job.get("branch") or "task").split()) for job in jobs
+        # One line per job, every value escaped: task text comes from whoever
+        # enqueued, and it must not be able to rewrite the count or the list
+        # that the human approves.
+        job_lines = [
+            f"  #{job.get('id')} "
+            f"{escape_controls(str(job.get('task') or job.get('branch') or 'task'))} "
+            f"({escape_controls(str(job.get('branch') or 'unknown branch'))})"
+            for job in jobs
+        ]
+        changes = (
+            f"Changes ({len(jobs)} job{'' if len(jobs) == 1 else 's'}):"
+            if jobs
+            else "Changes: task details unavailable"
         )
         refs = ", ".join(
-            str(item.get("target")) for item in push_plan.get("refs") or [] if item.get("target")
+            escape_controls(str(item.get("target")))
+            for item in push_plan.get("refs") or []
+            if item.get("target")
         )
-        destination = push_plan.get("url") or push_plan.get("remote") or "unknown"
+        destination = escape_controls(
+            str(push_plan.get("url") or push_plan.get("remote") or "unknown")
+        )
         reuse = preview.get("reuse") or {}
         decision = reuse.get("decision") or {}
-        gate_action = decision.get("action") or "run configured gates"
+        gate_action = escape_controls(str(decision.get("action") or "run configured gates"))
         warning_lines = [
-            f"Warning: {warning.get('summary')}"
+            f"Warning: {escape_controls(str(warning.get('summary')))}"
             for warning in preview.get("warnings") or []
             if warning.get("summary")
         ]
         summary = "\n".join(
             [
-                f"Changes: {tasks or 'task details unavailable'}",
+                changes,
+                *job_lines,
                 f"Destination: {destination} ({refs or 'configured refs'})",
                 f"Gate plan: {gate_action}",
                 *warning_lines,
