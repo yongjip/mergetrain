@@ -9,7 +9,7 @@ from dataclasses import fields
 from pathlib import Path
 
 from mergetrain.models import Job
-from mergetrain.store import connect
+from mergetrain.persistence.connection import connect
 
 
 class JobColumnTests(unittest.TestCase):

@@ -19,9 +19,9 @@ from mergetrain.observability import (
     stream_terminal,
     train_outcome,
 )
-from mergetrain.store import (
-    connect,
-    enqueue_job,
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job
+from mergetrain.persistence.operations import (
     finish_recovery_operation,
     list_recovery_operation_events,
     start_recovery_operation,

@@ -40,13 +40,10 @@ from test_git_runner import make_demo_repo
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.contract import CONTRACT_VERSION
-from mergetrain.store import (
-    acquire_runner_lock,
-    connect,
-    default_owner,
-    enqueue_job,
-    record_run_event,
-)
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import record_run_event
+from mergetrain.persistence.jobs import enqueue_job
+from mergetrain.persistence.leases import acquire_runner_lock, default_owner
 
 GOLDEN = Path(__file__).resolve().parent / "contract_fingerprints.json"
 
@@ -103,7 +100,7 @@ def _cap_status(repo):
 
 
 def _seed_status_attention(repo: Path) -> None:
-    from mergetrain.store import mark_job
+    from mergetrain.persistence.jobs import mark_job
 
     conn = connect(_db(repo))
     try:
@@ -152,7 +149,7 @@ def _cap_gc(repo):
     # Seed a terminal job so branch_candidates[] is NON-empty: keyset() renders an
     # empty list as "[]?" and pins nothing inside it, which is how a string
     # job_id sat next to an int job_id in this very payload without CI noticing.
-    from mergetrain.store import mark_job
+    from mergetrain.persistence.jobs import mark_job
 
     conn = connect(_db(repo))
     job = enqueue_job(conn, task="a", branch="feature/gc")
@@ -165,7 +162,7 @@ def _cap_gc_applied(repo):
     # `gc --apply` returns a different object (result{removed_worktrees,
     # deleted_branches, failed, swept_pending_refs}) that docs/contract.md claims
     # is covered. It was not.
-    from mergetrain.store import mark_job
+    from mergetrain.persistence.jobs import mark_job
 
     conn = connect(_db(repo))
     job = enqueue_job(conn, task="a", branch="feature/gc")
@@ -357,7 +354,7 @@ def _cap_cancel(repo):
 
 def _cap_verify(repo):
     # Seed a deployed+unknown job so `resolved` has a representative element.
-    from mergetrain.store import mark_job
+    from mergetrain.persistence.jobs import mark_job
 
     conn = connect(_db(repo))
     job = enqueue_job(conn, task="a", branch="feature/a")
@@ -375,7 +372,7 @@ def _cap_verify(repo):
 
 def _cap_dismiss(repo):
     # Seed a blocked job so `dismissed` has a representative element.
-    from mergetrain.store import mark_job
+    from mergetrain.persistence.jobs import mark_job
 
     conn = connect(_db(repo))
     job = enqueue_job(conn, task="a", branch="feature/a")
@@ -385,7 +382,7 @@ def _cap_dismiss(repo):
 
 
 def _cap_retry(repo):
-    from mergetrain.store import mark_job
+    from mergetrain.persistence.jobs import mark_job
 
     subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
     subprocess.run(

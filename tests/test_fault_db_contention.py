@@ -69,16 +69,13 @@ from mergetrain.config import load_config
 from mergetrain.errors import LockHeld, LostLease, QueueBusy
 from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, get_job
+from mergetrain.persistence.leases import release_runner_lock
+from mergetrain.persistence.recovery import record_pending_push
+from mergetrain.persistence.transactions import immediate
 from mergetrain.recovery import reconcile
-from mergetrain.store import (
-    claim_deploy_batch,
-    connect,
-    enqueue_job,
-    get_job,
-    immediate,
-    record_pending_push,
-    release_runner_lock,
-)
 
 # Short enough that a contended write fails fast, long enough that the holder
 # thread has genuinely parked on the lock rather than racing the runner. The

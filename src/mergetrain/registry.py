@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - non-POSIX platform
     fcntl = None  # type: ignore[assignment]
 
 from .errors import QueueError
-from .store import utc_now
+from .persistence.transactions import utc_now
 
 DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 REGISTRY_VERSION = 1

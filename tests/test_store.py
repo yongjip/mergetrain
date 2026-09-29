@@ -18,42 +18,46 @@ from mergetrain.errors import (
     LostLease,
     QueueError,
 )
-from mergetrain.store import (
-    SCHEMA_VERSION,
-    Liveness,
+from mergetrain.persistence.claims import claim_all_queued, claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import list_run_events, record_run_event
+from mergetrain.persistence.jobs import (
     SupersedeReplacement,
-    acquire_runner_lock,
-    active_runner_lock,
     cancel_job,
-    claim_all_queued,
-    claim_deploy_batch,
-    connect,
     counts,
-    default_owner,
-    deploy_reconcile_pending,
     dismiss_job,
     enqueue_job,
-    finish_recovery_operation,
     get_job,
-    get_lock,
-    list_recovery_operation_events,
-    list_run_events,
     list_train_jobs,
-    live_worktree_path,
     mark_job,
-    owner_liveness,
-    record_pending_push,
-    record_run_event,
-    refresh_runner_lock,
-    release_runner_lock,
     resolve_deployment_verify_status,
     retry_job,
-    start_recovery_operation,
     supersede_validated_train,
     terminal_branch_candidates,
-    unpack_push_refs,
     validated_train_summaries,
 )
+from mergetrain.persistence.leases import (
+    Liveness,
+    acquire_runner_lock,
+    active_runner_lock,
+    default_owner,
+    get_lock,
+    live_worktree_path,
+    owner_liveness,
+    refresh_runner_lock,
+    release_runner_lock,
+)
+from mergetrain.persistence.operations import (
+    finish_recovery_operation,
+    list_recovery_operation_events,
+    start_recovery_operation,
+)
+from mergetrain.persistence.recovery import (
+    deploy_reconcile_pending,
+    record_pending_push,
+    unpack_push_refs,
+)
+from mergetrain.persistence.schema import SCHEMA_VERSION
 
 
 class OwnerLivenessTests(unittest.TestCase):

@@ -14,7 +14,8 @@ from unittest.mock import patch
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.demo import DemoFailure, DemoSandbox, DemoWalkthrough
-from mergetrain.store import connect, list_jobs
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import list_jobs
 
 
 class DemoAssetTests(unittest.TestCase):

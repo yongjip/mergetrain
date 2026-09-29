@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import SHELL_PYTHON, make_demo_repo, py_path
 
 from mergetrain.config import load_config
-from mergetrain.store import connect, enqueue_job
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 GATE_SECONDS = 60
@@ -34,7 +35,9 @@ _RUNNER = textwrap.dedent(
     import sys
     from mergetrain.config import load_config
     from mergetrain.git_runner import GitRunner
-    from mergetrain.store import claim_all_queued, connect, default_owner
+    from mergetrain.persistence.claims import claim_all_queued
+    from mergetrain.persistence.connection import connect
+    from mergetrain.persistence.leases import default_owner
 
     config = load_config(repo=sys.argv[1])
     conn = connect(config.state.db)

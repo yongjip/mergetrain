@@ -12,7 +12,7 @@ from ..deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from ..errors import QueueError
 from ..git_runner import GitRunner
 from ..models import Job
-from ..store import default_owner
+from ..persistence.leases import default_owner
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:

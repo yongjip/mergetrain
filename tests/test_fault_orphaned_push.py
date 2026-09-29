@@ -25,9 +25,10 @@ from test_git_runner import git, make_demo_repo
 
 from mergetrain.config import load_config
 from mergetrain.errors import LockHeld
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import cancel_job, enqueue_job, get_job
 from mergetrain.push_liveness import push_in_flight
 from mergetrain.recovery import recover
-from mergetrain.store import cancel_job, connect, enqueue_job, get_job
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 HOOK_SECONDS = 8
@@ -39,7 +40,9 @@ _RUNNER = textwrap.dedent(
     import sys
     from mergetrain.config import load_config
     from mergetrain.git_runner import GitRunner
-    from mergetrain.store import claim_deploy_batch, connect, default_owner
+    from mergetrain.persistence.claims import claim_deploy_batch
+    from mergetrain.persistence.connection import connect
+    from mergetrain.persistence.leases import default_owner
 
     config = load_config(repo=sys.argv[1])
     conn = connect(config.state.db)

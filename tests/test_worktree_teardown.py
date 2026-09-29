@@ -26,7 +26,8 @@ from mergetrain.config import MergetrainConfig, load_config
 from mergetrain.git_ops import apply_gc, remove_worktree
 from mergetrain.git_runner import GitRunner
 from mergetrain.models import Job
-from mergetrain.store import connect, enqueue_job
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job
 
 # The gate a Windows user would write: an NTFS junction needs no privilege,
 # while a Windows symlink does.

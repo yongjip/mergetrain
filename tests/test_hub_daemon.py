@@ -12,8 +12,9 @@ from mergetrain.deploy_plan import (
     deploy_execution_policy_sha,
 )
 from mergetrain.hub_daemon import hub_daemon_loop, hub_sweep
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, list_jobs
 from mergetrain.registry import add_repo, load_registry, save_registry
-from mergetrain.store import connect, enqueue_job, list_jobs
 
 
 def make_repo(root: Path, name: str) -> Path:

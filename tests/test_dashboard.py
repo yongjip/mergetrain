@@ -19,15 +19,12 @@ from mergetrain.dashboard import (
     _create_from_snapshot_fn,
     create_server,
 )
+from mergetrain.persistence.claims import claim_all_queued
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import record_run_event
+from mergetrain.persistence.jobs import enqueue_job, mark_job
+from mergetrain.persistence.leases import release_runner_lock
 from mergetrain.snapshot import NEXT_ACTION_VALUES, build_dashboard_snapshot
-from mergetrain.store import (
-    claim_all_queued,
-    connect,
-    enqueue_job,
-    mark_job,
-    record_run_event,
-    release_runner_lock,
-)
 
 
 class DashboardTests(unittest.TestCase):

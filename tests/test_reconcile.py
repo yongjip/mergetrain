@@ -32,26 +32,26 @@ from mergetrain.errors import CommandFailed, QueueError, RemoteUnreachable
 from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_all_queued, claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import (
+    cancel_job,
+    enqueue_job,
+    get_job,
+    mark_job,
+    resolve_deployment_verify_status,
+)
+from mergetrain.persistence.leases import (
+    acquire_runner_lock,
+    force_clear_lock_and_split,
+    get_lock,
+    release_runner_lock,
+)
+from mergetrain.persistence.operations import list_recovery_operation_events
+from mergetrain.persistence.recovery import deploy_reconcile_pending, record_pending_push
+from mergetrain.persistence.transactions import utc_now
 from mergetrain.push_liveness import push_lock_path
 from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
-from mergetrain.store import (
-    acquire_runner_lock,
-    cancel_job,
-    claim_all_queued,
-    claim_deploy_batch,
-    connect,
-    deploy_reconcile_pending,
-    enqueue_job,
-    force_clear_lock_and_split,
-    get_job,
-    get_lock,
-    list_recovery_operation_events,
-    mark_job,
-    record_pending_push,
-    release_runner_lock,
-    resolve_verify_status,
-    utc_now,
-)
 
 # A pid that is never live, so a lock left by the "crashed" runner reads as DEAD
 # during recovery (the test process itself is alive, so it cannot be the owner).
@@ -281,7 +281,7 @@ class ReconcileClassifierTests(unittest.TestCase):
 
     def test_landed_then_rewritten_deploy_needs_recovery_authority_to_drop(self) -> None:
         from mergetrain.observability import job_outcome
-        from mergetrain.store import dismiss_job, retry_job
+        from mergetrain.persistence.jobs import dismiss_job, retry_job
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1111,7 +1111,7 @@ class StatusNextActionTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 job = enqueue_job(conn, task="a", branch="feature/a")
-                from mergetrain.store import mark_job
+                from mergetrain.persistence.jobs import mark_job
 
                 mark_job(
                     conn,
@@ -1303,7 +1303,9 @@ class VerifyRerunTests(unittest.TestCase):
             job_id, _ = self._stage_unknown_deploy(repo)
             conn = connect(load_config(repo=repo).state.db)
             try:
-                resolve_verify_status(conn, job_id, verify_status="failed", note="first failed")
+                resolve_deployment_verify_status(
+                    conn, job_id, verify_status="failed", note="first failed"
+                )
             finally:
                 conn.close()
 
@@ -1873,7 +1875,7 @@ class RetryReleasesDeploymentIdentityTests(unittest.TestCase):
     """
 
     def test_forced_retry_releases_its_deployment_identity(self) -> None:
-        from mergetrain.store import retry_job
+        from mergetrain.persistence.jobs import retry_job
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

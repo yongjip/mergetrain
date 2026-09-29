@@ -217,7 +217,7 @@ PYEOF
 help_text=$("$MT" --help)
 { echo "$help_text" | grep -q '{init,status,enqueue,validate,deploy,inspect}' && ! echo "$help_text" | grep -q 'doctor'; } \
   && ok "help exposes only the six core verbs" || no "public help grammar drifted"
-"$VPY" -c "import mergetrain, mergetrain.cli, mergetrain.store, mergetrain.git_runner, mergetrain.daemon, mergetrain.dashboard, mergetrain.snapshot" 2>/dev/null && ok "imports" || no "imports"
+"$VPY" -c "import mergetrain, mergetrain.cli, mergetrain.persistence.jobs, mergetrain.git_runner, mergetrain.daemon, mergetrain.dashboard, mergetrain.snapshot" 2>/dev/null && ok "imports" || no "imports"
 "$VPY" -c "from pathlib import Path; import mergetrain; assert Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()" 2>/dev/null && ok "dashboard assets packaged" || no "dashboard assets missing"
 "$MT" dashboard --help >/dev/null 2>&1 && ok "dashboard help" || no "dashboard help failed"
 "$MT" dashboard --host 0.0.0.0 >/dev/null 2>&1 && no "remote dashboard bind should require acknowledgement" || ok "remote dashboard bind refused without --allow-remote"

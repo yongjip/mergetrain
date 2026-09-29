@@ -43,15 +43,11 @@ from mergetrain.git_ops import (
     git_ref_exists,
     pending_ref_name,
 )
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, get_job, mark_job
+from mergetrain.persistence.recovery import record_pending_push
+from mergetrain.persistence.transactions import utc_now
 from mergetrain.recovery import reconcile
-from mergetrain.store import (
-    connect,
-    enqueue_job,
-    get_job,
-    mark_job,
-    record_pending_push,
-    utc_now,
-)
 
 
 def _assemble_train_head(repo: Path) -> str:

@@ -24,11 +24,10 @@ from ..git_ops import (
     git_worktree_clean,
     git_worktrees_for_branch,
 )
-from ..snapshot import next_action as _doctor_next_action
-from ..store import (
+from ..persistence.connection import connect
+from ..persistence.jobs import (
     SupersedeReplacement,
     cancel_job,
-    connect,
     counts,
     dismiss_job,
     enqueue_job,
@@ -40,6 +39,7 @@ from ..store import (
     supersede_validated_train,
     validated_train_summaries,
 )
+from ..snapshot import next_action as _doctor_next_action
 
 
 def _capture_sha_or_error(path: Path, ref: str, *, label: str) -> str:

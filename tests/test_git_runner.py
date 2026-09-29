@@ -75,19 +75,12 @@ from mergetrain.errors import (
 from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import branch_exists, deploy_audit_ref_name
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_all_queued, claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import list_run_events
+from mergetrain.persistence.jobs import cancel_job, counts, enqueue_job, get_job
+from mergetrain.persistence.leases import get_lock, release_runner_lock
 from mergetrain.snapshot import next_action
-from mergetrain.store import (
-    cancel_job,
-    claim_all_queued,
-    claim_deploy_batch,
-    connect,
-    counts,
-    enqueue_job,
-    get_job,
-    get_lock,
-    list_run_events,
-    release_runner_lock,
-)
 
 
 def git(cwd: Path, *args: str) -> str:

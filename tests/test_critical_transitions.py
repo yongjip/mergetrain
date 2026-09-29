@@ -26,18 +26,13 @@ from mergetrain import recovery as recovery_module
 from mergetrain.config import load_config
 from mergetrain.errors import MergetrainError, QueueError
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_all_queued
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import list_run_events
+from mergetrain.persistence.jobs import cancel_job, enqueue_job, get_job
+from mergetrain.persistence.leases import acquire_runner_lock, get_lock
+from mergetrain.persistence.transactions import utc_now
 from mergetrain.recovery import force_unlock
-from mergetrain.store import (
-    acquire_runner_lock,
-    cancel_job,
-    claim_all_queued,
-    connect,
-    enqueue_job,
-    get_job,
-    get_lock,
-    list_run_events,
-    utc_now,
-)
 
 DEAD_OWNER = "ghost:999999"
 

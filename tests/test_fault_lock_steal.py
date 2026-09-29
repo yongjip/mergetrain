@@ -57,20 +57,14 @@ from mergetrain.config import load_config
 from mergetrain.errors import LostLease
 from mergetrain.git_ops import pending_ref_name
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import list_run_events
+from mergetrain.persistence.jobs import enqueue_job, get_job, mark_job
+from mergetrain.persistence.leases import force_clear_lock_and_split, get_lock
+from mergetrain.persistence.recovery import deploy_reconcile_pending, record_pending_push
+from mergetrain.persistence.transactions import utc_now
 from mergetrain.recovery import force_unlock, reconcile
-from mergetrain.store import (
-    claim_deploy_batch,
-    connect,
-    deploy_reconcile_pending,
-    enqueue_job,
-    force_clear_lock_and_split,
-    get_job,
-    get_lock,
-    list_run_events,
-    mark_job,
-    record_pending_push,
-    utc_now,
-)
 
 
 def _pending_refs(repo: Path) -> str:

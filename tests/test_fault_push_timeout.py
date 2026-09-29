@@ -54,14 +54,11 @@ import mergetrain.git_ops as git_ops_module
 from mergetrain.config import MergetrainConfig, load_config
 from mergetrain.git_ops import is_push_rejection, pending_ref_name
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, get_job
+from mergetrain.persistence.recovery import deploy_reconcile_pending
 from mergetrain.recovery import reconcile
-from mergetrain.store import (
-    claim_deploy_batch,
-    connect,
-    deploy_reconcile_pending,
-    enqueue_job,
-    get_job,
-)
 
 # A pid that is never live, so the lock the "wedged" runner leaves behind reads
 # as DEAD when reconcile checks it (the test process is alive, so it cannot be

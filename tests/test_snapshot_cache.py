@@ -12,7 +12,8 @@ from mergetrain.config import load_config, render_default_config
 from mergetrain.dashboard import DashboardSnapshotCache, create_hub_server, create_server
 from mergetrain.errors import QueueError
 from mergetrain.hub import HubSnapshotCache, build_hub_snapshot
-from mergetrain.store import connect, enqueue_job
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job
 
 
 def make_config(root: Path):

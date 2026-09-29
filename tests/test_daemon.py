@@ -15,16 +15,10 @@ from mergetrain.daemon import (
 )
 from mergetrain.errors import ConfigError, MergetrainError, QueueError
 from mergetrain.models import Job
-from mergetrain.store import (
-    claim_all_queued,
-    connect,
-    default_owner,
-    enqueue_job,
-    get_job,
-    list_jobs,
-    mark_job,
-    release_runner_lock,
-)
+from mergetrain.persistence.claims import claim_all_queued
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, get_job, list_jobs, mark_job
+from mergetrain.persistence.leases import default_owner, release_runner_lock
 
 
 class GradeBatchTests(unittest.TestCase):
@@ -389,7 +383,7 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(outcome, "reconcile_paused")
 
     def test_tick_rechecks_reconcile_after_orphan_heal(self) -> None:
-        from mergetrain.store import recover_orphans as real_recover_orphans
+        from mergetrain.persistence.leases import recover_orphans as real_recover_orphans
 
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"
@@ -429,7 +423,7 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(seen, [])
 
     def test_tick_rechecks_reconcile_after_claim_race(self) -> None:
-        from mergetrain.store import claim_all_queued as real_claim_all_queued
+        from mergetrain.persistence.claims import claim_all_queued as real_claim_all_queued
 
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"

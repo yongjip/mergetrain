@@ -71,8 +71,7 @@ blocking CI check. It enforces the dependency direction described above:
 
 - core modules do not import `cli.py`, `cli_support.py`, or `commands/`;
 - command modules do not import one another;
-- `persistence/` depends only on persistence primitives, models, and errors,
-  while `store.py` remains a compatibility façade over that package;
+- `persistence/` depends only on persistence primitives, models, and errors;
 - Git/process/gate/worktree collaborators do not import the `GitRunner`
   coordinator;
 - MCP stays independent of core business logic and uses only the machine
@@ -325,9 +324,9 @@ running binary fail closed.
 
 ### Persistence responsibility boundaries
 
-`store.py` remains the stable import surface for callers, while implementation
-lives under `persistence/`. The modules expose SQLite semantics directly—there
-is no ORM or generic repository layer:
+Callers import from the `persistence/` module that owns each operation. The
+modules expose SQLite semantics directly—there is no ORM, generic repository
+layer, or re-export façade:
 
 | Module | Owns |
 | --- | --- |

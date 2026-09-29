@@ -53,8 +53,10 @@ from test_git_runner import git, make_demo_repo
 from mergetrain.config import load_config
 from mergetrain.git_ops import is_push_rejection, pending_ref_name
 from mergetrain.git_runner import GitRunner
+from mergetrain.persistence.claims import claim_deploy_batch
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, get_job
 from mergetrain.recovery import recover
-from mergetrain.store import claim_deploy_batch, connect, enqueue_job, get_job
 
 # A pid that is never live, so the lock left by the killed "runner" reads as DEAD
 # and a later recover()/claim can reap it (the test process is alive, so it

@@ -28,7 +28,6 @@ PERSISTENCE_ALLOWED = (
     "mergetrain.models",
     "mergetrain.persistence",
 )
-STORE_ALLOWED = ("mergetrain.persistence",)
 GIT_RUNNER_COLLABORATORS = {
     "mergetrain.atomic_push",
     "mergetrain.command_runner",
@@ -61,7 +60,8 @@ ADAPTER_ALLOWED = {
         "mergetrain.registry",
         "mergetrain.snapshot",
         "mergetrain.snapshot_cache",
-        "mergetrain.store",
+        "mergetrain.persistence.leases",
+        "mergetrain.persistence.transactions",
     ),
 }
 
@@ -205,16 +205,6 @@ def _dependency_violations(edges: list[ImportEdge]) -> list[Violation]:
                     edge.line,
                     "persistence-dependency-direction",
                     f"{edge.source} may depend only on persistence primitives, models, and errors; found {edge.target}",
-                )
-            )
-
-        if edge.source == "mergetrain.store" and not _matches(edge.target, STORE_ALLOWED):
-            violations.append(
-                Violation(
-                    edge.path,
-                    edge.line,
-                    "store-is-a-compatibility-facade",
-                    f"store.py may re-export persistence APIs but must not own policy via {edge.target}",
                 )
             )
 

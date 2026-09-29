@@ -28,8 +28,8 @@ from .notify import (
     save_notify_state,
     sweep_notifications,
 )
+from .persistence.leases import default_owner
 from .registry import load_registry, same_repo
-from .store import default_owner
 
 ProcessBatchFactory = Callable[[MergetrainConfig, str], ProcessBatch]
 NotifierResolver = Callable[[str, str], Notifier | None]

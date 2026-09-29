@@ -24,19 +24,13 @@ from ..git_ops import DEPLOY_AUDIT_REF_PREFIX
 from ..git_runner import GitRunner
 from ..models import Job
 from ..observability import _gate_runs
+from ..persistence.claims import claim_all_queued, claim_deploy_batch
+from ..persistence.connection import connect
+from ..persistence.events import list_history_events
+from ..persistence.jobs import counts, select_validated_train, validated_train_summaries
+from ..persistence.leases import default_owner, release_runner_lock
+from ..persistence.recovery import deploy_reconcile_pending
 from ..reuse import reuse_explanation
-from ..store import (
-    claim_all_queued,
-    claim_deploy_batch,
-    connect,
-    counts,
-    default_owner,
-    deploy_reconcile_pending,
-    list_history_events,
-    release_runner_lock,
-    select_validated_train,
-    validated_train_summaries,
-)
 
 
 def _emit_deploy_reconcile_block(args: argparse.Namespace, pending: int) -> int:

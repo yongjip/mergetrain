@@ -31,8 +31,8 @@ from .git_ops import (
     pending_ref_name,
     resolve_pending_ref,
 )
+from .persistence.recovery import clear_rejected_push, record_pending_push
 from .push_liveness import holding_push_lock, push_job_name
-from .store import clear_rejected_push, record_pending_push
 
 EventWriter = Callable[..., None]
 VerifyHooks = Callable[..., None]

@@ -28,7 +28,8 @@ from mergetrain.mcp_server import (
     _stop_cli_process,
     _stop_windows_process_tree,
 )
-from mergetrain.store import connect, enqueue_job, mark_job
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job, mark_job
 
 try:
     HAS_MCP = importlib.util.find_spec("mcp.server.mcpserver") is not None

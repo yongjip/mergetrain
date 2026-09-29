@@ -23,19 +23,17 @@ from ..git_ops import (
     find_worktree_gc_candidates,
 )
 from ..git_runner import GitRunner
-from ..recovery import force_unlock, reconcile, recover, sweep_pending_refs
-from ..store import (
-    connect,
-    finish_recovery_operation,
+from ..persistence.connection import connect
+from ..persistence.jobs import (
     get_job,
-    get_lock,
     get_verification_group,
     list_verify_unknown_jobs,
-    live_worktree_path,
     resolve_deployment_verify_status,
-    start_recovery_operation,
     terminal_branch_candidates,
 )
+from ..persistence.leases import get_lock, live_worktree_path
+from ..persistence.operations import finish_recovery_operation, start_recovery_operation
+from ..recovery import force_unlock, reconcile, recover, sweep_pending_refs
 
 
 def cmd_gc(args: argparse.Namespace) -> int:

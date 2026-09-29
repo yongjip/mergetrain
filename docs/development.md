@@ -36,7 +36,6 @@ mergetrain/
     dashboard_dist/    # packaged production dashboard assets
     models.py          # queue, lock, runner-event, and recovery-event dataclasses
     path_gates.py      # POSIX glob matching and NUL-safe Git diff parsing
-    store.py           # stable compatibility façade for persistence APIs
     persistence/
       transactions.py  # BEGIN IMMEDIATE and time helpers
       connection.py    # writable/read-only SQLite connection policy

@@ -234,7 +234,8 @@ class WebhookNotifierTests(unittest.TestCase):
 class SingleDaemonNotifyIntegrationTests(unittest.TestCase):
     def test_once_daemon_delivers_landed_notification(self) -> None:
         from mergetrain.daemon import daemon_loop
-        from mergetrain.store import connect, enqueue_job
+        from mergetrain.persistence.connection import connect
+        from mergetrain.persistence.jobs import enqueue_job
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -279,8 +280,9 @@ class HubDaemonNotifyIntegrationTests(unittest.TestCase):
             deploy_execution_policy_sha,
         )
         from mergetrain.hub_daemon import hub_daemon_loop
+        from mergetrain.persistence.connection import connect
+        from mergetrain.persistence.jobs import enqueue_job
         from mergetrain.registry import add_repo
-        from mergetrain.store import connect, enqueue_job
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

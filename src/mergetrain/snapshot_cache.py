@@ -7,7 +7,7 @@ import stat
 import threading
 from pathlib import Path
 
-from .store import connect
+from .persistence.connection import connect
 
 
 class QueueChangeMonitor:

@@ -15,8 +15,9 @@ from .config import (
 )
 from .contract import CONTRACT_VERSION
 from .errors import ConfigError
+from .persistence.jobs import counts, validated_train_summaries
+from .persistence.leases import get_lock
 from .snapshot import next_action as _doctor_next_action
-from .store import counts, get_lock, validated_train_summaries
 
 GLOBAL_OPTIONS_WITH_VALUES = {"--config", "--repo", "--db"}
 

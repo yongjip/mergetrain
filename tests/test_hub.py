@@ -17,8 +17,10 @@ from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.dashboard import create_hub_server
 from mergetrain.errors import QueueError
 from mergetrain.hub import build_hub_snapshot, build_hub_summary
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.jobs import enqueue_job
+from mergetrain.persistence.transactions import utc_now
 from mergetrain.registry import add_repo, load_registry, remove_repo
-from mergetrain.store import connect, enqueue_job, utc_now
 
 
 def _plus_hour() -> str:

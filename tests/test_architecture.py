@@ -36,7 +36,6 @@ def test_forbidden_layer_edges_and_cycles_are_reported(tmp_path: Path) -> None:
     _write(tmp_path, "src/mergetrain/models.py", "")
     _write(tmp_path, "src/mergetrain/cli.py", "")
     _write(tmp_path, "src/mergetrain/git_runner.py", "")
-    _write(tmp_path, "src/mergetrain/store.py", "from .models import Job\n")
     _write(tmp_path, "src/mergetrain/atomic_push.py", "from .git_runner import GitRunner\n")
     _write(tmp_path, "src/mergetrain/dashboard.py", "from .atomic_push import deploy\n")
     _write(tmp_path, "src/mergetrain/core_a.py", "from . import core_b\n")
@@ -53,7 +52,6 @@ def test_forbidden_layer_edges_and_cycles_are_reported(tmp_path: Path) -> None:
     assert "core-must-not-import-cli" in rules
     assert "persistence-dependency-direction" in rules
     assert "commands-must-not-call-each-other" in rules
-    assert "store-is-a-compatibility-facade" in rules
     assert "git-runner-dependency-direction" in rules
     assert "adapter-must-stay-thin" in rules
     assert "no-internal-import-cycles" in rules

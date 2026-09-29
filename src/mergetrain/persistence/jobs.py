@@ -575,17 +575,6 @@ def resolve_deployment_verify_status(
     return [get_job(conn, member_id) for member_id in ids]
 
 
-def resolve_verify_status(
-    conn: sqlite3.Connection, job_id: int, *, verify_status: str, note: str = ""
-) -> Job:
-    """Compatibility wrapper returning the selected member after group repair."""
-
-    resolved = resolve_deployment_verify_status(
-        conn, job_id, verify_status=verify_status, note=note
-    )
-    return next(job for job in resolved if job.id == job_id)
-
-
 def list_train_jobs(conn: sqlite3.Connection, train_id: str) -> list[Job]:
     if not train_id:
         return []
