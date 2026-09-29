@@ -30,6 +30,7 @@ from mergetrain.cli import main  # noqa: E402
 from mergetrain.command_runner import without_repository_env  # noqa: E402
 from mergetrain.commands.deploy import _render_v3_preview  # noqa: E402
 from mergetrain.config import load_config  # noqa: E402
+from mergetrain.errors import escape_controls  # noqa: E402
 from mergetrain.git_ops import apply_gc, branch_deletion_blocker  # noqa: E402
 from mergetrain.mcp_server import MergetrainTools  # noqa: E402
 from mergetrain.persistence.connection import connect  # noqa: E402
@@ -313,6 +314,14 @@ class ConfirmationTextTests(unittest.TestCase):
                 self.assertEqual(lines[1], "  #11 Legit fix (agent/legit)")
                 self.assertTrue(lines[2].startswith("  #12 "), lines[2])
                 self.assertTrue(lines[3].startswith("Destination: "), lines[3])
+
+    def test_escapes_read_as_python_escapes_and_keep_ordinary_text(self) -> None:
+        self.assertEqual(escape_controls("x\ry\x1b\x9b"), "x\\x0dy\\x1b\\x9b")
+        self.assertEqual(escape_controls("‮ab "), "\\u202eab\\u2028")
+        # A tag character beyond the BMP, and a lone surrogate that could not
+        # be encoded for output at all.
+        self.assertEqual(escape_controls("t\U000e0041\ud800"), "t\\U000e0041\\ud800")
+        self.assertEqual(escape_controls("Fix café, #12 (a/b)"), "Fix café, #12 (a/b)")
 
     def test_enqueue_stores_the_task_label_on_one_line(self) -> None:
         with tempfile.TemporaryDirectory() as td:

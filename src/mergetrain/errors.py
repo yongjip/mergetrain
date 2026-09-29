@@ -78,8 +78,15 @@ def redact_and_bound(
 # Control characters (carriage return, escape, the C1 set) can rewrite a
 # terminal line, and format characters (bidirectional overrides, zero-width
 # characters) and the Unicode line and paragraph separators can reorder, hide,
-# or break text.
-_HIDING_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+# or break text. A lone surrogate cannot be encoded for output at all.
+_HIDING_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
+def _escape(char: str) -> str:
+    code = ord(char)
+    if code <= 0xFF:
+        return f"\\x{code:02x}"
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
 
 
 def escape_controls(text: str) -> str:
@@ -91,9 +98,7 @@ def escape_controls(text: str) -> str:
     """
 
     return "".join(
-        (f"\\x{ord(char):02x}" if ord(char) <= 0xFF else f"\\u{ord(char):04x}")
-        if unicodedata.category(char) in _HIDING_CATEGORIES
-        else char
+        _escape(char) if unicodedata.category(char) in _HIDING_CATEGORIES else char
         for char in text
     )
 

@@ -125,6 +125,11 @@ def _checkout_common_dir(checkout: Path) -> Path | None:
     return None if admin is None else _admin_common_dir(admin)
 
 
+def _repository_common_dir(repo: Path) -> Path | None:
+    # Only a repo path below the top of its checkout needs Git to find it.
+    return _checkout_common_dir(repo) or git_common_dir(repo)
+
+
 def worktree_keep_reason(repo: Path, worktree: Path) -> str:
     """Why cleanup must leave ``worktree`` alone, or "" when it may go.
 
@@ -139,7 +144,7 @@ def worktree_keep_reason(repo: Path, worktree: Path) -> str:
     admin = _gitfile_target(worktree)
     if admin is None or not admin.is_dir():
         return ""
-    ours = _checkout_common_dir(repo)
+    ours = _repository_common_dir(repo)
     if ours is None or not _same_path(_admin_common_dir(admin), ours):
         return "it is a worktree of another repository"
     if (admin / "locked").exists():
@@ -165,7 +170,7 @@ def branch_worktree_use(repo: Path, branch: str) -> str:
     while the directory is away.
     """
 
-    common = _checkout_common_dir(repo)
+    common = _repository_common_dir(repo)
     if common is None:
         return "its repository's worktrees could not be read"
     ref = f"refs/heads/{branch}"
