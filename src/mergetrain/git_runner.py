@@ -58,11 +58,12 @@ class _BisectAbort(Exception):
 
 
 class _AlreadyLanded(PushRejected):
-    """The remote refused the push, but its push refs hold every job of the train.
+    """The remote refused the push after the integration branch moved to hold the train.
 
     Nothing of the refused push landed, so the jobs go back to the queue, and
-    their next deploy finds them merged and records the deployment. Anything
-    that does not expect it treats it as the push rejection it also is.
+    their next train, built on the moved branch, finds them merged and records
+    the deployment. Anything that does not expect it treats it as the push
+    rejection it also is.
     """
 
 
@@ -323,6 +324,7 @@ class GitRunner:
         event_job_id: int | None = None,
         expected_plan_sha: str = "",
         task_commits: Sequence[str] = (),
+        integration_base_sha: str = "",
     ) -> None:
         current_jobs = [get_job(conn, job_id) for job_id in job_ids]
         approved_destinations = {
@@ -394,17 +396,20 @@ class GitRunner:
             )
         except PushRejected as exc:
             # An earlier push of these jobs that reconcile found had not landed
-            # can land later on a network remote. It moves the refs, so this
-            # push is refused although every job is already live.
-            if self._pushes.contains_commits(
-                task_commits, destination=destination, log=log, pulse=ownership_pulse
+            # can land later on a network remote. When it moves the integration
+            # branch while this train is being built, this push is refused
+            # although every job is already live, and the next train, built on
+            # the moved branch, records the deployment. A refusal that repeats
+            # on an unmoved branch still blocks, so it cannot requeue forever.
+            if self._worktrees.integration_moved_to_contain(
+                task_commits, base_sha=integration_base_sha, log=log, pulse=ownership_pulse
             ):
                 raise _AlreadyLanded(
-                    "the remote refused this push, but its push refs already "
-                    "contain every job of this train, most likely from an "
-                    "earlier push of these jobs that landed after reconcile read "
-                    "the remote; nothing of this push landed, so the jobs are "
-                    f"requeued for a deploy that records it: {exc}"
+                    "the remote refused this push, but the integration branch "
+                    "moved after this train was built and already contains every "
+                    "job of it, most likely from an earlier push of these jobs "
+                    "that landed after reconcile read the remote; nothing of this "
+                    f"push landed, so the jobs are requeued: {exc}"
                 ) from exc
             raise
 
@@ -1313,6 +1318,7 @@ class GitRunner:
                         event_job_id=event_job_id,
                         expected_plan_sha=expected_plan_sha,
                         task_commits=[merge_shas.get(job.id, "") for job in merged_jobs],
+                        integration_base_sha=integration_base_sha,
                     )
                 status = "deployed" if deploy else "validated"
                 note = deploy_state.warning or (

@@ -3,13 +3,16 @@
 ## Unreleased
 
 - Requeue a deploy instead of blocking it when the remote refuses its push
-  but already contains every job of the train. On a network remote, an earlier
-  push of the same jobs that reconcile found had not landed can still land
-  later. When it landed while the requeued jobs were being deployed again, it
-  moved main, the remote refused the new push as non-fast-forward, and the jobs
-  were left `blocked` as if the remote had rejected them, although their code
-  was live. They now go back to the queue, and their next deploy finds them
-  merged and records the deployment.
+  because the integration branch moved, after the train was built, to a commit
+  that already contains every job of the train. On a network remote, an
+  earlier push of the same jobs that reconcile found had not landed can still
+  land later. When it landed while the requeued jobs were being deployed again,
+  it moved main, the remote refused the new push as non-fast-forward, and the
+  jobs were left `blocked` as if the remote had rejected them, although their
+  code was live. They now go back to the queue, and their next train, built on
+  the moved branch, finds them merged and records the deployment. A refusal on
+  a branch that did not move still blocks, so a remote that keeps refusing
+  cannot requeue the jobs forever.
 
 ## 3.2.0 - 2026-09-29
 
