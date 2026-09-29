@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 from .errors import redact_and_bound
@@ -66,76 +67,47 @@ class Job:
 
     @classmethod
     def from_row(cls, row: Any) -> Job:
-        return cls(
-            id=int(row["id"]),
-            task=str(row["task"]),
-            branch=str(row["branch"]),
-            worktree_path=str(row["worktree_path"] or ""),
-            status=str(row["status"]),
-            base_sha=str(row["base_sha"] or ""),
-            head_sha=str(row["head_sha"] or ""),
-            deploy_sha=str(row["deploy_sha"] or ""),
-            requested_at=str(row["requested_at"] or ""),
-            started_at=str(row["started_at"] or ""),
-            finished_at=str(row["finished_at"] or ""),
-            log_path=str(row["log_path"] or ""),
-            note=str(row["note"] or ""),
-            push_status=str(row["push_status"] or "not_run"),
-            verify_status=str(row["verify_status"] or "not_run"),
-            auto_deploy=bool(row["auto_deploy"]),
-            approval_destination_sha=str(row["approval_destination_sha"] or ""),
-            approval_execution_policy_sha=str(
-                row["approval_execution_policy_sha"] or ""
-            ),
-            train_id=str(row["train_id"] or ""),
-            train_size=int(row["train_size"] or 0),
-            validated_at=str(row["validated_at"] or ""),
-            validation_base_sha=str(row["validation_base_sha"] or ""),
-            validation_sha=str(row["validation_sha"] or ""),
-            validated_head_sha=str(row["validated_head_sha"] or ""),
-            validation_tree_sha=str(row["validation_tree_sha"] or ""),
-            validation_gate_policy_sha=str(
-                row["validation_gate_policy_sha"] or ""
-            ),
-            validation_environment_sha=str(
-                row["validation_environment_sha"] or ""
-            ),
-            validation_train_sha=str(row["validation_train_sha"] or ""),
-            reused_validation_sha=str(row["reused_validation_sha"] or ""),
-            claim_token=str(row["claim_token"] or ""),
-            cancel_requested_at=str(row["cancel_requested_at"] or ""),
-            pending_deploy_sha=str(row["pending_deploy_sha"] or ""),
-            conflict_with=str(row["conflict_with"] or ""),
-            pending_deploy_remote=str(row["pending_deploy_remote"] or ""),
-            pending_deploy_refs=str(row["pending_deploy_refs"] or ""),
-            pending_deploy_destination_sha=str(
-                row["pending_deploy_destination_sha"] or ""
-            ),
-            deployment_id=str(row["deployment_id"] or ""),
-            deployment_destination_sha=str(
-                row["deployment_destination_sha"] or ""
-            ),
-            verification_policy_sha=str(row["verification_policy_sha"] or ""),
-            supersession_id=str(row["supersession_id"] or ""),
-            supersedes_train_id=str(row["supersedes_train_id"] or ""),
-        )
+        values: dict[str, Any] = {}
+        for name, coerce, default in _JOB_COLUMNS:
+            value = row[name]
+            # Required columns never fall back: a NULL status must not read as
+            # 'queued' while SQL disagrees about the row.
+            values[name] = coerce(value) if name in _REQUIRED_JOB_COLUMNS else coerce(value or default)
+        return cls(**values)
 
     def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
+        data = {
+            name: value
+            for name, value in asdict(self).items()
+            if name not in _INTERNAL_JOB_FIELDS
+        }
         data["auto_deploy"] = bool(self.auto_deploy)
         data["note"], data["note_truncated"] = redact_and_bound(self.note)
-        data.pop("claim_token", None)
-        # Internal recovery bookkeeping — the durable push target is not part of
-        # the public job surface (keeps the contract fingerprint stable).
-        data.pop("pending_deploy_remote", None)
-        data.pop("pending_deploy_refs", None)
-        data.pop("pending_deploy_destination_sha", None)
-        data.pop("approval_destination_sha", None)
-        data.pop("approval_execution_policy_sha", None)
-        data.pop("deployment_id", None)
-        data.pop("deployment_destination_sha", None)
-        data.pop("verification_policy_sha", None)
         return data
+
+
+# Each Job field is a deploy_queue column of the same name, coerced by its
+# annotation; an unsupported annotation fails at import time.
+_COERCIONS: dict[str, Callable[[Any], Any]] = {"int": int, "str": str, "bool": bool}
+_JOB_COLUMNS = tuple(
+    (field.name, _COERCIONS[str(field.type)], field.default) for field in fields(Job)
+)
+_REQUIRED_JOB_COLUMNS = frozenset({"id", "task", "branch", "status"})
+# Recovery and approval bookkeeping that is not part of the public job surface
+# (keeps the contract fingerprint stable).
+_INTERNAL_JOB_FIELDS = frozenset(
+    {
+        "claim_token",
+        "pending_deploy_remote",
+        "pending_deploy_refs",
+        "pending_deploy_destination_sha",
+        "approval_destination_sha",
+        "approval_execution_policy_sha",
+        "deployment_id",
+        "deployment_destination_sha",
+        "verification_policy_sha",
+    }
+)
 
 
 @dataclass(slots=True)
