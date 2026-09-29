@@ -399,5 +399,49 @@ class GcOwnershipTests(unittest.TestCase):
         self.assertIn("checked out", result["failed"][0]["reason"])
 
 
+class PushScopeTests(unittest.TestCase):
+    """The deploy pushes the approved refs and its audit ref, and nothing else."""
+
+    def test_operator_push_config_adds_no_ref_to_the_deploy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = _ready_feature_branch(root)
+            git(repo, "config", "push.followTags", "true")
+            git(repo, "config", "push.recurseSubmodules", "on-demand")
+            git(repo, "tag", "-a", "wip-local-experiment", "-m", "local only", "feature/a")
+
+            code, out = _run(
+                [
+                    "--repo", str(repo), "enqueue", "--task", "task a",
+                    "--branch", "feature/a", "--auto", "--json",
+                ]
+            )
+            self.assertEqual(code, 0, out)
+            job_id = int(json.loads(out)["job"]["id"])
+            code, out = _run(["--repo", str(repo), "daemon", "--once"])
+            self.assertEqual(code, 0, out)
+
+            conn = connect(load_config(repo=repo).state.db)
+            try:
+                self.assertEqual(get_job(conn, job_id).status, "deployed")
+            finally:
+                conn.close()
+            remote_refs = git(root / "remote.git", "for-each-ref", "--format=%(refname)")
+            self.assertEqual(
+                sorted(ref for ref in remote_refs.splitlines() if not ref.startswith("refs/heads/")),
+                [line for line in remote_refs.splitlines() if line.startswith("refs/mergetrain/")],
+            )
+            pushes = [
+                line
+                for log in sorted((root / "logs").rglob("*.log"))
+                for line in log.read_text(encoding="utf-8").splitlines()
+                if " push --atomic" in line
+            ]
+            self.assertTrue(pushes)
+            for line in pushes:
+                self.assertIn("--no-follow-tags", line)
+                self.assertIn("--recurse-submodules=no", line)
+
+
 if __name__ == "__main__":
     unittest.main()

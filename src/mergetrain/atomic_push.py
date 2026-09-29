@@ -106,6 +106,12 @@ class AtomicPush:
             "git",
             "push",
             "--atomic",
+            # Operator push config must not widen the approved push:
+            # push.followTags would publish local tags, and
+            # push.recurseSubmodules (or submodule.recurse) would push
+            # submodule commits to other repositories.
+            "--no-follow-tags",
+            "--recurse-submodules=no",
             f"--force-with-lease={audit_ref}:{audit_expected_sha}",
             destination.remote_alias,
         ]

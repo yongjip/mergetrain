@@ -209,7 +209,10 @@ git push --atomic platform \
 ```
 
 The actual command also protects the audit ref with `--force-with-lease` so it
-can only be created or retain the identical value. The configured remote must
+can only be created or retain the identical value, and passes
+`--no-follow-tags --recurse-submodules=no` so `push.followTags`,
+`push.recurseSubmodules`, and `submodule.recurse` cannot add a tag or another
+repository's commits to the push. The configured remote must
 permit creation under `refs/mergetrain/deploys/`; these refs are permanent
 recovery evidence and are not payload targets configurable through
 `push_refs`.

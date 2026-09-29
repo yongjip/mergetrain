@@ -49,6 +49,14 @@
   whose worktree directory was briefly missing. Finishing that rebase then
   failed and left the new commits on a detached HEAD. gc now keeps a branch in
   every case where `git branch -d` would refuse.
+- Push only the approved refs and the audit ref, whatever the runner's Git
+  config says. With `push.followTags` set, the atomic deploy also published
+  local annotated tags on the pushed commits, or failed as a whole when the
+  runner was allowed to push only its payload and audit refs. With
+  `push.recurseSubmodules=on-demand`, or `submodule.recurse` set, it would also
+  have pushed submodule commits to other repositories. The deploy push now
+  passes `--no-follow-tags --recurse-submodules=no`. A project that needs
+  submodule commits published first can check that in a gate.
 - Remove the web dashboard and the web Hub. `mergetrain dashboard` and
   `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
   error that names the replacement: `status`, or `events --follow` for a live
