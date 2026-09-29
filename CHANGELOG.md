@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.2.0 - 2026-09-29
 
 - On Windows, stop a push from being parked for reconcile because another
   queue on the same machine was pushing the same commit. The push's Job Object
