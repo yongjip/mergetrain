@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any, cast
@@ -433,9 +433,40 @@ def _run_managed(
 # pathological child from holding the sole runner indefinitely.
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 600.0
 
+# Git exports GIT_DIR and GIT_INDEX_FILE to hooks, and to aliases run from a
+# linked worktree. These variables name a repository, index, or object store
+# and win over the cwd and --repo mergetrain chose, so a runner started from a
+# task worktree's hook would merge into and push that task's branch. Git drops
+# the same set (`git rev-parse --local-env-vars`) before it runs a command in
+# another repository, and keeps config passed with `git -c`, as this does.
+_REPOSITORY_ENV = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
+
+
+def without_repository_env(env: Mapping[str, str]) -> dict[str, str]:
+    """``env`` without the variables that point Git at another repository."""
+
+    # Windows environment names are case-insensitive.
+    return {key: value for key, value in env.items() if key.upper() not in _REPOSITORY_ENV}
+
 
 def _git_safe_env(env: dict[str, str] | None) -> dict[str, str]:
-    base = dict(os.environ) if env is None else dict(env)
+    base = without_repository_env(os.environ if env is None else env)
     base.setdefault("GIT_TERMINAL_PROMPT", "0")
     return base
 

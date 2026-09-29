@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .command_runner import without_repository_env
+
 
 class DemoFailure(RuntimeError):
     """A safe, user-facing demo failure."""
@@ -157,7 +159,9 @@ class DemoWalkthrough:
         self._step_number = 0
 
     def _isolated_environment(self) -> dict[str, str]:
-        env = os.environ.copy()
+        # An inherited GIT_DIR would point the demo's own git commands at the
+        # caller's repository and its real remote.
+        env = without_repository_env(os.environ)
         env["GIT_CONFIG_GLOBAL"] = str(self.git_config)
         env["GIT_CONFIG_SYSTEM"] = os.devnull
         env["GIT_CONFIG_NOSYSTEM"] = "1"

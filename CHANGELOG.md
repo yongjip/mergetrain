@@ -15,6 +15,17 @@
   recorded instead, which blocked the job for good. The `integration_ref`
   value in JSON output and the `${integration_ref}` placeholder are still
   `origin/main`.
+- Keep mergetrain in its own repository when it is started from a Git hook or
+  alias. Git exports `GIT_DIR` and `GIT_INDEX_FILE` to hooks, and to aliases run
+  from a linked worktree, and those variables override the directory a Git
+  command runs in. A `validate` or `daemon` started from a task worktree's hook
+  therefore merged the train into that task's branch and index, and a deploy
+  pushed the result to main while the job it came from was reported blocked.
+  `mergetrain demo` renamed, committed to, and pushed the caller's repository.
+  Every Git command, gate, verify hook, and push that mergetrain starts, the
+  demo, and the `status --diagnose` provenance read now drop the variables
+  that name a repository, index, or object store, as Git itself does before it
+  works in another repository. Config passed with `git -c` still applies.
 - Remove the web dashboard and the web Hub. `mergetrain dashboard` and
   `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
   error that names the replacement: `status`, or `events --follow` for a live

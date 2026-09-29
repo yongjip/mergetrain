@@ -8,18 +8,22 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_git_runner import git, make_demo_repo  # noqa: E402
+from test_git_runner import add_branch, git, make_demo_repo  # noqa: E402
 
+from mergetrain import runtime  # noqa: E402
 from mergetrain.cli import main  # noqa: E402
+from mergetrain.command_runner import without_repository_env  # noqa: E402
 from mergetrain.config import load_config  # noqa: E402
 from mergetrain.persistence.connection import connect  # noqa: E402
 from mergetrain.persistence.jobs import get_job  # noqa: E402
@@ -114,6 +118,117 @@ class AmbiguousRefTests(unittest.TestCase):
 
             self.assertEqual(code, 0, out)
             self.assertEqual(json.loads(out)["job"]["head_sha"], branch_head)
+
+
+def _init_repo(root: Path, name: str) -> Path:
+    repo = root / name
+    git(root, "init", "-q", str(repo))
+    git(repo, "config", "user.email", f"{name}@example.invalid")
+    git(repo, "config", "user.name", name)
+    (repo / f"{name}.txt").write_text(f"{name}\n", encoding="utf-8")
+    git(repo, "add", f"{name}.txt")
+    git(repo, "commit", "-m", name)
+    return repo
+
+
+def _repository_state(repo: Path, origin: Path) -> tuple[str, ...]:
+    return (
+        git(repo, "symbolic-ref", "HEAD"),
+        git(repo, "for-each-ref"),
+        git(repo, "worktree", "list", "--porcelain"),
+        git(repo, "status", "--porcelain"),
+        git(origin, "for-each-ref"),
+    )
+
+
+class InheritedGitEnvironmentTests(unittest.TestCase):
+    """Git exports GIT_DIR and GIT_INDEX_FILE to hooks, and to aliases run from
+    a linked worktree. mergetrain started there must still use its own repo."""
+
+    def test_repository_variables_are_dropped_and_config_is_kept(self) -> None:
+        env = without_repository_env(
+            {
+                "GIT_DIR": "/elsewhere/.git",
+                "GIT_INDEX_FILE": "/elsewhere/.git/index",
+                "GIT_WORK_TREE": "/elsewhere",
+                "GIT_OBJECT_DIRECTORY": "/elsewhere/.git/objects",
+                "GIT_COMMON_DIR": "/elsewhere/.git",
+                "GIT_CONFIG_PARAMETERS": "'core.quotepath'='false'",
+                "GIT_TERMINAL_PROMPT": "0",
+                "PATH": "/usr/bin",
+            }
+        )
+        self.assertEqual(
+            env,
+            {
+                "GIT_CONFIG_PARAMETERS": "'core.quotepath'='false'",
+                "GIT_TERMINAL_PROMPT": "0",
+                "PATH": "/usr/bin",
+            },
+        )
+
+    def test_validate_from_a_task_worktree_hook_leaves_that_worktree_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = _ready_feature_branch(root)
+            git(repo, "switch", "main")
+            add_branch(repo, "feature/b", "b.txt")
+            task_a, task_b = root / "task-a", root / "task-b"
+            git(repo, "worktree", "add", str(task_a), "feature/a")
+            git(repo, "worktree", "add", str(task_b), "feature/b")
+            for task, branch in (("a", "feature/a"), ("b", "feature/b")):
+                code, out = _run(
+                    [
+                        "--repo", str(repo), "enqueue", "--task", task,
+                        "--branch", branch, "--json",
+                    ]
+                )
+                self.assertEqual(code, 0, out)
+            feature_a = git(repo, "rev-parse", "feature/a")
+            gitdir = git(task_a, "rev-parse", "--absolute-git-dir")
+
+            hook_env = {"GIT_DIR": gitdir, "GIT_INDEX_FILE": str(Path(gitdir) / "index")}
+            with patch.dict(os.environ, hook_env):
+                code, out = _run(["--repo", str(repo), "validate", "--json"])
+
+            self.assertEqual(code, 0, out)
+            self.assertEqual(json.loads(out)["counts"], {"validated": 2})
+            self.assertEqual(git(repo, "rev-parse", "feature/a"), feature_a)
+            self.assertEqual(git(task_a, "status", "--porcelain"), "")
+
+    def test_demo_with_git_dir_set_never_touches_that_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            origin = root / "origin.git"
+            git(root, "init", "-q", "--bare", str(origin))
+            user = _init_repo(root, "user")
+            git(user, "branch", "-M", "feature")
+            git(user, "remote", "add", "origin", str(origin))
+            git(user, "push", "-q", "origin", "feature")
+            before = _repository_state(user, origin)
+
+            hook_env = {
+                "GIT_DIR": str(user / ".git"),
+                "GIT_INDEX_FILE": str(user / ".git" / "index"),
+                "GIT_WORK_TREE": str(user),
+                "MERGETRAIN_DEMO_STEP_DELAY": "0",
+            }
+            out, err = io.StringIO(), io.StringIO()
+            with patch.dict(os.environ, hook_env), redirect_stdout(out), redirect_stderr(err):
+                code = main(["demo", "--brief", "--dir", str(root / "demo")])
+
+            self.assertEqual(code, 0, err.getvalue()[-2000:])
+            self.assertEqual(_repository_state(user, origin), before)
+
+    def test_runtime_provenance_reads_the_package_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ours, theirs = _init_repo(root, "ours"), _init_repo(root, "theirs")
+
+            with patch.dict(os.environ, {"GIT_DIR": str(theirs / ".git")}):
+                head = runtime._git_output(ours, "rev-parse", "HEAD")
+
+            self.assertEqual(head, git(ours, "rev-parse", "HEAD"))
 
 
 if __name__ == "__main__":
