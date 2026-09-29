@@ -40,9 +40,12 @@ python -m pytest      # tests
 
 ## Changelog
 
-Every user-facing change needs a [`CHANGELOG.md`](./CHANGELOG.md) entry;
-`scripts/check_release.py` (run in CI) enforces that a release has a matching
-changelog heading.
+Every user-facing change needs a [`CHANGELOG.md`](./CHANGELOG.md) entry under
+`## Unreleased` at the top. Do not bump the version in the same change; the
+release-preparation change bumps it once for everything pending (see
+[docs/release.md](./docs/release.md#when-to-cut-a-release)).
+`scripts/check_release.py` (run in CI) enforces that the current version has a
+matching dated changelog heading.
 
 ## Commits & PRs
 

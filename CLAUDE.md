@@ -51,6 +51,12 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
   configuration, Git, runtime, or lock detail.
 - Prefer structured output. Raw logs may contain sensitive command output.
 - Keep the six-verb public grammar and product-scope ceiling intact.
+- Do not bump the version in feature or fix changes; add the changelog entry
+  under `## Unreleased`. Only a requested release-preparation change bumps the
+  version, after applying the cadence rules in
+  `docs/release.md#when-to-cut-a-release`; recommend waiting when the pending
+  changes do not meet them. When a change meets that section's patch-release
+  criteria, say so at handoff and recommend a prompt patch release.
 
 ## GitHub CLI authentication
 

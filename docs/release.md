@@ -3,6 +3,42 @@
 PyPI releases are built by GitHub Actions and published with short-lived OIDC
 credentials. Do not upload production artifacts from a developer machine.
 
+## When to cut a release
+
+Merging to `main` is not a reason to release. Every published version is
+immutable, gets fetched by PyPI mirrors and scanners, and asks every user to
+upgrade. Between 0.1.0 (2026-07-16) and 3.2.0 (2026-09-29) mergetrain shipped
+36 releases, including 2.0.0 and 3.0.0 four days apart. That pace inflates
+download counts without adding users and makes the tool look unstable to the
+people who depend on it.
+
+- Feature and fix changes add their `CHANGELOG.md` entry under
+  `## Unreleased` and leave every version string alone. Only the
+  release-preparation change bumps the version, once for everything pending:
+  it turns `## Unreleased` into the dated heading and updates every version
+  surface that `scripts/check_release.py` checks. `.gitattributes` merges
+  `CHANGELOG.md` with Git's union driver, so entries added by parallel
+  branches do not conflict.
+- Ship a patch release promptly only for a regression in the latest release, a
+  data-loss or safety-boundary bug (an unapproved push, or a cleanup that
+  deletes files mergetrain does not own), a security fix, or a broken install
+  or launch path (PyPI, `uvx`, the MCP Registry, or the plugins). Fold every
+  other fix into the next release.
+- Ship at most one feature (minor) release per week.
+- Bump the major version only for a breaking change to the machine contract,
+  the CLI grammar, or the configuration schema. Group breaking changes into one
+  planned major release instead of shipping several majors in a row.
+- Do not publish a second version on the same day unless it fixes a regression
+  in the first.
+- Changes to docs, tests, CI, or internal structure alone never justify a
+  release.
+
+An agent asked to prepare a release first lists what is pending under
+`## Unreleased` and says whether it meets these rules. If it does not, the
+agent recommends waiting instead of preparing the release. An agent whose
+change meets the patch-release criteria above says so when it hands the change
+off, and recommends a prompt patch release instead of waiting to be asked.
+
 ## What CI verifies
 
 Every pull request runs:
@@ -164,7 +200,10 @@ an upload that already succeeded.
    Compare the second command's description and topic set with GitHub About and
    update that repository setting if it drifted. Do not maintain a second copy
    of the desired text in this checklist.
-3. Update the version and dated changelog heading for the intended release.
+3. Update the version and turn `## Unreleased` into the dated changelog heading
+   for the intended release. Read the section first: the union merge that
+   `.gitattributes` sets for `CHANGELOG.md` can splice together two parallel
+   entries that share an identical line.
 4. Create a signed annotated tag on the exact verified `main` commit, verify it
    locally against the tracked allowed signer, and push it. Unsigned release
    tags are rejected by the release workflow:

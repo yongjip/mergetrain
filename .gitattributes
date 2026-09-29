@@ -1,3 +1,9 @@
+# Parallel branches all add entries under "## Unreleased". The union driver
+# keeps both sides' lines instead of stopping the merge on a conflict, but it
+# keeps a line that is identical on both sides only once, which can splice two
+# entries together. Release preparation re-reads the section for that.
+CHANGELOG.md merge=union
+
 # Frozen benchmark hashes must survive Windows checkout unchanged.
 benchmarks/discovery/eligibility/* text eol=lf
 benchmarks/operator_guidance/* text eol=lf

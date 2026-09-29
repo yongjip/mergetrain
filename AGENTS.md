@@ -34,6 +34,13 @@ worktrees.
    behavior, MCP tool, recovery action, notification path, or reuse control,
    apply the admission test in `docs/product-scope.md`, prefer consolidation,
    and record the measured cost, repeated workflow, or incorrect state.
+10. Do not bump the version in feature or fix changes; add the changelog entry
+    under `## Unreleased`. Only a requested release-preparation change bumps
+    the version, after applying the cadence rules in
+    `docs/release.md#when-to-cut-a-release`; if the pending changes do not
+    meet them, recommend waiting. When your change meets that section's
+    patch-release criteria, say so at handoff and recommend a prompt patch
+    release.
 
 ## Useful commands
 
