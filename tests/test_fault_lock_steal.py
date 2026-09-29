@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 from mergetrain import recovery as recovery_module
+from mergetrain.atomic_push import AtomicPush
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.errors import LostLease
@@ -122,7 +123,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                 self.assertEqual([j.id for j in claimed], [job.id])
                 lease_token = claimed[0].claim_token
                 runner = GitRunner(config)
-                real_push = runner.push_verified_head
+                real_push = runner._pushes.push_verified_head
 
                 def land_then_steal(
                     *,
@@ -158,7 +159,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                     finally:
                         control.close()
 
-                with patch.object(runner, "push_verified_head", side_effect=land_then_steal):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=land_then_steal):
                     # The runner must not quietly "succeed" here: its lease is
                     # gone, so its finalize has to fail loudly and retryably.
                     with self.assertRaises(LostLease):
@@ -270,10 +271,10 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                 )
             plan_sha = json.loads(preview_out.getvalue())["deploy_plan_sha"]
 
-            real_push = GitRunner.push_verified_head
+            real_push = AtomicPush.push_verified_head
 
-            def land_then_steal(runner_self, **kwargs):
-                real_push(runner_self, **kwargs)
+            def land_then_steal(pushes, **kwargs):
+                real_push(pushes, **kwargs)
                 out = io.StringIO()
                 with redirect_stdout(out):
                     code = main(["--repo", str(repo), "unlock", "--force", "--json"])
@@ -281,7 +282,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
 
             out = io.StringIO()
             with patch.object(
-                GitRunner,
+                AtomicPush,
                 "push_verified_head",
                 autospec=True,
                 side_effect=land_then_steal,

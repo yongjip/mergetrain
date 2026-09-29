@@ -61,10 +61,6 @@ class WorktreeManager:
             return
         remove_worktree(self.repo, worktree, log=log)
 
-    @staticmethod
-    def git_common_dir(path: Path) -> Path | None:
-        return git_common_dir(path)
-
     def persistent_cache_directories(self, worktree: Path) -> list[tuple[str, Path]]:
         directories: list[tuple[str, Path]] = []
         root = worktree.resolve()
@@ -122,8 +118,8 @@ class WorktreeManager:
     ) -> bool:
         reused = worktree.exists()
         if reused:
-            repo_common = self.git_common_dir(self.repo)
-            worktree_common = self.git_common_dir(worktree)
+            repo_common = git_common_dir(self.repo)
+            worktree_common = git_common_dir(worktree)
             if (
                 repo_common is None
                 or worktree_common != repo_common

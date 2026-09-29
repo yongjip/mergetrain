@@ -654,7 +654,7 @@ class CrashRecoveryTests(unittest.TestCase):
     """End-to-end: crash mid-deploy, then recover() to the truthful state."""
 
     def _crash_after_push(self, runner: GitRunner):
-        real_push = runner.push_verified_head
+        real_push = runner._pushes.push_verified_head
 
         def push_then_crash(
             *,
@@ -677,7 +677,7 @@ class CrashRecoveryTests(unittest.TestCase):
             )
             raise _Crash()
 
-        return patch.object(runner, "push_verified_head", side_effect=push_then_crash)
+        return patch.object(runner._pushes, "push_verified_head", side_effect=push_then_crash)
 
     def test_batch_crash_after_push_recovers_to_deployed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -733,7 +733,7 @@ class CrashRecoveryTests(unittest.TestCase):
                 ttl = config.queue.lock_ttl_minutes
                 claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
                 runner = GitRunner(config)
-                real_push = runner.push_verified_head
+                real_push = runner._pushes.push_verified_head
 
                 def land_then_drop(
                     *,
@@ -760,7 +760,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
-                with patch.object(runner, "push_verified_head", side_effect=land_then_drop):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=land_then_drop):
                     runner.process_batch(
                         conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
                     )
@@ -792,7 +792,7 @@ class CrashRecoveryTests(unittest.TestCase):
                 ttl = config.queue.lock_ttl_minutes
                 claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
                 runner = GitRunner(config)
-                real_push = runner.push_verified_head
+                real_push = runner._pushes.push_verified_head
 
                 def land_cancel_then_drop(
                     *,
@@ -824,7 +824,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
-                with patch.object(runner, "push_verified_head", side_effect=land_cancel_then_drop):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=land_cancel_then_drop):
                     runner.process_batch(
                         conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
                     )
@@ -861,7 +861,7 @@ class CrashRecoveryTests(unittest.TestCase):
                 ttl = config.queue.lock_ttl_minutes
                 claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
                 runner = GitRunner(config)
-                real_push = runner.push_verified_head
+                real_push = runner._pushes.push_verified_head
 
                 def land_then_drop(
                     *,
@@ -888,7 +888,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
-                with patch.object(runner, "push_verified_head", side_effect=land_then_drop):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=land_then_drop):
                     runner.process_batch(
                         conn, claimed, deploy=True, owner=DEAD_OWNER, ttl_minutes=ttl
                     )
@@ -939,7 +939,7 @@ class CrashRecoveryTests(unittest.TestCase):
                 ttl = config.queue.lock_ttl_minutes
                 claimed = claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=ttl)
                 runner = GitRunner(config)
-                real_push = runner.push_verified_head
+                real_push = runner._pushes.push_verified_head
 
                 def land_then_drop(
                     *,
@@ -966,7 +966,7 @@ class CrashRecoveryTests(unittest.TestCase):
                         stderr="fatal: the remote end hung up unexpectedly",
                     )
 
-                with patch.object(runner, "push_verified_head", side_effect=land_then_drop):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=land_then_drop):
                     runner.process_batch(
                         conn,
                         claimed,

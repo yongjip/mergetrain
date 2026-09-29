@@ -66,6 +66,22 @@ deploy:
     return repo, remote_a, remote_b, remote_c
 
 
+def _preflight_and_push(push, repo, head, destination, log=None):  # type: ignore[no-untyped-def]
+    """Run the audit-ref preflight and the atomic push, as a deploy does."""
+
+    audit_ref, expected = push.audit_ref_expectation(
+        worktree=repo, deploy_sha=head, log=log, destination=destination
+    )
+    push.push_verified_head(
+        worktree=repo,
+        deploy_sha=head,
+        log=log,
+        audit_ref=audit_ref,
+        audit_expected_sha=expected,
+        destination=destination,
+    )
+
+
 class GitDestinationTests(unittest.TestCase):
     def test_supported_url_forms_are_classified_without_cwd_ambiguity(self) -> None:
         self.assertTrue(_is_relative_filesystem_url("C:repo.git"))
@@ -206,12 +222,7 @@ class GitDestinationTests(unittest.TestCase):
             self.assertEqual(deploy_destination_sha(config), destination.destination_sha)
 
             log = io.StringIO()
-            AtomicPush(config).push_verified_head(
-                worktree=repo,
-                deploy_sha=head,
-                log=log,
-                destination=destination,
-            )
+            _preflight_and_push(AtomicPush(config), repo, head, destination, log=log)
 
             self.assertEqual(git(remote_a, "rev-parse", "main"), base)
             self.assertEqual(git(remote_b, "rev-parse", "main"), head)
@@ -232,33 +243,32 @@ class GitDestinationTests(unittest.TestCase):
             git(repo, "commit", "-m", "pinned")
             head = git(repo, "rev-parse", "HEAD")
             push = AtomicPush(config)
-
-            def mutate_after_audit(**kwargs):  # type: ignore[no-untyped-def]
-                result = push.audit_ref_expectation(**kwargs)
-                # These exact-length rules beat the old command-scope
-                # self-rule on Git 2.55. Insert them after the audit lookup to
-                # exercise the precise audit-to-push race from review.
-                git(
-                    repo,
-                    "config",
-                    "--add",
-                    f"url.{remote_c}.insteadOf",
-                    str(remote_b.resolve()),
-                )
-                git(
-                    repo,
-                    "config",
-                    "--add",
-                    f"url.{remote_c}.pushInsteadOf",
-                    str(remote_b.resolve()),
-                )
-                return result
-
+            audit_ref, expected = push.audit_ref_expectation(
+                worktree=repo, deploy_sha=head, log=None, destination=destination
+            )
+            # These exact-length rules beat the old command-scope self-rule on
+            # Git 2.55. Insert them after the audit lookup to exercise the
+            # precise audit-to-push race from review.
+            git(
+                repo,
+                "config",
+                "--add",
+                f"url.{remote_c}.insteadOf",
+                str(remote_b.resolve()),
+            )
+            git(
+                repo,
+                "config",
+                "--add",
+                f"url.{remote_c}.pushInsteadOf",
+                str(remote_b.resolve()),
+            )
             push.push_verified_head(
                 worktree=repo,
                 deploy_sha=head,
+                audit_ref=audit_ref,
+                audit_expected_sha=expected,
                 destination=destination,
-                audit_expectation=mutate_after_audit,
             )
 
             self.assertEqual(git(remote_b, "rev-parse", "main"), head)
@@ -294,11 +304,7 @@ class GitDestinationTests(unittest.TestCase):
             git(repo, "commit", "-m", "symlink pinned")
             head = git(repo, "rev-parse", "HEAD")
 
-            AtomicPush(config).push_verified_head(
-                worktree=repo,
-                deploy_sha=head,
-                destination=destination,
-            )
+            _preflight_and_push(AtomicPush(config), repo, head, destination)
 
             self.assertEqual(git(remote_b, "rev-parse", "main"), head)
             self.assertEqual(

@@ -163,10 +163,10 @@ class AuditPreflightEvidenceTests(unittest.TestCase):
             job = enqueue_job(conn, task="audit preflight", branch="feature/a")
             runner = GitRunner(config)
             with patch.object(
-                runner,
-                "_audit_ref_expectation",
+                runner._pushes,
+                "audit_ref_expectation",
                 side_effect=error,
-            ), patch.object(runner, "_push_with_marker") as push_with_marker:
+            ), patch.object(runner._pushes, "push_with_marker") as push_with_marker:
                 runner.process_batch(conn, [job], deploy=True)
             stored = get_job(conn, job.id)
             events = list_run_events(conn, limit=200)

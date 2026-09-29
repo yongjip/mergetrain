@@ -72,6 +72,7 @@ from mergetrain.errors import (
     PushRejected,
     redact_secrets,
 )
+from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import branch_exists, deploy_audit_ref_name
 from mergetrain.git_runner import GitRunner
 from mergetrain.snapshot import next_action
@@ -344,7 +345,7 @@ class GitRunnerTests(unittest.TestCase):
                     approval_execution_policy_sha=approved_policy,
                 )
                 runner = GitRunner(config)
-                real_run_gates = runner._run_gates
+                real_run_gates = runner._gates.run_gates
 
                 def gates_then_change_destination(*args, **kwargs):  # type: ignore[no-untyped-def]
                     result = real_run_gates(*args, **kwargs)
@@ -359,8 +360,8 @@ class GitRunnerTests(unittest.TestCase):
                     return result
 
                 with patch.object(
-                    runner,
-                    "_run_gates",
+                    runner._gates,
+                    "run_gates",
                     side_effect=gates_then_change_destination,
                 ):
                     results = runner.process_batch(
@@ -427,7 +428,7 @@ class GitRunnerTests(unittest.TestCase):
                     approval_execution_policy_sha=approved_policy,
                 )
                 runner = GitRunner(config)
-                real_run_gates = runner._run_gates
+                real_run_gates = runner._gates.run_gates
 
                 def gates_then_add_push_urls(*args, **kwargs):  # type: ignore[no-untyped-def]
                     result = real_run_gates(*args, **kwargs)
@@ -448,8 +449,8 @@ class GitRunnerTests(unittest.TestCase):
                     return result
 
                 with patch.object(
-                    runner,
-                    "_run_gates",
+                    runner._gates,
+                    "run_gates",
                     side_effect=gates_then_add_push_urls,
                 ):
                     results = runner.process_batch(
@@ -513,7 +514,7 @@ class GitRunnerTests(unittest.TestCase):
                     approval_execution_policy_sha=approved_policy,
                 )
                 runner = GitRunner(config)
-                real_run_gates = runner._run_gates
+                real_run_gates = runner._gates.run_gates
 
                 def gates_then_change_policy(*args, **kwargs):  # type: ignore[no-untyped-def]
                     result = real_run_gates(*args, **kwargs)
@@ -527,8 +528,8 @@ class GitRunnerTests(unittest.TestCase):
                     return result
 
                 with patch.object(
-                    runner,
-                    "_run_gates",
+                    runner._gates,
+                    "run_gates",
                     side_effect=gates_then_change_policy,
                 ):
                     results = runner.process_batch(
@@ -575,7 +576,7 @@ gates:
             log = io.StringIO()
             events: list[tuple[str, str]] = []
 
-            runner._run_configured_gate_plan(
+            runner._gates.run_configured_plan(
                 worktree=repo,
                 log=log,
                 pulse=None,
@@ -618,7 +619,7 @@ gates:
             started = time.monotonic()
 
             with self.assertRaises(CommandFailed):
-                runner._run_configured_gate_plan(
+                runner._gates.run_configured_plan(
                     worktree=repo,
                     log=io.StringIO(),
                     pulse=None,
@@ -649,7 +650,7 @@ gates:
             started = time.monotonic()
 
             with self.assertRaises(CommandFailed) as raised:
-                runner._run_configured_gate_plan(
+                runner._gates.run_configured_plan(
                     worktree=repo,
                     log=io.StringIO(),
                     pulse=None,
@@ -682,7 +683,7 @@ gates:
             started = time.monotonic()
 
             with self.assertRaises(CommandFailed) as raised:
-                runner._run_configured_gate_plan(
+                runner._gates.run_configured_plan(
                     worktree=repo,
                     log=io.StringIO(),
                     pulse=None,
@@ -732,7 +733,7 @@ deploy:
             runner = GitRunner(load_config(repo=repo))
             events: list[tuple[str, str]] = []
 
-            runner._run_gates(
+            runner._gates.run_gates(
                 worktree=repo,
                 log=io.StringIO(),
                 pulse=None,
@@ -767,7 +768,7 @@ deploy:
             runner = GitRunner(load_config(repo=repo))
             events: list[tuple[str, str, int]] = []
 
-            runner._run_gates(
+            runner._gates.run_gates(
                 worktree=repo,
                 log=io.StringIO(),
                 pulse=None,
@@ -1933,7 +1934,7 @@ deploy:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 runner = GitRunner(config)
                 failure = CommandFailed(["git", "push"], 1, stderr="remote rejected the update")
-                with patch.object(runner, "push_verified_head", side_effect=failure):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=failure):
                     result = runner.process_batch(conn, [job], deploy=True)[0]
             finally:
                 conn.close()
@@ -1971,7 +1972,7 @@ deploy:
                     1,
                     stderr="! [rejected] main -> main (fetch first)",
                 )
-                with patch.object(runner, "push_verified_head", side_effect=rejection):
+                with patch.object(runner._pushes, "push_verified_head", side_effect=rejection):
                     result = runner.process_batch(conn, [claimed[0]], deploy=True, owner=owner)[0]
                 action = next_action({"counts": counts(conn)})
             finally:
@@ -2028,7 +2029,7 @@ deploy:
                 side_effect=status_error,
             ):
                 with self.assertRaisesRegex(MergeBlocked, "could not verify.*clean"):
-                    runner._assert_tree_unchanged_by_gates(repo, deploy_sha)
+                    runner._pushes.assert_tree_unchanged(repo, deploy_sha)
             with self.assertRaises(AssertionError):
                 git(root / "remote.git", "show", "main:a.txt")
 
@@ -2043,8 +2044,8 @@ deploy:
                 job = enqueue_job(conn, task="a", branch="feature/a")
                 runner = GitRunner(config)
                 with patch.object(
-                    runner,
-                    "_run_verify_hooks",
+                    runner._gates,
+                    "run_verify_hooks",
                     side_effect=RuntimeError("verification crashed"),
                 ):
                     result = runner.process_batch(conn, [job], deploy=True)[0]
@@ -2136,7 +2137,7 @@ deploy:
             git(repo, "push", "origin", f"{base}:{audit_ref}")
 
             with self.assertRaisesRegex(PushRejected, "immutable audit evidence"):
-                runner.push_verified_head(worktree=repo, deploy_sha=target)
+                _preflight_and_push(runner, repo, target)
 
             remote = root / "remote.git"
             self.assertEqual(git(remote, "rev-parse", "main"), base)
@@ -2151,7 +2152,7 @@ deploy:
             audit_ref = deploy_audit_ref_name(target)
             git(repo, "push", "origin", f"{target}:{audit_ref}")
 
-            runner.push_verified_head(worktree=repo, deploy_sha=target)
+            _preflight_and_push(runner, repo, target)
 
             remote = root / "remote.git"
             self.assertEqual(git(remote, "rev-parse", "main"), target)
@@ -2169,15 +2170,14 @@ deploy:
             # was absent. The lease must reject both this ref and main together.
             git(repo, "push", "origin", f"{base}:{audit_ref}")
 
-            with (
-                patch.object(
-                    runner,
-                    "_audit_ref_expectation",
-                    return_value=(audit_ref, ""),
-                ),
-                self.assertRaises(CommandFailed) as raised,
-            ):
-                runner.push_verified_head(worktree=repo, deploy_sha=target)
+            with self.assertRaises(CommandFailed) as raised:
+                runner._pushes.push_verified_head(
+                    worktree=repo,
+                    deploy_sha=target,
+                    audit_ref=audit_ref,
+                    audit_expected_sha="",
+                    destination=resolve_git_destination(runner.config),
+                )
 
             self.assertIn("stale info", raised.exception.stderr)
             remote = root / "remote.git"
@@ -2206,7 +2206,7 @@ deploy:
                         "run_command",
                         side_effect=fail_pending_ref,
                     ),
-                    patch.object(runner, "push_verified_head") as push,
+                    patch.object(runner._pushes, "push_verified_head") as push,
                 ):
                     result = runner.process_batch(conn, [job], deploy=True)[0]
             finally:
@@ -2734,6 +2734,22 @@ deploy:
                 cleanup.close()
 
 
+def _preflight_and_push(runner: GitRunner, repo: Path, target: str) -> None:
+    """Run the audit-ref preflight and the atomic push, as a deploy does."""
+
+    destination = resolve_git_destination(runner.config)
+    audit_ref, expected = runner._pushes.audit_ref_expectation(
+        worktree=repo, deploy_sha=target, log=None, destination=destination
+    )
+    runner._pushes.push_verified_head(
+        worktree=repo,
+        deploy_sha=target,
+        audit_ref=audit_ref,
+        audit_expected_sha=expected,
+        destination=destination,
+    )
+
+
 def add_branch(repo: Path, name: str, filename: str) -> None:
     git(repo, "switch", "-c", name, "main")
     (repo / filename).write_text(f"{name}\n", encoding="utf-8")
@@ -3109,7 +3125,7 @@ class BisectIsolationTests(unittest.TestCase):
                 )
                 token = claimed[0].claim_token
                 runner = GitRunner(config)
-                with patch.object(runner, "push_verified_head") as push:
+                with patch.object(runner._pushes, "push_verified_head") as push:
                     runner.process_batch(conn, claimed, deploy=True, owner=owner)
                 stored = {job.branch: get_job(conn, job.id) for job in claimed}
                 ids = {job.branch: job.id for job in claimed}
@@ -3301,7 +3317,7 @@ class BisectIsolationTests(unittest.TestCase):
             config = load_config(repo=repo)
             owner = f"runner:{os.getpid()}"
             runner = GitRunner(config)
-            real_run_gates = runner._run_gates
+            real_run_gates = runner._gates.run_gates
             gc_runs: list[dict] = []
 
             def gc_then_run_gates(**kwargs):  # type: ignore[no-untyped-def]
@@ -3316,7 +3332,7 @@ class BisectIsolationTests(unittest.TestCase):
                 for name in ("left", "right"):
                     enqueue_job(conn, task=name, branch=f"agent/{name}")
                 claimed = claim_all_queued(conn, owner=owner)
-                with patch.object(runner, "_run_gates", side_effect=gc_then_run_gates):
+                with patch.object(runner._gates, "run_gates", side_effect=gc_then_run_gates):
                     runner.process_batch(conn, claimed, deploy=False, owner=owner)
                 stored = [get_job(conn, job.id) for job in claimed]
             finally:
@@ -3457,7 +3473,7 @@ class BisectIsolationTests(unittest.TestCase):
                 token = claimed[0].claim_token
                 failure = CommandFailed(["git", "push"], 1, stderr="transport timed out")
                 runner = GitRunner(config)
-                with patch.object(runner, "push_verified_head", side_effect=failure) as push:
+                with patch.object(runner._pushes, "push_verified_head", side_effect=failure) as push:
                     runner.process_batch(conn, claimed, deploy=True, owner=owner)
                 stored = [get_job(conn, job.id) for job in claimed]
             finally:
@@ -3529,7 +3545,7 @@ class BisectIsolationTests(unittest.TestCase):
                 token = claimed[0].claim_token
                 failure = CommandFailed(["git", "push"], 1, stderr="transport timed out")
                 runner = GitRunner(config)
-                with patch.object(runner, "push_verified_head", side_effect=failure) as push:
+                with patch.object(runner._pushes, "push_verified_head", side_effect=failure) as push:
                     results = runner.process_batch(conn, claimed, deploy=True, owner=owner)
                 stored = [get_job(conn, job.id) for job in claimed]
             finally:

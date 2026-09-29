@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import sqlite3
-import threading
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -20,7 +19,7 @@ from .atomic_push import (
     post_push_verify_status as _post_push_verify_status,
 )
 from .command_runner import run_command
-from .config import GateConfig, MergetrainConfig, load_config
+from .config import MergetrainConfig, load_config
 from .deploy_plan import deploy_execution_policy_sha, deploy_plan_sha
 from .errors import (
     AmbiguousPush,
@@ -35,12 +34,11 @@ from .errors import (
     QueueBusy,
 )
 from .gate_runner import GateProgress, GateRunner
-from .git_destination import ResolvedGitDestination, resolve_git_destination
+from .git_destination import resolve_git_destination
 from .git_ops import (
     git_output,
     git_rev_parse,
     git_worktree_clean,
-    pending_ref_name,
 )
 from .models import Job
 from .reuse import ReuseCheck, ReuseDecision
@@ -71,9 +69,6 @@ class GitRunner:
         self._validation = ValidationReuse(config, self._gates)
         self._worktrees = WorktreeManager(config, self._gates)
         self._pushes = AtomicPush(config)
-
-    def _ensure_state_dirs(self) -> None:
-        self._worktrees.ensure_state_dirs()
 
     def _refresh_lease(
         self,
@@ -201,148 +196,6 @@ class GitRunner:
         suffix = uuid.uuid4().hex[:8]
         return self.config.state.logs / f"{prefix}-{first_job_id}-{stamp}-{suffix}.log"
 
-    def _worktree_path(self, first_job_id: int) -> Path:
-        return self._worktrees.worktree_path(first_job_id)
-
-    def _primary_worktree_path(self, first_job_id: int, *, deploy: bool) -> tuple[Path, bool]:
-        return self._worktrees.primary_path(first_job_id, deploy=deploy)
-
-    def _persistent_workspace_marker(self) -> Path:
-        return self._worktrees.persistent_workspace_marker()
-
-    def _cleanup_worktree(
-        self, worktree: Path, *, log: IO[str] | None, keep_worktree: bool
-    ) -> None:
-        self._worktrees.cleanup(
-            worktree,
-            log=log,
-            keep_worktree=keep_worktree,
-        )
-
-    def _run_gate(
-        self,
-        gate: GateConfig,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-        cancel_event: threading.Event | None = None,
-    ) -> None:
-        self._gates.run_gate(
-            gate,
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-            cancel_event=cancel_event,
-        )
-
-    def _run_configured_gate_plan(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-        on_gate: GateProgress | None,
-        initial_states: dict[str, tuple[str, str]],
-    ) -> None:
-        self._gates.run_configured_plan(
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-            on_gate=on_gate,
-            initial_states=initial_states,
-        )
-
-    def _changed_paths(
-        self,
-        *,
-        worktree: Path,
-        base_ref: str,
-        head_ref: str,
-        log: IO[str],
-        pulse: Pulse | None,
-    ) -> tuple[str, ...] | None:
-        return self._gates.changed_paths(
-            worktree=worktree,
-            base_ref=base_ref,
-            head_ref=head_ref,
-            log=log,
-            pulse=pulse,
-        )
-
-    def _run_gates(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-        on_gate: GateProgress | None = None,
-        base_ref: str = "",
-        head_ref: str = "HEAD",
-    ) -> None:
-        self._gates.run_gates(
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-            on_gate=on_gate,
-            base_ref=base_ref,
-            head_ref=head_ref,
-        )
-
-    def _run_verify_hooks(self, *, worktree: Path, log: IO[str], pulse: Pulse | None) -> None:
-        self._gates.run_verify_hooks(worktree=worktree, log=log, pulse=pulse)
-
-    def _environment_fingerprint(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-    ) -> str:
-        return self._gates.environment_fingerprint(
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-        )
-
-    def _validation_identity_fields(
-        self,
-        *,
-        jobs: Sequence[Job],
-        train_id: str,
-        validated_heads: dict[int, str],
-        validation_sha: str,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-    ) -> dict[str, str]:
-        return self._validation.identity_fields(
-            jobs=jobs,
-            train_id=train_id,
-            validated_heads=validated_heads,
-            validation_sha=validation_sha,
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-        )
-
-    def _reuse_decision(
-        self,
-        jobs: Sequence[Job],
-        *,
-        worktree: Path,
-        integration_base_sha: str,
-        log: IO[str],
-        pulse: Pulse | None,
-    ) -> ReuseDecision:
-        return self._validation.decide(
-            jobs,
-            worktree=worktree,
-            integration_base_sha=integration_base_sha,
-            log=log,
-            pulse=pulse,
-        )
-
     def preview_validated_reuse(self, jobs: Sequence[Job]) -> ReuseDecision:
         """Evaluate reuse without claiming jobs, running gates, or pushing refs."""
 
@@ -350,14 +203,14 @@ class GitRunner:
             return unauthorized_reuse_decision(jobs)
         validation_shas = {job.validation_sha for job in jobs if job.validation_sha}
         validation_sha = next(iter(validation_shas)) if len(validation_shas) == 1 else ""
-        self._ensure_state_dirs()
-        worktree = self._worktree_path(jobs[0].id if jobs else 0)
+        self._worktrees.ensure_state_dirs()
+        worktree = self._worktrees.worktree_path(jobs[0].id if jobs else 0)
         log = io.StringIO()
         try:
-            self._prepare_worktree(worktree=worktree, log=log, pulse=None)
+            self._worktrees.prepare(worktree=worktree, log=log, pulse=None)
             for job in jobs:
                 self._merge_sha_for_job(job, deploying_validated=True)
-            return self._reuse_decision(
+            return self._validation.decide(
                 jobs,
                 worktree=worktree,
                 integration_base_sha=git_rev_parse(worktree, "HEAD"),
@@ -382,26 +235,7 @@ class GitRunner:
                 ),
             )
         finally:
-            self._cleanup_worktree(worktree, log=None, keep_worktree=False)
-
-    def _run_reused_gates(
-        self,
-        *,
-        worktree: Path,
-        validation_sha: str,
-        base_ref: str,
-        log: IO[str],
-        pulse: Pulse | None,
-        on_gate: GateProgress | None = None,
-    ) -> None:
-        self._gates.run_reused_gates(
-            worktree=worktree,
-            validation_sha=validation_sha,
-            base_ref=base_ref,
-            log=log,
-            pulse=pulse,
-            on_gate=on_gate,
-        )
+            self._worktrees.cleanup(worktree, log=None, keep_worktree=False)
 
     def reverify_deploy(self, *, deploy_sha: str, log: IO[str]) -> bool:
         """Re-run the configured post-push verify hooks against a deploy_sha.
@@ -418,8 +252,8 @@ class GitRunner:
                 "verification policy is unavailable; use --ack succeeded/failed "
                 "after explicit review"
             )
-        self._ensure_state_dirs()
-        worktree = self._worktree_path(0)
+        self._worktrees.ensure_state_dirs()
+        worktree = self._worktrees.worktree_path(0)
         run_command(
             ["git", "fetch", self.config.git.remote],
             cwd=self.repo,
@@ -433,103 +267,12 @@ class GitRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         try:
-            self._run_verify_hooks(worktree=worktree, log=log, pulse=None)
+            self._gates.run_verify_hooks(worktree=worktree, log=log, pulse=None)
             return True
         except CommandFailed:
             return False
         finally:
-            self._cleanup_worktree(worktree, log=log, keep_worktree=False)
-
-    def _assert_tree_unchanged_by_gates(self, worktree: Path, deploy_sha: str) -> None:
-        self._pushes.assert_tree_unchanged(worktree, deploy_sha)
-
-    def push_verified_head(
-        self,
-        *,
-        worktree: Path,
-        deploy_sha: str = "",
-        log: IO[str] | None = None,
-        pulse: Pulse | None = None,
-        audit_ref: str = "",
-        audit_expected_sha: str | None = None,
-        destination: ResolvedGitDestination | None = None,
-    ) -> None:
-        self._pushes.push_verified_head(
-            worktree=worktree,
-            deploy_sha=deploy_sha,
-            log=log,
-            pulse=pulse,
-            audit_ref=audit_ref,
-            audit_expected_sha=audit_expected_sha,
-            audit_expectation=self._audit_ref_expectation,
-            destination=destination,
-        )
-
-    def _audit_ref_expectation(
-        self,
-        *,
-        worktree: Path,
-        deploy_sha: str,
-        log: IO[str] | None,
-        pulse: Pulse | None = None,
-        destination: ResolvedGitDestination | None = None,
-    ) -> tuple[str, str]:
-        return self._pushes.audit_ref_expectation(
-            worktree=worktree,
-            deploy_sha=deploy_sha,
-            log=log,
-            pulse=pulse,
-            destination=destination,
-        )
-
-    def _pending_ref(self, job_id: int) -> str:
-        return pending_ref_name(job_id)
-
-    def _push_with_marker(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        job_ids: list[int],
-        deploy_sha: str,
-        lease_token: str,
-        worktree: Path,
-        log: IO[str] | None,
-        pulse: Pulse | None,
-        audit_ref: str,
-        audit_expected_sha: str,
-        destination: ResolvedGitDestination,
-    ) -> None:
-        self._pushes.push_with_marker(
-            conn,
-            job_ids=job_ids,
-            deploy_sha=deploy_sha,
-            lease_token=lease_token,
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-            audit_ref=audit_ref,
-            audit_expected_sha=audit_expected_sha,
-            destination=destination,
-            push_verified=self.push_verified_head,
-        )
-
-    def _clear_pending_refs(self, job_ids: list[int], *, log: IO[str] | None = None) -> None:
-        self._pushes.clear_pending_refs(job_ids, log=log)
-
-    def _clear_rejected_push(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        job_ids: list[int],
-        lease_token: str,
-        log: IO[str] | None = None,
-    ) -> None:
-        self._pushes.clear_rejected_push(
-            conn,
-            job_ids=job_ids,
-            lease_token=lease_token,
-            log=log,
-        )
+            self._worktrees.cleanup(worktree, log=log, keep_worktree=False)
 
     def _gate_progress_callback(
         self,
@@ -638,10 +381,7 @@ class GitRunner:
             event=self._event,
             destination=destination,
             event_job_id=event_job_id,
-            audit_expectation=self._audit_ref_expectation,
-            push_with_marker=self._push_with_marker,
-            clear_rejected=self._clear_rejected_push,
-            run_verify_hooks=self._run_verify_hooks,
+            run_verify_hooks=self._gates.run_verify_hooks,
         )
 
     def _assert_auto_execution_policy(self, jobs: Iterable[Job]) -> None:
@@ -673,65 +413,6 @@ class GitRunner:
                 "no longer matches the configured gates, validation reuse, or "
                 "verify hooks; nothing was pushed"
             )
-
-    @staticmethod
-    def _git_common_dir(path: Path) -> Path | None:
-        return WorktreeManager.git_common_dir(path)
-
-    def _persistent_cache_directories(self, worktree: Path) -> list[tuple[str, Path]]:
-        return self._worktrees.persistent_cache_directories(worktree)
-
-    def _clean_untracked_except_validation_cache(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-    ) -> list[tuple[str, Path]]:
-        return self._worktrees.clean_untracked_except_validation_cache(
-            worktree=worktree,
-            log=log,
-        )
-
-    def _prepare_persistent_worktree(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-    ) -> bool:
-        return self._worktrees.prepare_persistent(
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-        )
-
-    def _activate_persistent_validation_cache(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-    ) -> bool:
-        return self._worktrees.activate_persistent_cache(
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-        )
-
-    def _prepare_worktree(
-        self,
-        *,
-        worktree: Path,
-        log: IO[str],
-        pulse: Pulse | None,
-        persistent: bool = False,
-    ) -> bool:
-        return self._worktrees.prepare(
-            worktree=worktree,
-            log=log,
-            pulse=pulse,
-            persistent=persistent,
-        )
 
     def _merge_sha_for_job(self, job: Job, *, deploying_validated: bool) -> str:
         """Resolve and verify the exact task commit that may be merged."""
@@ -853,7 +534,7 @@ class GitRunner:
         order = {job.id: index for index, job in enumerate(merged_jobs)}
         probe_cache: dict[frozenset[int], bool] = {}
         probe_count = 0
-        probe_worktree = self._worktree_path(merged_jobs[0].id)
+        probe_worktree = self._worktrees.worktree_path(merged_jobs[0].id)
 
         def pulse() -> None:
             # The lease names the one worktree gc must spare. While probes run,
@@ -918,7 +599,7 @@ class GitRunner:
                         f"without its train predecessors"
                     )
             try:
-                self._run_gates(
+                self._gates.run_gates(
                     worktree=probe_worktree,
                     log=log,
                     pulse=pulse,
@@ -1003,7 +684,7 @@ class GitRunner:
             try:
                 descend(list(merged_jobs))
             finally:
-                self._cleanup_worktree(probe_worktree, log=log, keep_worktree=False)
+                self._worktrees.cleanup(probe_worktree, log=log, keep_worktree=False)
         except _BisectAbort as abort:
             log.write(f"\nbisect aborted: {abort}; falling back to linear isolation\n")
             self._event(
@@ -1084,7 +765,7 @@ class GitRunner:
             message=f"Bisect isolation complete: {len(goods)} job(s) rejoin the train",
             detail=summary,
         )
-        self._cleanup_worktree(worktree, log=log, keep_worktree=keep_worktree)
+        self._worktrees.cleanup(worktree, log=log, keep_worktree=keep_worktree)
         if goods:
             results.extend(
                 self.process_batch(
@@ -1121,9 +802,9 @@ class GitRunner:
         lease_token = next(iter(claim_tokens)) if owner is not None else ""
         validated_train_ids = {job.train_id for job in jobs if job.train_id}
         deploying_validated = deploy and bool(validated_train_ids)
-        self._ensure_state_dirs()
+        self._worktrees.ensure_state_dirs()
         log_path = self._log_path("batch", jobs[0].id)
-        worktree, persistent_workspace = self._primary_worktree_path(jobs[0].id, deploy=deploy)
+        worktree, persistent_workspace = self._worktrees.primary_path(jobs[0].id, deploy=deploy)
         merged_jobs: list[Job] = []
         results: list[Job] = []
         merge_shas: dict[int, str] = {}
@@ -1205,7 +886,7 @@ class GitRunner:
                     if result.status == "deployed":
                         deployed_ids.append(item.id)
             if deployed_ids:
-                self._clear_pending_refs(deployed_ids, log=log)
+                self._pushes.clear_pending_refs(deployed_ids, log=log)
             # A claimed job the train never reached is still in progress under
             # this lease. It rode no push and was never judged, so it goes back
             # to the queue instead of stranding in progress (#231).
@@ -1258,7 +939,7 @@ class GitRunner:
                     state="active",
                     message=f"Fetching {self.config.git.integration_ref}",
                 )
-                workspace_reused = self._prepare_worktree(
+                workspace_reused = self._worktrees.prepare(
                     worktree=worktree,
                     log=log,
                     pulse=normal_pulse,
@@ -1295,7 +976,7 @@ class GitRunner:
                             for job in jobs
                         ]
                     if reuse_authorized:
-                        reuse_decision = self._reuse_decision(
+                        reuse_decision = self._validation.decide(
                             jobs,
                             worktree=worktree,
                             integration_base_sha=integration_base_sha,
@@ -1470,7 +1151,7 @@ class GitRunner:
                     deploy_sha = git_rev_parse(worktree, "HEAD")
                 normal_pulse()
                 if persistent_workspace:
-                    cache_reused = self._activate_persistent_validation_cache(
+                    cache_reused = self._worktrees.activate_persistent_cache(
                         worktree=worktree,
                         log=log,
                         pulse=normal_pulse,
@@ -1514,7 +1195,7 @@ class GitRunner:
                         detail=reused_validation_sha,
                     )
                     if reused_validation_sha:
-                        self._run_reused_gates(
+                        self._gates.run_reused_gates(
                             worktree=worktree,
                             validation_sha=reused_validation_sha,
                             base_ref=integration_base_sha,
@@ -1523,7 +1204,7 @@ class GitRunner:
                             on_gate=gate_progress,
                         )
                     else:
-                        self._run_gates(
+                        self._gates.run_gates(
                             worktree=worktree,
                             log=log,
                             pulse=normal_pulse,
@@ -1531,7 +1212,7 @@ class GitRunner:
                             base_ref=integration_base_sha,
                             head_ref=deploy_sha,
                         )
-                    self._assert_tree_unchanged_by_gates(worktree, deploy_sha)
+                    self._pushes.assert_tree_unchanged(worktree, deploy_sha)
                     self._event(
                         conn,
                         lease_token=lease_token,
@@ -1618,7 +1299,7 @@ class GitRunner:
                 validated_at = utc_now() if not deploy else ""
                 validation_identity_fields: dict[str, str] = {}
                 if not deploy:
-                    validation_identity_fields = self._validation_identity_fields(
+                    validation_identity_fields = self._validation.identity_fields(
                         jobs=merged_jobs,
                         train_id=train_id,
                         validated_heads=merge_shas,
@@ -1653,7 +1334,7 @@ class GitRunner:
                         )
                     )
                 if deploy:
-                    self._clear_pending_refs([job.id for job in merged_jobs], log=log)
+                    self._pushes.clear_pending_refs([job.id for job in merged_jobs], log=log)
                 return results
             except LostLease:
                 raise
@@ -1688,7 +1369,7 @@ class GitRunner:
             except Exception as exc:  # pragma: no cover - defensive boundary
                 return finish_active_after_error(status="failed", note=f"unexpected error: {exc}")
             finally:
-                self._cleanup_worktree(
+                self._worktrees.cleanup(
                     worktree,
                     log=log,
                     keep_worktree=keep_worktree or persistent_workspace,

@@ -19,7 +19,7 @@ from .errors import (
     MergetrainError,
     PushRejected,
 )
-from .git_destination import ResolvedGitDestination, resolve_git_destination
+from .git_destination import ResolvedGitDestination
 from .git_ops import (
     delete_pending_ref,
     deploy_audit_ref_name,
@@ -34,8 +34,6 @@ from .git_ops import (
 from .push_liveness import holding_push_lock, push_job_name
 from .store import clear_rejected_push, record_pending_push
 
-AuditExpectation = Callable[..., tuple[str, str]]
-PushVerified = Callable[..., None]
 EventWriter = Callable[..., None]
 VerifyHooks = Callable[..., None]
 
@@ -90,30 +88,20 @@ class AtomicPush:
         self,
         *,
         worktree: Path,
-        deploy_sha: str = "",
+        deploy_sha: str,
+        audit_ref: str,
+        audit_expected_sha: str,
+        destination: ResolvedGitDestination,
         log: IO[str] | None = None,
         pulse: Pulse | None = None,
-        audit_ref: str = "",
-        audit_expected_sha: str | None = None,
-        audit_expectation: AuditExpectation | None = None,
-        destination: ResolvedGitDestination | None = None,
     ) -> None:
+        # dataclasses.replace can bypass config validation; an empty set would
+        # push only the audit ref and still report a successful deploy.
         if not self.config.git.push_refs:
             raise MergetrainError(
                 "git.push_refs must not be empty for deploy mode"
             )
-        destination = destination or resolve_git_destination(self.config)
-        target = deploy_sha or git_rev_parse(worktree, "HEAD")
-        audit_ref = audit_ref or deploy_audit_ref_name(target)
-        if audit_expected_sha is None:
-            expectation = audit_expectation or self.audit_ref_expectation
-            audit_ref, audit_expected_sha = expectation(
-                worktree=worktree,
-                deploy_sha=target,
-                log=log,
-                pulse=pulse,
-                destination=destination,
-            )
+        target = deploy_sha
         push_args = [
             "git",
             "push",
@@ -145,12 +133,11 @@ class AtomicPush:
         worktree: Path,
         deploy_sha: str,
         log: IO[str] | None,
+        destination: ResolvedGitDestination,
         pulse: Pulse | None = None,
-        destination: ResolvedGitDestination | None = None,
     ) -> tuple[str, str]:
         """Read the immutable audit ref and return its push lease expectation."""
 
-        destination = destination or resolve_git_destination(self.config)
         audit_ref = deploy_audit_ref_name(deploy_sha)
         reachable, current = git_remote_ref_sha(
             self.repo,
@@ -186,7 +173,6 @@ class AtomicPush:
         audit_ref: str,
         audit_expected_sha: str,
         destination: ResolvedGitDestination,
-        push_verified: PushVerified | None = None,
     ) -> None:
         """Persist pending intent and local pins before touching the remote."""
 
@@ -220,8 +206,7 @@ class AtomicPush:
                     f"{pinned_sha or 'nothing'}, expected {deploy_sha}; "
                     "push was not attempted"
                 )
-        push = push_verified or self.push_verified_head
-        push(
+        self.push_verified_head(
             worktree=worktree,
             deploy_sha=deploy_sha,
             log=log,
@@ -262,11 +247,8 @@ class AtomicPush:
         state: PushVerifyState,
         event: EventWriter,
         destination: ResolvedGitDestination,
+        run_verify_hooks: VerifyHooks,
         event_job_id: int | None = None,
-        audit_expectation: AuditExpectation | None = None,
-        push_with_marker: Callable[..., None] | None = None,
-        clear_rejected: Callable[..., None] | None = None,
-        run_verify_hooks: VerifyHooks | None = None,
     ) -> None:
         """Run audit preflight, durable marker, atomic push, and verification."""
 
@@ -279,9 +261,8 @@ class AtomicPush:
             state="active",
             message="Pushing verified HEAD atomically",
         )
-        expectation = audit_expectation or self.audit_ref_expectation
         try:
-            audit_ref, audit_expected_sha = expectation(
+            audit_ref, audit_expected_sha = self.audit_ref_expectation(
                 worktree=worktree,
                 deploy_sha=deploy_sha,
                 log=log,
@@ -303,9 +284,8 @@ class AtomicPush:
             raise
 
         state.push_status = "pending"
-        push = push_with_marker or self.push_with_marker
         try:
-            push(
+            self.push_with_marker(
                 conn,
                 job_ids=job_ids,
                 deploy_sha=deploy_sha,
@@ -333,8 +313,7 @@ class AtomicPush:
             )
             if is_push_rejection(exc.stderr):
                 state.push_status = "failed"
-                clear = clear_rejected or self.clear_rejected_push
-                clear(
+                self.clear_rejected_push(
                     conn,
                     job_ids=job_ids,
                     lease_token=lease_token,
@@ -372,9 +351,6 @@ class AtomicPush:
             )
             return
 
-        verify = run_verify_hooks
-        if verify is None:
-            raise MergetrainError("post-push verify runner is not configured")
         try:
             event(
                 conn,
@@ -384,7 +360,7 @@ class AtomicPush:
                 state="active",
                 message="Running post-push verification",
             )
-            verify(worktree=worktree, log=log, pulse=ownership_pulse)
+            run_verify_hooks(worktree=worktree, log=log, pulse=ownership_pulse)
             state.verify_status = "succeeded"
             event(
                 conn,

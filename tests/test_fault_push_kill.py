@@ -1,7 +1,7 @@
 """Fault matrix cases 1-2: a REAL ``git push --atomic`` killed mid-flight.
 
 Every other fault test in this repo reaches the ambiguous-push state by patching
-``GitRunner.push_verified_head`` and raising a hand-written ``CommandFailed``.
+``AtomicPush.push_verified_head`` and raising a hand-written ``CommandFailed``.
 That never exercises the three things the 1.0 gate actually depends on:
 
 * git's real exit status when the push client dies (a signal, not exit 1),
