@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.1.1 - 2026-09-29
 
 - Refuse a `${repo}` or `${worktree}` path that needs quoting anywhere after
   a `<<` or `<<<` in a gate, verify-hook, or reuse-fingerprint command. bash
