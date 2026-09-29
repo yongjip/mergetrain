@@ -13,7 +13,7 @@ from typing import IO
 
 from .command_runner import (
     Pulse,
-    _dashboard_command,
+    _display_command,
     command_env,
     expand_command,
     run_command,
@@ -154,7 +154,7 @@ class GateRunner:
                         "active",
                         indexes[gate.name],
                         total,
-                        _dashboard_command(gate.run),
+                        _display_command(gate.run),
                     )
 
             cancel_event = threading.Event()
@@ -248,7 +248,7 @@ class GateRunner:
                         indexes[gate.name],
                         total,
                         (
-                            _dashboard_command(gate.run)
+                            _display_command(gate.run)
                             if terminal_state == "success"
                             else failure_detail
                         ),
@@ -339,7 +339,7 @@ class GateRunner:
             f"{self.config.git.integration_ref}..HEAD",
         ]
         if on_gate:
-            on_gate("diff-check", "active", 1, total, _dashboard_command(diff_command))
+            on_gate("diff-check", "active", 1, total, _display_command(diff_command))
         run_command(
             diff_command,
             cwd=worktree,
@@ -349,7 +349,7 @@ class GateRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         if on_gate:
-            on_gate("diff-check", "success", 1, total, _dashboard_command(diff_command))
+            on_gate("diff-check", "success", 1, total, _display_command(diff_command))
         changed_paths = None
         if any(gate.paths for gate in self.gates):
             changed_paths = self.changed_paths(

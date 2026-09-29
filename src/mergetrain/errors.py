@@ -55,7 +55,7 @@ def redact_secrets(text: str) -> str:
 
     The one place secret masking is defined, so every surface that may persist
     or display a command line or its output — a failed-gate job ``note``, the
-    on-disk log, ``status --json``, the dashboard — masks the same way and a
+    on-disk log, ``status --json``, ``hub status`` — masks the same way and a
     credential passed inline to a gate is never echoed in cleartext. Idempotent.
     """
 
@@ -192,6 +192,6 @@ class CommandFailed(MergetrainError):
         else:
             text = f"command failed ({self.returncode}){location}: {rendered}"
         # Redact at the source: this string becomes the persisted job note that
-        # `status --json` and the dashboard emit, so a gate invoked with an
+        # `status --json` and `hub status` emit, so a gate invoked with an
         # inline credential must never leak it in cleartext.
         return redact_secrets(text)

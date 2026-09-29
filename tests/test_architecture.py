@@ -37,7 +37,7 @@ def test_forbidden_layer_edges_and_cycles_are_reported(tmp_path: Path) -> None:
     _write(tmp_path, "src/mergetrain/cli.py", "")
     _write(tmp_path, "src/mergetrain/git_runner.py", "")
     _write(tmp_path, "src/mergetrain/atomic_push.py", "from .git_runner import GitRunner\n")
-    _write(tmp_path, "src/mergetrain/dashboard.py", "from .atomic_push import deploy\n")
+    _write(tmp_path, "src/mergetrain/hub.py", "from .atomic_push import deploy\n")
     _write(tmp_path, "src/mergetrain/core_a.py", "from . import core_b\n")
     _write(tmp_path, "src/mergetrain/core_b.py", "from . import core_a\n")
     _write(tmp_path, "src/mergetrain/persistence/__init__.py", "")
@@ -75,20 +75,14 @@ def test_mcp_adapter_may_use_the_windows_job_leaf_only_while_it_stays_a_leaf(
     ]
 
 
-def test_coarse_size_backstops_catch_a_return_to_monoliths(tmp_path: Path) -> None:
+def test_coarse_size_backstop_catches_a_return_to_monoliths(tmp_path: Path) -> None:
     _write(tmp_path, "src/mergetrain/__init__.py", "")
     _write(
         tmp_path,
         "src/mergetrain/oversized.py",
         "x = '" + ("a" * CHECKER.PYTHON_MAX_BYTES) + "'\n",
     )
-    _write(
-        tmp_path,
-        "dashboard/src/App.jsx",
-        "\n".join("export const value = 1;" for _ in range(CHECKER.FRONTEND_MAX_LINES + 1)),
-    )
 
     report = CHECKER.check_repository(tmp_path)
     rules = {item.rule for item in report.violations}
     assert "python-production-monolith" in rules
-    assert "frontend-production-monolith" in rules

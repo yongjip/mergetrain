@@ -75,36 +75,15 @@ blocking CI check. It enforces the dependency direction described above:
 - Git/process/gate/worktree collaborators do not import the `GitRunner`
   coordinator;
 - MCP stays independent of core business logic and uses only the machine
-  contract plus the shared error-redaction primitive; dashboard/Hub backends
-  use only their documented read-model and contract dependencies;
+  contract plus the shared error-redaction primitive; the Hub read model uses
+  only its documented config, snapshot, and transaction dependencies;
 - production modules have no internal import cycles.
 
-The same check has deliberately coarse monolith backstops: Python production
-modules fail only beyond 2,500 lines or 100 KB, and dashboard source files fail
-beyond 1,200 lines or 50 KB. These are boundary-loss alarms, not style targets;
-smaller responsibility-specific budgets can be ratcheted separately. If a new
-legitimate dependency is needed, update this document and the explicit rule in
-the same reviewed change rather than bypassing the check.
-
-### Snapshot cache ownership
-
-`dashboard.py` and `hub.py` share the internal `snapshot_cache.py` read-model
-primitive; its only core dependency is `persistence.connection.connect`. `hub.py`
-also reads runner leases through `persistence.leases` and
-`persistence.transactions`. These explicit adapter edges are allowed by the
-architecture checker. Each cached repository owns one
-read-only connection, serialized across HTTP threads, and compares SQLite
-`PRAGMA data_version` on that same connection. File size is not commit evidence:
-SQLite can reuse a checkpointed WAL without growing it. Database file identity
-changes reopen the observer with a new local generation.
-
-The change token is captured before building the snapshot, so a concurrent
-commit invalidates the result on the next poll. No read transaction is held
-between polls. Missing queues are not created, observation never migrates or
-writes rows, Hub removal closes the observer, and server shutdown closes all
-observers and prevents late handlers from reopening them. Config changes that
-select another database also release the old connection. This is cache
-correctness inside the existing read-only surfaces; it adds no product option.
+The same check has a deliberately coarse monolith backstop: Python production
+modules fail only beyond 2,500 lines or 100 KB. It is a boundary-loss alarm, not
+a style target; smaller responsibility-specific budgets can be ratcheted
+separately. If a new legitimate dependency is needed, update this document and
+the explicit rule in the same reviewed change rather than bypassing the check.
 
 ## Concepts
 
@@ -135,8 +114,8 @@ runner cannot refresh the lease or overwrite results after ownership changes.
 
 **Run event** — an append-only, structured progress record for claiming,
 fetching, assembly, gates, readiness, push, verification, and terminal outcomes.
-The local dashboard uses these records rather than parsing logs or guessing from
-process output.
+`events` and the status read models use these records rather than parsing logs
+or guessing from process output.
 
 **Integration worktree** — normally a disposable, detached Git worktree created
 under `state.worktree_root`, named
@@ -316,7 +295,7 @@ worktree and log paths and reduces the owner identity to `local:<pid>`.
 `sqlite3.Row`, and applies `PRAGMA busy_timeout = 5000` and
 `PRAGMA journal_mode = WAL`. Writes are wrapped in `BEGIN IMMEDIATE`
 transactions to take an early lock and reduce queue-state conflicts under
-concurrent writers. Status, Hub, and dashboard builders wrap their related
+concurrent writers. Status and Hub builders wrap their related
 `SELECT` statements in one deferred read transaction, fixing counts, jobs,
 events, and the resulting action to one WAL snapshot without blocking writers.
 Each evolving table's columns are defined once: a fresh database is created
@@ -345,7 +324,7 @@ layer, or re-export façade:
 Dependencies flow from the small transaction/schema primitives toward jobs,
 leases, events, and recovery, then into `claims.py` where an operation genuinely
 needs several boundaries atomically. Persistence modules do not depend on CLI,
-dashboard, Git, or runner orchestration concerns.
+Git, or runner orchestration concerns.
 
 ## Job lifecycle
 
@@ -543,35 +522,22 @@ Scoped followers terminate after draining events when all selected jobs validate
 or deploy, fail/block, cancel, or lose the matching lease. Unscoped follow is an
 operator-wide feed and continues until interrupted.
 
-## Local dashboard
+## Read model
 
-`mergetrain dashboard` runs a small Python standard-library HTTP server. The
-bundled React UI reads `/api/snapshot` and subscribes to `/api/events`; the
-latter is an SSE stream of complete snapshots, so reconnects do not require
-client-side event reconciliation. A polling fallback preserves freshness when
-SSE is unavailable.
-
-The header reports browser data health (`CONNECTED`, `DEGRADED`, `POLLING`, or
-`DISCONNECTED`) independently from runner ownership (`ACTIVE` or `IDLE`).
-`DEGRADED` preserves the last good snapshot behind a visible retrying error
-instead of presenting stale state as live. During gates, the snapshot exposes structured gate position and a redacted command
-template so the current-check panel and Activity timeline can explain what is
-running instead of only repeating a log message.
+`hub status --json` embeds one read-only snapshot per registered repository.
+During gates, a snapshot exposes structured gate position and a redacted
+command template, so a reader can tell what is running instead of only
+repeating a log message.
 
 The same bounded event store supplies the ETA read model. For each running
 train, the snapshot exposes medians from at most the newest 20 completed spans
 per phase and gate, excluding the active claim. An ETA is published only when
-every remaining comparable span has a sample; otherwise the UI says that it is
-building history. No build cache or wall-clock guess participates in the
-estimate. Gate duration bars, the activity density controls, stateful tab
-identity, and the phone glance view are presentation-only consumers of that
-read model.
+every remaining comparable span has a sample; otherwise it reports
+`available: false` with its sample coverage. No build cache or wall-clock guess
+participates in the estimate.
 
-The dashboard has no write endpoint, form, cancel, retry, validate, deploy, or
-shell-execution control. The full train remains desktop-first; at phone widths a
-compact single-column glance shows state, next action, and attention. The
-default bind address is loopback, and non-loopback binding requires explicit
-`--allow-remote` acknowledgement.
+No read surface has a write path: cancel, retry, validate, deploy, and recovery
+remain explicit CLI actions.
 
 Structured events are capped at the newest 5,000 rows to keep observability
 bounded without requiring a separate maintenance process.

@@ -26,11 +26,9 @@ from .commands.deploy import (
     cmd_validate,
 )
 from .commands.hub import (
-    cmd_dashboard,
     cmd_hub_add,
     cmd_hub_daemon,
     cmd_hub_remove,
-    cmd_hub_serve,
     cmd_hub_status,
 )
 from .commands.inspection import (
@@ -294,31 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_verify.add_argument("--json", action="store_true")
     p_verify.set_defaults(func=cmd_verify)
 
-    p_dashboard = subparsers.add_parser("dashboard")
-    p_dashboard.add_argument("--host", default="127.0.0.1")
-    p_dashboard.add_argument("--port", type=int, default=8765)
-    p_dashboard.add_argument(
-        "--allow-remote",
-        action="store_true",
-        help="Explicitly allow binding outside the loopback interface",
-    )
-    p_dashboard.add_argument(
-        "--preview",
-        action="store_true",
-        help="Label the connected database as preview data",
-    )
-    p_dashboard.set_defaults(func=cmd_dashboard)
-
     p_hub = subparsers.add_parser("hub")
-    p_hub.add_argument("--host", default="127.0.0.1")
-    p_hub.add_argument("--port", type=int, default=8765)
-    p_hub.add_argument(
-        "--allow-remote",
-        action="store_true",
-        help="Explicitly allow binding outside the loopback interface",
-    )
-    p_hub.add_argument("--registry", help="Override the hub registry file path")
-    p_hub.set_defaults(func=cmd_hub_serve)
     hub_sub = p_hub.add_subparsers(dest="hub_command")
     p_hub_add = hub_sub.add_parser("add", help="Register a repo with the hub")
     p_hub_add.add_argument("path", nargs="?", default=".")
@@ -346,7 +320,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_hub_status.add_argument(
         "--summary",
         action="store_true",
-        help="Emit counts, lock, validated trains, and next action without full dashboard history",
+        help="Emit counts, lock, validated trains, and next action without each repo's history",
     )
     p_hub_status.set_defaults(func=cmd_hub_status)
     p_hub_daemon = hub_sub.add_parser(
@@ -382,6 +356,18 @@ _REMOVED_COMMANDS = {
     "agent-contract": "mergetrain init --refresh-instructions",
 }
 
+# The read-only web UI is gone; its state is in these JSON-first commands.
+_REMOVED_WEB_UI = {
+    "dashboard": (
+        "the web dashboard was removed; use 'mergetrain status' "
+        "(--json for machines) or 'mergetrain events --follow'"
+    ),
+    "hub": (
+        "the web hub that 'mergetrain hub' served was removed; use "
+        "'mergetrain hub status' (--json for machines)"
+    ),
+}
+
 _REMOVED_ENQUEUE_FLAGS = {
     "--base-sha",
     "--head-sha",
@@ -393,7 +379,7 @@ _REMOVED_ENQUEUE_FLAGS = {
 }
 
 
-def _command_token(argv: Sequence[str]) -> str | None:
+def _command_index(argv: Sequence[str]) -> int | None:
     index = 0
     while index < len(argv):
         value = argv[index]
@@ -405,11 +391,38 @@ def _command_token(argv: Sequence[str]) -> str | None:
         if value.startswith("-"):
             index += 1
             continue
-        return value
+        return index
     return None
 
 
-def _migration_error(raw: Sequence[str], command: str | None) -> str | None:
+def _command_token(argv: Sequence[str]) -> str | None:
+    index = _command_index(argv)
+    return None if index is None else argv[index]
+
+
+def _serves_web_hub(argv: Sequence[str]) -> bool:
+    """Whether `hub` names no subcommand, which is how it served the web hub."""
+
+    start = _command_index(argv)
+    rest = list(argv[start + 1 :]) if start is not None else []
+    if {"-h", "--help"}.intersection(rest):
+        return False
+    index = 0
+    while index < len(rest):
+        if rest[index] in {"--host", "--port", "--registry"}:
+            index += 2
+            continue
+        if not rest[index].startswith("-"):
+            # A subcommand, valid or not, is argparse's to judge.
+            return False
+        index += 1
+    return True
+
+
+def _migration_error(raw: Sequence[str], normalized: Sequence[str]) -> str | None:
+    command = _command_token(normalized)
+    if command == "dashboard" or (command == "hub" and _serves_web_hub(normalized)):
+        return _REMOVED_WEB_UI[command]
     if command in _REMOVED_COMMANDS:
         return f"v3 removed '{command}'; use {_REMOVED_COMMANDS[command]}"
     if command in {"run-batch", "run-next"}:
@@ -435,7 +448,7 @@ def _migration_error(raw: Sequence[str], command: str | None) -> str | None:
 def main(argv: Sequence[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     normalized = normalize_global_options(raw)
-    migration_error = _migration_error(raw, _command_token(normalized))
+    migration_error = _migration_error(raw, normalized)
     if migration_error:
         if "--json" in raw:
             dump_json(_error_payload("removed_interface", migration_error))

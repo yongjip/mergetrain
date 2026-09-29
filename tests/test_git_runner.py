@@ -53,7 +53,7 @@ def rmtree(path: Path | str) -> None:
 
 from mergetrain.cli import main
 from mergetrain.command_runner import (
-    _dashboard_command,
+    _display_command,
     _shell_command,
     command_env,
     expand_command,
@@ -2237,8 +2237,8 @@ deploy:
             self.assertIn("push was not attempted", result.note)
             push.assert_not_called()
 
-    def test_dashboard_command_masks_obvious_secret_values(self) -> None:
-        rendered = _dashboard_command(
+    def test_display_command_masks_obvious_secret_values(self) -> None:
+        rendered = _display_command(
             "TEST_TOKEN=fixture-value run-check --password fixture-password"
         )
         self.assertEqual(
@@ -2249,7 +2249,7 @@ deploy:
     def test_command_failed_str_redacts_inline_secrets(self) -> None:
         # redact_secrets is the single masking primitive; CommandFailed.__str__
         # runs through it so the persisted job note never carries an inline
-        # credential, matching what the dashboard already masks live.
+        # credential, matching what live command displays already mask.
         self.assertEqual(
             redact_secrets("deploy API_TOKEN=sk-abc123 --password hunter2"),
             "deploy API_TOKEN=[redacted] --password [redacted]",

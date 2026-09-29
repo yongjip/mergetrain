@@ -980,7 +980,7 @@ class CliTests(unittest.TestCase):
         message = err.getvalue()
         for command in ("init", "status", "enqueue", "validate", "deploy", "inspect"):
             self.assertIn(repr(command), message)
-        for hidden in ("daemon", "reconcile", "dashboard", "hub", "retry"):
+        for hidden in ("daemon", "reconcile", "hub", "retry"):
             self.assertNotIn(repr(hidden), message)
 
     def test_removed_run_next_points_to_deploy_without_claiming(self) -> None:
@@ -2344,6 +2344,44 @@ class CliTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 main(["hub", "list", "--json"])
         self.assertEqual(raised.exception.code, 2)
+
+    def test_removed_web_ui_points_to_the_json_read_commands(self) -> None:
+        cases = (
+            (["dashboard"], "mergetrain status"),
+            (["dashboard", "--port", "9000", "--preview"], "mergetrain status"),
+            (["hub"], "mergetrain hub status"),
+            (["hub", "--host", "0.0.0.0", "--port", "9000", "--allow-remote"], "hub status"),
+            (["--repo", ".", "hub", "--registry", "repos.json"], "hub status"),
+        )
+        for argv, replacement in cases:
+            with self.subTest(argv=argv):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main([*argv, "--json"])
+                payload = json.loads(out.getvalue())
+                self.assertEqual(code, 2)
+                self.assertEqual(payload["error"]["code"], "removed_interface")
+                self.assertIn(replacement, payload["error"]["message"])
+
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    self.assertEqual(main(argv), 2)
+                self.assertIn("was removed", err.getvalue())
+
+    def test_hub_subcommands_and_help_survive_the_web_hub_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = str(Path(td) / "repos.json")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["hub", "status", "--registry", registry, "--json"])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out.getvalue())["repos"], [])
+
+        out = io.StringIO()
+        with redirect_stdout(out), self.assertRaises(SystemExit) as raised:
+            main(["hub", "--help"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("status", out.getvalue())
 
     def test_init_write_creates_generic_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:

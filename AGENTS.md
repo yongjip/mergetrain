@@ -30,8 +30,9 @@ worktrees.
 8. Do not delete or rewrite remote `refs/mergetrain/deploys/*`; they are
    permanent recovery evidence.
 9. Treat public product surface as an owner-evidence budget. Before
-   adding a CLI command or flag, config field, dashboard control, daemon/Hub
-   behavior, MCP tool, recovery action, notification path, or reuse control,
+   adding a CLI command or flag, config field, UI or network listener,
+   daemon/Hub behavior, MCP tool, recovery action, notification path, or reuse
+   control,
    apply the admission test in `docs/product-scope.md`, prefer consolidation,
    and record the measured cost, repeated workflow, or incorrect state.
 10. Do not bump the version in feature or fix changes; add the changelog entry

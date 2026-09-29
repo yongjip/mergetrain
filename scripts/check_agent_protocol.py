@@ -42,7 +42,9 @@ GRAMMAR_SURFACES = (
     ROOT / "scripts/mt-deploy.sh",
 )
 REMOVED_GRAMMAR = (
-    re.compile(r"\bmergetrain\s+(?:doctor|run-batch|run-next|recover|agent-contract)\b"),
+    re.compile(
+        r"\bmergetrain\s+(?:doctor|run-batch|run-next|recover|agent-contract|dashboard)\b"
+    ),
     re.compile(
         r"\bmergetrain_(?:doctor|history|stats|agent_contract|gc_preview|events|logs)\b"
     ),

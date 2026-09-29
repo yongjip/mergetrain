@@ -1,9 +1,9 @@
 """The machine-readable contract version (issue #44).
 
-Every JSON/JSONL surface mergetrain emits — one-shot ``--json`` payloads, the
-HTTP dashboard snapshot, and the resumable event stream — carries a single
-top-level ``contract_version`` so a consumer can tell "is this the shape I
-understand?" from one integer comparison.
+Every JSON/JSONL surface mergetrain emits — one-shot ``--json`` payloads and
+the resumable event stream — carries a single top-level ``contract_version``
+so a consumer can tell "is this the shape I understand?" from one integer
+comparison.
 
 This is deliberately **separate** from the product ``__version__`` (which bumps
 for unrelated reasons) and from the SQLite ``SCHEMA_VERSION``. It mirrors the

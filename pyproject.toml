@@ -139,7 +139,6 @@ include = [
   "/benchmarks",
   "/discovery",
   "/docs",
-  "/dashboard",
   "/examples",
   "/scripts",
   "/site",
@@ -162,7 +161,4 @@ include = [
   "/mcp_config.json",
   "/skills",
   "/server.json",
-]
-exclude = [
-  "/dashboard/design",
 ]

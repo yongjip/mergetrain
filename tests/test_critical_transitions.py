@@ -77,7 +77,7 @@ class DeadOwnerLockEvidenceTests(unittest.TestCase):
                 self.assertEqual(outcome.audit_event_id, audit.id)
                 self.assertEqual(outcome.prior_owner, DEAD_OWNER)
                 self.assertEqual((audit.phase, audit.state), ("unlock", "cleared"))
-                # The dashboard and hub serve events: no OS username (#231).
+                # `events` and `hub status` publish events: no OS username (#231).
                 self.assertIn("(local:999999)", audit.message)
                 self.assertNotIn("ghost", audit.message + audit.detail)
                 detail = json.loads(audit.detail)

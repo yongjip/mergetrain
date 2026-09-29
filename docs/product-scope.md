@@ -78,7 +78,7 @@ action or automatic execution policy. The surface baseline above is unchanged.
 
 - validation and pre-approved deploy daemons;
 - evidence streams, history, statistics, cleanup, and repair commands;
-- local read-only dashboard and multi-repository Hub;
+- multi-repository Hub reads and roster;
 - generic notifications;
 - stdio MCP adapter.
 
@@ -87,9 +87,9 @@ truth, create a weaker authorization path, or add provider policy to core.
 
 ## Admission test
 
-Before adding a CLI command or option, config field, dashboard control, daemon
-mode, Hub behavior, MCP tool, recovery action, notification path, or reuse
-control, record all of the following in this file:
+Before adding a CLI command or option, config field, UI or network listener,
+daemon mode, Hub behavior, MCP tool, recovery action, notification path, or
+reuse control, record all of the following in this file:
 
 1. **Evidence:** a repeated real workflow, measured material cost, or concrete
    incorrect state.
@@ -125,11 +125,11 @@ Until external evidence changes the scope, mergetrain will not become:
 - a hosted control plane or organization permission system;
 - a general job queue, CI provider, or deployment platform;
 - a forge-native review UI or provider-specific merge queue;
-- a mutating dashboard/Hub control plane;
+- a web UI or a mutating Hub control plane;
 - a provider-specific notifications or credentials framework;
 - an automatic history rewriter;
 - a system that deletes or rewrites `refs/mergetrain/deploys/*`;
-- a second package merely to isolate the existing dashboard or Hub.
+- a second package merely to isolate the Hub.
 
 Provider adapters belong under `integrations/` or in a separate service and
 must use the same core contract.
@@ -645,3 +645,36 @@ commands. The ordinary product checks remain required. Shorten or revert this
 addition if controlled evidence shows no accuracy benefit or the added reading
 cost outweighs it. This record does not claim improved automatic discovery or
 cross-client behavioral certification.
+
+## Web dashboard removal record — 2026-09-30
+
+### Evidence
+
+The web dashboard and the web Hub it served were the only network listeners and
+the only non-Python build: a React/Vite source tree, a Node toolchain, a
+browser test suite, a committed build artifact, and a dedicated CI job. A
+full-codebase review on 2026-09-30 confirmed seven defects in that area. The two
+high-severity ones were presentation disagreeing with the machine contract: a
+live page froze once the event stream reached its time limit, and a crashed
+runner rendered as "Runner active / Wait" because the page ignored the
+server's recovery `next_action`.
+
+### Existing fit and decision cost
+
+`status`, `events --follow`, and `hub status` already carry the same queue
+truth, and agents act on their JSON. `mergetrain dashboard` and bare
+`mergetrain hub` now exit 2 with a `removed_interface` error naming those
+commands. The frontend, HTTP server, snapshot cache, browser notifications,
+frontend size backstop, and CI job are removed, and with the server its HTTP
+`/api/snapshot` and `/api/events` endpoints. `hub status`, `hub add`,
+`hub remove`, `hub daemon`, webhook notifications, and every CLI JSON payload
+remain. No command, flag, config field, state group, or MCP tool is added; the
+six-command/five-tool baseline is unchanged.
+
+### Safety impact and removal trigger
+
+Removing the only listener removes the loopback and `--allow-remote` exposure
+question. Browser alerts go away; the persisted, deduplicated webhook path is
+the remaining notification backend. Reintroduce a visual surface only with
+evidence of a repeated workflow that `status`, `events --follow`, and
+`hub status` cannot serve, through the admission test above.

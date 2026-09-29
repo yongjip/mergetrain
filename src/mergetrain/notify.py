@@ -126,11 +126,7 @@ def notifier_chain(*notifiers: Notifier) -> Notifier:
 
 
 def configured_notifier(config: NotifyConfig) -> Notifier:
-    """Build the configured headless webhook chain.
-
-    Interactive desktop alerts belong to the open dashboard, which uses the
-    browser Notification API consistently across supported platforms.
-    """
+    """Build the configured webhook chain."""
 
     backends: list[Notifier] = []
     if config.webhook_url:

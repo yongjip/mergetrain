@@ -704,7 +704,7 @@ def force_unlock(
         "in_progress_with_marker": count_data.get("in_progress_with_marker", 0),
         "forced": bool(force),
     }
-    # The event is served by the dashboard and hub, which never show the OS
+    # The event appears in `events` and `hub status`, which never show the OS
     # username (#231); the command's own output keeps the full owner.
     audited_owner = public_owner(lock.owner)
     audited = json.dumps({**context, "owner": audited_owner}, sort_keys=True)

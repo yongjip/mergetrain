@@ -1,30 +1,18 @@
 from __future__ import annotations
 
-import http.client
 import json
-import os
 import sqlite3
 import tempfile
-import threading
 import unittest
-from contextlib import ExitStack, closing
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mergetrain.config import load_config
-from mergetrain.contract import CONTRACT_VERSION
-from mergetrain.dashboard import create_hub_server
 from mergetrain.errors import QueueError
 from mergetrain.hub import build_hub_snapshot, build_hub_summary
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.jobs import enqueue_job
-from mergetrain.persistence.transactions import utc_now
-from mergetrain.registry import add_repo, load_registry, remove_repo
-
-
-def _plus_hour() -> str:
-    return (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+from mergetrain.registry import add_repo, load_registry
 
 
 def make_repo(root: Path, name: str) -> Path:
@@ -74,6 +62,31 @@ class HubSnapshotTests(unittest.TestCase):
             self.assertEqual(len(broken), 1)
             self.assertIn("missing", broken[0]["error"])
 
+    def test_config_problems_stay_isolated_to_their_repo_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            unconfigured = make_repo(root, "unconfigured")
+            broken = make_repo(root, "broken")
+            for repo in (live, unconfigured, broken):
+                add_repo(repo, registry)
+            (unconfigured / ".mergetrain.yaml").unlink()
+            (broken / ".mergetrain.yaml").write_text("gates: [\n", encoding="utf-8")
+
+            for build in (build_hub_snapshot, build_hub_summary):
+                with self.subTest(build=build.__name__):
+                    entries = {
+                        Path(entry["path"]).name: entry
+                        for entry in build(load_registry(registry))["repos"]
+                    }
+                    self.assertTrue(entries["live"]["ok"])
+                    self.assertFalse(entries["unconfigured"]["ok"])
+                    self.assertIn("no .mergetrain.yaml", entries["unconfigured"]["error"])
+                    self.assertFalse(entries["broken"]["ok"])
+                    self.assertTrue(entries["broken"]["error"])
+
     def test_observing_never_creates_or_migrates_repo_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -87,7 +100,37 @@ class HubSnapshotTests(unittest.TestCase):
             # scaffold .mergetrain/ inside it.
             self.assertFalse((empty / ".mergetrain").exists())
 
-    def test_summary_reads_queue_truth_without_building_dashboard_history(self) -> None:
+    def test_future_config_reports_the_upgrade_next_action(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "future")
+            seed_queue(live)
+            (live / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+            add_repo(live, registry)
+
+            snapshot = build_hub_snapshot(load_registry(registry))
+
+            self.assertEqual(
+                snapshot["repos"][0]["snapshot"]["next_action"],
+                "upgrade_mergetrain",
+            )
+
+    def test_daemon_flag_comes_from_the_registry_on_every_read(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            live = make_repo(root, "live")
+            seed_queue(live)
+            add_repo(live, registry)
+
+            self.assertTrue(build_hub_snapshot(load_registry(registry))["repos"][0]["daemon"])
+            add_repo(live, registry, daemon=False)  # registry-only change
+            self.assertFalse(build_hub_snapshot(load_registry(registry))["repos"][0]["daemon"])
+
+    def test_summary_reads_queue_truth_without_building_full_history(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             registry = root / "repos.json"
@@ -98,8 +141,8 @@ class HubSnapshotTests(unittest.TestCase):
                 add_repo(repo, registry)
 
             with patch(
-                "mergetrain.hub.build_dashboard_snapshot",
-                side_effect=AssertionError("full dashboard snapshot was built"),
+                "mergetrain.hub.build_repo_snapshot",
+                side_effect=AssertionError("full repo snapshot was built"),
             ):
                 summary = build_hub_summary(load_registry(registry))
 
@@ -201,230 +244,6 @@ class HubSnapshotTests(unittest.TestCase):
             bootstrap.close.assert_called_once_with()
 
 
-class HubSnapshotCacheTests(unittest.TestCase):
-    def test_warm_cache_preserves_upgrade_next_action(self) -> None:
-        from mergetrain.hub import HubSnapshotCache
-
-        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "future")
-            seed_queue(live)
-            (live / ".mergetrain.yaml").write_text(
-                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
-            )
-            add_repo(live, registry)
-            cache = resources.enter_context(closing(HubSnapshotCache()))
-
-            cold = build_hub_snapshot(load_registry(registry), cache=cache)
-            warm = build_hub_snapshot(load_registry(registry), cache=cache)
-
-            self.assertEqual(
-                cold["repos"][0]["snapshot"]["next_action"],
-                "upgrade_mergetrain",
-            )
-            self.assertEqual(
-                warm["repos"][0]["snapshot"]["next_action"],
-                "upgrade_mergetrain",
-            )
-
-    def test_served_snapshot_cannot_mutate_cached_nested_state(self) -> None:
-        from mergetrain.hub import HubSnapshotCache
-
-        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-            cache = resources.enter_context(closing(HubSnapshotCache()))
-
-            first = build_hub_snapshot(load_registry(registry), cache=cache)
-            first["repos"][0]["snapshot"]["counts"]["queued"] = 999
-            second = build_hub_snapshot(load_registry(registry), cache=cache)
-
-            self.assertEqual(second["repos"][0]["snapshot"]["counts"]["queued"], 1)
-
-    def test_cache_skips_rebuilds_until_queue_or_config_changes(self) -> None:
-        from unittest import mock
-
-        import mergetrain.hub as hub_module
-        from mergetrain.hub import HubSnapshotCache
-
-        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-            cache = resources.enter_context(closing(HubSnapshotCache()))
-            calls = []
-            real_build = hub_module.build_dashboard_snapshot
-
-            def counting_build(*args, **kwargs):
-                calls.append(1)
-                return real_build(*args, **kwargs)
-
-            with mock.patch.object(hub_module, "build_dashboard_snapshot", counting_build):
-                first = build_hub_snapshot(load_registry(registry), cache=cache)
-                second = build_hub_snapshot(load_registry(registry), cache=cache)
-                self.assertEqual(len(calls), 1)  # second build was a cache hit
-                self.assertEqual(
-                    second["repos"][0]["snapshot"]["counts"]["queued"],
-                    first["repos"][0]["snapshot"]["counts"]["queued"],
-                )
-
-                # A queue write touches db/-wal → fingerprint changes.
-                config = load_config(repo=live)
-                conn = connect(config.state.db)
-                try:
-                    enqueue_job(conn, task="second", branch="agent/second", worktree_path=str(live))
-                finally:
-                    conn.close()
-                third = build_hub_snapshot(load_registry(registry), cache=cache)
-                self.assertEqual(len(calls), 2)
-                self.assertEqual(third["repos"][0]["snapshot"]["counts"]["queued"], 2)
-
-                config_file = live / ".mergetrain.yaml"
-                config_file.write_text("project:\n  name: renamed\n", encoding="utf-8")
-                fourth = build_hub_snapshot(load_registry(registry), cache=cache)
-                self.assertEqual(len(calls), 3)
-                self.assertEqual(fourth["repos"][0]["name"], "renamed")
-
-    def test_cache_hit_refreshes_lock_liveness_and_next_action(self) -> None:
-        from mergetrain.hub import HubSnapshotCache
-
-        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-            config = load_config(repo=live)
-            # Plant an in-progress job held by a live-looking lock (this test
-            # process's own PID), so the warm entry reads liveness=alive /
-            # next_action=wait_for_runner.
-            conn = connect(config.state.db)
-            try:
-                job = enqueue_job(conn, task="run", branch="agent/run", worktree_path=str(live))
-                token = f"local:{os.getpid()}"
-                conn.execute(
-                    "INSERT INTO locks (name, owner, acquired_at, heartbeat_at, expires_at, token) "
-                    "VALUES ('runner', ?, ?, ?, ?, ?)",
-                    (f"tester:{os.getpid()}", utc_now(), utc_now(), _plus_hour(), token),
-                )
-                conn.execute(
-                    "UPDATE deploy_queue SET status='in_progress', claim_token=? WHERE id=?",
-                    (token, job.id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            cache = resources.enter_context(closing(HubSnapshotCache()))
-            warm = build_hub_snapshot(load_registry(registry), cache=cache)
-            self.assertEqual(warm["repos"][0]["snapshot"]["lock"]["liveness"], "alive")
-            self.assertEqual(warm["repos"][0]["snapshot"]["next_action"], "wait_for_runner")
-
-            # The runner "dies" (owner PID replaced with an impossible one) but
-            # touches no file the cache fingerprints. A cache hit must still
-            # report the runner as dead and stop saying "wait".
-            raw = sqlite3.connect(config.state.db)
-            try:
-                raw.execute("UPDATE locks SET owner='tester:999999999'")
-                raw.commit()
-            finally:
-                raw.close()
-            served = build_hub_snapshot(load_registry(registry), cache=cache)
-            lock = served["repos"][0]["snapshot"]["lock"]
-            self.assertEqual(lock["liveness"], "dead")
-            self.assertNotEqual(served["repos"][0]["snapshot"]["next_action"], "wait_for_runner")
-
-    def test_cache_evicts_deregistered_repos(self) -> None:
-        from mergetrain.hub import HubSnapshotCache
-
-        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-            cache = resources.enter_context(closing(HubSnapshotCache()))
-            build_hub_snapshot(load_registry(registry), cache=cache)
-            self.assertEqual(len(cache._entries), 1)
-            remove_repo(live, registry)
-            build_hub_snapshot(load_registry(registry), cache=cache)
-            self.assertEqual(cache._entries, {})
-
-    def test_daemon_flag_flip_is_visible_through_a_warm_cache(self) -> None:
-        from mergetrain.hub import HubSnapshotCache
-
-        with tempfile.TemporaryDirectory() as td, ExitStack() as resources:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-            cache = resources.enter_context(closing(HubSnapshotCache()))
-
-            warm = build_hub_snapshot(load_registry(registry), cache=cache)
-            self.assertTrue(warm["repos"][0]["daemon"])
-
-            add_repo(live, registry, daemon=False)  # registry-only change
-            flipped = build_hub_snapshot(load_registry(registry), cache=cache)
-            self.assertFalse(flipped["repos"][0]["daemon"])
-
-
-class HubRegistryDegradationTests(unittest.TestCase):
-    def test_broken_registry_degrades_to_visible_error_payload(self) -> None:
-        from mergetrain.hub import build_hub_snapshot_safe
-
-        with tempfile.TemporaryDirectory() as td:
-            registry = Path(td) / "repos.json"
-            registry.write_text("not json", encoding="utf-8")
-
-            snapshot = build_hub_snapshot_safe(str(registry))
-
-            self.assertTrue(snapshot["ok"])
-            self.assertTrue(snapshot["hub"])
-            self.assertEqual(snapshot["repos"], [])
-            self.assertIn("unreadable", snapshot["registry_error"])
-
-    def test_hub_server_survives_registry_corruption_mid_flight(self) -> None:
-        from mergetrain.dashboard import create_hub_server
-
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-
-            server = create_hub_server(host="127.0.0.1", port=0, registry=str(registry))
-            port = int(server.server_address[1])
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            try:
-                client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-                client.request("GET", "/api/snapshot")
-                first = json.loads(client.getresponse().read())
-                client.close()
-                self.assertEqual(first["repo_count"], 1)
-
-                registry.write_text("corrupted", encoding="utf-8")
-                client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-                client.request("GET", "/api/snapshot")
-                response = client.getresponse()
-                degraded = json.loads(response.read())
-                client.close()
-                self.assertEqual(response.status, 200)
-                self.assertIn("registry_error", degraded)
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=5)
-
-
 class HubStatusCliTests(unittest.TestCase):
     def test_hub_status_json_reports_every_registered_repo(self) -> None:
         import contextlib
@@ -512,97 +331,24 @@ class HubStatusCliTests(unittest.TestCase):
             self.assertNotIn("snapshot", entry)
             self.assertNotIn("jobs", entry["summary"])
 
-
-class HubServerTests(unittest.TestCase):
-    def request(self, port: int, method: str, path: str):
-        client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        try:
-            client.request(method, path)
-            response = client.getresponse()
-            return response.status, response.read()
-        finally:
-            client.close()
-
-    def test_hub_server_serves_snapshot_and_stays_read_only(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            registry = root / "repos.json"
-            live = make_repo(root, "live")
-            seed_queue(live)
-            add_repo(live, registry)
-
-            server = create_hub_server(host="127.0.0.1", port=0, registry=str(registry))
-            port = int(server.server_address[1])
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            try:
-                status, body = self.request(port, "GET", "/api/snapshot")
-                self.assertEqual(status, 200)
-                payload = json.loads(body)
-                self.assertTrue(payload["hub"])
-                self.assertEqual(payload["repo_count"], 1)
-                self.assertEqual(payload["repos"][0]["name"], "live")
-                # The outer hub frame is stamped at the HTTP
-                # boundary; embedded per-repo snapshots stay bare.
-                self.assertEqual(payload["contract_version"], CONTRACT_VERSION)
-                self.assertNotIn("contract_version", payload["repos"][0]["snapshot"])
-
-                # Registry edits show up without a server restart.
-                extra = make_repo(root, "extra")
-                add_repo(extra, registry)
-                status, body = self.request(port, "GET", "/api/snapshot")
-                self.assertEqual(json.loads(body)["repo_count"], 2)
-
-                status, body = self.request(port, "POST", "/api/snapshot")
-                self.assertEqual(status, 405)
-                self.assertEqual(json.loads(body)["error"]["code"], "read_only")
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=5)
-
-    def test_cli_refuses_a_non_loopback_bind_without_allow_remote(self) -> None:
-        """The hub shares the dashboard's loopback-only default.
-
-        Serving is patched out, so a regression fails here instead of exposing
-        every registered repository on all interfaces.
-        """
-
+    def test_hub_status_reports_a_corrupted_registry_as_an_error(self) -> None:
         import contextlib
         import io
 
         from mergetrain.cli import main
 
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            registry = root / "repos.json"
-            add_repo(make_repo(root, "live"), registry)
+            registry = Path(td) / "repos.json"
+            registry.write_text("not json", encoding="utf-8")
 
-            def run(*options: str):
-                stderr = io.StringIO()
-                with patch("mergetrain.dashboard.serve_hub") as serve, contextlib.redirect_stdout(
-                    io.StringIO()
-                ), contextlib.redirect_stderr(stderr):
-                    code = main(["hub", "--registry", str(registry), "--port", "0", *options])
-                return code, stderr.getvalue(), serve
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = main(["hub", "status", "--registry", str(registry), "--json"])
 
-            for host in ("0.0.0.0", "::"):
-                with self.subTest(host=host):
-                    code, stderr, serve = run("--host", host)
-                    self.assertEqual(code, 1)
-                    self.assertIn("pass --allow-remote", stderr)
-                    serve.assert_not_called()
-
-                    code, _stderr, serve = run("--host", host, "--allow-remote")
-                    self.assertEqual(code, 0)
-                    self.assertEqual(serve.call_args.kwargs["host"], host)
-                    self.assertEqual(serve.call_args.kwargs["registry"], str(registry))
-
-            for host in ("127.0.0.1", "localhost", "::1"):
-                with self.subTest(host=host):
-                    code, _stderr, serve = run("--host", host)
-                    self.assertEqual(code, 0)
-                    self.assertEqual(serve.call_args.kwargs["host"], host)
+            self.assertEqual(code, 1)
+            payload = json.loads(stdout.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertIn("unreadable", payload["error"]["message"])
 
 
 if __name__ == "__main__":

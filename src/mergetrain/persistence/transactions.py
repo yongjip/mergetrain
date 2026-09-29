@@ -75,7 +75,7 @@ def read_snapshot(conn: sqlite3.Connection) -> Iterator[None]:
     """Pin several observation queries to one SQLite snapshot.
 
     SQLite autocommit mode otherwise gives each standalone ``SELECT`` its own
-    view of the database. Status and dashboard builders combine several reads
+    view of the database. Status and hub builders combine several reads
     into one decision, so seeing a writer commit between those statements can
     pair an aggregate from one instant with a job row from another. A deferred
     read transaction is enough to keep the view stable in WAL mode without

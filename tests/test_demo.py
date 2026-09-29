@@ -223,7 +223,7 @@ class DemoTests(unittest.TestCase):
             self.assertTrue((sandbox / ".mergetrain-demo-marker").is_file())
             self.assertIn("sandbox kept", err.getvalue().lower())
             self.assertIn("status --json", err.getvalue())
-            self.assertIn("dashboard --preview", err.getvalue())
+            self.assertIn(" events", err.getvalue())
 
     def test_nonempty_requested_directory_is_never_modified(self) -> None:
         with tempfile.TemporaryDirectory() as td:

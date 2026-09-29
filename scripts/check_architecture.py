@@ -13,9 +13,6 @@ from pathlib import Path
 PACKAGE = "mergetrain"
 PYTHON_MAX_LINES = 2_500
 PYTHON_MAX_BYTES = 100_000
-FRONTEND_MAX_LINES = 1_200
-FRONTEND_MAX_BYTES = 50_000
-FRONTEND_SUFFIXES = {".css", ".js", ".jsx", ".mjs", ".ts", ".tsx"}
 
 CLI_PREFIXES = (
     "mergetrain.__main__",
@@ -47,20 +44,9 @@ ADAPTER_ALLOWED = {
     ),
     # A leaf that the MCP adapter may use, so it must stay free of mergetrain imports.
     "mergetrain.windows_job": (),
-    "mergetrain.dashboard": (
-        "mergetrain.config",
-        "mergetrain.contract",
-        "mergetrain.errors",
-        "mergetrain.hub",
-        "mergetrain.snapshot",
-        "mergetrain.snapshot_cache",
-    ),
     "mergetrain.hub": (
         "mergetrain.config",
-        "mergetrain.registry",
         "mergetrain.snapshot",
-        "mergetrain.snapshot_cache",
-        "mergetrain.persistence.leases",
         "mergetrain.persistence.transactions",
     ),
 }
@@ -85,7 +71,6 @@ class Violation:
 @dataclass(frozen=True)
 class ArchitectureReport:
     checked_python_files: int
-    checked_frontend_files: int
     internal_edges: int
     violations: tuple[Violation, ...]
 
@@ -93,7 +78,6 @@ class ArchitectureReport:
         return {
             "ok": not self.violations,
             "checked_python_files": self.checked_python_files,
-            "checked_frontend_files": self.checked_frontend_files,
             "internal_edges": self.internal_edges,
             "violations": [asdict(item) for item in self.violations],
         }
@@ -336,27 +320,9 @@ def check_repository(repo: Path) -> ArchitectureReport:
         if violation:
             violations.append(violation)
 
-    frontend_root = repo / "dashboard" / "src"
-    frontend_files = [
-        path
-        for path in sorted(frontend_root.rglob("*"))
-        if path.is_file() and path.suffix in FRONTEND_SUFFIXES
-    ] if frontend_root.is_dir() else []
-    for path in frontend_files:
-        violation = _size_violation(
-            path,
-            repo=repo,
-            max_lines=FRONTEND_MAX_LINES,
-            max_bytes=FRONTEND_MAX_BYTES,
-            rule="frontend-production-monolith",
-        )
-        if violation:
-            violations.append(violation)
-
     unique_edges = {(edge.source, edge.target, edge.path, edge.line) for edge in edges}
     return ArchitectureReport(
         checked_python_files=len(module_paths),
-        checked_frontend_files=len(frontend_files),
         internal_edges=len(unique_edges),
         violations=tuple(sorted(set(violations))),
     )
@@ -383,7 +349,6 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "architecture guardrails passed: "
             f"{report.checked_python_files} Python modules, "
-            f"{report.checked_frontend_files} frontend files, "
             f"{report.internal_edges} internal import edges"
         )
     return 1 if report.violations else 0

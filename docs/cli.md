@@ -128,7 +128,6 @@ grammar.
 | Clear a wedged runner lock | `unlock [--force]` |
 | Preview or apply cleanup | `gc [--apply] [--delete-branches]` |
 | Stream evidence | `events`, `logs`, `history`, `stats` |
-| Local read-only UI | `dashboard` |
 | Multi-repository read/daemon | `hub` |
 | Disposable walkthrough | `demo` |
 | stdio MCP adapter | `mcp` |
@@ -136,10 +135,10 @@ grammar.
 The state response tells the operator which exceptional command is appropriate.
 Do not memorize this table or infer recovery from raw SQLite state.
 
-## Removed v2 interfaces
+## Removed interfaces
 
-v3 deliberately rejects old spellings with `error.code: "removed_interface"`
-and an exact replacement:
+mergetrain deliberately rejects removed spellings with
+`error.code: "removed_interface"` and an exact replacement:
 
 | Removed | Replacement |
 | --- | --- |
@@ -151,6 +150,8 @@ and an exact replacement:
 | `agent-contract` | `init --refresh-instructions` |
 | enqueue SHA/readiness/duplicate flags | automatic exact-SHA readiness checks |
 | deploy `--preview`, `--reuse-validated` | `deploy --json`, config policy |
+| `dashboard` (web UI) | `status`, `events --follow` |
+| `hub` with no subcommand (web Hub) | `hub status` |
 
 There are no compatibility aliases. Keeping both grammars would preserve the
 very ambiguity v3 removes.

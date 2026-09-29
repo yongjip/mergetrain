@@ -750,7 +750,7 @@ deploy:
     def hints(self) -> list[str]:
         return [
             f"mergetrain --repo {shlex.quote(str(self.repo))} status --json",
-            f"mergetrain --repo {shlex.quote(str(self.repo))} dashboard --preview",
+            f"mergetrain --repo {shlex.quote(str(self.repo))} events",
         ]
 
 
@@ -813,5 +813,5 @@ def run_demo(
         return 1
     print(f"Sandbox removed: {'$DEMO' if brief else sandbox.root}")
     if not brief:
-        print("Run with --keep to inspect the queue or open the read-only dashboard afterward.")
+        print("Run with --keep to inspect the queue afterward.")
     return 0

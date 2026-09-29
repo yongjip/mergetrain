@@ -147,7 +147,7 @@ the background, but it pauses at the validated-train approval boundary and
 never pushes.
 
 See the [quickstart](https://github.com/yongjip/mergetrain/blob/main/docs/quickstart.md)
-for configuration, dashboard, daemon, and multi-repository Hub setup.
+for configuration, daemon, and multi-repository Hub setup.
 
 ## Why not just worktrees and `git merge`?
 

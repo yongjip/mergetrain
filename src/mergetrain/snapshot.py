@@ -1,4 +1,4 @@
-"""Privacy-conscious read models for CLI status and the local dashboard."""
+"""Privacy-conscious read models for CLI status and the hub."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from shlex import join as shell_join
@@ -20,7 +19,7 @@ from .observability import _gate_runs, elapsed_seconds
 from .persistence.connection import connect
 from .persistence.events import list_history_events
 from .persistence.jobs import counts, list_jobs, list_jobs_fifo, validated_train_summaries
-from .persistence.leases import get_lock, owner_liveness
+from .persistence.leases import get_lock
 from .persistence.transactions import _parse_utc, read_snapshot, utc_now
 from .reuse import reuse_explanation
 
@@ -307,28 +306,13 @@ def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
     return plan_next_action(payload, config_version=config_version).code
 
 
-def refresh_dashboard_snapshot(
-    payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
-) -> dict[str, Any]:
-    """Refresh clock/process-derived fields without reopening the queue DB."""
-
-    refreshed = deepcopy(payload)
-    lock = refreshed.get("lock")
-    if isinstance(lock, dict) and lock.get("owner"):
-        pid_suffix = str(lock["owner"]).rsplit(":", 1)[-1]
-        lock["liveness"] = owner_liveness(f"local:{pid_suffix}")
-    refreshed["generated_at"] = utc_now()
-    refreshed["next_action"] = next_action(refreshed, config_version=config_version)
-    return refreshed
-
-
 def _public_job(job: Job, *, worktree_root: str = "") -> dict[str, Any]:
     data = job.to_dict()
     worktree_path = str(data.get("worktree_path") or "")
-    # The dashboard needs queue identity and reasons, not local filesystem paths.
+    # A snapshot needs queue identity and reasons, not local filesystem paths.
     data.pop("worktree_path", None)
     data.pop("log_path", None)
-    # Defence in depth for the network-reachable read surfaces (dashboard, hub):
+    # Defence in depth for the read surfaces that other processes consume:
     # notes are already masked at the source (errors.redact_secrets in
     # CommandFailed.__str__), but re-mask here so a note written before that
     # guard — or by any future non-CommandFailed path — is never served in clear.
@@ -387,7 +371,7 @@ def build_queue_summary(
 ) -> dict[str, Any]:
     """Build the small queue truth needed by agents and Hub status.
 
-    Unlike the dashboard snapshot this does not load job history, events,
+    Unlike the full repo snapshot this does not load job history, events,
     reuse analysis, progress, or ETA data.
     """
 
@@ -750,18 +734,18 @@ def _progress(
     }
 
 
-def build_dashboard_snapshot(
+def build_repo_snapshot(
     config: MergetrainConfig,
     *,
     job_limit: int = 50,
     event_limit: int = 40,
-    preview: bool = False,
     read_only: bool = False,
 ) -> dict[str, Any]:
-    """Build one stable, read-only payload for the browser.
+    """Build one repository's full read-only queue snapshot.
 
-    With ``read_only`` the queue database is opened without creating or
-    migrating anything — the hub's contract when observing other repos.
+    ``hub status --json`` reports one per registered repo. With ``read_only``
+    the queue database is opened without creating or migrating anything — the
+    hub's contract when observing other repos.
     """
 
     worktree_root = str(config.state.worktree_root)
@@ -787,7 +771,9 @@ def build_dashboard_snapshot(
                 "push_refs": list(config.git.push_refs),
                 "push_specs": [f"HEAD:{ref}" for ref in config.git.push_refs],
                 "config_exists": config.config_exists,
-                "preview": preview,
+                # Only the removed web dashboard's --preview set this; the key
+                # stays because `hub status --json` publishes it.
+                "preview": False,
                 "gate_count": len(gate_names),
                 "gates": [
                     {

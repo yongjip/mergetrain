@@ -139,8 +139,8 @@ def hub_sweep(
         raw = str(item.get("path") or "")
         out: dict[str, Any] = {"path": display_path(raw)}
         if not item.get("daemon", True) or excluded_by_alias(raw, queue_keys[index]):
-            # Policy-level opt-out (`hub add --no-daemon`): this repo stays on
-            # the dashboard but is never swept, regardless of any --auto jobs.
+            # Policy-level opt-out (`hub add --no-daemon`): this repo stays in
+            # `hub status` but is never swept, regardless of any --auto jobs.
             out.update(ok=True, outcome="excluded", error="daemon excluded by registry flag")
             return out
         if index in duplicate_of:
@@ -151,7 +151,7 @@ def hub_sweep(
                 error=f"same queue as {display_path(duplicate_of[index])}",
             )
             return out
-        # Same isolation contract as the hub dashboard: any failure in one
+        # Same isolation contract as `hub status`: any failure in one
         # repo becomes that repo's error outcome, so the catch is broad.
         try:
             repo = Path(raw)

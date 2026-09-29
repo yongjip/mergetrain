@@ -23,8 +23,8 @@ third-party data. The most relevant issue classes are:
 - command/argument injection through a branch name, task string, or config value
   that reaches `git` or a shell gate;
 - path traversal via worktree or repository paths;
-- secret leakage into job notes, on-disk logs, `status --json`, or the read-only
-  dashboard/hub (especially when the dashboard is bound with `--allow-remote`);
+- secret leakage into job notes, on-disk logs, `status --json`, or
+  `hub status --json`;
 - unsafe handling of the crash-recovery / pending-deploy state.
 
 ## Supported versions

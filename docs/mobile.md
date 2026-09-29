@@ -80,6 +80,5 @@ Dispatch gives your phone a path to real actions on your computer — including 
 - **SSH from a phone terminal** (Termius, Blink, Termux) — status and
   validation are JSON-friendly; deploy intentionally needs an interactive
   confirmation. Pair with Tailscale for secure access.
-- **Read-only dashboard glance** — if you already place the loopback dashboard behind a reviewed authenticated tunnel or reverse proxy, phone widths show only state, next action, and attention. `--allow-remote` adds no authentication or TLS by itself; follow [the dashboard security guidance](security.md#dashboard-exposure) before exposing it.
 
 > Note: **Claude Code on the web** runs in Anthropic's cloud, not on your machine, so it can't see your local mergetrain queue/SQLite — it's the wrong tool for managing a local deploy train.

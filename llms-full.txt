@@ -117,7 +117,7 @@ logs may contain sensitive command output; prefer structured inspect evidence.
 
 ## Optional operations and integrations
 
-Daemons, dashboard, Hub, evidence commands, repair, cleanup, and performance
+Daemons, Hub, evidence commands, repair, cleanup, and performance
 settings are advanced surfaces. They remain hidden from default help. Do not
 memorize them in routine agent behavior; `status.next_action.command` names an
 exceptional command when one is needed.
@@ -133,8 +133,8 @@ mergetrain_deploy
 ```
 
 MCP does not expose unattended deployment, cancellation, recovery, forced
-unlock, or destructive cleanup. The read-only dashboard and multi-repository
-Hub do not own queue state.
+unlock, or destructive cleanup. The multi-repository Hub does not own queue
+state.
 
 See `docs/agent-contract.md`, `docs/contract.md`, `docs/cli.md`,
 `docs/failure-modes.md`, and `docs/security.md` for authoritative details.

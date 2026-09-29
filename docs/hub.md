@@ -1,18 +1,13 @@
-# Hub — one dashboard for every repo on your machine
+# Hub — one read for every repo on your machine
 
-The hub aggregates every registered repo into a single read-only dashboard:
-each repo's queue, runner, validated trains, and next safe action on one page,
-with a per-repo drill-down into the full single-repo view.
-
-![Hub overview: unified repository table with live state, queue counts, runner activity, and the next safe action](./images/hub-overview.png)
-
-![Drill-down: the full single-repo view mid-gates, fed from that repo's own queue](./images/hub-drilldown.png)
+`mergetrain hub status` aggregates every registered repo into a single
+read-only report: each repo's queue, runner, validated trains, and next safe
+action.
 
 ```bash
 mergetrain hub add ~/projects/app        # register a repo (requires .mergetrain.yaml)
 mergetrain hub add .                     # register the current repo
-mergetrain hub                           # serve http://127.0.0.1:8765/
-mergetrain hub status [--json]           # full dashboard aggregate
+mergetrain hub status [--json]           # full aggregate with each repo's jobs and events
 mergetrain hub status --summary --json   # compact agent/coordinator read
 mergetrain hub remove ~/projects/app     # deregister (repo state untouched)
 ```
@@ -20,13 +15,13 @@ mergetrain hub remove ~/projects/app     # deregister (repo state untouched)
 `hub add`/`hub remove` edit the roster only; they never touch the repo itself.
 The registry lives at `$XDG_CONFIG_HOME/mergetrain/repos.json` (default
 `~/.config/mergetrain/repos.json`; override with `MERGETRAIN_HUB_REGISTRY` or
-`--registry`). It is re-read on every snapshot, so adding or removing a repo
-shows up live without restarting the server.
+`--registry`). Every `hub status` read and every `hub daemon` sweep re-reads
+it, so adding or removing a repo takes effect immediately.
 
 Routine coordinators should use `hub status --summary --json`. It reads only
 queue counts, the public runner lock, validated-train identities, and the next
-safe action for each repo. Full `hub status --json` remains available for
-dashboard-equivalent job and event detail.
+safe action for each repo. Full `hub status --json` adds each repo's recent
+jobs and events.
 
 ## The contract: sovereign repos, stateless hub
 
@@ -36,8 +31,8 @@ The hub owns no correctness-critical state
 - Every repo entry is built by loading **that repo's own config** and opening
   **that repo's own SQLite database read-only**. Observing a repo never
   creates directories, never creates the queue database, never writes a row,
-  and never migrates its schema — a registered repo with no queue yet renders
-  as an idle card. (Honest limit: a WAL-mode reader may create or refresh
+  and never migrates its schema — a registered repo with no queue yet is
+  reported as empty. (Honest limit: a WAL-mode reader may create or refresh
   SQLite's sidecar `-shm`/`-wal` files next to an existing database; queue
   data is never touched.)
 - `hub daemon` probes each repo's policy state on that same read-only path:
@@ -45,21 +40,22 @@ The hub owns no correctness-critical state
   swept repo's schema. Creating or migrating a queue database is reserved
   for commands run inside the repo itself.
 - A repo that is missing, unreadable, or on a different schema version
-  becomes an isolated error card. One broken repo never breaks the page.
-- Killing the hub at any moment loses a view, never data integrity. Queue
+  becomes an isolated error entry. One broken repo never breaks the read.
+- Interrupting a hub command at any moment never costs data integrity. Queue
   state, runner locks, and the crash-recovery markers stay per-repo, exactly
   as without the hub.
 
 ## Security model
 
-Same as the single-repo dashboard: loopback-only by default
-(`--allow-remote` to override), no mutation endpoints (every non-GET request
-returns 405), and the same payload redaction. One deliberate difference: the
-hub shows each repo's home-relative path, because identifying repos is the
-page's purpose.
+The hub listens on no network port: `hub status` is a one-shot local read. Its
+payload masks inline secrets in job notes, drops local worktree and log paths,
+and reports runner owners without the OS username. One deliberate difference:
+hub entries show each repo's home-relative path, because identifying repos is
+the report's purpose.
 
 Deploys, recovery, and cleanup remain explicit CLI actions inside each repo.
-The hub cannot ship anything.
+`hub status` cannot ship anything; `hub daemon` ships only jobs enqueued with
+`--auto`, as described below.
 
 ## Hub daemon — auto-only execution across repos
 
@@ -86,42 +82,19 @@ The `--auto` flag remains the explicit unattended-deploy approval boundary,
 exactly as with the single-repo daemon. The hub daemon never touches
 manually enqueued jobs.
 
-The open Hub page can send cross-platform browser notifications when a repo's
-train passes validation, lands, or needs attention. Enable them once from the
-header; clicking an alert focuses Hub and opens that repo's drill-down. Alerts
-are owned by the page and stop when it closes. Multiple open tabs coordinate so
-one state transition produces one alert, and the initial snapshot is a quiet
-baseline rather than a replay of old work.
-
-For headless integrations, `--notify` sends landed, blocked, reconcile, and
-daemon-pause transitions to each repo's configured JSON webhook. Delivery is
-persisted and transition-deduplicated. Without a webhook configured for a repo,
-there is no headless notification backend.
+`--notify` sends landed, blocked, reconcile, and daemon-pause transitions to
+each repo's configured JSON webhook. Delivery is persisted and
+transition-deduplicated. Without a webhook configured for a repo, there is no
+notification backend for it.
 
 ### Per-repo opt-out
 
 Some repos must never see unattended deploys as a matter of policy, not just
 because no `--auto` job happens to exist. Register them with
-`mergetrain hub add REPO --no-daemon`: they stay on the dashboard (marked
-"daemon off") but every `hub daemon` sweep reports them `excluded` without
+`mergetrain hub add REPO --no-daemon`: they stay in `hub status` (with
+`"daemon": false`) but every `hub daemon` sweep reports them `excluded` without
 claiming anything. Re-run `mergetrain hub add REPO --daemon` to re-enable.
 The flag lives in the registry, not the repo. It follows the repo's queue
 rather than the registered path: a linked worktree of an excluded repo, which
 shares its queue, is excluded too. However many registered paths reach one
 queue, a sweep gives it one turn and reports the others `skipped`.
-
-## Snapshot caching
-
-The dashboard rebuilds the hub payload once per second per connected client.
-To keep that cheap, the server reuses a repo's entry while its config file
-and queue database (including the SQLite `-wal`, which every commit touches)
-have unchanged mtime/size fingerprints — a handful of `stat` calls instead
-of a YAML parse and a database open. Any queue write, config edit, or
-`hub add`/`hub remove`/flag flip is visible on the next snapshot; error
-entries are never cached.
-
-## Relationship to `mergetrain dashboard`
-
-`mergetrain dashboard` (single repo, run from inside that repo) is unchanged.
-The hub serves the same UI in multi-repo mode; clicking a repo card opens the
-identical single-repo view fed from that repo's data.

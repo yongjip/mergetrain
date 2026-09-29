@@ -47,15 +47,13 @@ Every pull request runs:
 
 - unit tests on macOS and Linux with Python 3.10 through 3.14, plus one blocking
   Windows Python version;
-- dashboard unit/build checks and a headless Chromium interaction suite for
-  notification permission, duplicate tabs, drill-down clicks, and feed recovery;
 - version, changelog, and security support-policy consistency checks;
 - immutable full-commit pins for every external GitHub Action;
 - isolated sdist and wheel builds, followed by extraction and execution of the
   packaged sdist's own collection and test suite;
 - `twine check --strict` on both distributions; and
-- a clean-environment wheel install that checks the packaged dashboard assets
-  and runs the self-checking `mergetrain demo --brief` walkthrough; and
+- a clean-environment wheel install that confirms Python imports the installed
+  package and runs the self-checking `mergetrain demo --brief` walkthrough; and
 - a clean MCP-extra wheel install that starts the stdio server, initializes the
   protocol, lists tools, and verifies the deploy input schema.
 
@@ -78,22 +76,10 @@ python -m twine check --strict dist/*
 smoke="$(mktemp -d)/venv"
 python -m venv "$smoke"
 "$smoke/bin/python" -m pip install dist/mergetrain-0.1.0-py3-none-any.whl
-"$smoke/bin/python" -c "import mergetrain, pathlib; assert pathlib.Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()"
+"$smoke/bin/mergetrain" --version
 "$smoke/bin/mergetrain" demo --brief
 bash scripts/check_sdist.sh dist/mergetrain-0.1.0.tar.gz
 ```
-
-Browser automation replaces the OS notification API with a deterministic fake,
-so each release that changes alerts also gets one native-browser smoke pass:
-
-- macOS Safari or Chrome and Windows Edge can grant permission from the
-  loopback dashboard and show the immediate confirmation alert;
-- a disposable Hub repo moving from running to validated produces one alert
-  across two open tabs, and clicking it opens that repo's drill-down;
-- a live snapshot failure shows `DEGRADED` with the last good state, then clears
-  after recovery; and
-- closing every dashboard tab stops interactive alerts. Headless webhook
-  delivery remains a separate `--notify` check.
 
 ## One-time Trusted Publishing setup
 
@@ -181,7 +167,7 @@ After the release-preparation change is integrated and its signed tag is pushed:
    /tmp/mergetrain-testpypi/bin/python -m pip install \
      --index-url https://test.pypi.org/simple/ --no-deps mergetrain==0.1.0
    /tmp/mergetrain-testpypi/bin/mergetrain --version
-   /tmp/mergetrain-testpypi/bin/mergetrain dashboard --help
+   /tmp/mergetrain-testpypi/bin/mergetrain status --help
    ```
 
 Package versions are immutable on each index. Bump the version before repeating

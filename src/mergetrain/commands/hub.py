@@ -1,60 +1,13 @@
-"""Dashboard and multi-repository hub commands."""
+"""Multi-repository hub commands."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 
-from ..cli_support import config_from_args, dump_json
+from ..cli_support import dump_json
 from ..config import load_config
 from ..errors import QueueError
-
-
-def cmd_dashboard(args: argparse.Namespace) -> int:
-    from ..dashboard import serve_dashboard
-
-    host = str(args.host).strip()
-    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
-    if host not in loopback_hosts and not args.allow_remote:
-        raise QueueError(
-            "dashboard binds to loopback by default; pass --allow-remote to expose it"
-        )
-    if not 0 <= args.port <= 65535:
-        raise QueueError("dashboard port must be between 0 and 65535")
-    config = config_from_args(args)
-
-    def announce(url: str) -> None:
-        print(f"mergetrain dashboard: {url}", flush=True)
-        print("read-only · press Ctrl-C to stop", flush=True)
-
-    serve_dashboard(config, host=host, port=args.port, preview=args.preview, ready=announce)
-    return 0
-
-
-def cmd_hub_serve(args: argparse.Namespace) -> int:
-    from ..dashboard import serve_hub
-    from ..registry import load_registry, registry_path
-
-    host = str(args.host).strip()
-    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
-    if host not in loopback_hosts and not args.allow_remote:
-        raise QueueError(
-            "hub binds to loopback by default; pass --allow-remote to expose it"
-        )
-    if not 0 <= args.port <= 65535:
-        raise QueueError("hub port must be between 0 and 65535")
-    registered = load_registry(args.registry)
-    roster = args.registry or registry_path()
-
-    def announce(url: str) -> None:
-        print(f"mergetrain hub: {url}", flush=True)
-        print(
-            f"read-only · {len(registered)} repo(s) registered in {roster} · press Ctrl-C to stop",
-            flush=True,
-        )
-
-    serve_hub(host=host, port=args.port, registry=args.registry, ready=announce)
-    return 0
 
 
 def cmd_hub_status(args: argparse.Namespace) -> int:
@@ -108,8 +61,8 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
         try:
             config = load_config(repo=path)
         except Exception:
-            # A broken config cannot provide a trusted webhook. The open Hub
-            # dashboard surfaces the repository error through browser alerts.
+            # A broken config cannot provide a trusted webhook; `hub status`
+            # reports the repository error.
             return None
         if notification_transition(key) not in config.notify.transitions:
             return None

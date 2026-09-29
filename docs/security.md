@@ -66,7 +66,7 @@ therefore requires a fresh approved enqueue instead of silently weakening QA.
   secrets.
 
 Structured surfaces apply one best-effort redaction policy to expected error
-messages, persisted job notes, status JSON, diagnostic remote URLs, and dashboard
+messages, persisted job notes, status JSON, diagnostic remote URLs, and Hub
 snapshots. MCP diagnostics synthesized when a CLI child does not return its JSON
 contract use the same policy; valid CLI JSON remains contract-owned and is not
 rewritten by the adapter. It masks sensitive `NAME=value` assignments,
@@ -179,35 +179,20 @@ itself and declare a representative weight. Logs remain raw and potentially
 sensitive; structured failure events include only a return code or exception
 class, never subprocess output.
 
-## Dashboard exposure
+## Read surfaces
 
-`mergetrain dashboard` binds to `127.0.0.1:8765` by default and has no action
-endpoints. Its payload omits lease tokens, local worktree paths, log paths, and
-the username portion of the runner owner. Status notes and Git branch names are
-still visible to anyone who can reach the server. Active gate events also include
-the configured command template; obvious token/password assignments and flags are
+mergetrain listens on no network port. `status`, `inspect`, `events`, and
+`hub status` are local reads. The snapshot that `hub status --json` embeds for
+each repository omits lease tokens, local worktree paths, log paths, and the
+username portion of the runner owner. Active gate events also include the
+configured command template; obvious token/password assignments and flags are
 masked by the same policy described above, but command authors should never
 embed credentials directly in gate configuration.
 
-Runtime provenance from `status --diagnose` is intentionally CLI-only because
-it can include an imported package path, editable source path, and source-control
-state. The dashboard snapshot and remotely bindable dashboard API do not include
-that provenance object.
-
-Browser notifications are opt-in and page-owned. Their lock-screen-visible text
-is deliberately limited to the project name, job IDs, status, and aggregate
-counts; task text, branch names, notes, paths, commands, and error details are
-not copied into an alert. Snapshot-read failures likewise use generic stale-state
-copy rather than the underlying error message. The enabled preference and short-lived duplicate
-suppression keys live in origin-scoped browser storage. Clicking an alert only
-focuses the page and, in Hub, selects the affected repo; it does not call a
-mutation endpoint. Closing the page stops new browser alerts.
-
-Binding to a non-loopback host requires `--allow-remote`. That flag is an
-acknowledgement, not an authentication or encryption layer. Put a separately
-reviewed authenticated reverse proxy in front of the dashboard if it must be
-reachable beyond the local machine. Do not expose it directly to an untrusted
-network.
+Runtime provenance from `status --diagnose` is intentionally limited to that
+command because it can include an imported package path, editable source path,
+and source-control state. The Hub snapshot does not include that provenance
+object.
 
 ## Examples
 

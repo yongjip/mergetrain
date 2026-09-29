@@ -395,7 +395,7 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
     # it reads 'failed'.
     #
     # Why it matters: verify_status is a contract field surfaced by
-    # `status --json` and the dashboard, so this reports a *failed verification*
+    # `status --json` and `hub status`, so this reports a *failed verification*
     # on a repo that has none — sending an operator hunting a hook that does not
     # exist. The vocabulary already has the honest answer: models.py:14 lists
     # 'unknown', and persistence.jobs.list_verify_unknown_jobs queries

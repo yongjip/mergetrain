@@ -256,7 +256,7 @@ def reuse_explanation(
     decision: ReuseDecision | None,
     gate_runs: Iterable[dict[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Build the shared CLI/dashboard reuse explanation.
+    """Build the reuse explanation shared by the CLI and the hub snapshot.
 
     Timing is deliberately advisory and can never change ``authorized`` or
     ``eligible``. It sums per-gate medians rather than claiming wall-clock

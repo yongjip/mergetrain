@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Remove the web dashboard and the web Hub. `mergetrain dashboard` and
+  `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
+  error that names the replacement: `status`, or `events --follow` for a live
+  feed, for one repository, and `hub status` for every registered repository.
+  The pages showed the same queue state as those commands through a second
+  implementation that could disagree with them: a review found a crashed
+  runner shown as still running, because the page ignored the recovery
+  `next_action` the server sent, and a live page that froze once its event
+  stream reached its time limit. Browser notifications go with the pages;
+  `daemon --notify` and `hub daemon --notify` still deliver to the configured
+  webhook. `hub status`, `hub add`, `hub remove`, `hub daemon`, the six
+  commands, the MCP tools, the JSON contract, and the config schema are
+  unchanged, and the wheel no longer ships frontend assets.
 - On Windows, keep a push findable while any process of it still runs.
   Windows drops a job's name with its last handle, and only `git push` and the
   runner held one; Git for Windows gives the processes it starts no handle to

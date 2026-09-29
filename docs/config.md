@@ -257,19 +257,7 @@ startup and Hub warns once per affected repository when a transition needs
 delivery. This avoids treating an intentionally empty backend chain as a
 successful headless notification.
 
-Interactive desktop alerts are configured in the open `dashboard` or `hub`
-page instead. Click **Enable notifications** once to grant the browser permission
-and remember the preference for that dashboard origin. Browser alerts work on
-supported macOS and Windows browsers without a platform helper, stop when the
-page closes, and focus the relevant dashboard (including the affected Hub repo)
-when clicked. They do not require `--notify` or a webhook.
-Embedded or in-app browsers may intentionally deny site notifications; in that
-case, open the same loopback dashboard URL in Safari, Chrome, Edge, or another
-desktop browser that exposes notification permission.
-Loopback HTTP is treated as a secure browser context; a remotely exposed
-dashboard needs HTTPS before browsers will offer notification permission.
-
-For headless webhook delivery, `transitions` selects `landed`,
+For webhook delivery, `transitions` selects `landed`,
 `blocked`/partial, `needs_reconcile`, and daemon error/pause messages. A disabled
 transition is recorded as settled so enabling it later does not replay old
 history. `timeout_seconds` must be positive, and the URL must use HTTP(S).
@@ -391,7 +379,7 @@ validation commit/tree, gate policy, environment fingerprints, and validation
 age to match. `on_mismatch: rerun` performs the normal full reassembly and gate
 run; `fail` blocks before push. The default remains full gate rerun.
 
-`deploy --json` and the dashboard expose the same
+`deploy --json` and `hub status --json` expose the same
 structured reuse explanation: authorization, exact identity checks and mismatch
 facts, the action for each gate (`reuse`, `rerun`, `skip`, or a conditional
 preview state), and `estimated_savings`. Savings use up to 20 successful timing

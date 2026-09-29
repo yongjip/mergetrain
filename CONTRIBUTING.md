@@ -28,8 +28,8 @@ python -m pytest      # tests
   concurrency tests are welcome — see `tests/test_git_runner.py` and
   `tests/test_store.py` for the patterns.
 - **Installed wheel:** CI builds the wheel, installs it into a clean virtualenv,
-  checks the packaged dashboard assets, and runs `mergetrain demo --brief`, a
-  self-checking walkthrough against real git repositories. Reproduce it with
+  and runs `mergetrain demo --brief`, a self-checking walkthrough against real
+  git repositories. Reproduce it with
   the commands in [docs/release.md](./docs/release.md#what-ci-verifies).
 - **The machine contract** — every `--json` payload's shape, the `error.code`
   values, and `contract_version` — is guarded by

@@ -18,7 +18,7 @@ mergetrain/
       deploy.py        # validation/deploy execution
       daemon.py        # single-repository auto-deploy/validation daemon command
       recovery.py      # reconcile, unlock, verify, cleanup
-      hub.py           # dashboard and multi-repository hub commands
+      hub.py           # multi-repository hub commands
     config.py          # safe YAML loading + typed policy validation
     daemon.py          # auto-deploy/validation daemon loop
     evidence.py        # evidence-backed outcome, validation, and batching metrics
@@ -31,9 +31,7 @@ mergetrain/
     validation_reuse.py # validated-train identity and reuse decisions
     worktree_manager.py # ephemeral/persistent integration worktrees
     observability.py   # job/train outcomes and event/heartbeat read models
-    dashboard.py       # stdlib read-only HTTP/SSE server
-    snapshot.py        # privacy-conscious dashboard read model
-    dashboard_dist/    # packaged production dashboard assets
+    snapshot.py        # privacy-conscious status and hub read model
     models.py          # queue, lock, runner-event, and recovery-event dataclasses
     path_gates.py      # POSIX glob matching and NUL-safe Git diff parsing
     persistence/
@@ -46,7 +44,6 @@ mergetrain/
       events.py        # append-only event storage and scoped reads
       operations.py    # append-only reconcile plus historical recovery evidence
       recovery.py      # durable push markers and reconcile guards
-  dashboard/           # React/Vite dashboard source
   benchmarks/          # agent-adoption, discovery, and multi-agent harnesses; retired pilot evidence
   docs/                # this documentation set
   examples/            # example .mergetrain.yaml and agent metadata
@@ -70,8 +67,8 @@ do not import each other.
 ## Product-surface budget
 
 Public product surface has an owner-evidence-gated growth budget. Before adding a CLI
-command or flag, YAML field, dashboard control or view, daemon/Hub behavior,
-MCP tool, recovery action, notification path, or validated-reuse control, read
+command or flag, YAML field, daemon/Hub behavior, MCP tool, recovery action,
+notification path, or validated-reuse control, read
 the [product scope and complexity budget](product-scope.md). A qualifying change
 must name the manual step, incorrect state, measured latency/cost, enforceable
 safety guarantee, or repeated user workflow that justifies it. Prefer improving
@@ -137,9 +134,10 @@ The suite covers the behaviors that make the queue safe:
 - **git_runner** — managed subprocess heartbeats, timeout/process-group cleanup, cooperative cancellation, atomic refs, exact validation identity, integration movement, and failure isolation.
 - **cli** — structured JSON errors and result counts, truthful exit codes,
   generated agent instructions, five-state status and next actions, resumable
-  JSONL events, inspect/log termination, global option normalization, dashboard
-  and Hub bind policy, and init output.
-- **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.
+  JSONL events, inspect/log termination, global option normalization, removed
+  interface migration errors, and init output.
+- **hub** — privacy-conscious read-only snapshots, per-repo error isolation,
+  and the registry roster.
 - **config** — safe YAML loading, ambiguous-scalar rejection, fail-closed deploy
   refs, positive queue timing, unique gate names, defaults, and path resolution.
 
@@ -242,30 +240,6 @@ throwaway GitHub repository, classified operator interventions, and one
 deliberate crash whose queue verdict matched the real remote. Its one-off
 simulator is retired; the evidence note links to it at the `v3.1.1` tag.
 
-## Dashboard authoring
-
-The published wheel does not need Node at runtime; it serves committed assets
-from `src/mergetrain/dashboard_dist`. Node is only needed when editing the UI:
-
-```sh
-cd dashboard
-npm ci
-npx --no-install playwright install chromium
-npm test
-npm run test:browser
-npm run build
-```
-
-Commit both the source and rebuilt `dashboard_dist` output. The UI uses bundled
-fonts and icons and makes no external runtime requests.
-
-The CI `dashboard` job runs the same checks (installing Chromium with its Linux
-system dependencies) and then fails if
-`src/mergetrain/dashboard_dist` came out different from what is committed, so a
-UI change that forgets the rebuild cannot ship. That check needs the build to be
-reproducible: use `npm ci` (not `npm install`, which can move dependencies off
-the lockfile) and the Node major pinned in `dashboard/.nvmrc`.
-
 ## Claude Code plugin authoring
 
 The self-marketplace manifest lives at `.claude-plugin/marketplace.json`; the
@@ -295,12 +269,11 @@ mergetrain --version
 ```
 
 CI's `package` job installs the built wheel into a clean virtualenv, asserts
-that the installed package contains `dashboard_dist/index.html`, and runs
+that Python imports the installed package rather than the checkout, and runs
 `mergetrain demo --brief`. The demo drives the installed console script
 through a disposable repository and bare remote, from init through an approved
 atomic deploy, and exits non-zero when any outcome differs from the expected
-one. The dashboard and Hub loopback-only bind policy is covered by
-`tests/test_dashboard.py` and `tests/test_hub.py`.
+one.
 
 Supported and tested Python: 3.10 through 3.14. See the
 [release checklist](release.md) for the full publish flow.

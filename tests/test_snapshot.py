@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from mergetrain.commands.inspection import _job_display_state
+from mergetrain.config import load_config
 from mergetrain.models import Job
+from mergetrain.persistence.claims import claim_all_queued
+from mergetrain.persistence.connection import connect
+from mergetrain.persistence.events import record_run_event
+from mergetrain.persistence.jobs import enqueue_job, mark_job
+from mergetrain.persistence.leases import release_runner_lock
 from mergetrain.snapshot import (
     PUBLIC_REASON_LIMIT,
     attention_reason_code,
+    build_repo_snapshot,
     next_action,
     plan_next_action,
     public_reason,
@@ -232,6 +244,474 @@ class NextActionTests(unittest.TestCase):
         for payload, expected in cases:
             with self.subTest(expected=expected):
                 self.assertEqual(next_action(payload), expected)
+
+
+class RepoSnapshotTests(unittest.TestCase):
+    """The full per-repo read model that `hub status --json` embeds."""
+
+    def make_config(self, root: Path):
+        return load_config(repo=root, db_override=root / "queue.sqlite")
+
+    def test_snapshot_points_too_new_config_at_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                "version: 999\nproject:\n  name: future\n", encoding="utf-8"
+            )
+            config = self.make_config(root)
+            connect(config.state.db).close()
+            payload = build_repo_snapshot(config, read_only=True)
+            self.assertEqual(payload["next_action"], "upgrade_mergetrain")
+
+    def test_snapshot_omits_the_runner_username_and_integration_worktree_paths(self) -> None:
+        """#231: unlock events and command-failure notes leaked both."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            integration = config.state.worktree_root / "demo-mergetrain-7-0a1b2c3d"
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="gate", branch="codex/gate")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="failed",
+                    note=f"command failed (1) in {integration}: /bin/sh -c 'make test'",
+                )
+                # An unlock audit event recorded before owners were masked.
+                record_run_event(
+                    conn,
+                    phase="unlock",
+                    state="cleared",
+                    message="cleared dead runner lock (alice:4242)",
+                    detail=json.dumps({"owner": "alice:4242", "liveness": "dead"}),
+                )
+            finally:
+                conn.close()
+
+            payload = build_repo_snapshot(config, read_only=True)
+
+            self.assertNotIn("alice", json.dumps(payload))
+            note = next(item["note"] for item in payload["jobs"] if item["id"] == job.id)
+            self.assertNotIn(str(config.state.worktree_root), note)
+            self.assertIn(os.path.join("[worktrees]", "demo-mergetrain-7-0a1b2c3d"), note)
+            unlock = next(item for item in payload["events"] if item["phase"] == "unlock")
+            self.assertEqual(unlock["message"], "cleared dead runner lock (local:4242)")
+            self.assertEqual(json.loads(unlock["detail"])["owner"], "local:4242")
+
+    def test_snapshot_is_live_and_omits_local_paths_and_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            try:
+                enqueue_job(
+                    conn,
+                    task="snapshot",
+                    branch="codex/snapshot",
+                    worktree_path="/private/sensitive/worktree",
+                )
+                claimed = claim_all_queued(conn, owner=owner)
+                record_run_event(
+                    conn,
+                    claim_token=claimed[0].claim_token,
+                    job_id=claimed[0].id,
+                    phase="assembling",
+                    state="success",
+                    message=f"Merged {claimed[0].branch}",
+                )
+                record_run_event(
+                    conn,
+                    claim_token=claimed[0].claim_token,
+                    phase="gating",
+                    state="active",
+                    message="Running gate 1/1: diff-check",
+                    detail="git diff --check origin/main..HEAD",
+                )
+            finally:
+                conn.close()
+
+            payload = build_repo_snapshot(config, read_only=True)
+            self.assertEqual(payload["train"]["selection"], "running")
+            self.assertEqual(payload["progress"]["phase"], "gating")
+            self.assertEqual(payload["progress"]["completed_job_ids"], [claimed[0].id])
+            self.assertNotIn("gating", payload["progress"]["completed_phases"])
+            self.assertEqual(
+                payload["progress"]["current_gate"],
+                {
+                    "index": 1,
+                    "total": 1,
+                    "name": "diff-check",
+                    "state": "active",
+                    "command": "git diff --check origin/main..HEAD",
+                    "started_at": payload["progress"]["updated_at"],
+                    "finished_at": "",
+                    "duration_seconds": None,
+                },
+            )
+            self.assertEqual(
+                [gate["state"] for gate in payload["progress"]["gates"]],
+                ["active"],
+            )
+            self.assertFalse(payload["project"]["reuse"]["enabled"])
+            self.assertEqual(payload["project"]["reuse"]["max_age_minutes"], 60)
+            self.assertEqual(payload["reuse"]["evaluation"], "not_evaluated")
+            self.assertIsNone(payload["reuse"]["eligible"])
+            self.assertFalse(
+                payload["reuse"]["estimated_savings"]["authorizes_reuse"]
+            )
+            self.assertFalse(payload["eta"]["available"])
+            self.assertEqual(payload["eta"]["coverage"], "none")
+            self.assertEqual(payload["lock"]["owner"], f"local:{os.getpid()}")
+            self.assertIn("heartbeat_at", payload["lock"])
+            self.assertNotIn("worktree_path", payload["jobs"][0])
+            self.assertNotIn("log_path", payload["jobs"][0])
+            self.assertNotIn("claim_token", payload["events"][0])
+            self.assertNotIn("runtime", payload)
+            self.assertNotIn("terminology", payload["project"])
+            self.assertEqual(payload["project"]["push_specs"], ["HEAD:main"])
+
+            cleanup = connect(config.state.db)
+            try:
+                release_runner_lock(cleanup, owner=owner, token=claimed[0].claim_token)
+            finally:
+                cleanup.close()
+
+    def test_snapshot_estimates_running_gate_eta_from_recent_history(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: unit
+    run: python -m unittest
+""",
+                encoding="utf-8",
+            )
+            config = self.make_config(root)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+
+            def event(
+                token: str,
+                phase: str,
+                state: str,
+                message: str,
+                created_at: str,
+            ) -> None:
+                recorded = record_run_event(
+                    conn,
+                    claim_token=token,
+                    phase=phase,
+                    state=state,
+                    message=message,
+                )
+                conn.execute(
+                    "UPDATE run_events SET created_at = ? WHERE id = ?",
+                    (created_at, recorded.id),
+                )
+
+            try:
+                event(
+                    "history",
+                    "fetching",
+                    "active",
+                    "Fetching main",
+                    "2026-07-29T11:00:00Z",
+                )
+                event(
+                    "history",
+                    "fetching",
+                    "success",
+                    "Integration worktree prepared",
+                    "2026-07-29T11:00:10Z",
+                )
+                event(
+                    "history",
+                    "assembling",
+                    "active",
+                    "Assembling train with 1 job(s)",
+                    "2026-07-29T11:00:10Z",
+                )
+                event(
+                    "history",
+                    "assembling",
+                    "success",
+                    "Assembled 1 job(s)",
+                    "2026-07-29T11:00:30Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "active",
+                    "Running train gates",
+                    "2026-07-29T11:00:30Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "active",
+                    "Running gate 1/2: diff-check",
+                    "2026-07-29T11:00:30Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "success",
+                    "Passed gate 1/2: diff-check",
+                    "2026-07-29T11:00:40Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "active",
+                    "Running gate 2/2: unit",
+                    "2026-07-29T11:00:40Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "success",
+                    "Passed gate 2/2: unit",
+                    "2026-07-29T11:01:10Z",
+                )
+                event(
+                    "history",
+                    "gating",
+                    "success",
+                    "All train gates passed",
+                    "2026-07-29T11:01:10Z",
+                )
+                conn.commit()
+
+                enqueue_job(conn, task="snapshot ETA", branch="codex/snapshot-eta")
+                claimed = claim_all_queued(conn, owner=owner)
+                token = claimed[0].claim_token
+                event(
+                    token,
+                    "fetching",
+                    "active",
+                    "Fetching main",
+                    "2026-07-29T12:00:00Z",
+                )
+                event(
+                    token,
+                    "fetching",
+                    "success",
+                    "Integration worktree prepared",
+                    "2026-07-29T12:00:05Z",
+                )
+                event(
+                    token,
+                    "assembling",
+                    "active",
+                    "Assembling train with 1 job(s)",
+                    "2026-07-29T12:00:05Z",
+                )
+                event(
+                    token,
+                    "assembling",
+                    "success",
+                    "Assembled 1 job(s)",
+                    "2026-07-29T12:00:20Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "active",
+                    "Running train gates",
+                    "2026-07-29T12:00:20Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "active",
+                    "Running gate 1/2: diff-check",
+                    "2026-07-29T12:00:20Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "success",
+                    "Passed gate 1/2: diff-check",
+                    "2026-07-29T12:00:30Z",
+                )
+                event(
+                    token,
+                    "gating",
+                    "active",
+                    "Running gate 2/2: unit",
+                    "2026-07-29T12:00:30Z",
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            with patch(
+                "mergetrain.snapshot.utc_now",
+                return_value="2026-07-29T12:00:35Z",
+            ):
+                payload = build_repo_snapshot(config, read_only=True)
+
+            self.assertTrue(payload["eta"]["available"])
+            self.assertEqual(payload["eta"]["coverage"], "complete")
+            self.assertEqual(payload["eta"]["sample_count"], 1)
+            self.assertEqual(payload["eta"]["estimated_remaining_seconds"], 25.0)
+            self.assertEqual(payload["eta"]["expected_at"], "2026-07-29T12:01:00Z")
+            self.assertEqual(
+                [
+                    (
+                        gate["name"],
+                        gate["median_seconds"],
+                        gate["remaining_seconds"],
+                    )
+                    for gate in payload["eta"]["gates"]
+                ],
+                [("diff-check", 10.0, 0.0), ("unit", 30.0, 25.0)],
+            )
+            self.assertEqual(
+                {
+                    phase["name"]: phase["median_seconds"]
+                    for phase in payload["eta"]["phases"]
+                }["gating"],
+                40.0,
+            )
+
+            cleanup = connect(config.state.db)
+            try:
+                release_runner_lock(cleanup, owner=owner, token=token)
+            finally:
+                cleanup.close()
+
+    def test_snapshot_exposes_push_targets_without_terminology_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                """git:
+  remote: upstream
+  integration_branch: main
+  push_refs:
+    - main
+    - release
+""",
+                encoding="utf-8",
+            )
+            config = self.make_config(root)
+            connect(config.state.db).close()
+            payload = build_repo_snapshot(config, read_only=True)
+            self.assertNotIn("terminology", payload["project"])
+            self.assertEqual(payload["project"]["remote"], "upstream")
+            self.assertEqual(payload["project"]["push_specs"], ["HEAD:main", "HEAD:release"])
+
+    def test_snapshot_preserves_skipped_gate_after_train_gates_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".mergetrain.yaml").write_text(
+                """gates:
+  - name: docs
+    run: make docs
+    paths:
+      - docs/**
+""",
+                encoding="utf-8",
+            )
+            config = self.make_config(root)
+            owner = f"runner:{os.getpid()}"
+            conn = connect(config.state.db)
+            try:
+                enqueue_job(conn, task="snapshot", branch="codex/snapshot")
+                claimed = claim_all_queued(conn, owner=owner)
+                token = claimed[0].claim_token
+                record_run_event(
+                    conn,
+                    claim_token=token,
+                    phase="gating",
+                    state="skipped",
+                    message="Skipped gate 2/2: docs",
+                    detail="no changed paths matched configured paths",
+                )
+                record_run_event(
+                    conn,
+                    claim_token=token,
+                    phase="gating",
+                    state="success",
+                    message="All train gates passed",
+                )
+            finally:
+                conn.close()
+
+            payload = build_repo_snapshot(config, read_only=True)
+            self.assertEqual(
+                [gate["state"] for gate in payload["progress"]["gates"]],
+                ["success", "skipped"],
+            )
+            self.assertIsNone(payload["progress"]["current_gate"])
+
+            cleanup = connect(config.state.db)
+            try:
+                release_runner_lock(cleanup, owner=owner, token=token)
+            finally:
+                cleanup.close()
+
+    def test_snapshot_exposes_deployed_verification_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="deploy", branch="codex/deploy")
+                mark_job(
+                    conn,
+                    job.id,
+                    status="deployed",
+                    push_status="succeeded",
+                    verify_status="failed",
+                    note="post-push verify warning: health check failed",
+                )
+                record_run_event(
+                    conn,
+                    job_id=job.id,
+                    phase="complete",
+                    state="warning",
+                    message=f"Job #{job.id} deployed; verification needs attention",
+                    detail="post-push verify warning: health check failed",
+                )
+            finally:
+                conn.close()
+
+            payload = build_repo_snapshot(config, read_only=True)
+            self.assertEqual(payload["jobs"][0]["status"], "deployed")
+            self.assertEqual(payload["jobs"][0]["push_status"], "succeeded")
+            self.assertEqual(payload["jobs"][0]["verify_status"], "failed")
+            self.assertEqual(payload["events"][-1]["state"], "warning")
+
+    def test_snapshot_removes_worktree_path_embedded_in_job_note(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            sensitive = "/private/sensitive/integration-worktree"
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(
+                    conn,
+                    task="failed gate",
+                    branch="codex/failure",
+                    worktree_path=sensitive,
+                )
+                mark_job(
+                    conn,
+                    job.id,
+                    status="failed",
+                    note=f"command failed (1) in {sensitive}: make test",
+                )
+            finally:
+                conn.close()
+
+            payload = build_repo_snapshot(config, read_only=True)
+            note = payload["jobs"][0]["note"]
+            self.assertNotIn(sensitive, note)
+            self.assertIn("[worktree]", note)
 
 
 if __name__ == "__main__":
