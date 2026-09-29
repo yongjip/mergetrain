@@ -318,8 +318,10 @@ transactions to take an early lock and reduce queue-state conflicts under
 concurrent writers. Status, Hub, and dashboard builders wrap their related
 `SELECT` statements in one deferred read transaction, fixing counts, jobs,
 events, and the resulting action to one WAL snapshot without blocking writers.
-Schema upgrades run once per `PRAGMA user_version` in the same transaction;
-databases newer than the running binary fail closed.
+Each evolving table's columns are defined once: a fresh database is created
+from that list, and an older one gains whichever columns it lacks, then its
+indexes and version backfills, in one transaction. Databases newer than the
+running binary fail closed.
 
 ### Persistence responsibility boundaries
 
@@ -331,7 +333,7 @@ is no ORM or generic repository layer:
 | --- | --- |
 | `transactions.py` | write transactions, stable read snapshots, rollback/commit handling, and `QueueBusy` translation |
 | `connection.py` | writable versus observer-only connections, WAL/FULL pragmas, and state-directory safety |
-| `schema.py` | current schema, ordered migrations, and forward-version refusal |
+| `schema.py` | the column lists, upgrades of older databases, and forward-version refusal |
 | `jobs.py` | queue/job reads and compare-and-swap mutations plus validated-train identity |
 | `leases.py` | process liveness, token-fenced runner locks, and marker-aware orphan splitting |
 | `claims.py` | cross-boundary atomic claims that acquire a lease, select jobs, and record the claim event in one transaction |

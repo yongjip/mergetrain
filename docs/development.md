@@ -40,7 +40,7 @@ mergetrain/
     persistence/
       transactions.py  # BEGIN IMMEDIATE and time helpers
       connection.py    # writable/read-only SQLite connection policy
-      schema.py        # schema definition and ordered migrations
+      schema.py        # column lists and upgrades of older databases
       jobs.py          # queue/job reads, mutations, validated trains
       leases.py        # liveness, token-fenced locks, orphan recovery
       claims.py        # atomic job+lease+event claim transactions

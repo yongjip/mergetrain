@@ -646,6 +646,75 @@ class StoreTests(unittest.TestCase):
         self.assertEqual([item.id for item in claimed], [job.id, fresh.id])
         self.assertEqual([item.train_id for item in claimed], ["", ""])
 
+    def test_an_upgraded_legacy_database_matches_a_fresh_one(self) -> None:
+        def shape(path: Path) -> dict[str, object]:
+            conn = connect(path)
+            try:
+                tables = {
+                    table: {
+                        tuple(row[1:6])
+                        for row in conn.execute(f"PRAGMA table_info({table})")
+                    }
+                    for table in (
+                        "deploy_queue",
+                        "locks",
+                        "run_events",
+                        "recovery_operation_events",
+                    )
+                }
+                indexes = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'index' "
+                        "AND name NOT LIKE 'sqlite_%'"
+                    )
+                }
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+            finally:
+                conn.close()
+            return {"tables": tables, "indexes": indexes, "version": version}
+
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        legacy_path = Path(td.name) / "legacy.sqlite"
+        legacy = sqlite3.connect(legacy_path)
+        # The first schema: base queue columns and a lock without a token.
+        legacy.execute(
+            """
+            CREATE TABLE deploy_queue (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              task TEXT NOT NULL,
+              branch TEXT NOT NULL,
+              worktree_path TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'queued',
+              base_sha TEXT NOT NULL DEFAULT '',
+              head_sha TEXT NOT NULL DEFAULT '',
+              deploy_sha TEXT NOT NULL DEFAULT '',
+              requested_at TEXT NOT NULL,
+              started_at TEXT NOT NULL DEFAULT '',
+              finished_at TEXT NOT NULL DEFAULT '',
+              log_path TEXT NOT NULL DEFAULT '',
+              note TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        legacy.execute(
+            """
+            CREATE TABLE locks (
+              name TEXT PRIMARY KEY,
+              owner TEXT NOT NULL,
+              worktree_path TEXT NOT NULL DEFAULT '',
+              head_sha TEXT NOT NULL DEFAULT '',
+              acquired_at TEXT NOT NULL,
+              expires_at TEXT NOT NULL
+            )
+            """
+        )
+        legacy.commit()
+        legacy.close()
+
+        self.assertEqual(shape(legacy_path), shape(Path(td.name) / "fresh.sqlite"))
+
     def test_legacy_database_migrates_validation_train_columns(self) -> None:
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
