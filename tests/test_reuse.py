@@ -29,6 +29,7 @@ from mergetrain.reuse import (
     train_identity_sha,
     validation_age_minutes,
 )
+from mergetrain.validation_reuse import unauthorized_reuse_decision
 
 # A fixed "now" so validation_age_minutes assertions are deterministic.
 NOW = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -367,6 +368,105 @@ class ReuseDecisionTests(unittest.TestCase):
         )
         self.assertEqual(exact["gates"][1]["action"], "skip")
         self.assertEqual(exact["gates"][1]["reason_code"], "no_matching_paths")
+
+        unknown = reuse_explanation(
+            config,
+            [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)],
+            decision=ReuseDecision(
+                authorized=True,
+                eligible=True,
+                action="reuse",
+                validation_sha="a" * 40,
+                changed_paths=None,
+            ),
+        )
+        self.assertEqual(unknown["gates"][1]["action"], "rerun")
+        self.assertEqual(unknown["gates"][1]["reason_code"], "path_discovery_unavailable")
+
+    def test_an_authorized_mismatch_reruns_every_gate_and_estimates_nothing(self) -> None:
+        payload = reuse_explanation(
+            _config(gate_paths=("src/**",)),
+            [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)],
+            decision=ReuseDecision(
+                authorized=True,
+                eligible=False,
+                action="rerun",
+                validation_sha="a" * 40,
+                reasons=("gate policy changed since validation",),
+            ),
+            gate_runs=[{"name": "tests", "state": "success", "duration_seconds": 4.0}],
+        )
+
+        self.assertEqual(
+            [(gate["action"], gate["reason_code"]) for gate in payload["gates"]],
+            [("rerun", "identity_mismatch"), ("conditional_run", "identity_mismatch")],
+        )
+        savings = payload["estimated_savings"]
+        self.assertEqual(savings["mode"], "unavailable")
+        self.assertEqual(savings["seconds"], 0.0)
+        self.assertEqual(savings["confidence"], "none")
+
+    def test_an_unauthorized_decision_is_a_potential_saving(self) -> None:
+        # The decision a runner returns when reuse is not enabled in config.
+        config = replace(
+            _config(),
+            gates=(
+                GateConfig(name="tests", run="pytest", paths=("src/**",)),
+                GateConfig(name="smoke", run="scripts/smoke", always_rerun_on_deploy=True),
+            ),
+        )
+        jobs = [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)]
+
+        payload = reuse_explanation(config, jobs, decision=unauthorized_reuse_decision(jobs))
+
+        self.assertEqual(
+            [(gate["action"], gate["reason_code"]) for gate in payload["gates"]],
+            [
+                ("potential_reuse", "authorization_required"),
+                ("conditional_reuse", "authorization_and_preview_required"),
+                ("rerun", "always_rerun_on_deploy"),
+            ],
+        )
+        self.assertFalse(payload["authorized"])
+        self.assertEqual(payload["estimated_savings"]["mode"], "potential")
+
+    def test_the_estimate_counts_only_named_timed_successful_runs(self) -> None:
+        config = _config()
+        jobs = [Job(id=1, task="a", branch="feature/a", validation_sha="a" * 40)]
+        decision = ReuseDecision(
+            authorized=True,
+            eligible=True,
+            action="reuse",
+            validation_sha="a" * 40,
+            changed_paths=(),
+        )
+
+        untimed = reuse_explanation(
+            config,
+            jobs,
+            decision=decision,
+            gate_runs=[
+                {"name": "diff-check", "state": "failed", "duration_seconds": 5.0},
+                {"name": "diff-check", "state": "success"},
+                {"name": "", "state": "success", "duration_seconds": 1.0},
+            ],
+        )
+        self.assertIsNone(untimed["estimated_savings"]["seconds"])
+        self.assertEqual(untimed["estimated_savings"]["confidence"], "none")
+        self.assertEqual(untimed["estimated_savings"]["timed_gate_count"], 0)
+
+        timed = reuse_explanation(
+            config,
+            jobs,
+            decision=decision,
+            gate_runs=[
+                {"name": "diff-check", "state": state, "duration_seconds": 2.0}
+                for state in ("success", "reused") * 5
+            ],
+        )
+        self.assertEqual(timed["estimated_savings"]["seconds"], 2.0)
+        self.assertEqual(timed["estimated_savings"]["sample_count"], 10)
+        self.assertEqual(timed["estimated_savings"]["confidence"], "high")
 
 
 if __name__ == "__main__":
