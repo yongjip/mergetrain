@@ -1,10 +1,12 @@
 """A runner killed mid-push must not let reconcile outrun its orphaned push (#220).
 
-Managed commands start in their own session, so killing the runner leaves the
-``git push`` it started running. Here the push waits in a slow ``pre-receive``
-hook, the runner process alone is killed, and reconcile runs while the orphan
-is still going. It must refuse, rather than record "did not land" for a push
-that then lands; once the push has exited, it must record ``deployed``.
+Managed commands start in their own session (their own Job Object on Windows),
+so killing the runner leaves the ``git push`` it started running. Here the push
+waits in a slow ``pre-receive`` hook, the runner process alone is killed, and
+reconcile runs while the orphan is still going. It must refuse, rather than
+record "did not land" for a push that then lands; once the push has exited, it
+must record ``deployed``. POSIX finds the orphan by its push lock and Windows by
+its named Job Object, so the killed-runner scenarios run on both.
 """
 
 from __future__ import annotations
@@ -63,17 +65,21 @@ def _wait_for(condition, *, what: str) -> None:
     raise AssertionError(f"timed out waiting for {what}")
 
 
-@unittest.skipUnless(os.name == "posix", "kills a runner process with POSIX signals")
 class OrphanedPushTests(unittest.TestCase):
-    def _run(self, *, kill_signal: int, cancel: bool) -> None:
+    def _run(self, *, kill_signal: int | None, cancel: bool) -> None:
+        """Stop the runner mid-push with ``kill_signal``, or ``Popen.kill`` when None."""
+
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
             remote = root / "remote.git"
             sentinel = root / "hook-started"
             hook = remote / "hooks" / "pre-receive"
+            # LF endings: Git for Windows runs hooks with its own sh.
             hook.write_text(
-                f"#!/bin/sh\ntouch '{sentinel}'\nsleep {HOOK_SECONDS}\n", encoding="utf-8"
+                f"#!/bin/sh\ntouch '{sentinel.as_posix()}'\nsleep {HOOK_SECONDS}\n",
+                encoding="utf-8",
+                newline="\n",
             )
             hook.chmod(0o755)
             config = load_config(repo=repo)
@@ -92,8 +98,12 @@ class OrphanedPushTests(unittest.TestCase):
                     what="the push to reach the pre-receive hook",
                 )
                 self.assertIsNone(runner.poll(), "the runner exited before it pushed")
-                runner.send_signal(kill_signal)
-                self.assertEqual(runner.wait(timeout=WAIT_SECONDS), -kill_signal)
+                if kill_signal is None:
+                    runner.kill()  # SIGKILL on POSIX, TerminateProcess on Windows
+                    runner.wait(timeout=WAIT_SECONDS)
+                else:
+                    runner.send_signal(kill_signal)
+                    self.assertEqual(runner.wait(timeout=WAIT_SECONDS), -kill_signal)
             finally:
                 if runner.poll() is None:
                     runner.kill()
@@ -133,14 +143,15 @@ class OrphanedPushTests(unittest.TestCase):
             if cancel:
                 self.assertIn("late cancel ignored", reason)
 
-    def test_sigkill_mid_push_waits_for_the_orphan_then_records_deployed(self) -> None:
-        self._run(kill_signal=signal.SIGKILL, cancel=False)
+    def test_a_killed_runner_waits_for_the_orphan_then_records_deployed(self) -> None:
+        self._run(kill_signal=None, cancel=False)
 
+    @unittest.skipUnless(os.name == "posix", "delivers a POSIX SIGTERM")
     def test_sigterm_mid_push_waits_for_the_orphan_then_records_deployed(self) -> None:
         self._run(kill_signal=signal.SIGTERM, cancel=False)
 
     def test_a_late_cancel_cannot_turn_a_landing_push_into_canceled(self) -> None:
-        self._run(kill_signal=signal.SIGKILL, cancel=True)
+        self._run(kill_signal=None, cancel=True)
 
 
 @unittest.skipUnless(os.name == "posix", "the POSIX push lock is an inherited flock")
