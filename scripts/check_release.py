@@ -20,6 +20,12 @@ SECURITY_SUPPORT_POLICY = (
     "Only the latest release published to PyPI receives security fixes."
 )
 _FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+# Documents that quote the release version in prose. No package metadata reads
+# them, so a release preparation that missed one would leave it stale.
+QUOTED_VERSION_DOCUMENTS = (
+    ("docs/contract.md", r"mergetrain (\d+\.\d+\.\d+) uses machine contract"),
+    ("integrations/claude/plugin/README.md", r"mergetrain\[mcp\]==(\d+\.\d+\.\d+)"),
+)
 
 
 def _security_policy_errors(text: str) -> list[str]:
@@ -32,6 +38,16 @@ def _security_policy_errors(text: str) -> list[str]:
             f"{SECURITY_SUPPORT_POLICY}"
         )
     return errors
+
+
+def _quoted_version_errors(relative: str, pattern: str, text: str, version: str) -> list[str]:
+    """Require every version a document quotes through ``pattern`` to be ``version``."""
+
+    quoted = sorted(set(re.findall(pattern, text)))
+    if quoted != [version]:
+        found = ", ".join(quoted) or "none"
+        return [f"{relative} must quote the release version {version}; found {found}"]
+    return []
 
 
 def _readme_status_errors(text: str) -> list[str]:
@@ -183,6 +199,13 @@ def check_release(*, tag: str = "") -> list[str]:
     errors.extend(_readme_status_errors(readme))
     errors.extend(_workflow_pin_errors())
     errors.extend(_release_workflow_errors())
+    for relative, pattern in QUOTED_VERSION_DOCUMENTS:
+        try:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"{relative} is missing or unreadable: {exc}")
+            continue
+        errors.extend(_quoted_version_errors(relative, pattern, text, project_version))
 
     packages = server.get("packages")
     pypi_packages = [

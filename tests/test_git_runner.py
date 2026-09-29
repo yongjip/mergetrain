@@ -2116,6 +2116,36 @@ deploy:
                 result.deploy_sha,
             )
 
+    def test_deploy_lands_on_every_push_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            remote = root / "remote.git"
+            git(repo, "push", "origin", "main:release")
+            config_path = repo / ".mergetrain.yaml"
+            text = config_path.read_text(encoding="utf-8")
+            two_refs = text.replace("  push_refs:\n    - main\n", "  push_refs:\n    - main\n    - release\n")
+            self.assertNotEqual(two_refs, text, "fixture no longer lists push_refs as expected")
+            config_path.write_text(two_refs, encoding="utf-8")
+            config = load_config(repo=repo)
+            self.assertEqual(config.git.push_refs, ("main", "release"))
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                result = GitRunner(config).process_batch(conn, [job], deploy=True)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "deployed")
+            self.assertEqual(result.push_status, "succeeded")
+            # One atomic push moves every configured ref, and its audit ref.
+            self.assertEqual(git(remote, "rev-parse", "main"), result.deploy_sha)
+            self.assertEqual(git(remote, "rev-parse", "release"), result.deploy_sha)
+            self.assertEqual(
+                git(remote, "rev-parse", deploy_audit_ref_name(result.deploy_sha)),
+                result.deploy_sha,
+            )
+
     def test_conflicting_deploy_audit_ref_is_never_rewritten(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

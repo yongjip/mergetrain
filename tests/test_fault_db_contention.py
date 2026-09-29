@@ -5,7 +5,7 @@ that tells an agent *the branch is at fault* — rebase it on the integration re
 and enqueue a new job. Writer contention is not the branch's fault: it means a
 second process (a concurrent ``enqueue``, a hub write, another repo's runner
 sharing the state dir) held SQLite's single write lock longer than
-``PRAGMA busy_timeout`` (``store.connect`` sets 5000 ms). Nothing crashed and
+``PRAGMA busy_timeout`` (``persistence.connection.connect`` sets 5000 ms). Nothing crashed and
 nothing is wrong with the code being shipped, so the honest outcome is a
 *retryable* one: raise a ``QueueError`` the CLI maps to ``error.code`` /
 ``lock_held`` / ``lost_lease``, or park the job somewhere non-terminal that a
@@ -79,7 +79,7 @@ from mergetrain.recovery import reconcile
 
 # Short enough that a contended write fails fast, long enough that the holder
 # thread has genuinely parked on the lock rather than racing the runner. The
-# production value is 5000 ms (store.connect); the defect under test is how the
+# production value is 5000 ms (persistence.connection.connect); the defect under test is how the
 # resulting OperationalError is *classified*, not how long it waits.
 CONTENDED_BUSY_TIMEOUT_MS = 250
 
@@ -398,7 +398,7 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
     # `status --json` and the dashboard, so this reports a *failed verification*
     # on a repo that has none — sending an operator hunting a hook that does not
     # exist. The vocabulary already has the honest answer: models.py:14 lists
-    # 'unknown', and store.py:646 has a reconcile query keyed on
+    # 'unknown', and persistence.jobs.list_verify_unknown_jobs queries
     # `status='deployed' AND verify_status='unknown'` for exactly the "we could
     # not determine it" case. 'not_configured' (unchanged) or 'unknown' are both
     # honest here; 'failed' is not.

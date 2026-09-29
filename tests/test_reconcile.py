@@ -24,7 +24,6 @@ from unittest.mock import patch
 # (python -m unittest tests.test_reconcile) resolves the import too.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mergetrain.atomic_push import AtomicPush
 from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
@@ -1103,11 +1102,11 @@ class LateLandingTests(unittest.TestCase):
             patch.object(runner._pushes, "push_verified_head", side_effect=land_then_push),
         )
 
-        # The remote refused the new push only because main already carries
+        # The remote refused the new push only because main moved to carry
         # the job, so it goes back to the queue instead of reading blocked.
         requeued = get_job(conn, job_id)
         self.assertEqual(requeued.status, "queued")
-        self.assertIn("already contain every job of this train", requeued.note)
+        self.assertIn("integration branch moved after this train was built", requeued.note)
         self.assertEqual(git(root / "remote.git", "rev-parse", "main"), earlier)
 
         self._deploy(config, conn, runner)
@@ -1116,33 +1115,82 @@ class LateLandingTests(unittest.TestCase):
         self.assertEqual(job.status, "deployed")
         self.assertEqual(job.deploy_sha, earlier)
 
-    def test_containment_fails_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo, _ = make_demo_repo(root)
-            config = load_config(repo=repo)
-            push = AtomicPush(config)
-            destination = resolve_git_destination(config)
-            base = git(repo, "rev-parse", "main")
-            task = git(repo, "rev-parse", "feature/a")
+    def _refusing_remote_that_already_holds_the_job(self, hook_body: str):  # type: ignore[no-untyped-def]
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        repo, marker = make_demo_repo(root)
+        # Someone merged feature/a by hand, so main already contains the job.
+        git(repo, "merge", "--no-ff", "-m", "manual merge of a", "feature/a")
+        git(repo, "push", "origin", "main")
+        hook = root / "remote.git" / "hooks" / "pre-receive"
+        hook.write_text(hook_body, encoding="utf-8", newline="\n")
+        hook.chmod(0o755)
+        config = load_config(repo=repo)
+        conn = connect(config.state.db)
+        self.addCleanup(conn.close)
+        job = enqueue_job(conn, task="a", branch="feature/a")
+        return config, conn, GitRunner(config), job.id, marker
 
-            def contains(commits: list[str]) -> bool:
-                return push.contains_commits(commits, destination=destination, log=None)
+    def test_a_refusal_that_repeats_blocks_instead_of_requeueing(self) -> None:
+        # The branch did not move under the train: requeueing could only
+        # rebuild the same train and be refused again, forever.
+        config, conn, runner, job_id, marker = self._refusing_remote_that_already_holds_the_job(
+            "#!/bin/sh\necho 'deploy freeze in effect' >&2\nexit 1\n"
+        )
 
-            self.assertTrue(contains([base]))
-            self.assertFalse(contains([task]))
-            self.assertFalse(contains([]))
-            self.assertFalse(contains([base, ""]))
-            # A remote tip this clone has never fetched proves nothing.
-            other = root / "other"
-            git(root, "clone", "-b", "main", str(root / "remote.git"), str(other))
-            git(other, "config", "user.email", "other@example.invalid")
-            git(other, "config", "user.name", "Other")
-            (other / "other.txt").write_text("other\n", encoding="utf-8")
-            git(other, "add", "other.txt")
-            git(other, "commit", "-m", "other")
-            git(other, "push", "origin", "main")
-            self.assertFalse(contains([base]))
+        self._deploy(config, conn, runner)
+
+        job = get_job(conn, job_id)
+        self.assertEqual(job.status, "blocked")
+        self.assertIn("remote definitively rejected the push", job.note)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "x")
+
+    def test_a_refused_audit_ref_blocks_although_main_holds_the_job(self) -> None:
+        config, conn, runner, job_id, _marker = self._refusing_remote_that_already_holds_the_job(
+            "#!/bin/sh\n"
+            "while read old new ref; do\n"
+            "  case \"$ref\" in refs/mergetrain/*) echo 'audit refs are protected' >&2; exit 1;; esac\n"
+            "done\n"
+            "exit 0\n"
+        )
+
+        self._deploy(config, conn, runner)
+
+        self.assertEqual(get_job(conn, job_id).status, "blocked")
+
+    def test_the_moved_branch_check_fails_closed(self) -> None:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        repo, _ = make_demo_repo(root)
+        worktrees = GitRunner(load_config(repo=repo))._worktrees
+        base = git(repo, "rev-parse", "main")
+        task = git(repo, "rev-parse", "feature/a")
+
+        def moved_to_contain(commits: list[str], base_sha: str) -> bool:
+            return worktrees.integration_moved_to_contain(
+                commits, base_sha=base_sha, log=None, pulse=None
+            )
+
+        # Not moved, nothing to check, or no base to compare with.
+        self.assertFalse(moved_to_contain([base], base))
+        self.assertFalse(moved_to_contain([], "0" * 40))
+        self.assertFalse(moved_to_contain([base, ""], "0" * 40))
+        self.assertFalse(moved_to_contain([base], ""))
+        # Main moves on without the task: moved, but it does not hold the job.
+        (repo / "main.txt").write_text("main\n", encoding="utf-8")
+        git(repo, "add", "main.txt")
+        git(repo, "commit", "-m", "main moves on")
+        git(repo, "push", "origin", "main")
+        self.assertFalse(moved_to_contain([task], base))
+        # Main moves to hold the task: the next train starts from it.
+        git(repo, "merge", "--no-ff", "-m", "merge a", "feature/a")
+        git(repo, "push", "origin", "main")
+        self.assertTrue(moved_to_contain([task], base))
+        # A remote it cannot fetch proves nothing.
+        git(repo, "remote", "set-url", "origin", str(root / "missing.git"))
+        self.assertFalse(moved_to_contain([task], base))
 
 
 class DeployGateTests(unittest.TestCase):

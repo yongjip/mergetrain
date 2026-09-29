@@ -89,8 +89,10 @@ the same reviewed change rather than bypassing the check.
 ### Snapshot cache ownership
 
 `dashboard.py` and `hub.py` share the internal `snapshot_cache.py` read-model
-primitive; its only core dependency is `store.connect`. These explicit adapter
-edges are allowed by the architecture checker. Each cached repository owns one
+primitive; its only core dependency is `persistence.connection.connect`. `hub.py`
+also reads runner leases through `persistence.leases` and
+`persistence.transactions`. These explicit adapter edges are allowed by the
+architecture checker. Each cached repository owns one
 read-only connection, serialized across HTTP threads, and compares SQLite
 `PRAGMA data_version` on that same connection. File size is not commit evidence:
 SQLite can reuse a checkpointed WAL without growing it. Database file identity
@@ -343,8 +345,7 @@ layer, or re-export façade:
 Dependencies flow from the small transaction/schema primitives toward jobs,
 leases, events, and recovery, then into `claims.py` where an operation genuinely
 needs several boundaries atomically. Persistence modules do not depend on CLI,
-dashboard, Git, or runner orchestration concerns. The compatibility façade does
-not add policy or hide transactions.
+dashboard, Git, or runner orchestration concerns.
 
 ## Job lifecycle
 

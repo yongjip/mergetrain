@@ -125,8 +125,10 @@ read the remote and requeued the job. That late push never overwrites anything
 newer, because a ref moves only while it still has the value the push expected.
 The job's next deploy finds its commits on the remote and records the
 deployment. If the late push lands while that deploy is under way, the remote
-refuses the new push; because the remote already contains every job of the
-train, mergetrain requeues the jobs again instead of blocking them.
+refuses the new push. Because the integration branch then moved to a commit
+that already contains every job of the train, mergetrain requeues the jobs
+instead of blocking them, and the next train starts from that commit. A
+refusal on a branch that did not move still blocks the jobs.
 
 When `git push` exits with a status of its own while the runner is still there,
 it has already waited for the processes that do the push, so the runner releases
@@ -187,7 +189,7 @@ depends only on how far the deploy got before the contention:
 | after the marker, push outcome unknown | `in_progress` with its marker and pin ref | `needs_reconcile`, then the remote decides |
 | after the refs landed | finalized `deployed` with a warning | nothing to do |
 
-The split is made by `store.recover_orphans` from **durable evidence** (is there
+The split is made by `persistence.leases.recover_orphans` from **durable evidence** (is there
 a marker?), never from what the failing run believed — an in-memory push status
 can belong to a different frame, or describe a marker write that never committed.
 

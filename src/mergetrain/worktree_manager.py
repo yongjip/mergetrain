@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import IO
 
@@ -250,3 +251,48 @@ class WorktreeManager:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         return False
+
+    def integration_moved_to_contain(
+        self,
+        commits: Sequence[str],
+        *,
+        base_sha: str,
+        log: IO[str] | None,
+        pulse: Pulse | None,
+    ) -> bool:
+        """Whether the integration ref moved past ``base_sha`` and holds ``commits``.
+
+        Fetches first, as the next train would, so a yes means that train
+        starts from a tip that already contains every commit. Any failure
+        reads as no.
+        """
+
+        if not base_sha or not commits or not all(commits):
+            return False
+        fetched = run_command(
+            ["git", "fetch", self.config.git.remote],
+            cwd=self.repo,
+            log=log,
+            check=False,
+            pulse=pulse,
+            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+            timeout_seconds=self.config.queue.command_timeout_seconds,
+        )
+        tip = run_command(
+            ["git", "rev-parse", "--verify", "--quiet", f"{self.config.git.integration_ref}^{{commit}}"],
+            cwd=self.repo,
+            check=False,
+        )
+        tip_sha = tip.stdout.strip()
+        if fetched.returncode != 0 or tip.returncode != 0 or tip_sha in {"", base_sha}:
+            return False
+        return all(
+            run_command(
+                ["git", "merge-base", "--is-ancestor", commit, tip_sha],
+                cwd=self.repo,
+                log=log,
+                check=False,
+            ).returncode
+            == 0
+            for commit in commits
+        )

@@ -3,13 +3,16 @@
 ## Unreleased
 
 - Requeue a deploy instead of blocking it when the remote refuses its push
-  but already contains every job of the train. On a network remote, an earlier
-  push of the same jobs that reconcile found had not landed can still land
-  later. When it landed while the requeued jobs were being deployed again, it
-  moved main, the remote refused the new push as non-fast-forward, and the jobs
-  were left `blocked` as if the remote had rejected them, although their code
-  was live. They now go back to the queue, and their next deploy finds them
-  merged and records the deployment.
+  because the integration branch moved, after the train was built, to a commit
+  that already contains every job of the train. On a network remote, an
+  earlier push of the same jobs that reconcile found had not landed can still
+  land later. When it landed while the requeued jobs were being deployed again,
+  it moved main, the remote refused the new push as non-fast-forward, and the
+  jobs were left `blocked` as if the remote had rejected them, although their
+  code was live. They now go back to the queue, and their next train, built on
+  the moved branch, finds them merged and records the deployment. A refusal on
+  a branch that did not move still blocks, so a remote that keeps refusing
+  cannot requeue the jobs forever.
 
 ## 3.2.0 - 2026-09-29
 
@@ -35,10 +38,11 @@
   the push is left. The killed-runner scenarios now also run on Windows, where
   the push's named Job Object plays the lock's part.
 - Remove the `mergetrain.store` module. It only re-exported functions from the
-  `mergetrain.persistence` modules for older imports, and no Python import API
-  was promised; import from the `mergetrain.persistence` module that owns the
-  function instead. The CLI, MCP tools, JSON contract, and config schema are
-  unchanged.
+  `mergetrain.persistence` modules for older imports. The 3.1.1 design notes
+  still called it the stable import surface, and it is removed without a
+  deprecation period; import from the `mergetrain.persistence` module that owns
+  the function instead. The CLI, MCP tools, JSON contract, and config schema
+  are unchanged.
 - Simplify internals without changing behavior. `GitRunner` drops 27 methods
   that only forwarded to its helpers; the queue claims share one
   implementation; `Job` reads and serializes its row from the dataclass fields;
