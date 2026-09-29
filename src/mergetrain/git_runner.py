@@ -51,7 +51,7 @@ from .store import (
     refresh_runner_lock,
     utc_now,
 )
-from .validation_reuse import ValidationReuse
+from .validation_reuse import ValidationReuse, unauthorized_reuse_decision
 from .worktree_manager import WorktreeManager
 
 Pulse = Callable[[], None]
@@ -332,7 +332,6 @@ class GitRunner:
         *,
         worktree: Path,
         integration_base_sha: str,
-        authorized: bool,
         log: IO[str],
         pulse: Pulse | None,
     ) -> ReuseDecision:
@@ -340,39 +339,17 @@ class GitRunner:
             jobs,
             worktree=worktree,
             integration_base_sha=integration_base_sha,
-            authorized=authorized,
             log=log,
             pulse=pulse,
         )
 
-    def preview_validated_reuse(
-        self,
-        jobs: Sequence[Job],
-        *,
-        authorized: bool = False,
-    ) -> ReuseDecision:
+    def preview_validated_reuse(self, jobs: Sequence[Job]) -> ReuseDecision:
         """Evaluate reuse without claiming jobs, running gates, or pushing refs."""
 
-        reuse_authorized = authorized or self.config.deploy.reuse.enabled
+        if not self.config.deploy.reuse.enabled:
+            return unauthorized_reuse_decision(jobs)
         validation_shas = {job.validation_sha for job in jobs if job.validation_sha}
         validation_sha = next(iter(validation_shas)) if len(validation_shas) == 1 else ""
-        if not reuse_authorized:
-            return ReuseDecision(
-                authorized=False,
-                eligible=False,
-                action="rerun",
-                validation_sha=validation_sha,
-                reasons=("validated gate reuse is not authorized",),
-                checks=(
-                    ReuseCheck(
-                        code="authorization",
-                        status="mismatch",
-                        expected=True,
-                        actual=False,
-                        detail="validated gate reuse is not authorized",
-                    ),
-                ),
-            )
         self._ensure_state_dirs()
         worktree = self._worktree_path(jobs[0].id if jobs else 0)
         log = io.StringIO()
@@ -384,7 +361,6 @@ class GitRunner:
                 jobs,
                 worktree=worktree,
                 integration_base_sha=git_rev_parse(worktree, "HEAD"),
-                authorized=True,
                 log=log,
                 pulse=None,
             )
@@ -596,7 +572,6 @@ class GitRunner:
         state: _PushVerifyState,
         event_job_id: int | None = None,
         expected_plan_sha: str = "",
-        reuse_validated: bool = False,
     ) -> None:
         current_jobs = [get_job(conn, job_id) for job_id in job_ids]
         approved_destinations = {
@@ -642,7 +617,6 @@ class GitRunner:
             current_plan_sha = deploy_plan_sha(
                 current_config,
                 current_jobs,
-                reuse_validated=reuse_validated,
                 destination=destination,
             )
             if current_plan_sha != expected_plan_sha:
@@ -1136,7 +1110,6 @@ class GitRunner:
         keep_worktree: bool = False,
         owner: str | None = None,
         ttl_minutes: int = 30,
-        reuse_validated: bool = False,
         expected_plan_sha: str = "",
     ) -> list[Job]:
         jobs = list(jobs)
@@ -1159,7 +1132,7 @@ class GitRunner:
         deploy_state = _PushVerifyState()
         reused_validation_sha = ""
         reuse_fallback_reason = ""
-        reuse_authorized = reuse_validated or self.config.deploy.reuse.enabled
+        reuse_authorized = self.config.deploy.reuse.enabled
 
         def pulse(*, check_cancel: bool = True) -> None:
             self._refresh_lease(
@@ -1326,7 +1299,6 @@ class GitRunner:
                             jobs,
                             worktree=worktree,
                             integration_base_sha=integration_base_sha,
-                            authorized=True,
                             log=log,
                             pulse=normal_pulse,
                         )
@@ -1635,7 +1607,6 @@ class GitRunner:
                         state=deploy_state,
                         event_job_id=event_job_id,
                         expected_plan_sha=expected_plan_sha,
-                        reuse_validated=reuse_validated,
                     )
                 status = "deployed" if deploy else "validated"
                 note = deploy_state.warning or (

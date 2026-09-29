@@ -225,10 +225,6 @@ class DeployExecutionPolicyShaTests(unittest.TestCase):
                 )
             ),
         )
-        self.assertNotEqual(
-            baseline,
-            deploy_execution_policy_sha(config, reuse_validated=True),
-        )
 
     def test_operational_poll_interval_is_not_an_execution_policy_input(self) -> None:
         config = _config()

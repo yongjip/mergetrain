@@ -1712,7 +1712,7 @@ deploy:
             root = Path(td)
             verify_marker = root / "verify.txt"
             verify = f"{SHELL_PYTHON} -c \"from pathlib import Path; Path('{py_path(verify_marker)}').write_text('verified')\""
-            repo, marker = make_demo_repo(root, verify_command=verify)
+            repo, marker = make_demo_repo(root, verify_command=verify, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -1723,7 +1723,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
                 events = list_run_events(conn)
             finally:
@@ -1746,7 +1745,7 @@ deploy:
     def test_path_skipped_gate_remains_skipped_during_exact_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root, gate_paths=("src/**",))
+            repo, marker = make_demo_repo(root, gate_paths=("src/**",), reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -1757,7 +1756,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
                 events = list_run_events(conn)
             finally:
@@ -1777,7 +1775,7 @@ deploy:
     def test_reuse_runs_scoped_gate_when_path_discovery_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root, gate_paths=("src/**",))
+            repo, marker = make_demo_repo(root, gate_paths=("src/**",), reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -1792,7 +1790,6 @@ deploy:
                         conn,
                         [validated],
                         deploy=True,
-                        reuse_validated=True,
                     )[0]
             finally:
                 conn.close()
@@ -2438,7 +2435,7 @@ deploy:
     def test_validated_batch_deploys_after_integration_ref_moves(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root)
+            repo, marker = make_demo_repo(root, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -2458,7 +2455,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
                 events = list_run_events(conn)
             finally:
@@ -2481,7 +2477,7 @@ deploy:
     def test_changed_branch_head_blocks_validated_train(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root)
+            repo, marker = make_demo_repo(root, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -2496,7 +2492,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
             finally:
                 conn.close()
@@ -2515,7 +2510,7 @@ deploy:
             second_marker = root / "second-gate.txt"
             first_gate = f"{SHELL_PYTHON} -c \"from pathlib import Path; Path('{py_path(first_marker)}').write_text('x')\""
             second_gate = f"{SHELL_PYTHON} -c \"from pathlib import Path; Path('{py_path(second_marker)}').write_text('y')\""
-            repo, _marker = make_demo_repo(root, gate_command=first_gate)
+            repo, _marker = make_demo_repo(root, gate_command=first_gate, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -2530,7 +2525,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
                 events = list_run_events(conn)
             finally:
@@ -2548,7 +2542,7 @@ deploy:
     def test_missing_validation_commit_falls_back_to_full_gates(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root)
+            repo, marker = make_demo_repo(root, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -2564,7 +2558,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
                 events = list_run_events(conn)
             finally:
@@ -2581,7 +2574,7 @@ deploy:
     def test_stale_validation_falls_back_to_full_gates(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            repo, marker = make_demo_repo(root, reuse_max_age_minutes=1)
+            repo, marker = make_demo_repo(root, reuse_max_age_minutes=1, reuse_enabled=True)
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
@@ -2597,7 +2590,6 @@ deploy:
                     conn,
                     [validated],
                     deploy=True,
-                    reuse_validated=True,
                 )[0]
                 events = list_run_events(conn)
             finally:
@@ -2616,6 +2608,7 @@ deploy:
             root = Path(td)
             repo, marker = make_demo_repo(
                 root,
+                reuse_enabled=True,
                 reuse_max_age_minutes=1,
                 reuse_on_mismatch="fail",
             )
@@ -2642,7 +2635,6 @@ deploy:
                     claimed,
                     deploy=True,
                     owner=owner,
-                    reuse_validated=True,
                 )[0]
             finally:
                 if token:

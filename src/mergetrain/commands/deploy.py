@@ -134,7 +134,6 @@ def _execute_batch(
                     current_plan_sha = deploy_plan_sha(
                         config,
                         selected_jobs,
-                        reuse_validated=False,
                     )
                     # Bytes: compare_digest refuses a str with non-ASCII text,
                     # and the hidden flag accepts any string.
@@ -178,7 +177,6 @@ def _execute_batch(
                 keep_worktree=args.keep_worktree,
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
-                reuse_validated=False,
                 expected_plan_sha=expected_plan,
             )
             payload = _results_payload(results)
@@ -299,8 +297,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
                     keep_worktree=args.keep_worktree,
                     owner=owner,
                     ttl_minutes=config.queue.lock_ttl_minutes,
-                    reuse_validated=False,
-                    expected_plan_sha="",
+                        expected_plan_sha="",
                 )
                 validation_payload = _results_payload(results)
         finally:
@@ -328,12 +325,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         conn.close()
     if selected is None or not jobs:
         raise QueueError("no validated train is ready to deploy")
-    decision = GitRunner(config).preview_validated_reuse(jobs, authorized=False)
+    decision = GitRunner(config).preview_validated_reuse(jobs)
     destination = resolve_git_destination(config)
     plan_sha = deploy_plan_sha(
         config,
         jobs,
-        reuse_validated=False,
         destination=destination,
     )
     preview = {

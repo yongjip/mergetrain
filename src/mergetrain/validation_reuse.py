@@ -80,15 +80,13 @@ class ValidationReuse:
         *,
         worktree: Path,
         integration_base_sha: str,
-        authorized: bool,
         log: IO[str],
         pulse: Pulse | None,
     ) -> ReuseDecision:
+        """Decide reuse for a train whose reuse the config already authorizes."""
+
         validation_shas = {job.validation_sha for job in jobs if job.validation_sha}
         validation_sha = next(iter(validation_shas)) if len(validation_shas) == 1 else ""
-        if not authorized:
-            return unauthorized_reuse_decision(jobs)
-
         reasons: list[str] = []
         checks: list[ReuseCheck] = [
             ReuseCheck(

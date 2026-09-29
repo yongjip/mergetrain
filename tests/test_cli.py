@@ -2134,7 +2134,8 @@ class CliTests(unittest.TestCase):
                 },
             )
             self.assertEqual(payload["reuse"]["evaluation"], "exact")
-            self.assertEqual(payload["reuse"]["estimated_savings"]["mode"], "unavailable")
+            # Unauthorized reuse is a potential saving, whatever the reason text.
+            self.assertEqual(payload["reuse"]["estimated_savings"]["mode"], "potential")
             self.assertFalse(payload["reuse"]["estimated_savings"]["authorizes_reuse"])
             self.assertEqual(payload["warnings"][0]["code"], "no_configured_gates")
             self.assertNotIn("confirmed_command", payload)

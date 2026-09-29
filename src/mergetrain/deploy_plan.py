@@ -29,18 +29,17 @@ def deploy_destination_sha(config: MergetrainConfig) -> str:
     return resolve_git_destination(config).destination_sha
 
 
-def _execution_policy_identity(
-    config: MergetrainConfig,
-    *,
-    reuse_validated: bool,
-) -> dict[str, Any]:
+def _execution_policy_identity(config: MergetrainConfig) -> dict[str, Any]:
     """Return the configured QA/deploy policy that an approval authorizes."""
 
     return {
         "version": 1,
         "gate_policy_sha": gate_policy_sha(config),
         "reuse": {
-            "authorized": bool(reuse_validated),
+            # A frozen hash input. It recorded a per-call authorization flag
+            # that no longer exists; changing it would invalidate stored
+            # --auto approvals and confirmed plan hashes.
+            "authorized": False,
             "configured": config.deploy.reuse.enabled,
             "max_age_minutes": config.deploy.reuse.max_age_minutes,
             "on_mismatch": config.deploy.reuse.on_mismatch,
@@ -56,16 +55,10 @@ def _execution_policy_identity(
     }
 
 
-def deploy_execution_policy_sha(
-    config: MergetrainConfig,
-    *,
-    reuse_validated: bool = False,
-) -> str:
-    """Hash the configured gates, reuse authorization, and verify hooks."""
+def deploy_execution_policy_sha(config: MergetrainConfig) -> str:
+    """Hash the configured gates, reuse policy, and verify hooks."""
 
-    return _sha256_json(
-        _execution_policy_identity(config, reuse_validated=reuse_validated)
-    )
+    return _sha256_json(_execution_policy_identity(config))
 
 
 def verification_policy_sha(config: MergetrainConfig) -> str:
@@ -92,7 +85,6 @@ def deploy_plan_sha(
     config: MergetrainConfig,
     jobs: Iterable[Job],
     *,
-    reuse_validated: bool = False,
     destination: ResolvedGitDestination | None = None,
 ) -> str:
     """Hash the exact train, destination, and policy shown for approval."""
@@ -105,9 +97,6 @@ def deploy_plan_sha(
             "destination_sha": (
                 destination or resolve_git_destination(config)
             ).destination_sha,
-            "execution_policy": _execution_policy_identity(
-                config,
-                reuse_validated=reuse_validated,
-            ),
+            "execution_policy": _execution_policy_identity(config),
         }
     )

@@ -192,12 +192,7 @@ def _reuse_gate_plan(
             for gate in effective_gates(config)
         ],
     ]
-    authorization_only = bool(
-        exact
-        and decision is not None
-        and not decision.authorized
-        and decision.reasons == ("validated gate reuse is not authorized",)
-    )
+    authorization_only = bool(exact and decision is not None and not decision.authorized)
     for gate in gates:
         paths = tuple(gate["paths"])
         always_rerun = bool(gate["always_rerun"])
@@ -367,21 +362,12 @@ def reuse_explanation(
         checks = [check.to_dict() for check in decision.checks]
         evaluation = decision.evaluation
 
-    estimate_mode = (
-        "exact"
-        if decision is not None and decision.eligible
-        else (
-            "potential"
-            if decision is None
-            or (
-                decision is not None
-                and not decision.authorized
-                and decision.reasons
-                == ("validated gate reuse is not authorized",)
-            )
-            else "unavailable"
-        )
-    )
+    if decision is not None and decision.eligible:
+        estimate_mode = "exact"
+    elif decision is None or not decision.authorized:
+        estimate_mode = "potential"
+    else:
+        estimate_mode = "unavailable"
     if estimate_mode == "unavailable":
         estimate = 0.0
         confidence = "none"
