@@ -16,7 +16,9 @@ people who depend on it.
   `## Unreleased` and leave every version string alone. Only the
   release-preparation change bumps the version, once for everything pending:
   it turns `## Unreleased` into the dated heading and updates every version
-  surface that `scripts/check_release.py` checks. `.gitattributes` merges
+  surface that `scripts/check_release.py` checks, including the version that
+  `docs/contract.md` and the Claude plugin README quote, and the pin in
+  `tests/test_mcp_registry_launch.py`. `.gitattributes` merges
   `CHANGELOG.md` with Git's union driver, so entries added by parallel
   branches do not conflict.
 - Ship a patch release promptly only for a regression in the latest release, a
@@ -73,10 +75,11 @@ python -m pytest -q
 python scripts/check_release.py --tag v0.1.0
 python -m build
 python -m twine check --strict dist/*
-python -m venv /tmp/mergetrain-smoke
-/tmp/mergetrain-smoke/bin/python -m pip install dist/mergetrain-0.1.0-py3-none-any.whl
-/tmp/mergetrain-smoke/bin/python -c "import mergetrain, pathlib; assert pathlib.Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()"
-/tmp/mergetrain-smoke/bin/mergetrain demo --brief
+smoke="$(mktemp -d)/venv"
+python -m venv "$smoke"
+"$smoke/bin/python" -m pip install dist/mergetrain-0.1.0-py3-none-any.whl
+"$smoke/bin/python" -c "import mergetrain, pathlib; assert pathlib.Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()"
+"$smoke/bin/mergetrain" demo --brief
 bash scripts/check_sdist.sh dist/mergetrain-0.1.0.tar.gz
 ```
 

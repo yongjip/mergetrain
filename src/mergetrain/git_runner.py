@@ -1391,7 +1391,7 @@ class GitRunner:
                 # the batch and not the job that actually pushed. Leaving the
                 # rows as the last successful write left them makes contention
                 # indistinguishable from a crash at the same instant, which
-                # store.recover_orphans settles from the durable marker.
+                # persistence.leases.recover_orphans settles from the durable marker.
                 if deploy_state.push_status != "succeeded":
                     raise
                 return finish_active_after_error(status="deployed", note=str(exc))

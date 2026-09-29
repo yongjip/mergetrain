@@ -189,7 +189,7 @@ depends only on how far the deploy got before the contention:
 | after the marker, push outcome unknown | `in_progress` with its marker and pin ref | `needs_reconcile`, then the remote decides |
 | after the refs landed | finalized `deployed` with a warning | nothing to do |
 
-The split is made by `store.recover_orphans` from **durable evidence** (is there
+The split is made by `persistence.leases.recover_orphans` from **durable evidence** (is there
 a marker?), never from what the failing run believed — an in-memory push status
 can belong to a different frame, or describe a marker write that never committed.
 

@@ -7,7 +7,7 @@ understand?" from one integer comparison.
 
 This is deliberately **separate** from the product ``__version__`` (which bumps
 for unrelated reasons) and from the SQLite ``SCHEMA_VERSION``. It mirrors the
-one-number-per-artifact discipline of ``store.SCHEMA_VERSION`` and
+one-number-per-artifact discipline of ``persistence.schema.SCHEMA_VERSION`` and
 ``registry.REGISTRY_VERSION``.
 
 Compatibility rule (enforced by ``tests/test_contract_fingerprints.py`` once it

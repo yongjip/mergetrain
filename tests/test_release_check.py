@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 
 from scripts.check_release import (
+    QUOTED_VERSION_DOCUMENTS,
     SECURITY_SUPPORT_POLICY,
+    _quoted_version_errors,
     _readme_status_errors,
     _release_workflow_errors,
     _security_policy_errors,
@@ -63,6 +65,25 @@ class ReleaseManifestTests(unittest.TestCase):
 
     def test_current_release_metadata_is_self_consistent(self) -> None:
         self.assertEqual(check_release(), [])
+
+    def test_documents_that_quote_the_version_must_quote_the_release(self) -> None:
+        for relative, pattern in QUOTED_VERSION_DOCUMENTS:
+            with self.subTest(relative=relative):
+                current = "9.9.9"
+                sample = {
+                    "docs/contract.md": "mergetrain {} uses machine contract **4**.",
+                    "integrations/claude/plugin/README.md": "uvx --from 'mergetrain[mcp]=={}'",
+                }[relative]
+                self.assertEqual(
+                    _quoted_version_errors(relative, pattern, sample.format(current), current),
+                    [],
+                )
+                self.assertTrue(
+                    _quoted_version_errors(relative, pattern, sample.format("9.9.8"), current)
+                )
+                self.assertTrue(_quoted_version_errors(relative, pattern, "no version", current))
+                both = sample.format(current) + "\n" + sample.format("9.9.8")
+                self.assertTrue(_quoted_version_errors(relative, pattern, both, current))
 
     def test_release_workflow_is_main_rooted_before_building(self) -> None:
         root = Path(__file__).resolve().parents[1]

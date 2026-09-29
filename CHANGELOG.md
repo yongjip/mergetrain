@@ -38,10 +38,11 @@
   the push is left. The killed-runner scenarios now also run on Windows, where
   the push's named Job Object plays the lock's part.
 - Remove the `mergetrain.store` module. It only re-exported functions from the
-  `mergetrain.persistence` modules for older imports, and no Python import API
-  was promised; import from the `mergetrain.persistence` module that owns the
-  function instead. The CLI, MCP tools, JSON contract, and config schema are
-  unchanged.
+  `mergetrain.persistence` modules for older imports. The 3.1.1 design notes
+  still called it the stable import surface, and it is removed without a
+  deprecation period; import from the `mergetrain.persistence` module that owns
+  the function instead. The CLI, MCP tools, JSON contract, and config schema
+  are unchanged.
 - Simplify internals without changing behavior. `GitRunner` drops 27 methods
   that only forwarded to its helpers; the queue claims share one
   implementation; `Job` reads and serializes its row from the dataclass fields;

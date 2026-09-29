@@ -23,7 +23,7 @@ DEFAULT_CONFIG_NAME = ".mergetrain.yaml"
 
 # Schema version of `.mergetrain.yaml` (issue #44). A file with no `version:`
 # key is treated as version 1 (every file written before versioning existed).
-# Mirrors store.SCHEMA_VERSION / registry.REGISTRY_VERSION: one integer per
+# Mirrors persistence.schema.SCHEMA_VERSION / registry.REGISTRY_VERSION: one integer per
 # artifact, forward-only. Enforcement of a too-new config is command-scoped
 # (the deploy/enqueue path fails closed; recovery and read-only commands stay
 # permissive) — not done inside load_config, so a version mismatch after a
