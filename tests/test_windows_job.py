@@ -10,6 +10,7 @@ import time
 import unittest
 from pathlib import Path
 
+from mergetrain.command_runner import run_command
 from mergetrain.windows_job import CREATE_SUSPENDED, WindowsJob, named_job_active
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
@@ -90,6 +91,42 @@ class WindowsJobTests(unittest.TestCase):
         while named_job_active(name):
             self.assertLess(time.monotonic(), deadline, "the command never finished")
             time.sleep(0.1)
+
+    def test_a_named_job_stays_findable_while_a_process_outlives_its_command(self) -> None:
+        # A local receive-pack can outlive a git push killed on its own and
+        # still land the push. It holds no handle to the job, and Windows
+        # drops a name with its last handle, so the job has to stay findable
+        # for as long as any process of it runs.
+        name = f"Local\\mergetrain-test-{os.getpid()}-{time.monotonic_ns()}"
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            started = Path(td) / "descendant-started"
+            descendant = (
+                f"import pathlib, time; pathlib.Path({str(started)!r}).touch(); time.sleep(10)"
+            )
+            # The command starts the descendant, then dies without a clean exit.
+            command = (
+                "import os, subprocess, sys; "
+                f"subprocess.Popen([sys.executable, '-c', {descendant!r}], "
+                "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+                "stderr=subprocess.DEVNULL); os._exit(1)"
+            )
+            completed = run_command(
+                [sys.executable, "-c", command],
+                cwd=tempfile.gettempdir(),
+                check=False,
+                job_name=name,
+            )
+            self.assertEqual(completed.returncode, 1)
+            deadline = time.monotonic() + 30
+            while not started.exists():
+                self.assertLess(time.monotonic(), deadline, "the descendant never started")
+                time.sleep(0.05)
+
+            self.assertTrue(named_job_active(name), "the job's name died with its command")
+            deadline = time.monotonic() + 30
+            while named_job_active(name):
+                self.assertLess(time.monotonic(), deadline, "the descendant never finished")
+                time.sleep(0.1)
 
 
 if __name__ == "__main__":
