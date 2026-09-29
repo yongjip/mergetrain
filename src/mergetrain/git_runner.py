@@ -31,6 +31,7 @@ from .errors import (
     LostLease,
     MergeBlocked,
     MergetrainError,
+    PushRejected,
     QueueBusy,
 )
 from .gate_runner import GateProgress, GateRunner
@@ -54,6 +55,15 @@ Pulse = Callable[[], None]
 
 class _BisectAbort(Exception):
     """Bisect isolation cannot classify the failure from gate evidence."""
+
+
+class _AlreadyLanded(PushRejected):
+    """The remote refused the push, but its push refs hold every job of the train.
+
+    Nothing of the refused push landed, so the jobs go back to the queue, and
+    their next deploy finds them merged and records the deployment. Anything
+    that does not expect it treats it as the push rejection it also is.
+    """
 
 
 class GitRunner:
@@ -312,6 +322,7 @@ class GitRunner:
         state: _PushVerifyState,
         event_job_id: int | None = None,
         expected_plan_sha: str = "",
+        task_commits: Sequence[str] = (),
     ) -> None:
         current_jobs = [get_job(conn, job_id) for job_id in job_ids]
         approved_destinations = {
@@ -365,21 +376,37 @@ class GitRunner:
                     "reuse, or verify policy changed before push; nothing was pushed"
                 )
         self._gates.check_verify_hooks(worktree=worktree)
-        self._pushes.deploy_and_verify(
-            conn,
-            job_ids=job_ids,
-            deploy_sha=deploy_sha,
-            lease_token=lease_token,
-            worktree=worktree,
-            log=log,
-            before_push=before_push,
-            ownership_pulse=ownership_pulse,
-            state=state,
-            event=self._event,
-            destination=destination,
-            event_job_id=event_job_id,
-            run_verify_hooks=self._gates.run_verify_hooks,
-        )
+        try:
+            self._pushes.deploy_and_verify(
+                conn,
+                job_ids=job_ids,
+                deploy_sha=deploy_sha,
+                lease_token=lease_token,
+                worktree=worktree,
+                log=log,
+                before_push=before_push,
+                ownership_pulse=ownership_pulse,
+                state=state,
+                event=self._event,
+                destination=destination,
+                event_job_id=event_job_id,
+                run_verify_hooks=self._gates.run_verify_hooks,
+            )
+        except PushRejected as exc:
+            # An earlier push of these jobs that reconcile found had not landed
+            # can land later on a network remote. It moves the refs, so this
+            # push is refused although every job is already live.
+            if self._pushes.contains_commits(
+                task_commits, destination=destination, log=log, pulse=ownership_pulse
+            ):
+                raise _AlreadyLanded(
+                    "the remote refused this push, but its push refs already "
+                    "contain every job of this train, most likely from an "
+                    "earlier push of these jobs that landed after reconcile read "
+                    "the remote; nothing of this push landed, so the jobs are "
+                    f"requeued for a deploy that records it: {exc}"
+                ) from exc
+            raise
 
     def _assert_auto_execution_policy(self, jobs: Iterable[Job]) -> None:
         auto_jobs = [job for job in jobs if job.auto_deploy]
@@ -840,22 +867,22 @@ class GitRunner:
         def finish(item: Job, **values: Any) -> Job:
             return self._finish_job(conn, item.id, lease_token=lease_token, **values)
 
-        def cancel_active_jobs() -> list[Job]:
-            canceled: list[Job] = []
+        def finish_active_jobs(*, status: str, note: str) -> list[Job]:
+            finished: list[Job] = []
             for item in jobs:
                 current = get_job(conn, item.id)
                 if current.status == "in_progress" and current.claim_token == lease_token:
-                    canceled.append(
-                        finish(
-                            item,
-                            status="canceled",
-                            log_path=str(log_path),
-                            note="canceled by user while the train was running",
-                        )
+                    finished.append(
+                        finish(item, status=status, log_path=str(log_path), note=note)
                     )
                 else:
-                    canceled.append(current)
-            return canceled
+                    finished.append(current)
+            return finished
+
+        def cancel_active_jobs() -> list[Job]:
+            return finish_active_jobs(
+                status="canceled", note="canceled by user while the train was running"
+            )
 
         def finish_active_after_error(*, status: str, note: str) -> list[Job]:
             affected_jobs = jobs if deploying_validated else merged_jobs or jobs
@@ -1285,6 +1312,7 @@ class GitRunner:
                         state=deploy_state,
                         event_job_id=event_job_id,
                         expected_plan_sha=expected_plan_sha,
+                        task_commits=[merge_shas.get(job.id, "") for job in merged_jobs],
                     )
                 status = "deployed" if deploy else "validated"
                 note = deploy_state.warning or (
@@ -1342,6 +1370,8 @@ class GitRunner:
                         note="canceled by user while the train was running",
                     )
                 return cancel_active_jobs()
+            except _AlreadyLanded as exc:
+                return finish_active_jobs(status="queued", note=str(exc))
             except AmbiguousPush as exc:
                 return finish_active_after_error(status="needs_reconcile", note=str(exc))
             except QueueBusy as exc:

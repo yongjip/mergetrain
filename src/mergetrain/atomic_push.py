@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -168,6 +168,47 @@ class AtomicPush:
                 f"{deploy_sha}; refusing to rewrite immutable audit evidence"
             )
         return audit_ref, current
+
+    def contains_commits(
+        self,
+        commits: Sequence[str],
+        *,
+        destination: ResolvedGitDestination,
+        log: IO[str] | None,
+        pulse: Pulse | None = None,
+    ) -> bool:
+        """Whether every push ref of the destination already contains ``commits``.
+
+        Like reconcile, it reads the refs with ls-remote and decides ancestry
+        from local objects. A ref it cannot read, or a tip it does not have
+        locally, reads as not containing them.
+        """
+
+        if not commits or not all(commits):
+            return False
+        for ref in destination.push_refs:
+            reachable, tip = git_remote_ref_sha(
+                self.repo,
+                destination.remote_alias,
+                ref,
+                env=destination.command_env(),
+                log=redacting_log(log),
+                pulse=pulse,
+                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                timeout_seconds=self.config.queue.command_timeout_seconds,
+            )
+            if not reachable or not tip:
+                return False
+            for commit in commits:
+                ancestry = run_command(
+                    ["git", "merge-base", "--is-ancestor", commit, tip],
+                    cwd=self.repo,
+                    log=log,
+                    check=False,
+                )
+                if ancestry.returncode != 0:
+                    return False
+        return True
 
     def push_with_marker(
         self,

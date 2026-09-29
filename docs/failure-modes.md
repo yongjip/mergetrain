@@ -117,9 +117,16 @@ Windows the push's Job Object is named after the queue and the commit instead,
 and `git push` holds its own handle to it, so the name outlives the runner.
 While any process of that push is alive, `reconcile` refuses with `lock_held`
 (exit 3) and leaves the job parked, so it never reads the remote before the
-push has finished changing it. Rerun reconcile once the push has exited. One gap
-remains for network remotes: a server that already received the whole push can
-still apply it after the client has died.
+push has finished changing it. Rerun reconcile once the push has exited.
+
+One gap remains for network remotes: a server that already received the whole
+push can still apply it after the client has died, even after reconcile has
+read the remote and requeued the job. That late push never overwrites anything
+newer, because a ref moves only while it still has the value the push expected.
+The job's next deploy finds its commits on the remote and records the
+deployment. If the late push lands while that deploy is under way, the remote
+refuses the new push; because the remote already contains every job of the
+train, mergetrain requeues the jobs again instead of blocking them.
 
 When `git push` exits with a status of its own while the runner is still there,
 it has already waited for the processes that do the push, so the runner releases
