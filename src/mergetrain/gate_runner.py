@@ -336,7 +336,7 @@ class GateRunner:
             "git",
             "diff",
             "--check",
-            f"{self.config.git.integration_ref}..HEAD",
+            f"{self.config.git.integration_tracking_ref}..HEAD",
         ]
         if on_gate:
             on_gate("diff-check", "active", 1, total, _display_command(diff_command))

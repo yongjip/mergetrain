@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path, PurePath
 from typing import Any
 from urllib.parse import urlsplit
+
+from .command_runner import without_repository_env
 
 
 def _direct_url(distribution: Any) -> dict[str, Any]:
@@ -80,6 +83,7 @@ def _git_output(source_path: Path, *args: str) -> str | None:
         result = subprocess.run(
             ["git", "-C", str(source_path), *args],
             check=False,
+            env=without_repository_env(os.environ),
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,

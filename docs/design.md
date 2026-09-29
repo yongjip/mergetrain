@@ -420,11 +420,17 @@ Deploy mode pushes the verified commit to every ref in `git.push_refs` and to a
 content-addressed recovery audit ref in the same atomic operation:
 
 ```sh
-git push --atomic \
+git push --atomic --no-follow-tags --recurse-submodules=no \
   --force-with-lease=refs/mergetrain/deploys/<sha>:<expected-or-empty> \
   <remote> <sha>:<ref1> <sha>:<ref2> ... \
   <sha>:refs/mergetrain/deploys/<sha>
 ```
+
+`--no-follow-tags` and `--recurse-submodules=no` keep operator push settings
+from widening the approved push: `push.followTags` would also publish local
+tags, and `push.recurseSubmodules` or `submodule.recurse` would push submodule
+commits to other repositories. Check that submodule commits are published in a
+gate if the project needs it.
 
 Before approval, the control checkout resolves `git remote get-url --push
 --all <remote>`. Mergetrain requires exactly one result, rejects relative local

@@ -330,8 +330,17 @@ job recorded, and only when that head has landed: it is merged into the
 integration ref, or into the commit the job pushed. The delete is a
 compare-and-delete, so a commit that arrives in the meantime makes it fail
 rather than disappear. A branch with later commits, a canceled branch that never
-landed, and a branch checked out in a worktree are kept; each
-`branch_candidates[]` entry carries `eligible` and the `reason` it was kept.
+landed, and a branch that a worktree still uses are kept; each
+`branch_candidates[]` entry carries `eligible` and the `reason` it was kept. A
+worktree uses a branch when it has it checked out, is rebasing or bisecting it,
+or is registered with it while its directory is missing, the same cases for
+which `git branch -d` refuses.
+
+Worktree cleanup removes only directories under `state.worktree_root` that
+carry the project's temporary-worktree name and that nothing else owns. A
+worktree locked with `git worktree lock`, a worktree of another repository
+(two clones can share an absolute `worktree_root`), and a nested repository are
+listed as protected, with the reason, and left in place.
 
 ## Why a persisted marker, instead of reconstructing from Git?
 

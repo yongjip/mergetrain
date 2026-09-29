@@ -18,7 +18,7 @@ from ..cli_support import (
 )
 from ..config import gate_policy_warnings
 from ..deploy_plan import deploy_plan_sha
-from ..errors import DeployPlanChanged, QueueError, redact_secrets
+from ..errors import DeployPlanChanged, QueueError, escape_controls, redact_secrets
 from ..git_destination import resolve_git_destination
 from ..git_ops import DEPLOY_AUDIT_REF_PREFIX
 from ..git_runner import GitRunner
@@ -213,18 +213,24 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def _render_v3_preview(payload: dict[str, Any]) -> None:
     jobs = payload.get("jobs", [])
-    tasks = ", ".join(str(job.get("task") or job.get("branch")) for job in jobs)
     push_plan = payload["push_plan"]
-    refs = ", ".join(item["target"] for item in push_plan["refs"])
-    print(f"Ready to deploy {len(jobs)} job(s): {tasks}")
-    print(f"Destination: {push_plan['url']} ({refs})")
+    refs = ", ".join(escape_controls(str(item["target"])) for item in push_plan["refs"])
+    # One line per job, every value escaped: task text comes from whoever
+    # enqueued, and it must not be able to rewrite the count or the list that
+    # the human approves.
+    print(f"Ready to deploy {len(jobs)} job(s):")
+    for job in jobs:
+        task = escape_controls(str(job.get("task") or job.get("branch")))
+        branch = escape_controls(str(job.get("branch")))
+        print(f"  #{job.get('id')} {task} ({branch})")
+    print(f"Destination: {escape_controls(str(push_plan['url']))} ({refs})")
     reuse = payload.get("reuse") or {}
     decision = reuse.get("decision") or {}
     action = decision.get("action")
     if action:
-        print(f"Gate plan: {action}")
+        print(f"Gate plan: {escape_controls(str(action))}")
     for warning in payload.get("warnings", []):
-        print(f"Warning: {warning['summary']}")
+        print(f"Warning: {escape_controls(str(warning['summary']))}")
     print(
         "The exact train, destination, gates, reuse policy, and verify hooks "
         "will be checked again before push."

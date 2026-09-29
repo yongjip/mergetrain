@@ -135,7 +135,7 @@ class WorktreeManager:
                     "runs there; move it aside or delete it, then validate again"
                 )
             run_command(
-                ["git", "reset", "--hard", self.config.git.integration_ref],
+                ["git", "reset", "--hard", self.config.git.integration_tracking_ref],
                 cwd=worktree,
                 log=log,
                 pulse=pulse,
@@ -156,7 +156,7 @@ class WorktreeManager:
                     "--force",
                     "--detach",
                     str(worktree),
-                    self.config.git.integration_ref,
+                    self.config.git.integration_tracking_ref,
                 ],
                 cwd=self.repo,
                 log=log,
@@ -242,7 +242,7 @@ class WorktreeManager:
                 "add",
                 "--detach",
                 str(worktree),
-                self.config.git.integration_ref,
+                self.config.git.integration_tracking_ref,
             ],
             cwd=self.repo,
             log=log,
@@ -279,7 +279,7 @@ class WorktreeManager:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         tip = run_command(
-            ["git", "rev-parse", "--verify", "--quiet", f"{self.config.git.integration_ref}^{{commit}}"],
+            ["git", "rev-parse", "--verify", "--quiet", f"{self.config.git.integration_tracking_ref}^{{commit}}"],
             cwd=self.repo,
             check=False,
         )

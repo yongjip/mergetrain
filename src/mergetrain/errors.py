@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -72,6 +73,34 @@ def redact_and_bound(
 
     redacted = redact_secrets(text)
     return redacted[:limit], len(redacted) > limit
+
+
+# Control characters (carriage return, escape, the C1 set) can rewrite a
+# terminal line, and format characters (bidirectional overrides, zero-width
+# characters) and the Unicode line and paragraph separators can reorder, hide,
+# or break text. A lone surrogate cannot be encoded for output at all.
+_HIDING_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
+def _escape(char: str) -> str:
+    code = ord(char)
+    if code <= 0xFF:
+        return f"\\x{code:02x}"
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
+
+
+def escape_controls(text: str) -> str:
+    """Show ``text`` as what it is, on one line, with nothing hidden.
+
+    Every character that could move the cursor, reorder, or hide text prints
+    as a Python-style escape instead, so text an agent wrote can never change
+    the rest of what a human reads.
+    """
+
+    return "".join(
+        _escape(char) if unicodedata.category(char) in _HIDING_CATEGORIES else char
+        for char in text
+    )
 
 
 class MergetrainError(Exception):

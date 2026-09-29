@@ -85,6 +85,113 @@ def _same_path(left: Path, right: Path) -> bool:
     return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
 
 
+# gc decides what is its own from the files Git itself reads, with no Git
+# command: a checkout's `.git` gitfile names its worktree admin directory, and
+# the admin directory's `commondir` names the repository it belongs to.
+
+
+def _read_marker(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def _gitfile_target(checkout: Path) -> Path | None:
+    """The git directory that ``checkout/.git`` names, when it is a gitfile."""
+
+    pointer = _read_marker(checkout / ".git")
+    if not pointer.startswith("gitdir:"):
+        return None
+    target = Path(pointer[len("gitdir:") :].strip())
+    return target if target.is_absolute() else checkout / target
+
+
+def _admin_common_dir(admin: Path) -> Path:
+    """The repository an admin directory belongs to; its own when unshared."""
+
+    relative = _read_marker(admin / "commondir")
+    if not relative:
+        return admin
+    common = Path(relative)
+    return common if common.is_absolute() else admin / common
+
+
+def _checkout_common_dir(checkout: Path) -> Path | None:
+    dot_git = checkout / ".git"
+    if dot_git.is_dir():
+        return dot_git
+    admin = _gitfile_target(checkout)
+    return None if admin is None else _admin_common_dir(admin)
+
+
+def _repository_common_dir(repo: Path) -> Path | None:
+    # Only a repo path below the top of its checkout needs Git to find it.
+    return _checkout_common_dir(repo) or git_common_dir(repo)
+
+
+def worktree_keep_reason(repo: Path, worktree: Path) -> str:
+    """Why cleanup must leave ``worktree`` alone, or "" when it may go.
+
+    Cleanup removes only this repository's own unlocked worktree, or a
+    directory that no repository uses any more. Git refuses to remove a
+    locked worktree, and another clone's live worktree can sit in a shared
+    worktree_root under a name gc recognizes.
+    """
+
+    if (worktree / ".git").is_dir():
+        return "it is a repository of its own"
+    admin = _gitfile_target(worktree)
+    if admin is None or not admin.is_dir():
+        return ""
+    ours = _repository_common_dir(repo)
+    if ours is None or not _same_path(_admin_common_dir(admin), ours):
+        return "it is a worktree of another repository"
+    if (admin / "locked").exists():
+        return "it is locked with `git worktree lock`"
+    return ""
+
+
+def _admin_worktree_path(admin: Path, common: Path) -> str:
+    if _same_path(admin, common):
+        return str(common.parent if common.name == ".git" else common)
+    gitfile = _read_marker(admin / "gitdir")
+    return str(Path(gitfile).parent) if gitfile else str(admin)
+
+
+def branch_worktree_use(repo: Path, branch: str) -> str:
+    """Why a worktree still needs ``branch``, or "" when none does.
+
+    These are the uses for which `git branch -d` refuses to delete a branch.
+    `git worktree list` shows a worktree that is rebasing or bisecting the
+    branch as detached, and one whose directory is missing only as prunable,
+    so its porcelain output misses them. Each worktree's HEAD, rebase
+    head-name, and BISECT_START live in its admin directory, which stays
+    while the directory is away.
+    """
+
+    common = _repository_common_dir(repo)
+    if common is None:
+        return "its repository's worktrees could not be read"
+    ref = f"refs/heads/{branch}"
+    admins = [common]
+    linked = common / "worktrees"
+    if linked.is_dir():
+        admins.extend(sorted(path for path in linked.iterdir() if path.is_dir()))
+    for admin in admins:
+        where = _admin_worktree_path(admin, common)
+        if _read_marker(admin / "HEAD") == f"ref: {ref}":
+            return f"checked out in {where}"
+        if {
+            _read_marker(admin / "rebase-merge" / "head-name"),
+            _read_marker(admin / "rebase-apply" / "head-name"),
+        } & {ref, branch}:
+            return f"being rebased in {where}"
+        if _read_marker(admin / "BISECT_START") in {ref, branch}:
+            return f"being bisected in {where}"
+    return ""
+
+
 def is_linked_worktree(repo: str | Path, path: Path) -> bool:
     """Whether ``path`` is itself a registered linked worktree of ``repo``.
 
@@ -313,6 +420,12 @@ def find_worktree_gc_candidates(
                 }
             )
             continue
+        keep = worktree_keep_reason(config.repo, path)
+        if keep:
+            candidates.append(
+                {"path": str(path), "reason": f"{keep}, skipped", "protected": True}
+            )
+            continue
         candidates.append({"path": str(path), "reason": "temporary mergetrain worktree"})
     return candidates
 
@@ -376,11 +489,17 @@ def _remove_links_below(root: Path) -> None:
 def remove_worktree(repo: Path, worktree: Path, *, log: IO[str] | None = None) -> None:
     """Delete a linked worktree without deleting anything outside it.
 
-    The worktree is kept when its path is itself a link, or when a link inside
-    it cannot be removed on its own, because the recursive delete could then
-    reach through that link.
+    The worktree is kept when cleanup does not own it (see
+    ``worktree_keep_reason``), when its path is itself a link, or when a link
+    inside it cannot be removed on its own, because the recursive delete could
+    then reach through that link.
     """
 
+    keep = worktree_keep_reason(repo, worktree)
+    if keep:
+        if log:
+            log.write(f"\nkeeping worktree: {worktree} ({keep})\n")
+        return
     try:
         _remove_links_below(worktree)
     except OSError as exc:
@@ -398,6 +517,8 @@ def remove_worktree(repo: Path, worktree: Path, *, log: IO[str] | None = None) -
             check=True,
         )
     except Exception:
+        # No repository uses the directory any more, so Git has nothing left
+        # to remove it through.
         shutil.rmtree(worktree, ignore_errors=True)
 
 
@@ -442,10 +563,10 @@ def branch_deletion_blocker(
         return "branch does not exist"
     if not recorded or current != recorded:
         return f"moved since its job recorded {recorded_head[:12]}"
-    checked_out = git_worktrees_for_branch(config.repo, branch)
-    if checked_out:
-        return f"checked out in {checked_out[0]}"
-    if _is_ancestor(config.repo, recorded, integration_ref):
+    in_use = branch_worktree_use(config.repo, branch)
+    if in_use:
+        return in_use
+    if _is_ancestor(config.repo, recorded, config.git.integration_tracking_ref):
         return ""
     if landed_sha and _is_ancestor(config.repo, recorded, landed_sha):
         return ""
@@ -487,9 +608,9 @@ def apply_gc(
     for branch, recorded_head in dict(delete_branches or {}).items():
         if not branch_exists(config.repo, branch):
             continue
-        checked_out = git_worktrees_for_branch(config.repo, branch)
-        if checked_out:
-            failed.append({"branch": branch, "reason": f"checked out in {checked_out[0]}"})
+        in_use = branch_worktree_use(config.repo, branch)
+        if in_use:
+            failed.append({"branch": branch, "reason": in_use})
             continue
         # Compare-and-delete: a commit that lands on the branch after the caller
         # checked it makes the update fail instead of being thrown away (#223).

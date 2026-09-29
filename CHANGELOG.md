@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+- Build every train on the integration branch itself, never on a tag or local
+  branch that shares its short name. mergetrain resolved `origin/main` the way
+  Git resolves any short name, which prefers `refs/tags/origin/main` and
+  `refs/heads/origin/main` to the remote-tracking ref. Anyone able to push a
+  tag called `origin/main` could therefore choose the commit a train was built
+  on, and the deploy published that commit to main although nobody had
+  enqueued or approved it. Train assembly, enqueue, retry, supersede, the
+  built-in whitespace check, `gc`, and `status` now resolve
+  `refs/remotes/<remote>/<branch>`. Enqueue, retry, and supersede also record
+  the head of `refs/heads/<branch>`: a tag with the branch's name used to be
+  recorded instead, which blocked the job for good. The `integration_ref`
+  value in JSON output and the `${integration_ref}` placeholder are still
+  `origin/main`.
+- Keep mergetrain in its own repository when it is started from a Git hook or
+  alias. Git exports `GIT_DIR` and `GIT_INDEX_FILE` to hooks, and to aliases run
+  from a linked worktree, and those variables override the directory a Git
+  command runs in. A `validate` or `daemon` started from a task worktree's hook
+  therefore merged the train into that task's branch and index, and a deploy
+  pushed the result to main while the job it came from was reported blocked.
+  `mergetrain demo` renamed, committed to, and pushed the caller's repository.
+  Every Git command, gate, verify hook, and push that mergetrain starts, the
+  demo, and the `status --diagnose` provenance read now drop the variables
+  that name a repository, index, or object store, as Git itself does before it
+  works in another repository. Config passed with `git -c` still applies.
+- Show every job of a deploy plan the way it is, whatever its task text says.
+  The `mergetrain deploy` confirmation printed each task exactly as the
+  enqueuing agent wrote it. A carriage return or escape sequence in one task
+  could overwrite the job count and the list that the human approved, so a
+  job nobody saw was pushed with the others. The MCP confirmation removed line
+  breaks but kept escape sequences and direction overrides. Both
+  confirmations now list each job on its own line as `#id task (branch)` and
+  print control and formatting characters as visible escapes, and the MCP
+  confirmation states the number of jobs. Enqueue and supersede store the task
+  on one line, with line breaks, tabs, and runs of spaces turned into single
+  spaces.
+- Keep `gc` away from worktrees and branches that are not its to remove.
+  `gc --apply` deleted any directory with the temporary-worktree name that
+  `git worktree remove` refused, including a worktree locked with
+  `git worktree lock` and another clone's live worktree in a shared
+  `worktree_root`. It now leaves a locked worktree, another repository's
+  worktree, and a nested repository in place and lists them as protected. It
+  still removes a leftover directory that no repository uses.
+  `gc --delete-branches` checked only the branch each worktree had checked
+  out, so it deleted a branch that a worktree was rebasing or bisecting, or
+  whose worktree directory was briefly missing. Finishing that rebase then
+  failed and left the new commits on a detached HEAD. gc now keeps a branch in
+  every case where `git branch -d` would refuse.
+- Push only the approved refs and the audit ref, whatever the runner's Git
+  config says. With `push.followTags` set, the atomic deploy also published
+  local annotated tags on the pushed commits, or failed as a whole when the
+  runner was allowed to push only its payload and audit refs. With
+  `push.recurseSubmodules=on-demand`, or `submodule.recurse` set, it would also
+  have pushed submodule commits to other repositories. The deploy push now
+  passes `--no-follow-tags --recurse-submodules=no`. A project that needs
+  submodule commits published first can check that in a gate.
 - Remove the web dashboard and the web Hub. `mergetrain dashboard` and
   `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
   error that names the replacement: `status`, or `events --follow` for a live

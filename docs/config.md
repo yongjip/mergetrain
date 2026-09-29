@@ -156,6 +156,14 @@ git:
 {remote}/{integration_branch}
 ```
 
+That short name is what status output and the `${integration_ref}` placeholder
+show. mergetrain itself resolves the integration base through the full
+remote-tracking ref, `refs/remotes/{remote}/{integration_branch}`, because Git
+resolves a short name to a tag or local branch called `origin/main` before the
+remote-tracking ref. A gate that hands `${integration_ref}` to Git keeps that
+short-name lookup; write `refs/remotes/${integration_ref}` where a gate must not
+be redirected.
+
 `remote` names the fetch remote used to assemble the train. Before approval,
 mergetrain separately resolves its effective push endpoint with
 `git remote get-url --push --all` from the control checkout. A split setup such
@@ -201,7 +209,10 @@ git push --atomic platform \
 ```
 
 The actual command also protects the audit ref with `--force-with-lease` so it
-can only be created or retain the identical value. The configured remote must
+can only be created or retain the identical value, and passes
+`--no-follow-tags --recurse-submodules=no` so `push.followTags`,
+`push.recurseSubmodules`, and `submodule.recurse` cannot add a tag or another
+repository's commits to the push. The configured remote must
 permit creation under `refs/mergetrain/deploys/`; these refs are permanent
 recovery evidence and are not payload targets configurable through
 `push_refs`.
