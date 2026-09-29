@@ -6,9 +6,11 @@ land after recovery has read the remote. Recovery therefore has to know that a
 push is still going before it trusts what the remote says.
 
 On POSIX the runner takes an exclusive ``flock`` before it pushes and hands the
-descriptor to ``git push``. The push's own processes inherit it -- the local
-``receive-pack`` and its hooks included -- so the lock is released only when
-the runner and every process of the push have exited. On Windows the push's
+descriptor to a small holder process that runs ``git push`` in the push's own
+session. The holder keeps the lock until ``git push`` exits, and ``git push``
+waits for the processes that do the push (a local ``receive-pack`` and its
+hooks included); helpers it leaves running never inherit the lock, so they
+cannot keep a finished push "in flight". On Windows the push's
 Job Object carries a name derived from the commit, and ``git push`` holds its
 own handle to that job, which keeps the name alive after the runner is gone.
 

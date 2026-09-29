@@ -143,5 +143,49 @@ class OrphanedPushTests(unittest.TestCase):
         self._run(kill_signal=signal.SIGKILL, cancel=True)
 
 
+@unittest.skipUnless(os.name == "posix", "the POSIX push lock is an inherited flock")
+class PushHelperTests(unittest.TestCase):
+    def test_a_helper_the_push_leaves_running_does_not_hold_the_push_lock(self) -> None:
+        # git starts helpers that outlive the push, such as a credential cache
+        # daemon or anything a hook backgrounds. Once git push has exited,
+        # they must not keep the push "in flight" and block reconcile.
+        from mergetrain.atomic_push import AtomicPush
+        from mergetrain.git_destination import resolve_git_destination
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            pid_file = root / "helper.pid"
+            hook = repo / ".git" / "hooks" / "pre-push"
+            hook.write_text(
+                "#!/bin/sh\n"
+                "sleep 60 >/dev/null 2>&1 </dev/null &\n"
+                f"echo $! > '{pid_file}'\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+            config = load_config(repo=repo)
+            target = git(repo, "rev-parse", "feature/a")
+            push = AtomicPush(config)
+            destination = resolve_git_destination(config)
+            audit_ref, expected = push.audit_ref_expectation(
+                worktree=repo, deploy_sha=target, log=None, destination=destination
+            )
+            push.push_verified_head(
+                worktree=repo,
+                deploy_sha=target,
+                audit_ref=audit_ref,
+                audit_expected_sha=expected,
+                destination=destination,
+            )
+            helper = int(pid_file.read_text(encoding="utf-8"))
+            try:
+                os.kill(helper, 0)  # the helper outlived the push
+                self.assertFalse(push_in_flight(config, target))
+            finally:
+                os.kill(helper, signal.SIGKILL)
+            self.assertEqual(git(root / "remote.git", "rev-parse", "main"), target)
+
+
 if __name__ == "__main__":
     unittest.main()

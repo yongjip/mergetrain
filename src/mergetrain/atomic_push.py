@@ -112,8 +112,9 @@ class AtomicPush:
         push_args.extend(f"{target}:{ref}" for ref in destination.push_refs)
         if audit_ref not in destination.push_refs:
             push_args.append(f"{target}:{audit_ref}")
-        # The push inherits the lock, so recovery can tell that a push whose
-        # runner died is still running and may yet land (#220).
+        # A holder process keeps the lock for exactly as long as git push
+        # runs, so recovery can tell that a push whose runner died may yet
+        # land (#220), and helpers git leaves running cannot hold it.
         with holding_push_lock(self.config, target) as inherited:
             run_command(
                 push_args,
@@ -123,7 +124,7 @@ class AtomicPush:
                 pulse=pulse,
                 pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
                 timeout_seconds=self.config.queue.command_timeout_seconds,
-                pass_fds=inherited,
+                hold_fds=inherited,
                 job_name=push_job_name(target),
             )
 
