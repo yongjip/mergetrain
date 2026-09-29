@@ -29,6 +29,8 @@ from .errors import ConfigError
 _CONTEXT_FREE = re.compile(r"[A-Za-z0-9_@%+=:,./-]+")
 # Characters that end an unquoted word; a '#' right after one starts a comment.
 _WORD_END = " \t\n;&|()<>"
+# A shell variable name; bash reads 'name[' as the start of an array subscript.
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # After a backslash inside double quotes, only these characters are escaped.
 _DOUBLE_QUOTE_ESCAPABLE = '$`"\\\n'
 # A line continuation after one of these can spell '$(', '<<', or '((' across
@@ -171,6 +173,10 @@ class _Scanner:
                 self.comment()
                 continue
             if char not in _WORD_END:
+                if char == "[" and plain and _NAME.fullmatch(word):
+                    # bash reads 'name[...]' as an array subscript, which pairs
+                    # quotes and has no comments, unlike an ordinary word.
+                    self.doubt("an array subscript")
                 if plain:
                     word += char
                 self.copy(1)
@@ -262,6 +268,11 @@ class _Scanner:
             self.parameter()
         elif not quoted and self.at("$'"):
             self.ansi_c_quoted()
+        elif self.at("$["):
+            # bash arithmetic: it pairs quotes and has no comments inside, so
+            # a '#' or ')' in it would mislead this scan about what follows.
+            self.doubt("a $[...] arithmetic expansion")
+            self.copy(2)
         else:
             self.copy(1)
             for key, value in self.values.items():

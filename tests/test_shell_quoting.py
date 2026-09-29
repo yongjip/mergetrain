@@ -241,6 +241,16 @@ class RefusalTests(unittest.TestCase):
             "echo $((1+'2'))\necho ${worktree}": "quoting inside an arithmetic expansion",
             "echo $((1)+(2))\necho ${worktree}": "unbalanced parentheses",
             "((x = 1))\necho ${worktree}": "'(('",
+            # bash pairs quotes inside these and has no comments there, so the
+            # quote after '#' would otherwise leave the path unquoted.
+            "echo $[1 # ' ${worktree} ' ]": "a $[...] arithmetic expansion",
+            'echo "$[1 # \' ${worktree} \' ]"': "a $[...] arithmetic expansion",
+            "echo $(echo $[1 ) # ' ${worktree} ' ])": "a $[...] arithmetic expansion",
+            "a[1 # ' ${worktree} ' ]=x": "an array subscript",
+            "declare a[1 # ' ${worktree} ' ]=x": "an array subscript",
+            # bash reads these '<<' as a shift; the scan once read a here-doc.
+            "echo $[1<<2] >/dev/null\necho ${worktree}": "a $[...] arithmetic expansion",
+            "a[1<<2]=x\necho ${worktree}": "an array subscript",
             # Joined across the continuation, these spell '<<', '$(', and '(('.
             "cat <\\\n<EOF\nx\nEOF\necho ${worktree}": "a line continuation that joins",
             'echo "$\\\n(echo a)"\necho ${worktree}': "a line continuation that joins",
@@ -260,9 +270,6 @@ class RefusalTests(unittest.TestCase):
             "cat <<A <<B >/dev/null\na\nA\nb\nB\n",
             'cat <<<"it\'s" >/dev/null; ',
             "x=$(cat <<EOF\na)\nEOF\n)\n",
-            # bash reads these '<<' as a shift, the scan as a here-document.
-            "echo $[1<<2] >/dev/null\n",
-            "a[1<<2]=x\n",
         ):
             with self.subTest(prefix=prefix):
                 self.assert_refused(prefix + "echo ${worktree}", _HERE)

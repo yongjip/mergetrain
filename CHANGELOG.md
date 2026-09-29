@@ -11,7 +11,10 @@
   command under bash. Commands that put a here-document before such a path now
   fail with a `ConfigError` before anything runs; use `"$MERGETRAIN_REPO"` or
   `"$MERGETRAIN_WORKTREE"` there instead. A path made only of letters, digits,
-  and `_@%+=:,./-` still expands anywhere.
+  and `_@%+=:,./-` still expands anywhere. The same now holds after bash
+  `$[...]` arithmetic or a `name[...]` array subscript: bash pairs quotes inside
+  them and has no comments there, so a `#` followed by a quote in one could also
+  leave a later path unquoted.
 - Stop a confirmed deploy from claiming or pushing jobs outside the confirmed
   plan. The plan check and the claim ran in separate transactions, so a cancel
   or supersede that landed between them let the claim fall back to queued jobs
