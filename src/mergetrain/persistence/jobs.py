@@ -107,6 +107,15 @@ def enqueue_job(
     return get_job(conn, job_id)
 
 
+# The deployment identity a pending push records before remote I/O. A row that
+# ends canceled or returns to queued does not represent that deployment, so it
+# must drop all of it: a canceled member that kept it would make the other
+# members' verification group read as inconsistent for good.
+_CLEAR_DEPLOYMENT_IDENTITY = (
+    "deployment_id = '', deployment_destination_sha = '', verification_policy_sha = ''"
+)
+
+
 def retry_job(
     conn: sqlite3.Connection,
     job_id: int,
@@ -185,13 +194,13 @@ def retry_job(
         replacement_id = cur.lastrowid
         assert replacement_id is not None
         dismissed = conn.execute(
-            """
+            f"""
             UPDATE deploy_queue
             SET status = 'canceled', finished_at = ?,
                 note = ?, claim_token = '', cancel_requested_at = '',
                 pending_deploy_sha = '', pending_deploy_remote = '',
                 pending_deploy_refs = '', pending_deploy_destination_sha = '',
-                conflict_with = ''
+                conflict_with = '', {_CLEAR_DEPLOYMENT_IDENTITY}
             WHERE id = ? AND status = ?
             """,
             (
@@ -931,12 +940,7 @@ def mark_job(
             # push records the identity before remote I/O, so an unlanded
             # reconcile that ends in cancellation must discard it as well.
             conn.execute(
-                """
-                UPDATE deploy_queue
-                SET deployment_id = '', deployment_destination_sha = '',
-                    verification_policy_sha = ''
-                WHERE id = ?
-                """,
+                f"UPDATE deploy_queue SET {_CLEAR_DEPLOYMENT_IDENTITY} WHERE id = ?",
                 (job_id,),
             )
         if status == "queued":

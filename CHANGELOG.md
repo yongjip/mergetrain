@@ -35,6 +35,12 @@
   finishes `failed` after one gate run; fix the branch and run `mergetrain retry
   <id>`. Linear isolation after an inconclusive bisect runs each job as a
   one-job train, and the separate path, about 300 lines, is gone.
+- Stop `retry --force` on one member of a parked multi-job deployment from
+  leaving the other members' verification stuck. The retried row became
+  `canceled` but kept the deployment identity its push had recorded, so once
+  the others were settled `deployed`, `verify --job` and `verify --ack` failed
+  with "inconsistent member state" and `status` kept recommending them. A
+  retried row now drops that identity, as `dismiss` and `cancel` already did.
 
 ## 3.1.0 - 2026-09-29
 
