@@ -37,6 +37,18 @@
   confirmation states the number of jobs. Enqueue and supersede store the task
   on one line, with line breaks, tabs, and runs of spaces turned into single
   spaces.
+- Keep `gc` away from worktrees and branches that are not its to remove.
+  `gc --apply` deleted any directory with the temporary-worktree name that
+  `git worktree remove` refused, including a worktree locked with
+  `git worktree lock` and another clone's live worktree in a shared
+  `worktree_root`. It now leaves a locked worktree, another repository's
+  worktree, and a nested repository in place and lists them as protected. It
+  still removes a leftover directory that no repository uses.
+  `gc --delete-branches` checked only the branch each worktree had checked
+  out, so it deleted a branch that a worktree was rebasing or bisecting, or
+  whose worktree directory was briefly missing. Finishing that rebase then
+  failed and left the new commits on a detached HEAD. gc now keeps a branch in
+  every case where `git branch -d` would refuse.
 - Remove the web dashboard and the web Hub. `mergetrain dashboard` and
   `mergetrain hub` without a subcommand now exit 2 with a `removed_interface`
   error that names the replacement: `status`, or `events --follow` for a live

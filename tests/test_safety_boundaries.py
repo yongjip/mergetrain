@@ -30,6 +30,7 @@ from mergetrain.cli import main  # noqa: E402
 from mergetrain.command_runner import without_repository_env  # noqa: E402
 from mergetrain.commands.deploy import _render_v3_preview  # noqa: E402
 from mergetrain.config import load_config  # noqa: E402
+from mergetrain.git_ops import apply_gc, branch_deletion_blocker  # noqa: E402
 from mergetrain.mcp_server import MergetrainTools  # noqa: E402
 from mergetrain.persistence.connection import connect  # noqa: E402
 from mergetrain.persistence.jobs import enqueue_job, get_job  # noqa: E402
@@ -321,6 +322,81 @@ class ConfirmationTextTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual(job.task, "fix the bug now")
+
+
+class GcOwnershipTests(unittest.TestCase):
+    """gc may remove only what this repository's queue made and no one uses."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.repo, _marker = make_demo_repo(self.root)
+        self.config = load_config(repo=self.repo)
+        # Named the way gc recognizes a temporary mergetrain worktree.
+        self.worktrees = self.config.state.worktree_root
+
+    def test_gc_keeps_a_worktree_locked_with_git(self) -> None:
+        locked = self.worktrees / "demo-mergetrain-7-deadbeef"
+        git(self.repo, "worktree", "add", "--detach", str(locked), "main")
+        git(self.repo, "worktree", "lock", "--reason", "investigating", str(locked))
+        (locked / "notes.txt").write_text("kept for investigation\n", encoding="utf-8")
+        leftover = self.worktrees / "demo-mergetrain-8-cafebabe"
+        leftover.mkdir()
+        (leftover / "junk.txt").write_text("x\n", encoding="utf-8")
+
+        result = apply_gc(self.config)
+
+        self.assertTrue((locked / "notes.txt").is_file())
+        self.assertFalse(leftover.exists())
+        self.assertEqual(
+            [item["path"] for item in result["removed_worktrees"]], [str(leftover)]
+        )
+
+    def test_gc_keeps_another_repositorys_worktree_in_a_shared_root(self) -> None:
+        other = _init_repo(self.root, "other")
+        foreign = self.worktrees / "demo-mergetrain-3-0badc0de"
+        git(other, "worktree", "add", "--detach", str(foreign), "HEAD")
+
+        result = apply_gc(self.config)
+
+        self.assertTrue((foreign / "other.txt").is_file())
+        self.assertEqual(result["removed_worktrees"], [])
+        self.assertNotIn("prunable", git(other, "worktree", "list", "--porcelain"))
+
+    def test_gc_keeps_a_branch_that_a_worktree_is_rebasing(self) -> None:
+        git(self.repo, "switch", "-c", "clash", "main")
+        (self.repo / "app.txt").write_text("clash\n", encoding="utf-8")
+        git(self.repo, "commit", "-am", "clash")
+        git(self.repo, "switch", "feature/a")
+        (self.repo / "app.txt").write_text("feature\n", encoding="utf-8")
+        git(self.repo, "commit", "-am", "feature")
+        git(self.repo, "switch", "main")
+        head = git(self.repo, "rev-parse", "feature/a")
+        task = self.root / "task-a"
+        git(self.repo, "worktree", "add", str(task), "feature/a")
+        rebase = subprocess.run(["git", "rebase", "clash"], cwd=task, capture_output=True)
+        self.assertNotEqual(rebase.returncode, 0, "the rebase should stop on its conflict")
+
+        self.assertIn("rebased", branch_deletion_blocker(self.config, "feature/a", head))
+        result = apply_gc(self.config, delete_branches={"feature/a": head})
+
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/feature/a"), head)
+        self.assertEqual(result["deleted_branches"], [])
+        self.assertIn("rebased", result["failed"][0]["reason"])
+
+    def test_gc_keeps_a_branch_whose_worktree_is_temporarily_missing(self) -> None:
+        head = git(self.repo, "rev-parse", "feature/a")
+        task = self.root / "task-a"
+        git(self.repo, "worktree", "add", str(task), "feature/a")
+        task.rename(self.root / "task-a-unplugged")
+
+        self.assertIn("checked out", branch_deletion_blocker(self.config, "feature/a", head))
+        result = apply_gc(self.config, delete_branches={"feature/a": head})
+
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/feature/a"), head)
+        self.assertEqual(result["deleted_branches"], [])
+        self.assertIn("checked out", result["failed"][0]["reason"])
 
 
 if __name__ == "__main__":
