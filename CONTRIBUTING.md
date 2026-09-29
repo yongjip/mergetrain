@@ -27,8 +27,10 @@ python -m pytest      # tests
 - **Tests** live in `tests/`; cover any behaviour change. Real-git and
   concurrency tests are welcome — see `tests/test_git_runner.py` and
   `tests/test_store.py` for the patterns.
-- **End-to-end:** `bash scripts/e2e.sh` drives the installed CLI through every
-  workflow against real git repositories.
+- **Installed wheel:** CI builds the wheel, installs it into a clean virtualenv,
+  checks the packaged dashboard assets, and runs `mergetrain demo --brief`, a
+  self-checking walkthrough against real git repositories. Reproduce it with
+  the commands in [docs/release.md](./docs/release.md#what-ci-verifies).
 - **The machine contract** — every `--json` payload's shape, the `error.code`
   values, and `contract_version` — is guarded by
   `tests/test_contract_fingerprints.py`. If you change a JSON envelope, update its
@@ -46,5 +48,4 @@ changelog heading.
 
 Keep each PR focused on one logical change, with a clear conventional commit
 message. CI must be green before merge: `ruff` + `mypy` + `pytest` across the
-3.10–3.14 matrix, package metadata and clean-wheel installation, and an
-end-to-end leg.
+3.10–3.14 matrix, package metadata, and a clean-wheel installation smoke test.

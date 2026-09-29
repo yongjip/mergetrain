@@ -138,7 +138,7 @@ The suite covers the behaviors that make the queue safe:
 - **cli** — structured JSON errors and result counts, truthful exit codes,
   generated agent instructions, five-state status and next actions, resumable
   JSONL events, inspect/log termination, global option normalization, dashboard
-  bind policy, and init output.
+  and Hub bind policy, and init output.
 - **dashboard** — privacy-conscious snapshots, security headers, packaged static assets, and path-traversal rejection.
 - **config** — safe YAML loading, ambiguous-scalar rejection, fail-closed deploy
   refs, positive queue timing, unique gate names, defaults, and path resolution.
@@ -294,6 +294,14 @@ python -m pip install dist/*.whl
 mergetrain --version
 ```
 
+CI's `package` job installs the built wheel into a clean virtualenv, asserts
+that the installed package contains `dashboard_dist/index.html`, and runs
+`mergetrain demo --brief`. The demo drives the installed console script
+through a disposable repository and bare remote, from init through an approved
+atomic deploy, and exits non-zero when any outcome differs from the expected
+one. The dashboard and Hub loopback-only bind policy is covered by
+`tests/test_dashboard.py` and `tests/test_hub.py`.
+
 Supported and tested Python: 3.10 through 3.14. See the
 [release checklist](release.md) for the full publish flow.
 
@@ -323,7 +331,7 @@ shortens the independent lint phase without overlapping pytest-xdist's
 CPU-heavy worker pool. The built-in integrity check still finishes first.
 
 One machine cannot reproduce the whole matrix, so the CI legs it cannot run
-(Windows, Python 3.10-3.14, `e2e`, `package`) are covered *after* the push by
+(Windows, Python 3.10-3.14, `package`) are covered *after* the push by
 the `github-ci` verify hook — [`scripts/verify-ci.sh`](../scripts/verify-ci.sh)
 waits for the `ci.yml` run on the pushed SHA. Tunables:
 

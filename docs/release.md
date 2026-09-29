@@ -9,7 +9,6 @@ Every pull request runs:
 
 - unit tests on macOS and Linux with Python 3.10 through 3.14, plus one blocking
   Windows Python version;
-- the installed-CLI E2E suite on macOS and Linux;
 - dashboard unit/build checks and a headless Chromium interaction suite for
   notification permission, duplicate tabs, drill-down clicks, and feed recovery;
 - version, changelog, and security support-policy consistency checks;
@@ -17,7 +16,8 @@ Every pull request runs:
 - isolated sdist and wheel builds, followed by extraction and execution of the
   packaged sdist's own collection and test suite;
 - `twine check --strict` on both distributions; and
-- a clean-environment wheel install and CLI smoke test; and
+- a clean-environment wheel install that checks the packaged dashboard assets
+  and runs the self-checking `mergetrain demo --brief` walkthrough; and
 - a clean MCP-extra wheel install that starts the stdio server, initializes the
   protocol, lists tools, and verifies the deploy input schema.
 
@@ -34,10 +34,13 @@ Useful local equivalents:
 ```sh
 python -m pip install -e ".[dev]"
 python -m pytest -q
-PYTHON=python3.12 bash scripts/e2e.sh
 python scripts/check_release.py --tag v0.1.0
 python -m build
 python -m twine check --strict dist/*
+python -m venv /tmp/mergetrain-smoke
+/tmp/mergetrain-smoke/bin/python -m pip install dist/mergetrain-0.1.0-py3-none-any.whl
+/tmp/mergetrain-smoke/bin/python -c "import mergetrain, pathlib; assert pathlib.Path(mergetrain.__file__).with_name('dashboard_dist').joinpath('index.html').is_file()"
+/tmp/mergetrain-smoke/bin/mergetrain demo --brief
 bash scripts/check_sdist.sh dist/mergetrain-0.1.0.tar.gz
 ```
 

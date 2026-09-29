@@ -561,6 +561,49 @@ class HubServerTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_cli_refuses_a_non_loopback_bind_without_allow_remote(self) -> None:
+        """The hub shares the dashboard's loopback-only default.
+
+        Serving is patched out, so a regression fails here instead of exposing
+        every registered repository on all interfaces.
+        """
+
+        import contextlib
+        import io
+
+        from mergetrain.cli import main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            add_repo(make_repo(root, "live"), registry)
+
+            def run(*options: str):
+                stderr = io.StringIO()
+                with patch("mergetrain.dashboard.serve_hub") as serve, contextlib.redirect_stdout(
+                    io.StringIO()
+                ), contextlib.redirect_stderr(stderr):
+                    code = main(["hub", "--registry", str(registry), "--port", "0", *options])
+                return code, stderr.getvalue(), serve
+
+            for host in ("0.0.0.0", "::"):
+                with self.subTest(host=host):
+                    code, stderr, serve = run("--host", host)
+                    self.assertEqual(code, 1)
+                    self.assertIn("pass --allow-remote", stderr)
+                    serve.assert_not_called()
+
+                    code, _stderr, serve = run("--host", host, "--allow-remote")
+                    self.assertEqual(code, 0)
+                    self.assertEqual(serve.call_args.kwargs["host"], host)
+                    self.assertEqual(serve.call_args.kwargs["registry"], str(registry))
+
+            for host in ("127.0.0.1", "localhost", "::1"):
+                with self.subTest(host=host):
+                    code, _stderr, serve = run("--host", host)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(serve.call_args.kwargs["host"], host)
+
 
 if __name__ == "__main__":
     unittest.main()

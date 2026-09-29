@@ -178,27 +178,28 @@ jobs:
           /tmp/mergetrain-smoke/bin/python -c "import yaml"
           /tmp/mergetrain-smoke/bin/mergetrain --version
           /tmp/mergetrain-smoke/bin/mergetrain dashboard --help
+      # The self-checking demo drives the installed console script through
+      # init, enqueue, combined validation with semantic-conflict bisection,
+      # inspect, dismiss, and an approved atomic deploy to a sandboxed bare
+      # remote, and exits non-zero when any outcome differs from the expected.
+      - name: Smoke-test the installed wheel
+        run: |
+          /tmp/mergetrain-smoke/bin/python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          import mergetrain
+
+          package = Path(mergetrain.__file__).resolve().parent
+          if Path(sys.prefix).resolve() not in package.parents:
+              sys.exit(f"imported {package}, not the installed wheel")
+          index = package / "dashboard_dist" / "index.html"
+          if not index.is_file():
+              sys.exit(f"the installed wheel is missing {index}")
+          print(f"packaged dashboard: {index}")
+          PY
+          /tmp/mergetrain-smoke/bin/mergetrain demo --brief
       - name: Extract and run the sdist's packaged test suite
         env:
           MERGETRAIN_SDIST_PYTHON: python
         run: bash scripts/check_sdist.sh dist/*.tar.gz
-
-  e2e:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
-        with:
-          python-version: "3.12"
-      # Drives the installed `mergetrain` CLI through every workflow against real
-      # git repos. PYTHON=python pins the interpreter actions/setup-python put on
-      # PATH (the script defaults to python3 otherwise).
-      - name: End-to-end
-        env:
-          PYTHON: python
-        run: bash scripts/e2e.sh

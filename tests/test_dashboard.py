@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import os
 import socket
@@ -8,10 +9,11 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.dashboard import (
@@ -543,6 +545,44 @@ class DashboardTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 worker.join(timeout=3)
+
+    def test_cli_refuses_a_non_loopback_bind_without_allow_remote(self) -> None:
+        """A wildcard bind needs the explicit --allow-remote acknowledgement.
+
+        Serving is patched out, so a regression fails here instead of exposing
+        a listener on every interface.
+        """
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                "project:\n  name: demo\n", encoding="utf-8"
+            )
+
+            def run(*options: str):
+                stderr = io.StringIO()
+                with patch("mergetrain.dashboard.serve_dashboard") as serve, redirect_stdout(
+                    io.StringIO()
+                ), redirect_stderr(stderr):
+                    code = main(["--repo", str(repo), "dashboard", "--port", "0", *options])
+                return code, stderr.getvalue(), serve
+
+            for host in ("0.0.0.0", "::"):
+                with self.subTest(host=host):
+                    code, stderr, serve = run("--host", host)
+                    self.assertEqual(code, 1)
+                    self.assertIn("pass --allow-remote", stderr)
+                    serve.assert_not_called()
+
+                    code, _stderr, serve = run("--host", host, "--allow-remote")
+                    self.assertEqual(code, 0)
+                    self.assertEqual(serve.call_args.kwargs["host"], host)
+
+            for host in ("127.0.0.1", "localhost", "::1"):
+                with self.subTest(host=host):
+                    code, _stderr, serve = run("--host", host)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(serve.call_args.kwargs["host"], host)
 
     def test_snapshot_error_returns_json_instead_of_dropping_connection(self) -> None:
         def fail_snapshot() -> dict:
