@@ -51,6 +51,9 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
   configuration, Git, runtime, or lock detail.
 - Prefer structured output. Raw logs may contain sensitive command output.
 - Keep the six-verb public grammar and product-scope ceiling intact.
+- Batch releases. Before preparing one, apply the cadence rules in
+  `docs/release.md#when-to-cut-a-release`, and recommend waiting when the
+  pending changes do not meet them.
 
 ## GitHub CLI authentication
 

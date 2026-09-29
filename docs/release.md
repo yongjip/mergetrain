@@ -3,6 +3,35 @@
 PyPI releases are built by GitHub Actions and published with short-lived OIDC
 credentials. Do not upload production artifacts from a developer machine.
 
+## When to cut a release
+
+Merging to `main` is not a reason to release. Every published version is
+immutable, gets fetched by PyPI mirrors and scanners, and asks every user to
+upgrade. Between 0.1.0 (2026-07-16) and 3.2.0 (2026-09-29) mergetrain shipped
+36 releases, including 2.0.0 and 3.0.0 four days apart. That pace inflates
+download counts without adding users and makes the tool look unstable to the
+people who depend on it.
+
+- Collect changes under `## Unreleased` in `CHANGELOG.md` and release them
+  together.
+- Ship a patch release promptly only for a regression in the latest release, a
+  data-loss or safety-boundary bug (an unapproved push, or a cleanup that
+  deletes files mergetrain does not own), a security fix, or a broken install
+  or launch path (PyPI, `uvx`, the MCP Registry, or the plugins). Fold every
+  other fix into the next release.
+- Ship at most one feature (minor) release per week.
+- Bump the major version only for a breaking change to the machine contract,
+  the CLI grammar, or the configuration schema. Group breaking changes into one
+  planned major release instead of shipping several majors in a row.
+- Do not publish a second version on the same day unless it fixes a regression
+  in the first.
+- Changes to docs, tests, CI, or internal structure alone never justify a
+  release.
+
+An agent asked to prepare a release first lists what is pending under
+`## Unreleased` and says whether it meets these rules. If it does not, the
+agent recommends waiting instead of preparing the release.
+
 ## What CI verifies
 
 Every pull request runs:

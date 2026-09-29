@@ -34,6 +34,9 @@ worktrees.
    behavior, MCP tool, recovery action, notification path, or reuse control,
    apply the admission test in `docs/product-scope.md`, prefer consolidation,
    and record the measured cost, repeated workflow, or incorrect state.
+10. Do not cut a release for every merge. Before preparing one, apply the
+    cadence rules in `docs/release.md#when-to-cut-a-release`; if the changes
+    pending under `## Unreleased` do not meet them, recommend waiting.
 
 ## Useful commands
 
