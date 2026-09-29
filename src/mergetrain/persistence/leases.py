@@ -89,8 +89,7 @@ def get_lock(conn: sqlite3.Connection) -> RunnerLock | None:
     return RunnerLock.from_row(row, liveness=owner_liveness(str(row["owner"])))
 
 
-def active_runner_lock(
-    conn: sqlite3.Connection) -> RunnerLock | None:
+def active_runner_lock(conn: sqlite3.Connection) -> RunnerLock | None:
     """Return the lock that still fences work as an active runner.
 
     A live local process remains authoritative even if its wall-clock lease is
@@ -130,8 +129,7 @@ def _release_lock_token(
     return cur.rowcount > 0
 
 
-def live_worktree_path(
-    conn: sqlite3.Connection) -> str | None:
+def live_worktree_path(conn: sqlite3.Connection) -> str | None:
     """The integration worktree of the currently live runner, or ``None``.
 
     Read fresh from the lock table so GC can re-check it immediately before each
