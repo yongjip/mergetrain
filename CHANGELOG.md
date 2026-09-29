@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.3.0 - 2026-09-30
 
 - Build every train on the integration branch itself, never on a tag or local
   branch that shares its short name. mergetrain resolved `origin/main` the way
