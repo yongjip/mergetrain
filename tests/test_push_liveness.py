@@ -16,6 +16,7 @@ from mergetrain.push_liveness import (
     push_in_flight,
     push_job_name,
     push_lock_path,
+    release_push_lock,
 )
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -74,6 +75,28 @@ class PushLockTests(unittest.TestCase):
                 child.wait(timeout=30)
             self.assertFalse(push_in_flight(config, SHA))
             self.assertFalse(push_lock_path(config, SHA).exists())
+
+    def test_a_released_lock_is_free_although_a_process_still_inherits_it(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = fake_config(Path(td))
+            release = Path(td) / "release"
+            waiter = (
+                "import os, sys, time\n"
+                "while not os.path.exists(sys.argv[1]):\n"
+                "    time.sleep(0.02)\n"
+            )
+            with holding_push_lock(config, SHA) as inherited:
+                child = subprocess.Popen(
+                    [sys.executable, "-c", waiter, str(release)], pass_fds=inherited
+                )
+                release_push_lock(inherited)
+            try:
+                # The child keeps its copy of the descriptor, but not the lock.
+                self.assertFalse(push_in_flight(config, SHA))
+                self.assertFalse(push_lock_path(config, SHA).exists())
+            finally:
+                release.touch()
+                child.wait(timeout=30)
 
     def test_a_lock_that_cannot_be_taken_means_the_push_is_not_attempted(self) -> None:
         with tempfile.TemporaryDirectory() as td:

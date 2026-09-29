@@ -2,16 +2,20 @@
 
 ## Unreleased
 
-- Stop a process that `git push` leaves running from holding the push lock.
-  Since 3.1.0 the push inherited its lock, and so did everything the push
-  started, including helpers that outlive it, such as a credential cache daemon
-  or a process a pre-push hook starts in the background. After a runner crash
-  such a helper kept the push "in flight" for as long as it lived, and
-  `reconcile` refused with `lock_held` long after the push had exited. A small
-  holder process now keeps the lock for exactly as long as `git push` runs, and
-  nothing the push starts inherits it, so the refusal no longer asks you to stop
-  a process or delete the lock file by hand. The killed-runner scenarios now
-  also run on Windows, where the push's named Job Object plays the lock's part.
+- Stop a process that `git push` leaves running from holding the push lock
+  once the push has finished. Since 3.1.0 every process the push started
+  inherited its lock, including helpers that outlive it, such as a credential
+  cache daemon or a process a pre-push hook starts in the background, so
+  `reconcile` refused a parked push with `lock_held` for as long as such a
+  helper lived. When `git push` exits with a status of its own, it has already
+  waited for the processes that do the push, and mergetrain now releases the
+  lock for every process that inherited it. A push that times out, is killed,
+  or dies from a signal keeps the lock until each of those processes has
+  exited, because a local `receive-pack` can outlive its client and still land
+  the push. After a runner crash nothing releases the lock early, and the
+  `lock_held` error still names the lock file to clear once no git process of
+  the push is left. The killed-runner scenarios now also run on Windows, where
+  the push's named Job Object plays the lock's part.
 - Remove the `mergetrain.store` module. It only re-exported functions from the
   `mergetrain.persistence` modules for older imports, and no Python import API
   was promised; import from the `mergetrain.persistence` module that owns the

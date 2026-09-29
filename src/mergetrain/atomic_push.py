@@ -32,7 +32,7 @@ from .git_ops import (
     resolve_pending_ref,
 )
 from .persistence.recovery import clear_rejected_push, record_pending_push
-from .push_liveness import holding_push_lock, push_job_name
+from .push_liveness import holding_push_lock, push_job_name, release_push_lock
 
 EventWriter = Callable[..., None]
 VerifyHooks = Callable[..., None]
@@ -112,21 +112,29 @@ class AtomicPush:
         push_args.extend(f"{target}:{ref}" for ref in destination.push_refs)
         if audit_ref not in destination.push_refs:
             push_args.append(f"{target}:{audit_ref}")
-        # A holder process keeps the lock for exactly as long as git push
-        # runs, so recovery can tell that a push whose runner died may yet
-        # land (#220), and helpers git leaves running cannot hold it.
+        # The push inherits the lock, so recovery can tell that a push whose
+        # runner died is still running and may yet land (#220).
         with holding_push_lock(self.config, target) as inherited:
-            run_command(
-                push_args,
-                cwd=worktree,
-                env=destination.command_env(),
-                log=redacting_log(log),
-                pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
-                hold_fds=inherited,
-                job_name=push_job_name(target),
-            )
+            try:
+                run_command(
+                    push_args,
+                    cwd=worktree,
+                    env=destination.command_env(),
+                    log=redacting_log(log),
+                    pulse=pulse,
+                    pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
+                    timeout_seconds=self.config.queue.command_timeout_seconds,
+                    pass_fds=inherited,
+                    job_name=push_job_name(target),
+                )
+            except CommandFailed as exc:
+                # git push chose this status after the processes doing the
+                # push had finished. A timeout (124) or a signal may leave a
+                # local receive-pack running, so those keep the lock.
+                if exc.returncode in (1, 128):
+                    release_push_lock(inherited)
+                raise
+            release_push_lock(inherited)
 
     def audit_ref_expectation(
         self,

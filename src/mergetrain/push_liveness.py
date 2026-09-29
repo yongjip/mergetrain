@@ -6,11 +6,15 @@ land after recovery has read the remote. Recovery therefore has to know that a
 push is still going before it trusts what the remote says.
 
 On POSIX the runner takes an exclusive ``flock`` before it pushes and hands the
-descriptor to a small holder process that runs ``git push`` in the push's own
-session. The holder keeps the lock until ``git push`` exits, and ``git push``
-waits for the processes that do the push (a local ``receive-pack`` and its
-hooks included); helpers it leaves running never inherit the lock, so they
-cannot keep a finished push "in flight". On Windows the push's
+descriptor to ``git push``. The push's own processes inherit it -- the local
+``receive-pack`` and its hooks included -- so the lock is released only when
+the runner and every process of the push have exited. A local
+``receive-pack`` can outlive a killed client and still land the push, so this
+holds even when ``git push`` itself is gone. Once ``git push`` exits with a
+status of its own, though, it has waited for the processes that do the push,
+and the runner releases the lock for every copy of the descriptor: helpers the
+push left running, such as a credential cache daemon, then cannot keep a
+finished push "in flight". On Windows the push's
 Job Object carries a name derived from the commit, and ``git push`` holds its
 own handle to that job, which keeps the name alive after the runner is gone.
 
@@ -21,7 +25,7 @@ the whole push may still apply it after the client has died.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -58,6 +62,19 @@ def _lock_is_free(path: Path) -> bool:
         return True
     finally:
         os.close(fd)
+
+
+def release_push_lock(inherited: Sequence[int]) -> None:
+    """Release the push lock for every process that inherited it.
+
+    An ``flock`` lock belongs to the open file, so unlocking one descriptor
+    frees it for every copy. Call this only after ``git push`` exited with a
+    status of its own; a push that was stopped or died of a signal must keep
+    the lock until each process that inherited it has exited.
+    """
+
+    for fd in inherited:
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def push_in_flight(config: MergetrainConfig, deploy_sha: str) -> bool:

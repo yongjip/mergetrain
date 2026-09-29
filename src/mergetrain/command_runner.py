@@ -247,20 +247,6 @@ def _stop_process(process: subprocess.Popen[str], job: WindowsJob | None = None)
     return _stop_windows_process(process, job)  # pragma: no cover - Windows compatibility
 
 
-# Runs argv[1:] and exits with its status, re-raising a fatal signal. It keeps
-# the descriptors it inherited open for exactly that long; the command itself
-# starts with them closed (close_fds), so helpers that outlive it cannot hold
-# them.
-_FD_HOLDER = (
-    "import os, signal, subprocess, sys\n"
-    "code = subprocess.call(sys.argv[1:])\n"
-    "if code < 0:\n"
-    "    signal.signal(-code, signal.SIG_DFL)\n"
-    "    os.kill(os.getpid(), -code)\n"
-    "sys.exit(code)\n"
-)
-
-
 def _run_managed(
     command: Sequence[str],
     *,
@@ -272,15 +258,13 @@ def _run_managed(
     pulse_interval_seconds: float,
     timeout_seconds: float | None,
     cancel_event: threading.Event | None = None,
-    hold_fds: Sequence[int] = (),
+    pass_fds: Sequence[int] = (),
     job_name: str = "",
 ) -> subprocess.CompletedProcess[str]:
     """Run one non-interactive process while enforcing pulse, timeout, and cancel.
 
-    ``hold_fds`` stay open exactly as long as the command runs, held by a small
-    parent process, and are not inherited by the command or anything it starts
-    (POSIX). ``job_name`` names its Windows job so that other processes can find
-    it.
+    ``pass_fds`` stay open in the process and everything it starts (POSIX);
+    ``job_name`` names its Windows job so that other processes can find it.
     """
 
     if cancel_event is not None and cancel_event.is_set():
@@ -288,12 +272,10 @@ def _run_managed(
     if pulse is not None:
         pulse()
     job = WindowsJob.create(job_name) if os.name == "nt" else None
-    held = tuple(hold_fds) if os.name == "posix" else ()
-    argv = [sys.executable, "-c", _FD_HOLDER, *command] if held else list(command)
     try:
         with _job_handle_for_command(job if job_name else None) as startupinfo:
             process = subprocess.Popen(
-                argv,
+                command,
                 cwd=str(cwd),
                 env=env,
                 shell=False,
@@ -305,7 +287,7 @@ def _run_managed(
                 stderr=subprocess.PIPE,
                 bufsize=1,
                 start_new_session=os.name == "posix",
-                pass_fds=held,
+                pass_fds=tuple(pass_fds) if os.name == "posix" else (),
                 startupinfo=startupinfo,
                 # A job adopts the process before it runs, so no descendant escapes.
                 creationflags=(
@@ -415,7 +397,7 @@ def run_command(
     pulse: Pulse | None = None,
     pulse_interval_seconds: float = 10,
     timeout_seconds: float | None = None,
-    hold_fds: Sequence[int] = (),
+    pass_fds: Sequence[int] = (),
     job_name: str = "",
 ) -> subprocess.CompletedProcess[str]:
     if log:
@@ -433,7 +415,7 @@ def run_command(
         pulse=pulse,
         pulse_interval_seconds=pulse_interval_seconds,
         timeout_seconds=timeout_seconds,
-        hold_fds=hold_fds,
+        pass_fds=pass_fds,
         job_name=job_name,
     )
 

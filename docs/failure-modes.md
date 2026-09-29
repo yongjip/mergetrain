@@ -111,17 +111,26 @@ for explicit operator inspection.
 A runner that stops mid-push, whether it was killed or crashed, does not stop
 the push: managed commands run in their own process group (a Job Object on
 Windows), so `git push` keeps running and can still land afterwards. The runner
-takes a lock before it pushes, and a small holder process started in the push's
-own session keeps it for exactly as long as `git push` runs. `git push` waits for
-the processes that do the push, a local `receive-pack` and its hooks included,
-and helpers it leaves running, such as a credential cache daemon, never hold the
-lock. On Windows the push's Job Object is named after the commit instead, and
-`git push` holds its own handle to it, so the name outlives the runner. While the
-push is running, `reconcile` refuses with `lock_held` (exit 3) and leaves the job
-parked, so it never reads the remote before the push has finished changing it.
-Rerun reconcile once the push has exited. One gap remains for network remotes: a
-server that already received the whole push can still apply it after the client
-has died.
+takes a lock before it pushes and hands it to `git push`, and every process the
+push starts, a local `receive-pack` and its hooks included, inherits it. On
+Windows the push's Job Object is named after the commit instead, and `git push`
+holds its own handle to it, so the name outlives the runner. While any process
+of that push is alive, `reconcile` refuses with `lock_held` (exit 3) and leaves
+the job parked, so it never reads the remote before the push has finished
+changing it. Rerun reconcile once the push has exited. One gap remains for
+network remotes: a server that already received the whole push can still apply
+it after the client has died.
+
+When `git push` exits with a status of its own while the runner is still there,
+it has already waited for the processes that do the push, so the runner releases
+the lock for every process that inherited it. A long-lived process that the push
+started, such as `git credential-cache--daemon` or a daemon launched by a
+`pre-push` hook, then no longer holds it. After a crash, or when the push is
+stopped, nothing releases the lock early, so such a process keeps it after the
+push itself has exited. The `lock_held` error names the lock file under
+`push-locks/` in the state directory. Once no `git` process of that push is
+left, stop the process that holds the file (`lsof <file>` shows it), or delete
+the file, and rerun reconcile.
 
 Use `mergetrain logs <job-id> --tail 200` for the raw git diagnostics either way.
 

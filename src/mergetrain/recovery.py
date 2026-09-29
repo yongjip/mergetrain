@@ -516,8 +516,10 @@ def reconcile(
                 raise LockHeld(
                     f"job {job.id}: the push of {job.pending_deploy_sha[:12]} started "
                     "by a runner that stopped is still running and may yet land; "
-                    "wait for it to exit, then rerun reconcile (its lock is "
-                    f"{push_lock_path(config, job.pending_deploy_sha)})"
+                    "wait for it to exit, then rerun reconcile. If no git process "
+                    "of that push is left, a process it started still holds "
+                    f"{push_lock_path(config, job.pending_deploy_sha)}: stop that "
+                    "process or delete the file, then rerun reconcile"
                 )
         # One interrupted push parks jobs bound for a single target, but two
         # separate crashes can park jobs bound for different remotes/refs. Ask

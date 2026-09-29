@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -26,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_git_runner import git, make_demo_repo
 
 from mergetrain.config import load_config
-from mergetrain.errors import LockHeld
+from mergetrain.errors import CommandFailed, LockHeld
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.jobs import cancel_job, enqueue_job, get_job
 from mergetrain.push_liveness import push_in_flight
@@ -154,8 +155,88 @@ class OrphanedPushTests(unittest.TestCase):
         self._run(kill_signal=None, cancel=True)
 
 
+def _process_command(pid: int) -> str:
+    completed = subprocess.run(
+        ["ps", "-ww", "-o", "command=", "-p", str(pid)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return completed.stdout.strip()
+
+
 @unittest.skipUnless(os.name == "posix", "the POSIX push lock is an inherited flock")
-class PushHelperTests(unittest.TestCase):
+class PushLockLifetimeTests(unittest.TestCase):
+    def test_a_receive_pack_that_outlives_a_killed_git_push_keeps_the_push_in_flight(
+        self,
+    ) -> None:
+        # A local receive-pack that already has the whole push still applies
+        # it after git push dies, so a push killed on its own must stay "in
+        # flight" until every process that inherited the lock has exited.
+        from mergetrain.atomic_push import AtomicPush
+        from mergetrain.git_destination import resolve_git_destination
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            remote = root / "remote.git"
+            # Keepalives would make receive-pack write to the dead client and
+            # die, so without them it deterministically outlives git push.
+            git(remote, "config", "receive.keepAlive", "0")
+            sentinel = root / "hook.pid"
+            hook = remote / "hooks" / "pre-receive"
+            hook.write_text(
+                f"#!/bin/sh\necho $$ > '{sentinel}.tmp'\n"
+                f"mv '{sentinel}.tmp' '{sentinel}'\nsleep {HOOK_SECONDS}\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+            config = load_config(repo=repo)
+            base = git(remote, "rev-parse", "main")
+            target = git(repo, "rev-parse", "feature/a")
+            push = AtomicPush(config)
+            destination = resolve_git_destination(config)
+            audit_ref, expected = push.audit_ref_expectation(
+                worktree=repo, deploy_sha=target, log=None, destination=destination
+            )
+            failures: list[BaseException] = []
+
+            def run_push() -> None:
+                try:
+                    push.push_verified_head(
+                        worktree=repo,
+                        deploy_sha=target,
+                        audit_ref=audit_ref,
+                        audit_expected_sha=expected,
+                        destination=destination,
+                    )
+                except BaseException as exc:  # noqa: BLE001 - asserted below
+                    failures.append(exc)
+
+            pusher = threading.Thread(target=run_push, daemon=True)
+            pusher.start()
+            _wait_for(sentinel.exists, what="the pre-receive hook to start")
+            # The push runs in its own session, led by git push itself.
+            client = os.getpgid(int(sentinel.read_text(encoding="utf-8")))
+            self.assertNotEqual(client, os.getpgid(0))
+            self.assertIn("push --atomic", _process_command(client))
+            os.kill(client, signal.SIGKILL)
+            pusher.join(timeout=WAIT_SECONDS)
+            self.assertFalse(pusher.is_alive(), "the push never returned")
+            self.assertEqual(len(failures), 1)
+            self.assertIsInstance(failures[0], CommandFailed)
+
+            # receive-pack is still in its hook: nothing has landed yet, and
+            # nothing may decide that nothing will.
+            self.assertEqual(git(remote, "rev-parse", "main"), base)
+            self.assertTrue(push_in_flight(config, target))
+
+            _wait_for(
+                lambda: not push_in_flight(config, target),
+                what="receive-pack to exit",
+            )
+            self.assertEqual(git(remote, "rev-parse", "main"), target)
+
     def test_a_helper_the_push_leaves_running_does_not_hold_the_push_lock(self) -> None:
         # git starts helpers that outlive the push, such as a credential cache
         # daemon or anything a hook backgrounds. Once git push has exited,
