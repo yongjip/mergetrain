@@ -148,6 +148,20 @@ class TrainOutcomeTests(unittest.TestCase):
                 self.assertEqual(out["severity"], severity)
                 self.assertEqual(out["category"], category)
 
+    def test_failure_and_warning_messages_say_when_they_were_bounded(self) -> None:
+        # Every other note-derived outcome message publishes message_truncated,
+        # but failures[] and warnings[] copied the bounded message without it.
+        out = train_outcome(
+            [
+                job(id=1, branch="a", status="failed", note="x" * 3000),
+                job(id=2, branch="b", status="deployed", verify_status="failed", note="late"),
+            ]
+        )
+        self.assertEqual(len(out["failures"][0]["message"]), 1000)
+        self.assertIs(out["failures"][0]["message_truncated"], True)
+        self.assertEqual(out["warnings"][0]["message"], "late")
+        self.assertIs(out["warnings"][0]["message_truncated"], False)
+
 
 class StreamTerminalTests(unittest.TestCase):
     def _live_lock(self) -> RunnerLock:

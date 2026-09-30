@@ -89,7 +89,8 @@ machine from those fields.
 Advanced structured views that serialize a job redact and bound its persisted
 `note` at 1,000 characters and publish `note_truncated`. Outcome and progress
 messages derived from that note use the same rule and publish
-`message_truncated`. The truncation keys are always boolean; consumers should
+`message_truncated`, as does each entry of a train outcome's `failures` and
+`warnings`. The truncation keys are always boolean; consumers should
 show the bounded text and may use the flag to explain that more text was
 discarded.
 

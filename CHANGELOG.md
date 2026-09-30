@@ -347,6 +347,12 @@
   the stream, and that event never reached it. The stream now reads once more
   after it first sees the final status, one poll interval later, and ends
   after that read.
+- Say when a train outcome's failure or warning message was cut. The
+  `failures` and `warnings` entries of a train outcome, in `inspect --json`,
+  `history --json`, and the JSONL `stream_end` frame, carried a note-derived
+  message bounded at 1,000 characters but no `message_truncated`, unlike
+  every other note-derived message, so a consumer could not tell that text
+  was discarded. Each entry now has `message_truncated`.
 
 ## 3.3.0 - 2026-09-30
 

@@ -722,12 +722,22 @@ def job_outcome(job: Job) -> dict[str, Any]:
 def train_outcome(jobs: Sequence[Job]) -> dict[str, Any]:
     outcomes = [(job, job_outcome(job)) for job in jobs]
     failures = [
-        {"job_id": job.id, "category": outcome["category"], "message": outcome["message"]}
+        {
+            "job_id": job.id,
+            "category": outcome["category"],
+            "message": outcome["message"],
+            "message_truncated": outcome["message_truncated"],
+        }
         for job, outcome in outcomes
         if outcome["severity"] == "failure"
     ]
     warnings = [
-        {"job_id": job.id, "category": outcome["category"], "message": outcome["message"]}
+        {
+            "job_id": job.id,
+            "category": outcome["category"],
+            "message": outcome["message"],
+            "message_truncated": outcome["message_truncated"],
+        }
         for job, outcome in outcomes
         if outcome["severity"] == "warning"
     ]
