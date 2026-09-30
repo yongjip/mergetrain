@@ -26,6 +26,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -230,6 +231,49 @@ async def _stop_cli_process(
     return stopped
 
 
+# The CLI children still running, by process ID. The SDK's own cancellation
+# stops them one by one; the server stops whatever is left when it exits.
+_LIVE_CHILDREN: dict[int, tuple[asyncio.subprocess.Process, WindowsJob | None]] = {}
+
+
+def _child_running(pid: int) -> bool:
+    try:
+        reaped, _status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return False  # already reaped by the event loop's child watcher
+    return reaped == 0
+
+
+def _stop_live_children() -> None:
+    """Stop every CLI child that is still running, before the server exits.
+
+    POSIX children get SIGINT, so each CLI stops its gates and releases its
+    lease, and their groups are killed once the grace period runs out. On
+    Windows a CLI cannot unwind from CTRL_BREAK, so its job ends the tree.
+    """
+
+    children = list(_LIVE_CHILDREN.values())
+    _LIVE_CHILDREN.clear()
+    for process, job in children:
+        if os.name == "posix":
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGINT)
+        elif job is not None:  # pragma: no cover - exercised by Windows CI
+            job.terminate()
+        else:  # pragma: no cover - exercised by Windows CI
+            with suppress(ProcessLookupError):
+                process.kill()
+    if os.name != "posix":  # pragma: no cover - exercised by Windows CI
+        return
+    deadline = time.monotonic() + _CLI_TERMINATE_GRACE_SECONDS
+    for process, _job in children:
+        while _child_running(process.pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if _child_running(process.pid):
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+
+
 async def _join_job(  # pragma: no cover - exercised by Windows CI
     job: WindowsJob, process: asyncio.subprocess.Process
 ) -> WindowsJob | None:
@@ -268,6 +312,7 @@ async def _stop_and_drain(
             return await communicate_task
         return b"", b""
     finally:
+        _LIVE_CHILDREN.pop(process.pid, None)
         if job is not None:  # pragma: no cover - exercised by Windows CI
             job.close()
 
@@ -321,6 +366,8 @@ class MergetrainTools:
             if job is not None:  # pragma: no cover - exercised by Windows CI
                 job.close()
             raise
+        _LIVE_CHILDREN[process.pid] = (process, job)
+        handed_off = False
         communicate_task = asyncio.create_task(process.communicate())
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -333,7 +380,7 @@ class MergetrainTools:
             # the shielded wait below, so the cleanup owns the job and closes
             # it only after it has terminated the tree through it.
             cleanup = asyncio.create_task(_stop_and_drain(process, communicate_task, job))
-            job = None
+            handed_off = True
             await asyncio.shield(cleanup)
             if isinstance(exc, asyncio.TimeoutError):
                 raise subprocess.TimeoutExpired(
@@ -343,8 +390,10 @@ class MergetrainTools:
             # the MCP SDK keeps its existing semantics.
             raise
         finally:
-            if job is not None:  # pragma: no cover - exercised by Windows CI
-                job.close()
+            if not handed_off:
+                _LIVE_CHILDREN.pop(process.pid, None)
+                if job is not None:  # pragma: no cover - exercised by Windows CI
+                    job.close()
         return subprocess.CompletedProcess(
             argv,
             process.returncode if process.returncode is not None else 1,
@@ -787,6 +836,13 @@ def build_server(repo: Path, *, config: str | None = None, db: str | None = None
     return server
 
 
+def _exit_on_signal(signum: int, _frame: Any) -> None:
+    # The default action would end the server at once and leave every CLI
+    # child, which runs in its own session, validating or deploying with no
+    # client. An exit unwinds through run_server, which stops them first.
+    raise SystemExit(128 + signum)
+
+
 def run_server(repo: Path, *, config: str | None = None, db: str | None = None) -> int:
     """Serve over stdio, or explain how to install the extra."""
 
@@ -795,5 +851,14 @@ def run_server(repo: Path, *, config: str | None = None, db: str | None = None) 
     except ImportError:
         print(f"mergetrain mcp: {INSTALL_HINT}", file=sys.stderr)
         return 1
-    server.run(transport="stdio")
+    previous: dict[signal.Signals, Any] = {}
+    if os.name == "posix":
+        for terminating in (signal.SIGTERM, signal.SIGHUP):
+            previous[terminating] = signal.signal(terminating, _exit_on_signal)
+    try:
+        server.run(transport="stdio")
+    finally:
+        _stop_live_children()
+        for restored, handler in previous.items():
+            signal.signal(restored, handler)
     return 0

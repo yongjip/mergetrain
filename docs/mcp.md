@@ -80,9 +80,15 @@ roots in synthesized diagnostics.
 
 Validation can run a real test suite. MCP cancellation, server shutdown, and a
 bounded timeout stop the CLI process group and let mergetrain release its lease;
-the gate process is not left running invisibly. On Windows the CLI runs in a Job
-Object, which also holds the gates that the CLI starts in their own process
-groups, so stopping the CLI stops those gates too.
+the gate process is not left running invisibly. The server sends the CLI SIGINT
+and allows it 20 seconds to stop its gates before it kills the CLI's group. On
+POSIX, stopping the server with SIGTERM or SIGHUP, as well as closing its stdin,
+stops any CLI still running first; a SIGKILL of the server cannot. On Windows the
+CLI runs in a Job Object, which also holds the gates that the CLI starts in their
+own process groups, so stopping the CLI stops those gates too.
+
+A deploy stopped by the timeout may already have pushed. The tool then says so,
+and the agent reads `mergetrain_status` before deciding what happened.
 
 ## Contract
 

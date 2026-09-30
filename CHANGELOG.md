@@ -68,6 +68,13 @@
   cleanup could terminate the tree through it, so gates the CLI had started in
   their own process groups kept running. The cleanup now owns the job and
   closes it only after terminating the tree.
+- Stop the MCP server's running commands when the server is stopped with a
+  signal. The CLI child runs in its own session, and the server had no
+  handler for SIGTERM or SIGHUP, so stopping the server that way, as a host or
+  a closing terminal does, left a validate or deploy and its gates running
+  with no client. On POSIX both signals now end the server through its normal
+  exit, which stops every CLI still running the way a cancellation does, and
+  any other exit of the server does the same.
 
 ## 3.3.0 - 2026-09-30
 

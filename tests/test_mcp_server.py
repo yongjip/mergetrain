@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stderr, suppress
@@ -546,6 +547,68 @@ class ProcessLifecycleTests(unittest.TestCase):
 
         asyncio.run(scenario())
         self.assertEqual(events, ["terminate", "close"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups and signals")
+    def test_server_shutdown_stops_a_running_cli_child_the_graceful_way(self) -> None:
+        # A child still running when the server exits gets SIGINT, so the CLI
+        # can stop its gates and release its lease, rather than being left
+        # running with no client.
+        from mergetrain import mcp_server
+
+        child_program = (
+            "import pathlib, sys, time\n"
+            "root = pathlib.Path(sys.argv[1])\n"
+            "try:\n"
+            "    (root / 'ready').write_text('1')\n"
+            "    time.sleep(60)\n"
+            "except KeyboardInterrupt:\n"
+            "    (root / 'stopped').write_text('clean')\n"
+            "    raise SystemExit(130)\n"
+        )
+
+        async def scenario(root: Path) -> None:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-c", child_program, str(root), start_new_session=True
+            )
+            for _ in range(500):
+                if (root / "ready").exists():
+                    break
+                await asyncio.sleep(0.01)
+            mcp_server._LIVE_CHILDREN[process.pid] = (process, None)
+            mcp_server._stop_live_children()
+            self.assertEqual((root / "stopped").read_text(), "clean")
+            self.assertEqual(mcp_server._LIVE_CHILDREN, {})
+            await process.wait()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(scenario(Path(tmp)))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signals")
+    def test_a_terminating_signal_stops_the_children_before_the_server_exits(self) -> None:
+        from mergetrain import mcp_server
+
+        class SignalledServer:
+            def run(self, *, transport: str) -> None:
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(1)
+
+        def unhandled(signum: int, frame: Any) -> None:
+            # Keeps a regression from terminating the test process itself.
+            raise AssertionError("run_server installed no SIGTERM handler")
+
+        original = signal.signal(signal.SIGTERM, unhandled)
+        try:
+            with (
+                patch("mergetrain.mcp_server.build_server", return_value=SignalledServer()),
+                patch("mergetrain.mcp_server._stop_live_children") as stop_children,
+                self.assertRaises(SystemExit) as raised,
+            ):
+                mcp_server.run_server(Path("/repo"))
+            self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+            stop_children.assert_called_once_with()
+            self.assertIs(signal.getsignal(signal.SIGTERM), unhandled)
+        finally:
+            signal.signal(signal.SIGTERM, original)
 
     def test_the_cli_gets_time_to_stop_its_gates_before_it_is_killed(self) -> None:
         # The CLI stops a gate with SIGTERM, then SIGKILL, waiting up to
