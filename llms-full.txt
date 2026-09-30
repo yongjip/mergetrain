@@ -104,7 +104,7 @@ what landed and never blindly repeats a push. Never delete or rewrite
 
 ## Machine contract
 
-mergetrain 3 uses machine `contract_version: 3` and config schema `version: 2`.
+mergetrain uses machine `contract_version: 5` and config schema `version: 2`.
 They are independent. Every one-shot JSON payload carries the contract version;
 `ok` says the command produced a normal response, while run outcome lives in
 `result`, repository condition in `health` and `state`, and failures in

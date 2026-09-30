@@ -25,6 +25,11 @@ jobs and events. Both views choose the next action as `status` does, so a repo
 whose Git repository, remote, or integration ref is missing is pointed at that
 first, which takes three read-only Git queries per repo.
 
+For a running job's phase, current gate, and elapsed time, run
+`mergetrain inspect JOB_ID --json` or `mergetrain events --jsonl` in that repo.
+Contract 5 removed the full view's dashboard-era `eta` and `progress` keys; see
+the [migration](contract.md#contract-4-to-5-hub-read-model-retirement).
+
 ## The contract: sovereign repos, stateless hub
 
 The hub owns no correctness-critical state

@@ -250,7 +250,8 @@ init  status  enqueue  validate  deploy  inspect
 
 Version 3 is the long-lived product grammar. There is no planned v4: new
 capabilities must fit these verbs or stay in advanced operator surfaces, and
-the v3 JSON and MCP contracts evolve additively. See the
+the v3 JSON and MCP contracts evolve additively apart from the contract bumps
+recorded in the
 [compatibility policy](https://github.com/yongjip/mergetrain/blob/main/docs/contract.md#long-lived-v3-compatibility-policy).
 
 The latest published release is shown by the PyPI badge above.

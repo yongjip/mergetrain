@@ -535,17 +535,14 @@ operator-wide feed and continues until interrupted.
 
 ## Read model
 
-`hub status --json` embeds one read-only snapshot per registered repository.
-During gates, a snapshot exposes structured gate position and a redacted
+`hub status --json` embeds one read-only snapshot per registered repository:
+its counts, runner lock, recent jobs and events, selected and validated
+trains, reuse explanation, and next action. During gates, `inspect` and
+`events` in that repository expose structured gate position and a redacted
 command template, so a reader can tell what is running instead of only
-repeating a log message.
-
-The same bounded event store supplies the ETA read model. For each running
-train, the snapshot exposes medians from at most the newest 20 completed spans
-per phase and gate, excluding the active claim. An ETA is published only when
-every remaining comparable span has a sample; otherwise it reports
-`available: false` with its sample coverage. No build cache or wall-clock guess
-participates in the estimate.
+repeating a log message. The snapshot's dashboard-era ETA and progress read
+model was retired in contract 5
+([migration](contract.md#contract-4-to-5-hub-read-model-retirement)).
 
 No read surface has a write path: cancel, retry, validate, deploy, and recovery
 remain explicit CLI actions.

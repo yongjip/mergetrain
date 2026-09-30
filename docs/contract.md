@@ -12,10 +12,12 @@ changes without an explicit compatibility decision.
 | `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
 | Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-mergetrain 3.3.0 uses machine contract **4** and config schema **2**. They move
-only when their own boundary changes; neither is tied to the SQLite schema.
+mergetrain 3.3.0 uses machine contract **4** and config schema **2**. Unreleased
+changes move machine output to contract **5**, which this page describes; the
+config schema stays **2**. Each version moves only when its own boundary
+changes; neither is tied to the SQLite schema.
 
-## Contract 4 envelope
+## Contract 5 envelope
 
 Every one-shot JSON response carries top-level `contract_version`. Nested job
 or repository objects are not stamped; the outer response owns the version.
@@ -33,7 +35,7 @@ All failures use one shape:
 
 ```json
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "ok": false,
   "error": {
     "code": "queue_error",
@@ -148,7 +150,7 @@ The following promises apply indefinitely across 3.x releases:
    and `inspect`—will not be removed, renamed, or repurposed.
 2. Existing public options keep their meaning. A new optional flag cannot make
    an old invocation more permissive or introduce a push.
-3. Contract-4 JSON evolves additively: existing keys, types, meanings, failure
+3. Contract-5 JSON evolves additively: existing keys, types, meanings, failure
    envelope, and exit semantics are preserved.
 4. Consumers ignore unknown object keys and tolerate unknown enum values. An
    unknown safety or next-action value must fail closed for mutation.
@@ -167,6 +169,14 @@ would itself violate a safety guarantee. Such a release must fail the unsafe
 operation closed, document the migration, bump the affected machine contract,
 and provide a direct diagnostic. Convenience or naming preference is not a
 reason to break v3.
+
+Contract 5 is the one recorded exception to that rule, made by an explicit
+owner decision. It removes the `eta` and `progress` keys from each repository
+snapshot in `hub status --json`: they existed only for the web dashboard, 3.3.0
+removed that dashboard, and nothing else read them. The removal fixes no safety
+problem. It still bumps the machine contract and documents the migration
+([Contract 4 to 5](#contract-4-to-5-hub-read-model-retirement)), and it sets no
+precedent: every other incompatible change must meet the safety rule above.
 
 ## Additive changes
 
@@ -194,6 +204,30 @@ row. The `reason_truncated`, `note_truncated`, and `message_truncated` keys are
 additive; the contract bump is for the Attention meaning change, not those
 keys.
 
+## Contract 4 to 5 hub read-model retirement
+
+Contract 5 is not a safety fix. Each repository `snapshot` in the full
+`hub status --json` view carried an `eta` completion estimate and a `progress`
+summary of the selected train. Both existed only for the web dashboard. After
+3.3.0 removed the dashboard, nothing read them, and the owner retired them
+instead of maintaining output without a consumer. Contract 5 removes the two
+keys and changes nothing else: the rest of the full view, the `--summary` view,
+every other command's JSON, the failure envelope, and the exit codes are the
+same as in contract 4.
+
+A consumer that read either key reads a job's progress from its repository
+instead:
+
+- `mergetrain inspect JOB_ID --json` returns the job's `progress`: its phase
+  and state, the current gate's position and name, the redacted command
+  template, elapsed seconds, and the runner heartbeat;
+- `mergetrain events --jsonl`, scoped with `--job` and live with `--follow`,
+  streams the same phases and gates as the runner records them.
+
+Nothing replaces the completion estimate, which summed the medians of recent
+phase and gate spans; `stats --json` still reports per-phase and per-gate
+timing medians.
+
 ## Too-new configuration
 
 State-changing paths (`enqueue`, `validate`, `deploy`, and daemons) reject a
@@ -219,11 +253,13 @@ executed deployment-result shape.
 
 An additive shape change requires review, a changelog note, and deliberate
 golden regeneration. A removal or rename fails CI and is rejected unless it
-meets the safety-exception policy. Semantic stability that key fingerprints
-cannot detect is covered by focused contract tests and review.
+meets the safety-exception policy; contract 5 is the one recorded exception.
+Semantic stability that key fingerprints cannot detect is covered by focused
+contract tests and review.
 
 The v2-to-v3 grammar break is intentionally concentrated in 3.0: ambiguous command
 aliases, manually copied SHA inputs, human train IDs, separate doctor state,
 and duplicate preview/reuse switches were removed together. From 3.0 onward,
 the product grammar remains fixed. Contract 4 is the narrow safety exception
-above and adds no command, option, config field, or MCP tool.
+above, and contract 5 the recorded retirement of the Hub's dashboard read
+model; neither adds or removes a command, option, config field, or MCP tool.
