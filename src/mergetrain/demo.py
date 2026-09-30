@@ -519,17 +519,6 @@ deploy:
                 lines.append(f"    {line[:200]}")
         return "\n" + "\n".join(lines)
 
-    @staticmethod
-    def _jobs_by_branch(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        jobs = payload.get("jobs")
-        if not isinstance(jobs, list):
-            raise DemoFailure("runner payload is missing jobs")
-        return {
-            str(job.get("branch")): job
-            for job in jobs
-            if isinstance(job, dict) and job.get("branch")
-        }
-
     def run(self) -> None:
         self._bootstrap()
         self._step(
