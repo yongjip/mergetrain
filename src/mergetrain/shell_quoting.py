@@ -37,6 +37,7 @@ _DOUBLE_QUOTE_ESCAPABLE = '$`"\\\n'
 # the joined lines, which the scan has already read as separate characters.
 _JOINABLE = "$<("
 _JOINED = "a line continuation that joins '$', '<', or '(' to the next line"
+_PROCESS_ID_BRACKET = "'$$(', '$${', or '$$[' inside double quotes"
 
 # Contexts whose quoting rules are exact; any other context names a construct.
 _UNQUOTED = "unquoted"
@@ -280,6 +281,14 @@ class _Scanner:
                     # The '$' would join the quoting the path gets, and bash
                     # reads "$'...'" as a string with escapes.
                     raise self.refusal(key, value, "right after a '$'")
+            if self.at("$") and not any(self.at(key) for key in self.values):
+                # '$$' is the shell's process ID, so this '$' starts nothing:
+                # dash, and bash when it expands the word, read the '(' of
+                # '$$(' as text. Inside double quotes, though, bash's parser
+                # opens a '$(', '${', or '$[' there to find the closing quote.
+                self.copy(1)
+                if quoted and any(self.at(bracket) for bracket in "({["):
+                    self.doubt(_PROCESS_ID_BRACKET)
 
     # -- constructs whose contents stay unproven ------------------------------
 

@@ -19,6 +19,7 @@ SHELL_PYTHON = sys.executable.replace("\\", "/")
 DUMP = f"{SHELL_PYTHON} -c 'import json,sys; print(json.dumps(sys.argv[1:]))'"
 SAFE = "/srv/build/repo/.mergetrain/worktrees/demo-1"
 _HERE = "after a here-document or here-string"
+_PROCESS_ID = "after '$$(', '$${', or '$$[' inside double quotes"
 
 
 def shells() -> list[str]:
@@ -170,6 +171,21 @@ class ShellContextTests(unittest.TestCase):
                     expand(prefix + "echo ${worktree}", "/a b"), f"{prefix}echo {quoted}"
                 )
 
+    def test_a_process_id_is_not_the_start_of_another_expansion(self) -> None:
+        # '$$' is the shell's process ID: a '$', '{', or '[' after it outside
+        # double quotes is what follows the ID, not a '$(', '${', or '$['.
+        with tempfile.TemporaryDirectory() as td:
+            worktree = unsafe_path(td)
+            for prefix in (
+                "x=$$$(echo a) >/dev/null; ",
+                'x="$$$(echo a)" >/dev/null; ',
+                "echo $${x} $$[x] >/dev/null; ",
+            ):
+                command = expand(f"{prefix}{DUMP} ${{worktree}}", worktree)
+                for shell in shells():
+                    with self.subTest(prefix=prefix, shell=shell):
+                        self.assertEqual(argv(shell, command), [worktree])
+
     def test_escaped_placeholders_stay_literal(self) -> None:
         self.assertEqual(expand(r"echo \${worktree}", "/a b"), r"echo \${worktree}")
         self.assertEqual(expand(r'echo "\${worktree}"', "/a b"), r'echo "\${worktree}"')
@@ -260,10 +276,32 @@ class RefusalTests(unittest.TestCase):
             "echo $\\\n(echo a)\necho ${worktree}": "a line continuation that joins",
             "x=$(\\\n(echo a))\necho ${worktree}": "a line continuation that joins",
             "(\\\n(x = 1))\necho ${worktree}": "a line continuation that joins",
+            # Inside double quotes dash reads '$$(' as the process ID and a
+            # '(', but bash's parser opens a '$(' there, so quoting the path
+            # for either shell lets the other run the path's own '$(...)'.
+            'echo "$$(printf %s ${worktree})"': _PROCESS_ID,
+            'echo "$${x}"\necho ${worktree}': _PROCESS_ID,
+            'echo "$$[x]"\necho ${worktree}': _PROCESS_ID,
+            'echo "$$$$(echo a)"\necho ${worktree}': _PROCESS_ID,
         }
         for command, where in cases.items():
             with self.subTest(command=command):
                 self.assert_refused(command, where)
+
+    @unittest.skipUnless(os.name == "posix", "runs the command through POSIX shells")
+    def test_a_path_after_a_process_id_cannot_run_a_command(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / "ran"
+            command = f'{DUMP} "$$(printf %s ${{worktree}})"'
+            with self.assertRaises(ConfigError):
+                expand(command, f"/tmp/x $(touch {marker})")
+            for shell in shells():
+                with self.subTest(shell=shell):
+                    (argument,) = argv(shell, expand(command, SAFE))
+                    process_id, rest = argument.split("(", 1)
+                    self.assertTrue(process_id.isdigit(), argument)
+                    self.assertEqual(rest, f"printf %s {SAFE})")
+            self.assertFalse(marker.exists())
 
     def test_every_here_document_or_shift_makes_later_placeholders_unprovable(self) -> None:
         for prefix in (

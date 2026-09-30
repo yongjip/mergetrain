@@ -459,7 +459,9 @@ Some places have no escaping mergetrain can prove correct: backquotes, `${...}`,
 `$((...))`, and `$'...'`. The same holds for everything after a construct that
 shells parse differently: a here-document or here-string (`<<`, `<<<`, and a
 bash arithmetic shift look alike), bash `$[...]` arithmetic or a `name[...]`
-array subscript, or a comment or `case` statement inside `$(...)`. A path made only of letters, digits, and `_@%+=:,./-` needs no
+array subscript, a comment or `case` statement inside `$(...)`, or `$$(`,
+`$${`, or `$$[` inside double quotes, where bash's parser opens a `$(`, `${`,
+or `$[` that other shells read as the process ID and text. A path made only of letters, digits, and `_@%+=:,./-` needs no
 escaping and expands there as-is. Any other path fails the gate with an error
 before the command runs; use `"$MERGETRAIN_REPO"` or `"$MERGETRAIN_WORKTREE"` in
 those places instead. A verify hook with this problem blocks the deploy before

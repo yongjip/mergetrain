@@ -129,6 +129,16 @@
   `{ok: false, error}` object to read. An operating-system or SQLite error now
   answers as `mergetrain_error`, and a config file that cannot be read or built
   as `config_error`.
+- Refuse a `${repo}` or `${worktree}` path that needs quoting after `$$(`
+  inside double quotes, as in `echo "$$(printf %s ${repo})"`. mergetrain read
+  the `$(` as a command substitution and single-quoted the path, but the
+  shells expand `$$` as the process ID and the rest as double-quoted text,
+  where those single quotes are literal, so a path containing `$(...)` ran
+  that command. The shells disagree about where such a string ends, so a later
+  path that needs quoting is now refused, as after other constructs they read
+  differently, and `"$MERGETRAIN_REPO"` or `"$MERGETRAIN_WORKTREE"` works
+  there instead. Outside double quotes, a `$`, `{`, or `[` after `$$` no
+  longer starts an expansion of its own.
 
 ## 3.3.0 - 2026-09-30
 
