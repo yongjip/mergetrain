@@ -28,7 +28,7 @@ def _plus_minutes(minutes: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _busy(exc: sqlite3.OperationalError) -> bool:
+def is_busy(exc: sqlite3.OperationalError) -> bool:
     text = str(exc).lower()
     return "database is locked" in text or "database is busy" in text
 
@@ -48,7 +48,7 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
     try:
         conn.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError as exc:
-        if _busy(exc):
+        if is_busy(exc):
             raise QueueBusy(
                 f"queue database is busy; another process held the write lock: {exc}"
             ) from exc
@@ -63,7 +63,7 @@ def immediate(conn: sqlite3.Connection) -> Iterator[None]:
             conn.commit()
         except sqlite3.OperationalError as exc:
             conn.rollback()
-            if _busy(exc):
+            if is_busy(exc):
                 raise QueueBusy(
                     f"queue database is busy; the commit could not complete: {exc}"
                 ) from exc

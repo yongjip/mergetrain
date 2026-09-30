@@ -120,7 +120,7 @@ only event IDs as resume cursors.
 | `lock_held` | yes | another live runner owns the queue lease |
 | `lost_lease` | yes | this runner no longer owns its lease |
 | `merge_blocked` | no | the branch cannot be merged into the assembled train |
-| `mergetrain_error` | no | an expected failure has no more specific code, or an operating-system or SQLite error stopped the command |
+| `mergetrain_error` | no | an expected failure has no more specific code, or an operating-system or SQLite error other than contention stopped the command |
 | `push_rejected` | no | remote policy or permissions rejected the push |
 | `queue_busy` | yes | SQLite could not complete a write before its timeout; reread state because a push may already have happened |
 | `queue_error` | no | a queue, job, or runner precondition failed |

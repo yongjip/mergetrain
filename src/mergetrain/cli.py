@@ -50,7 +50,8 @@ from .commands.queue import (
 )
 from .commands.recovery import cmd_gc, cmd_reconcile, cmd_unlock, cmd_verify
 from .commands.setup import cmd_demo, cmd_init, cmd_mcp, render_agent_contract
-from .errors import CommandFailed, ConfigError, MergetrainError, QueueError
+from .errors import CommandFailed, ConfigError, MergetrainError, QueueBusy, QueueError
+from .persistence.transactions import is_busy
 
 __all__ = [
     "_job_result_line",
@@ -506,7 +507,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         # A path of the wrong kind, such as a --worktree that is a file or a
         # --db that is a directory, fails in the operating system or SQLite
         # rather than in mergetrain. It still answers in the one failure shape.
-        if not isinstance(exc, MergetrainError):
+        # SQLite contention outside the queue's write transaction still asks
+        # for a retry, as QueueBusy does inside it.
+        if isinstance(exc, sqlite3.OperationalError) and is_busy(exc):
+            exc = QueueBusy(f"queue database is busy: {exc}")
+        elif not isinstance(exc, MergetrainError):
             exc = MergetrainError(str(exc))
         code = "".join(
             [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]

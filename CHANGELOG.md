@@ -127,8 +127,9 @@
   value PyYAML cannot build, such as the date `2026-13-45`, ended the command
   with a Python traceback and nothing on stdout, so a `--json` consumer got no
   `{ok: false, error}` object to read. An operating-system or SQLite error now
-  answers as `mergetrain_error`, and a config file that cannot be read or built
-  as `config_error`.
+  answers as `mergetrain_error`, a locked or busy SQLite database as the
+  retryable `queue_busy`, and a config file that cannot be read or built as
+  `config_error`.
 - Refuse a `${repo}` or `${worktree}` path that needs quoting after `$$(`
   inside double quotes, as in `echo "$$(printf %s ${repo})"`. mergetrain read
   the `$(` as a command substitution and single-quoted the path, but the

@@ -1510,6 +1510,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("mergetrain: error: unable to open database file", err.getvalue())
 
+    def test_a_locked_queue_database_stays_a_retryable_queue_busy(self) -> None:
+        # Contention outside the queue's write transaction still asks for a
+        # retry; it must not read as a failure that retrying cannot fix.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            out = io.StringIO()
+            with (
+                patch(
+                    "mergetrain.cli.cmd_status",
+                    side_effect=sqlite3.OperationalError("database is locked"),
+                ),
+                redirect_stdout(out),
+            ):
+                code = main(["--repo", str(repo), "status", "--json"])
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "queue_busy")
+        self.assertTrue(payload["error"]["retryable"])
+
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
