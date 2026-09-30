@@ -2202,6 +2202,99 @@ class CliTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def _race_a_ready_train(self, root: Path, command: str) -> tuple[dict, dict[str, str], int]:
+        """Run ``command`` while another runner's train turns Ready just
+        before the claim, after the command's own Ready check."""
+
+        import mergetrain.commands.deploy as deploy_commands
+
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(root / "upstream.git")],
+            cwd=root,
+            check=True,
+        )
+        (root / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
+        db = root / ".mergetrain" / "queue.sqlite"
+        conn = connect(db)
+        try:
+            other = enqueue_job(conn, task="other", branch="feature/other")
+            waiting = enqueue_job(conn, task="waiting", branch="feature/waiting")
+            # The other runner's train, not yet validated.
+            conn.execute("UPDATE deploy_queue SET status='in_progress' WHERE id=?", (other.id,))
+            conn.commit()
+        finally:
+            conn.close()
+        real_claim = deploy_commands.claim_all_queued
+
+        def train_turns_ready_then_claim(conn_arg, **kwargs):  # type: ignore[no-untyped-def]
+            control = connect(db)
+            try:
+                mark_job(
+                    control,
+                    other.id,
+                    status="validated",
+                    train_id="train-other",
+                    train_size=1,
+                    validated_at="2026-09-03T00:00:00Z",
+                    validation_base_sha="a" * 40,
+                    validation_sha="b" * 40,
+                    validated_head_sha="c" * 40,
+                )
+            finally:
+                control.close()
+            return real_claim(conn_arg, **kwargs)
+
+        out = io.StringIO()
+        with (
+            patch.object(
+                deploy_commands, "claim_all_queued", side_effect=train_turns_ready_then_claim
+            ),
+            patch.object(
+                deploy_commands.GitRunner,
+                "process_batch",
+                side_effect=AssertionError("a second train was validated"),
+            ),
+            patch.object(
+                deploy_commands.GitRunner,
+                "preview_validated_reuse",
+                return_value=ReuseDecision(
+                    authorized=False,
+                    eligible=False,
+                    action="rerun",
+                    validation_sha="b" * 40,
+                    reasons=("reuse not authorized",),
+                ),
+            ),
+            redirect_stdout(out),
+        ):
+            main(["--repo", str(root), command, "--json"])
+        conn = connect(db)
+        try:
+            statuses = {
+                "other": get_job(conn, other.id).status,
+                "waiting": get_job(conn, waiting.id).status,
+            }
+        finally:
+            conn.close()
+        return json.loads(out.getvalue()), statuses, other.id
+
+    def test_a_train_that_becomes_ready_before_the_claim_stops_validation(self) -> None:
+        """#26: the Ready check before the claim left a window for a runner
+        that commits a validated train in between."""
+
+        with tempfile.TemporaryDirectory() as td:
+            payload, statuses, _ = self._race_a_ready_train(Path(td), "validate")
+        self.assertEqual(statuses, {"other": "validated", "waiting": "queued"})
+        self.assertEqual(payload["error"]["code"], "validated_train_pending")
+
+        with tempfile.TemporaryDirectory() as td:
+            payload, statuses, other_id = self._race_a_ready_train(Path(td), "deploy")
+        self.assertEqual(statuses, {"other": "validated", "waiting": "queued"})
+        # deploy goes on to present the one Ready train.
+        self.assertEqual(payload["result"], "confirmation_required")
+        self.assertEqual([job["id"] for job in payload["jobs"]], [other_id])
+
     def test_deploy_preview_lists_exact_atomic_push_refspecs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

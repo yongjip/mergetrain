@@ -164,7 +164,17 @@ def _execute_batch(
                         "nothing was pushed"
                     )
         else:
-            jobs = claim_all_queued(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
+            jobs = claim_all_queued(
+                conn,
+                owner=owner,
+                ttl_minutes=config.queue.lock_ttl_minutes,
+                unless_ready=True,
+            )
+            if not jobs and any(
+                train.get("deploy_eligible") for train in validated_train_summaries(conn)
+            ):
+                # Another runner made a train Ready after cmd_validate looked.
+                return _emit_validated_train_pending(args)
         if not jobs:
             payload = {**_results_payload([]), "note": "no queued jobs"}
         else:
@@ -190,6 +200,21 @@ def _execute_batch(
     return _run_exit_code(payload)
 
 
+def _emit_validated_train_pending(args: argparse.Namespace) -> int:
+    note = "a validated train is already ready; deploy it before validating more work"
+    if args.json:
+        dump_json(
+            _error_payload(
+                "validated_train_pending",
+                note,
+                next_action="deploy_when_approved",
+            )
+        )
+    else:
+        print(note, file=sys.stderr)
+    return 1
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate the queued train without exposing runner implementation modes."""
 
@@ -201,18 +226,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     if ready:
-        note = "a validated train is already ready; deploy it before validating more work"
-        if args.json:
-            dump_json(
-                _error_payload(
-                    "validated_train_pending",
-                    note,
-                    next_action="deploy_when_approved",
-                )
-            )
-        else:
-            print(note, file=sys.stderr)
-        return 1
+        return _emit_validated_train_pending(args)
     return _execute_batch(args, deploy=False)
 
 
@@ -283,10 +297,13 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         lease_token = ""
         conn = connect(config.state.db)
         try:
+            # A train another runner made Ready since the check above leaves
+            # the queued jobs alone; the preview below presents that train.
             jobs = claim_all_queued(
                 conn,
                 owner=owner,
                 ttl_minutes=config.queue.lock_ttl_minutes,
+                unless_ready=True,
             )
             if not jobs:
                 validation_payload = {

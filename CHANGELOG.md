@@ -238,6 +238,13 @@
   error, paused for a pending reconcile, or ran jobs that did not all land
   (or, with `--validate-only`, validate), and 0 for a tick with nothing to
   do, one waiting for a validated train to be deployed, and a landing.
+- Keep `validate` and `deploy` from making a second Ready train when another
+  runner finishes one first. Both commands looked for a Ready train before
+  they claimed queued work, and a runner that validated a train in between
+  left two Ready trains once the new validation passed, which `deploy` and
+  the MCP deploy tool then refused. The claim now checks again under the
+  runner lock: `validate` stops with `validated_train_pending`, and `deploy`
+  presents the train that became Ready.
 
 ## 3.3.0 - 2026-09-30
 

@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from ..errors import DeployPlanChanged, QueueError
 from ..models import Job
 from .events import _record_run_event
-from .jobs import get_job, list_jobs_fifo, select_validated_train
+from .jobs import get_job, list_jobs_fifo, select_validated_train, validated_train_summaries
 from .leases import _acquire_runner_lock, _release_lock_token, default_owner
 from .recovery import deploy_reconcile_pending
 from .transactions import immediate, utc_now
@@ -87,11 +87,13 @@ def claim_all_queued(
     approval_destination_sha: str = "",
     approval_execution_policy_sha: str = "",
     blocked: list[Job] | None = None,
+    unless_ready: bool = False,
 ) -> list[Job]:
     """Claim queued jobs: all of them, only --auto ones (deploy), or only manual ones.
 
     ``blocked``, when given, receives the --auto jobs this claim blocked
-    because their approval no longer matches.
+    because their approval no longer matches. ``unless_ready`` claims nothing
+    while a deploy-eligible validated train exists.
     """
 
     if auto_only and manual_only:
@@ -118,6 +120,14 @@ def claim_all_queued(
             if validated is not None:
                 _release_lock_token(conn, owner=owner, token=lock.token)
                 return []
+        if unless_ready and any(
+            train["deploy_eligible"] for train in validated_train_summaries(conn)
+        ):
+            # validate and deploy look for a Ready train before they claim, but
+            # another runner can commit one in between. Check again under the
+            # runner lock, so that one stays the only Ready train.
+            _release_lock_token(conn, owner=owner, token=lock.token)
+            return []
         if auto_only:
             approvals = {
                 "approval_destination_sha": approval_destination_sha,
