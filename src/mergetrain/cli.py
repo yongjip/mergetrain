@@ -6,6 +6,7 @@ import argparse
 import re
 import sys
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import NoReturn
 
@@ -445,7 +446,20 @@ def _migration_error(raw: Sequence[str], normalized: Sequence[str]) -> str | Non
     return None
 
 
+def _escape_what_the_console_cannot_show() -> None:
+    # Human output (task text, the arrow in `stats`) must not crash on a
+    # stdout or stderr whose code page lacks a character; JSON has its own
+    # fallback in cli_support.
+    for stream in (sys.stdout, sys.stderr):
+        encoding = str(getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        reconfigure = getattr(stream, "reconfigure", None)
+        if encoding and encoding != "utf8" and reconfigure is not None:
+            with suppress(ValueError, OSError):
+                reconfigure(errors="backslashreplace")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _escape_what_the_console_cannot_show()
     raw = list(sys.argv[1:] if argv is None else argv)
     normalized = normalize_global_options(raw)
     migration_error = _migration_error(raw, normalized)

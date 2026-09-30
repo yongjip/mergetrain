@@ -102,6 +102,13 @@
   sent, and a job first seen running kept reading as running, so its last
   events said `"lost"` after it finished normally. It now reads the jobs its
   events name, and the ones in progress, on every poll.
+- Keep output working on a stdout that is not UTF-8, such as a Windows pipe
+  without UTF-8 mode, which includes the pipes the MCP server reads. A task,
+  branch, or note with CJK text or an emoji made every JSON command that
+  printed it exit with a traceback instead of its JSON, and `stats` always
+  failed on the arrow it prints. JSON now escapes the characters such a
+  stdout cannot carry, which parses to the same payload, and human-readable
+  output prints them as escapes instead of failing.
 
 ## 3.3.0 - 2026-09-30
 

@@ -2940,6 +2940,34 @@ class CliTests(unittest.TestCase):
                 "interrupted",
             )
 
+    def test_output_survives_a_stdout_without_utf8(self) -> None:
+        # A Windows pipe without UTF-8 mode encodes stdout with the ANSI code
+        # page, which cannot carry CJK task text, emoji, or the arrow in stats.
+        from mergetrain.cli_support import _dump_jsonl, dump_json
+
+        payload = {"task": "로그인 버그 수정 🚀"}
+        for write in (dump_json, _dump_jsonl):
+            with self.subTest(write=write.__name__):
+                raw = io.BytesIO()
+                stream = io.TextIOWrapper(raw, encoding="cp1252")
+                with patch("sys.stdout", stream):
+                    write(payload)
+                stream.flush()
+                parsed = json.loads(raw.getvalue().decode("cp1252"))
+                self.assertEqual(parsed["task"], payload["task"])
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            connect(db).close()
+            raw = io.BytesIO()
+            stream = io.TextIOWrapper(raw, encoding="cp1252")
+            with patch("sys.stdout", stream):
+                code = main(["--repo", str(repo), "--db", str(db), "stats"])
+            stream.flush()
+            self.assertEqual(code, 0)
+            self.assertIn("current window", raw.getvalue().decode("cp1252"))
+
     def test_unscoped_events_follow_reads_each_jobs_current_state(self) -> None:
         # An operator-wide stream used to keep the job rows it first saw, so a
         # job claimed later still read as queued: its live run's events said

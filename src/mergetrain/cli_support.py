@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Sequence
 from typing import Any
 
@@ -66,7 +67,23 @@ def dump_json(payload: Any) -> None:
     # stamped — the outer frame owns the number.
     if isinstance(payload, dict) and "contract_version" not in payload:
         payload = {"contract_version": CONTRACT_VERSION, **payload}
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    print(_json_for_stdout(payload, indent=2, sort_keys=True))
+
+
+def _json_for_stdout(payload: Any, **options: Any) -> str:
+    """JSON that stdout can carry, with the same meaning either way.
+
+    A Windows pipe without UTF-8 mode encodes stdout with the ANSI code page,
+    which cannot carry CJK text or emoji in a task or note. There the JSON
+    escapes those characters, which decodes to the identical payload.
+    """
+
+    text = json.dumps(payload, ensure_ascii=False, **options)
+    try:
+        text.encode(getattr(sys.stdout, "encoding", None) or "utf-8")
+    except (UnicodeEncodeError, LookupError):
+        text = json.dumps(payload, ensure_ascii=True, **options)
+    return text
 
 
 def config_from_args(args: argparse.Namespace) -> MergetrainConfig:
@@ -107,7 +124,7 @@ def _preflight_config(config: MergetrainConfig) -> None:
 
 def _dump_jsonl(payload: dict[str, Any]) -> None:
     print(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        _json_for_stdout(payload, sort_keys=True, separators=(",", ":")),
         flush=True,
     )
 
