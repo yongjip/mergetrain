@@ -521,7 +521,7 @@ class PayloadTests(unittest.TestCase):
     def test_payloads_the_adapter_builds_carry_the_contract_version(self) -> None:
         # A client that checks contract_version before acting found none on
         # the refusals, the events wrapper, or the log tail built here.
-        header = '{"type": "stream_start", "contract_version": 4, "after_event_id": 0}\n'
+        header = '{"type": "stream_start", "contract_version": 5, "after_event_id": 0}\n'
         payloads: dict[str, dict[str, Any]] = {}
         with patch.object(
             MergetrainTools, "_run", return_value=completed("not json", returncode=1)

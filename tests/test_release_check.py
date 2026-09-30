@@ -71,7 +71,7 @@ class ReleaseManifestTests(unittest.TestCase):
             with self.subTest(relative=relative):
                 current = "9.9.9"
                 sample = {
-                    "docs/contract.md": "mergetrain {} uses machine contract **4**.",
+                    "docs/contract.md": "mergetrain {} uses machine contract **5**.",
                     "integrations/claude/plugin/README.md": "uvx --from 'mergetrain[mcp]=={}'",
                 }[relative]
                 self.assertEqual(

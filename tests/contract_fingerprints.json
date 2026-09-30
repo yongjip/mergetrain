@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "surfaces": {
     "_jsonl_frames": {
       "event": {
@@ -461,34 +461,6 @@
               "queued": null,
               "validated": null
             },
-            "eta": {
-              "available": null,
-              "basis": null,
-              "calculated_at": null,
-              "coverage": null,
-              "estimated_remaining_seconds": null,
-              "expected_at": null,
-              "gates": {
-                "[]": {
-                  "elapsed_seconds": null,
-                  "index": null,
-                  "median_seconds": null,
-                  "name": null,
-                  "remaining_seconds": null,
-                  "sample_count": null,
-                  "state": null
-                }
-              },
-              "phases": {
-                "[]": {
-                  "median_seconds": null,
-                  "name": null,
-                  "sample_count": null
-                }
-              },
-              "sample_count": null,
-              "sample_limit": null
-            },
             "events": "[]?",
             "generated_at": null,
             "jobs": {
@@ -529,30 +501,6 @@
             "lock": null,
             "next_action": null,
             "ok": null,
-            "progress": {
-              "completed_job_ids": "[]?",
-              "completed_phases": "[]?",
-              "current_gate": null,
-              "detail": null,
-              "gates": {
-                "[]": {
-                  "command": null,
-                  "duration_seconds": null,
-                  "finished_at": null,
-                  "index": null,
-                  "name": null,
-                  "started_at": null,
-                  "state": null,
-                  "total": null
-                }
-              },
-              "job_id": null,
-              "message": null,
-              "phase": null,
-              "started_at": null,
-              "state": null,
-              "updated_at": null
-            },
             "project": {
               "config_exists": null,
               "gate_count": null,

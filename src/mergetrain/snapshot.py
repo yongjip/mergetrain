@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from shlex import join as shell_join
-from statistics import median
 from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
 from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound
 from .git_ops import git_ref_exists, git_remote_exists, git_repo_root
 from .models import Job, RunEvent, RunnerLock, public_owner
-from .observability import GATE_EVENT, TIMED_PHASES, _gate_runs, elapsed_seconds
+from .observability import _gate_runs
 from .persistence.connection import connect
 from .persistence.events import list_history_events
 from .persistence.jobs import counts, list_jobs, list_jobs_fifo, validated_train_summaries
@@ -24,18 +22,6 @@ from .persistence.leases import get_lock
 from .persistence.transactions import _parse_utc, read_snapshot, utc_now
 from .reuse import reuse_explanation
 
-PHASES = (
-    "claiming",
-    "fetching",
-    "assembling",
-    "gating",
-    "ready",
-    "pushing",
-    "verifying",
-    "complete",
-)
-
-ESTIMATE_SAMPLE_LIMIT = 20
 PUBLIC_REASON_LIMIT = PUBLIC_TEXT_LIMIT
 
 NEXT_ACTION_VALUES = frozenset(
@@ -382,9 +368,8 @@ def _public_lock(lock: RunnerLock | None) -> dict[str, Any] | None:
 def build_queue_summary(config: MergetrainConfig) -> dict[str, Any]:
     """Build the small queue truth needed by agents and Hub status.
 
-    Unlike the full repo snapshot this does not load job history, events,
-    reuse analysis, progress, or ETA data. Like it, it opens the queue
-    database read-only.
+    Unlike the full repo snapshot this does not load job history, events, or
+    reuse analysis. Like it, it opens the queue database read-only.
     """
 
     conn = connect(config.state.db, read_only=True)
@@ -425,325 +410,6 @@ def _selected_jobs(conn) -> tuple[list[Job], str]:
     if queued:
         return queued[:8], "queued"
     return [], "idle"
-
-
-def _median_samples(
-    samples: list[tuple[int, float]], *, limit: int = ESTIMATE_SAMPLE_LIMIT
-) -> tuple[int, float | None]:
-    recent = [duration for _, duration in sorted(samples)[-limit:]]
-    if not recent:
-        return 0, None
-    return len(recent), round(median(recent), 3)
-
-
-def _sum_complete(values: list[float | None]) -> float | None:
-    if not values or any(value is None for value in values):
-        return None
-    return round(sum(value for value in values if value is not None), 3)
-
-
-def _phase_duration_samples(
-    events: list[RunEvent], *, exclude_token: str = ""
-) -> dict[str, list[tuple[int, float]]]:
-    """Return completed phase spans grouped by phase.
-
-    A batch emits nested per-job assembly and per-gate events. The phase span is
-    deliberately the first active event through the last terminal event for the
-    same claim token and phase, so those nested milestones do not shorten the
-    estimate.
-    """
-
-    grouped: dict[tuple[str, str], list[RunEvent]] = defaultdict(list)
-    for event in events:
-        if (
-            not event.claim_token
-            or event.claim_token == exclude_token
-            or event.phase not in TIMED_PHASES
-        ):
-            continue
-        grouped[(event.claim_token, event.phase)].append(event)
-
-    samples: dict[str, list[tuple[int, float]]] = defaultdict(list)
-    for (_, phase), phase_events in grouped.items():
-        ordered = sorted(phase_events, key=lambda event: event.id)
-        started = next((event for event in ordered if event.state == "active"), None)
-        finished = next(
-            (
-                event
-                for event in reversed(ordered)
-                if event.state in {"success", "warning", "error"}
-                and (started is None or event.id > started.id)
-            ),
-            None,
-        )
-        if started is None or finished is None:
-            continue
-        duration = elapsed_seconds(started.created_at, finished.created_at)
-        if duration is not None:
-            samples[phase].append((finished.id, duration))
-    return samples
-
-
-def _current_phase_started_at(run_events: list[RunEvent], phase: str) -> str:
-    return next(
-        (
-            event.created_at
-            for event in run_events
-            if event.phase == phase and event.state == "active"
-        ),
-        "",
-    )
-
-
-def _eta_payload(
-    *,
-    events: list[RunEvent],
-    selected_jobs: list[Job],
-    progress: dict[str, Any],
-    selection: str,
-    gate_names: tuple[str, ...],
-    calculated_at: str,
-) -> dict[str, Any]:
-    token = next((job.claim_token for job in selected_jobs if job.claim_token), "")
-    run_events = [event for event in events if token and event.claim_token == token]
-    phase_samples = _phase_duration_samples(events, exclude_token=token)
-    phases: list[dict[str, Any]] = []
-    phase_estimates: dict[str, tuple[int, float | None]] = {}
-    for phase in TIMED_PHASES:
-        sample_count, estimate = _median_samples(phase_samples.get(phase, []))
-        phase_estimates[phase] = (sample_count, estimate)
-        phases.append(
-            {
-                "name": phase,
-                "sample_count": sample_count,
-                "median_seconds": estimate,
-            }
-        )
-
-    historical_events = [event for event in events if not token or event.claim_token != token]
-    gate_samples: dict[str, list[tuple[int, float]]] = defaultdict(list)
-    for ordinal, run in enumerate(_gate_runs(historical_events), start=1):
-        duration = run.get("duration_seconds")
-        if duration is None:
-            continue
-        gate_samples[str(run["name"])].append((ordinal, float(duration)))
-
-    progress_gates = {str(gate.get("name")): gate for gate in progress.get("gates", [])}
-    gates: list[dict[str, Any]] = []
-    gate_remaining: list[float | None] = []
-    gate_sample_counts: list[int] = []
-    for index, name in enumerate(gate_names, start=1):
-        sample_count, estimate = _median_samples(gate_samples.get(name, []))
-        current = progress_gates.get(name, {})
-        state = str(current.get("state") or "waiting")
-        started_at = str(current.get("started_at") or "")
-        current_elapsed = elapsed_seconds(started_at, calculated_at) if started_at else None
-        if state in {"success", "reused", "skipped"}:
-            remaining: float | None = 0.0
-        elif estimate is None:
-            remaining = None
-        elif state == "active" and current_elapsed is not None:
-            remaining = round(max(0.0, estimate - current_elapsed), 3)
-        else:
-            remaining = estimate
-        if state not in {"success", "reused", "skipped"}:
-            gate_remaining.append(remaining)
-            if remaining is not None:
-                gate_sample_counts.append(sample_count)
-        gates.append(
-            {
-                "index": index,
-                "name": name,
-                "state": state,
-                "sample_count": sample_count,
-                "median_seconds": estimate,
-                "elapsed_seconds": current_elapsed,
-                "remaining_seconds": remaining,
-            }
-        )
-
-    remaining_parts: list[float | None] = []
-    used_sample_counts: list[int] = []
-    current_phase = str(progress.get("phase") or "")
-    deploying = any(
-        job.status == "in_progress" and bool(job.train_id) for job in selected_jobs
-    ) or current_phase in {"pushing", "verifying", "complete"}
-    target_phases = list(TIMED_PHASES[:3])
-    if deploying:
-        target_phases.extend(TIMED_PHASES[3:])
-
-    if selection == "running":
-        try:
-            current_index = target_phases.index(current_phase)
-        except ValueError:
-            current_index = 0
-        for phase in target_phases[current_index:]:
-            sample_count, estimate = phase_estimates[phase]
-            if phase == "gating" and current_phase == "gating" and gate_remaining:
-                gate_total = _sum_complete(gate_remaining)
-                if gate_total is not None:
-                    remaining_parts.append(gate_total)
-                    used_sample_counts.extend(gate_sample_counts)
-                else:
-                    remaining_parts.append(None)
-                continue
-            if estimate is None:
-                remaining_parts.append(None)
-                continue
-            if phase == current_phase:
-                started_at = _current_phase_started_at(run_events, phase)
-                current_elapsed = elapsed_seconds(started_at, calculated_at) if started_at else None
-                remaining_parts.append(round(max(0.0, estimate - float(current_elapsed or 0.0)), 3))
-            else:
-                remaining_parts.append(estimate)
-            used_sample_counts.append(sample_count)
-
-    estimated_remaining = _sum_complete(remaining_parts)
-    available = estimated_remaining is not None
-    expected_at = ""
-    if estimated_remaining is not None:
-        expected_at = (
-            (_parse_utc(calculated_at) + timedelta(seconds=estimated_remaining))
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z")
-        )
-    has_history = any(item["sample_count"] for item in (*phases, *gates))
-    return {
-        "basis": "median_recent_completed_runs",
-        "sample_limit": ESTIMATE_SAMPLE_LIMIT,
-        "available": available,
-        "coverage": "complete" if available else "partial" if has_history else "none",
-        "sample_count": min(used_sample_counts) if used_sample_counts else 0,
-        "calculated_at": calculated_at,
-        "expected_at": expected_at,
-        "estimated_remaining_seconds": estimated_remaining,
-        "phases": phases,
-        "gates": gates,
-    }
-
-
-def _progress(
-    selected_jobs: list[Job],
-    events,
-    selection: str,
-    gate_names: tuple[str, ...],
-) -> dict[str, Any]:
-    token = next((job.claim_token for job in selected_jobs if job.claim_token), "")
-    run_events = [event for event in events if token and event.claim_token == token]
-    latest = run_events[-1] if run_events else None
-    if latest:
-        phase = latest.phase
-        state = latest.state
-        message = latest.message
-        updated_at = latest.created_at
-    elif selection == "validated":
-        phase, state = "ready", "success"
-        message = "Validated train is waiting for deployment approval"
-        updated_at = selected_jobs[0].validated_at if selected_jobs else ""
-    elif selection == "queued":
-        phase, state = "claiming", "queued"
-        message = "Jobs are waiting for a runner"
-        updated_at = selected_jobs[0].requested_at if selected_jobs else ""
-    else:
-        phase, state = "claiming", "idle"
-        message = "No active train"
-        updated_at = ""
-
-    completed: list[str] = []
-    completed_job_ids: list[int] = []
-    gate_events: dict[int, dict[str, Any]] = {}
-    latest_gate: dict[str, Any] | None = None
-    all_gates_passed = False
-    for event in run_events:
-        gate_match = GATE_EVENT.match(event.message)
-        if gate_match:
-            gate_index = int(gate_match.group(1))
-            previous = gate_events.get(gate_index)
-            started_at = (
-                event.created_at
-                if event.state == "active"
-                else str(previous.get("started_at") or "")
-                if previous
-                else ""
-            )
-            finished_at = "" if event.state == "active" else event.created_at
-            latest_gate = {
-                "index": gate_index,
-                "total": int(gate_match.group(2)),
-                "name": gate_match.group(3),
-                "state": event.state,
-                "command": event.detail,
-                "started_at": started_at,
-                "finished_at": finished_at,
-                "duration_seconds": (
-                    elapsed_seconds(started_at, finished_at) if started_at and finished_at else None
-                ),
-            }
-            gate_events[gate_index] = latest_gate
-        if (
-            event.phase == "gating"
-            and event.state == "success"
-            and event.message == "All train gates passed"
-        ):
-            all_gates_passed = True
-        phase_completed = event.state == "success" and event.phase in PHASES
-        if event.phase == "gating" and not all_gates_passed:
-            phase_completed = False
-        if event.phase == "assembling" and event.job_id is not None and len(selected_jobs) > 1:
-            phase_completed = False
-        if phase_completed and event.phase not in completed:
-            completed.append(event.phase)
-        if (
-            event.state == "success"
-            and event.phase == "assembling"
-            and event.job_id is not None
-            and event.job_id not in completed_job_ids
-        ):
-            completed_job_ids.append(event.job_id)
-    gate_progress: list[dict[str, Any]] = []
-    for index, name in enumerate(gate_names, start=1):
-        observed = gate_events.get(index)
-        if observed and observed["state"] in {"reused", "skipped"}:
-            gate_state = observed["state"]
-        elif all_gates_passed:
-            gate_state = "success"
-        elif observed:
-            gate_state = observed["state"]
-        elif latest_gate and index < latest_gate["index"]:
-            gate_state = "success"
-        else:
-            gate_state = "waiting"
-        gate_progress.append(
-            {
-                "index": index,
-                "total": len(gate_names),
-                "name": name,
-                "state": gate_state,
-                "command": observed["command"] if observed else "",
-                "started_at": observed["started_at"] if observed else "",
-                "finished_at": observed["finished_at"] if observed else "",
-                "duration_seconds": (observed["duration_seconds"] if observed else None),
-            }
-        )
-
-    current_gate = None
-    if latest and latest.phase == "gating" and latest_gate and latest_gate["state"] == "active":
-        current_gate = latest_gate
-
-    started_at = next((job.started_at for job in selected_jobs if job.started_at), "")
-    return {
-        "phase": phase,
-        "state": state,
-        "message": message,
-        "detail": latest.detail if latest else "",
-        "job_id": latest.job_id if latest else None,
-        "started_at": started_at,
-        "updated_at": updated_at,
-        "completed_phases": completed,
-        "completed_job_ids": completed_job_ids,
-        "gates": gate_progress,
-        "current_gate": current_gate,
-    }
 
 
 def build_repo_snapshot(config: MergetrainConfig) -> dict[str, Any]:
@@ -823,20 +489,6 @@ def build_repo_snapshot(config: MergetrainConfig) -> dict[str, Any]:
                 gate_runs=_gate_runs(history_events),
             ),
         }
-        payload["progress"] = _progress(
-            selected_jobs,
-            raw_events,
-            selection,
-            gate_names,
-        )
-        payload["eta"] = _eta_payload(
-            events=history_events,
-            selected_jobs=selected_jobs,
-            progress=payload["progress"],
-            selection=selection,
-            gate_names=gate_names,
-            calculated_at=payload["generated_at"],
-        )
         payload["next_action"] = next_action(
             {**payload, **_readiness(config)}, config_version=config.config_version
         )
