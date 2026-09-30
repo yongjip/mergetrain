@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sqlite3
 import sys
 from collections.abc import Sequence
 from contextlib import suppress
@@ -496,7 +497,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("mergetrain: interrupted", file=sys.stderr)
         return 130
-    except (MergetrainError, CommandFailed, ConfigError, QueueError) as exc:
+    except (MergetrainError, CommandFailed, ConfigError, QueueError, OSError, sqlite3.Error) as exc:
+        # A path of the wrong kind, such as a --worktree that is a file or a
+        # --db that is a directory, fails in the operating system or SQLite
+        # rather than in mergetrain. It still answers in the one failure shape.
+        if not isinstance(exc, MergetrainError):
+            exc = MergetrainError(str(exc))
         code = "".join(
             [f"_{char.lower()}" if char.isupper() else char for char in type(exc).__name__]
         ).lstrip("_")

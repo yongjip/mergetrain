@@ -1464,6 +1464,52 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "queue_error")
         self.assertIn("repository does not exist", payload["error"]["message"])
 
+    def test_a_path_of_the_wrong_kind_keeps_the_json_error_contract(self) -> None:
+        # These fail in the operating system, SQLite, or PyYAML rather than in
+        # mergetrain, and used to end in a traceback with nothing on stdout.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            repo = root / "repo"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            regular_file = root / "regular-file"
+            regular_file.write_text("", encoding="utf-8")
+            directory = root / "directory"
+            directory.mkdir()
+            not_utf8 = root / "not-utf8.yaml"
+            not_utf8.write_bytes(b"project:\n  name: caf\xe9\n")
+            impossible_date = root / "impossible-date.yaml"
+            impossible_date.write_text("project:\n  name: 2026-13-45\n", encoding="utf-8")
+            cases = [
+                (
+                    ["enqueue", "--task", "a", "--branch", "main"],
+                    ["--worktree", str(regular_file)],
+                    "mergetrain_error",
+                ),
+                (["--config", str(directory), "status"], [], "config_error"),
+                (["--config", str(not_utf8), "status"], [], "config_error"),
+                (["--config", str(impossible_date), "status"], [], "config_error"),
+                (["--db", str(directory), "gc"], [], "mergetrain_error"),
+            ]
+            for command, options, error_code in cases:
+                with self.subTest(command=command):
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        code = main(["--repo", str(repo), *command, *options, "--json"])
+                    payload = json.loads(out.getvalue())
+                    self.assertEqual(code, 1)
+                    self.assertFalse(payload["ok"])
+                    self.assertEqual(payload["error"]["code"], error_code)
+                    self.assertFalse(payload["error"]["retryable"])
+
+            err = io.StringIO()
+            with redirect_stderr(err):
+                code = main(["--repo", str(repo), "--db", str(directory), "gc"])
+            self.assertEqual(code, 1)
+            self.assertIn("mergetrain: error: unable to open database file", err.getvalue())
+
     def test_contract1_version_stamped_top_level_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

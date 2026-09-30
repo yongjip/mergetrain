@@ -325,7 +325,9 @@ def load_yaml(text: str) -> dict[str, Any]:
     _validate_yaml_text(text)
     try:
         loaded = yaml.safe_load(text) or {}
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError) as exc:
+        # PyYAML raises ValueError for a value it recognizes but cannot build,
+        # such as the date 2026-13-45.
         raise ConfigError(f"invalid YAML: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ConfigError("top-level YAML value must be a mapping")
@@ -634,7 +636,13 @@ def load_config(
         path = (repo_path / path).resolve()
     exists = path.exists()
     if exists:
-        data = load_yaml(path.read_text(encoding="utf-8"))
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ConfigError(f"cannot read {path}: {exc.strerror or exc}") from exc
+        except UnicodeError as exc:
+            raise ConfigError(f"cannot read {path}: it is not UTF-8 text") from exc
+        data = load_yaml(text)
     else:
         data = default_config_dict(state_root.name or "example-app")
 
