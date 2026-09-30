@@ -257,12 +257,19 @@ async def _stop_and_drain(
     communicate_task: asyncio.Task[tuple[bytes, bytes]],
     job: WindowsJob | None = None,
 ) -> tuple[bytes, bytes]:
-    """Complete process-tree cleanup even when the caller is being cancelled."""
+    """Complete process-tree cleanup even when the caller is being cancelled.
 
-    await _stop_cli_process(process, job)
-    with suppress(BaseException):
-        return await communicate_task
-    return b"", b""
+    Takes ownership of ``job`` and closes it only after the stop has used it.
+    """
+
+    try:
+        await _stop_cli_process(process, job)
+        with suppress(BaseException):
+            return await communicate_task
+        return b"", b""
+    finally:
+        if job is not None:  # pragma: no cover - exercised by Windows CI
+            job.close()
 
 
 @dataclass(slots=True)
@@ -319,15 +326,21 @@ class MergetrainTools:
             stdout, stderr = await asyncio.wait_for(
                 asyncio.shield(communicate_task), timeout=_CLI_TIMEOUT_SECONDS
             )
-        except asyncio.TimeoutError as exc:
-            await _stop_and_drain(process, communicate_task, job)
-            raise subprocess.TimeoutExpired(cmd=argv, timeout=_CLI_TIMEOUT_SECONDS) from exc
-        except BaseException:
-            # Shield cleanup so the cancellation already delivered to this task
-            # cannot strand the child. Re-raise the original CancelledError (or
-            # transport failure) so the MCP SDK keeps its existing semantics.
+        except BaseException as exc:
+            # Stop the child in a task of its own, so a cancellation of this
+            # task cannot strand it. The MCP SDK cancels through an anyio
+            # scope, which delivers the cancellation again and interrupts even
+            # the shielded wait below, so the cleanup owns the job and closes
+            # it only after it has terminated the tree through it.
             cleanup = asyncio.create_task(_stop_and_drain(process, communicate_task, job))
+            job = None
             await asyncio.shield(cleanup)
+            if isinstance(exc, asyncio.TimeoutError):
+                raise subprocess.TimeoutExpired(
+                    cmd=argv, timeout=_CLI_TIMEOUT_SECONDS
+                ) from exc
+            # Re-raise the original CancelledError (or transport failure) so
+            # the MCP SDK keeps its existing semantics.
             raise
         finally:
             if job is not None:  # pragma: no cover - exercised by Windows CI

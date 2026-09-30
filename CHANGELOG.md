@@ -61,6 +61,13 @@
   that took longer to exit, as test runners and containers often do, kept
   running in its own session, and the runner lease stayed with the dead CLI,
   so `status` asked for recovery. The server now waits 20 seconds.
+- On Windows, stop the gates of a cancelled MCP run through the CLI's job. The
+  MCP SDK cancels a request through an anyio scope, which delivers the
+  cancellation again and cut short the server's wait for its cleanup. The
+  server then closed the job that held the CLI's process tree before the
+  cleanup could terminate the tree through it, so gates the CLI had started in
+  their own process groups kept running. The cleanup now owns the job and
+  closes it only after terminating the tree.
 
 ## 3.3.0 - 2026-09-30
 

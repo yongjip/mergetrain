@@ -492,6 +492,61 @@ class ProcessLifecycleTests(unittest.TestCase):
         self.assertEqual(result.stdout, f"out{os.linesep}")
         self.assertEqual(result.stderr, f"err{os.linesep}")
 
+    def test_a_repeated_cancellation_closes_the_job_only_after_the_stop_used_it(self) -> None:
+        # The MCP SDK cancels through an anyio scope, which delivers the
+        # cancellation again and interrupts even a shielded wait. The job must
+        # stay open until the stop has terminated the tree through it.
+        events: list[str] = []
+
+        async def scenario() -> None:
+            finished = asyncio.Event()
+
+            class FakeProcess:
+                pid = 4321
+                returncode: int | None = None
+
+                async def communicate(self) -> tuple[bytes, bytes]:
+                    await finished.wait()
+                    return b"", b""
+
+            class FakeJob:
+                def adopt(self, pid: int) -> bool:
+                    return True
+
+                def terminate(self) -> bool:
+                    events.append("terminate")
+                    return True
+
+                def close(self) -> None:
+                    events.append("close")
+
+            async def spawn(*argv: str, **options: Any) -> FakeProcess:
+                return FakeProcess()
+
+            async def stop(process: Any, job: Any) -> bool:
+                await asyncio.sleep(0.05)
+                job.terminate()
+                finished.set()
+                return True
+
+            with (
+                patch("mergetrain.mcp_server.os.name", "nt"),
+                patch("mergetrain.mcp_server.WindowsJob.create", return_value=FakeJob()),
+                patch("mergetrain.mcp_server.asyncio.create_subprocess_exec", spawn),
+                patch("mergetrain.mcp_server._stop_cli_process", stop),
+            ):
+                task = asyncio.create_task(self.tools._run(["validate", "--json"]))
+                await asyncio.sleep(0.01)
+                task.cancel()
+                await asyncio.sleep(0.01)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                await asyncio.sleep(0.2)
+
+        asyncio.run(scenario())
+        self.assertEqual(events, ["terminate", "close"])
+
     def test_the_cli_gets_time_to_stop_its_gates_before_it_is_killed(self) -> None:
         # The CLI stops a gate with SIGTERM, then SIGKILL, waiting up to
         # _STOP_GRACE_SECONDS after each, and only then releases its lease. A
