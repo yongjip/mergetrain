@@ -6,11 +6,13 @@ import io
 import sqlite3
 import uuid
 from collections.abc import Callable, Iterable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import IO, Any
 
 from .atomic_push import (
     AtomicPush,
+    EventWriter,
 )
 from .atomic_push import (
     PushVerifyState as _PushVerifyState,
@@ -195,7 +197,6 @@ class GitRunner:
                 phase=phase,
                 state=state,
                 message=message,
-                detail="",
             )
         return result
 
@@ -282,13 +283,8 @@ class GitRunner:
         finally:
             self._worktrees.cleanup(worktree, log=log, keep_worktree=False)
 
-    def _gate_progress_callback(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        lease_token: str,
-        job_id: int | None = None,
-    ) -> GateProgress:
+    @staticmethod
+    def _gate_progress_callback(emit: EventWriter) -> GateProgress:
         def report(name: str, state: str, index: int, total: int, command: str) -> None:
             verb = {
                 "active": "Running",
@@ -297,10 +293,7 @@ class GitRunner:
                 "failure": "Failed",
                 "canceled": "Canceled",
             }.get(state, "Passed")
-            self._event(
-                conn,
-                lease_token=lease_token,
-                job_id=job_id,
+            emit(
                 phase="gating",
                 state=state,
                 message=f"{verb} gate {index}/{total}: {name}",
@@ -575,6 +568,7 @@ class GitRunner:
         probe_cache: dict[frozenset[int], bool] = {}
         probe_count = 0
         probe_worktree = self._worktrees.worktree_path(merged_jobs[0].id)
+        emit = partial(self._event, conn, lease_token=lease_token)
 
         def pulse() -> None:
             # The lease names the one worktree gc must spare. While probes run,
@@ -603,13 +597,7 @@ class GitRunner:
             probe_count += 1
             ids = [job.id for job in members]
             log.write(f"\n## bisect probe {probe_count}: jobs {ids}\n")
-            self._event(
-                conn,
-                lease_token=lease_token,
-                phase="gating",
-                state="active",
-                message=f"Bisect probe {probe_count}: jobs {ids}",
-            )
+            emit(phase="gating", state="active", message=f"Bisect probe {probe_count}: jobs {ids}")
             pulse()
             run_command(
                 ["git", "reset", "--hard", integration_base_sha],
@@ -727,9 +715,7 @@ class GitRunner:
                 self._worktrees.cleanup(probe_worktree, log=log, keep_worktree=False)
         except _BisectAbort as abort:
             log.write(f"\nbisect aborted: {abort}; falling back to linear isolation\n")
-            self._event(
-                conn,
-                lease_token=lease_token,
+            emit(
                 phase="gating",
                 state="warning",
                 message="Bisect inconclusive; isolating jobs one-by-one",
@@ -797,9 +783,7 @@ class GitRunner:
             f"{len(goods)} rejoining"
         )
         log.write(f"\n{summary}\n")
-        self._event(
-            conn,
-            lease_token=lease_token,
+        emit(
             phase="gating",
             state="warning" if conflict_sets else "success",
             message=f"Bisect isolation complete: {len(goods)} job(s) rejoin the train",
@@ -876,9 +860,8 @@ class GitRunner:
         # linear isolation runs several one-job trains under one claim, and
         # inspect must never show one job another job's progress.
         event_job_id = jobs[0].id if len(jobs) == 1 else None
-        gate_progress = self._gate_progress_callback(
-            conn, lease_token=lease_token, job_id=event_job_id
-        )
+        emit = partial(self._event, conn, lease_token=lease_token, job_id=event_job_id)
+        gate_progress = self._gate_progress_callback(emit)
 
         def finish(item: Job, **values: Any) -> Job:
             return self._finish_job(conn, item.id, lease_token=lease_token, **values)
@@ -971,10 +954,7 @@ class GitRunner:
                         finish(job, status="blocked", log_path=str(log_path), note=note)
                         for job in jobs
                     ]
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=event_job_id,
+                emit(
                     phase="fetching",
                     state="active",
                     message=f"Fetching {self.config.git.integration_ref}",
@@ -985,10 +965,7 @@ class GitRunner:
                     pulse=normal_pulse,
                     persistent=persistent_workspace,
                 )
-                self._event(
-                    conn,
-                    lease_token=lease_token,
-                    job_id=event_job_id,
+                emit(
                     phase="fetching",
                     state="success",
                     message=(
@@ -1025,10 +1002,7 @@ class GitRunner:
                         )
                         if reuse_decision.eligible:
                             reused_validation_sha = reuse_decision.reused_validation_sha
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                job_id=event_job_id,
+                            emit(
                                 phase="assembling",
                                 state="active",
                                 message="Restoring exact validated train commit",
@@ -1050,10 +1024,7 @@ class GitRunner:
                                     "exact validation commit could not be restored cleanly"
                                 )
                             merged_jobs.extend(jobs)
-                            self._event(
-                                conn,
-                                lease_token=lease_token,
-                                job_id=event_job_id,
+                            emit(
                                 phase="assembling",
                                 state="success",
                                 message="Exact validated train commit restored",
@@ -1074,10 +1045,7 @@ class GitRunner:
                         )
 
                 if not reused_validation_sha:
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=event_job_id,
+                    emit(
                         phase="assembling",
                         state="active",
                         message=f"Assembling train with {len(jobs)} job(s)",
@@ -1085,9 +1053,7 @@ class GitRunner:
                     for job in jobs:
                         log.write(f"\n## merge job {job.id}: {job.branch}\n")
                         normal_pulse()
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
+                        emit(
                             job_id=job.id,
                             phase="assembling",
                             state="active",
@@ -1169,9 +1135,7 @@ class GitRunner:
                             )
                             continue
                         merged_jobs.append(job)
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
+                        emit(
                             job_id=job.id,
                             phase="assembling",
                             state="success",
@@ -1180,10 +1144,7 @@ class GitRunner:
                     if not merged_jobs:
                         log.write("\nno jobs were merged\n")
                         return results
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=event_job_id,
+                    emit(
                         phase="assembling",
                         state="success",
                         message=f"Assembled {len(merged_jobs)} job(s)",
@@ -1196,10 +1157,7 @@ class GitRunner:
                         log=log,
                         pulse=normal_pulse,
                     )
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=event_job_id,
+                    emit(
                         phase="gating",
                         state="reused" if cache_reused else "success",
                         message=(
@@ -1212,19 +1170,13 @@ class GitRunner:
                     self._assert_auto_execution_policy(merged_jobs)
                 try:
                     if reuse_fallback_reason:
-                        self._event(
-                            conn,
-                            lease_token=lease_token,
-                            job_id=event_job_id,
+                        emit(
                             phase="gating",
                             state="warning",
                             message="Validated gates were not reused; rerunning all gates",
                             detail=reuse_fallback_reason,
                         )
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=event_job_id,
+                    emit(
                         phase="gating",
                         state="active",
                         message=(
@@ -1253,10 +1205,7 @@ class GitRunner:
                             head_ref=deploy_sha,
                         )
                     self._pushes.assert_tree_unchanged(worktree, deploy_sha)
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=event_job_id,
+                    emit(
                         phase="gating",
                         state="success",
                         message="All train gates passed",
@@ -1285,10 +1234,7 @@ class GitRunner:
                         "\ntrain gate failed; probing "
                         f"{len(merged_jobs)} merged jobs for semantic conflicts\n"
                     )
-                    self._event(
-                        conn,
-                        lease_token=lease_token,
-                        job_id=event_job_id,
+                    emit(
                         phase="gating",
                         state="warning",
                         message=(

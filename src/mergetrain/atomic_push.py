@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import IO
 
@@ -266,15 +267,9 @@ class AtomicPush:
     ) -> None:
         """Run audit preflight, durable marker, atomic push, and verification."""
 
+        emit = partial(event, conn, lease_token=lease_token, job_id=event_job_id)
         before_push()
-        event(
-            conn,
-            lease_token=lease_token,
-            job_id=event_job_id,
-            phase="pushing",
-            state="active",
-            message="Pushing verified HEAD atomically",
-        )
+        emit(phase="pushing", state="active", message="Pushing verified HEAD atomically")
         try:
             audit_ref, audit_expected_sha = self.audit_ref_expectation(
                 deploy_sha=deploy_sha,
@@ -285,10 +280,7 @@ class AtomicPush:
         except CancellationRequested:
             raise
         except MergetrainError as exc:
-            event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
+            emit(
                 phase="pushing",
                 state="error",
                 message="Deploy audit preflight failed",
@@ -315,10 +307,7 @@ class AtomicPush:
             state.push_status = "not_run"
             raise
         except CommandFailed as exc:
-            event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
+            emit(
                 phase="pushing",
                 state="error",
                 message="Atomic push failed",
@@ -344,20 +333,10 @@ class AtomicPush:
             ) from exc
 
         state.push_status = "succeeded"
-        event(
-            conn,
-            lease_token=lease_token,
-            job_id=event_job_id,
-            phase="pushing",
-            state="success",
-            message="Atomic push completed",
-        )
+        emit(phase="pushing", state="success", message="Atomic push completed")
         if not self.config.deploy.verify:
             state.verify_status = "not_configured"
-            event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
+            emit(
                 phase="verifying",
                 state="success",
                 message="No post-push verification configured",
@@ -365,32 +344,15 @@ class AtomicPush:
             return
 
         try:
-            event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="verifying",
-                state="active",
-                message="Running post-push verification",
-            )
+            emit(phase="verifying", state="active", message="Running post-push verification")
             run_verify_hooks(worktree=worktree, log=log, pulse=ownership_pulse)
             state.verify_status = "succeeded"
-            event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
-                phase="verifying",
-                state="success",
-                message="Post-push verification passed",
-            )
+            emit(phase="verifying", state="success", message="Post-push verification passed")
         except CommandFailed as exc:
             state.verify_status = "failed"
             state.warning = f"post-push verify warning: {exc}"
             log.write(f"\nWARNING: {state.warning}\n")
-            event(
-                conn,
-                lease_token=lease_token,
-                job_id=event_job_id,
+            emit(
                 phase="verifying",
                 state="warning",
                 message="Post-push verification needs attention",
