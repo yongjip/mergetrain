@@ -129,6 +129,7 @@ def daemon_tick(
     """
 
     lease_token = ""
+    stale_token = ""
     probe_failed: QueueError | None = None
     # Skipped-probe default (sovereign first run): assume there may be orphans
     # so the writable path runs the heal, which is a cheap no-op when there are
@@ -167,7 +168,13 @@ def daemon_tick(
             # so the writable path recovers it instead of reporting idle forever
             # (#84, defect 1).
             has_orphans = has_in_progress(probe)
-            if has_orphans and active_lock is not None:
+            if active_lock is not None and active_lock.owner == owner:
+                # A daemon runs its ticks one at a time, so a lease under its own
+                # owner at the start of a tick is one that an earlier tick
+                # failed to drop, not work in progress. Left alone, its live PID
+                # would make every later tick take it for an active runner.
+                stale_token = active_lock.token
+            elif has_orphans and active_lock is not None:
                 say(
                     "mergetrain daemon tick: runner is active; "
                     "leaving its in-progress train untouched"
@@ -175,7 +182,7 @@ def daemon_tick(
                 return "idle"
         finally:
             probe.close()
-        if not has_work and not has_orphans:
+        if not has_work and not has_orphans and not stale_token:
             if validate_only:
                 say("mergetrain validation daemon tick: no manual queued jobs")
             else:
@@ -183,6 +190,8 @@ def daemon_tick(
             return "idle"
     conn = connect(db_path)
     try:
+        if stale_token and force_clear_lock_and_split(conn, owner=owner, token=stale_token):
+            say("mergetrain daemon tick: cleared a lease an earlier tick could not release")
         if has_orphans:
             # Recover a dead/absent runner's stranded claims before deciding
             # what to do: clean orphans return to `queued`, marker-bearing ones
@@ -281,10 +290,10 @@ def daemon_tick(
         try:
             if lease_token:
                 release_runner_lock(conn, owner=owner, token=lease_token)
-        except Exception as exc:  # noqa: BLE001 - lease expires at TTL anyway
+        except Exception as exc:  # noqa: BLE001 - the next tick clears its own lease
             say(
                 "mergetrain daemon: failed to release runner lock "
-                f"(lease expires at TTL): {exc}"
+                f"(the next tick clears it): {exc}"
             )
         finally:
             conn.close()

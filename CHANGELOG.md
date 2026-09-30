@@ -29,6 +29,14 @@
   `landed:<n>` and sent a plain "Train landed" notification. It now reports
   `unverified:<n>`, which notifies under the `landed` transition as "Train
   landed (n jobs); verification needs attention".
+- Keep the daemon from wedging itself on a lease it could not release. When a
+  batch raised and SQLite contention also stopped the daemon from clearing its
+  lease, the lock kept naming the daemon's own live process while the claimed
+  jobs stayed `in_progress`. Every later tick took that for another active
+  runner and idled, even after the lease expired, until someone ran
+  `unlock --force` or restarted the daemon. A daemon runs one tick at a time,
+  so a tick now clears a lease left under its own name by an earlier tick and
+  returns the claimed jobs to the queue.
 
 ## 3.3.0 - 2026-09-30
 

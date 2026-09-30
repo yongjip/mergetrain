@@ -13,12 +13,12 @@ from mergetrain.daemon import (
     daemon_loop,
     daemon_tick,
 )
-from mergetrain.errors import ConfigError, MergetrainError, QueueError
+from mergetrain.errors import ConfigError, MergetrainError, QueueBusy, QueueError
 from mergetrain.models import Job
 from mergetrain.persistence.claims import claim_all_queued
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.jobs import enqueue_job, get_job, list_jobs, mark_job
-from mergetrain.persistence.leases import default_owner, release_runner_lock
+from mergetrain.persistence.leases import default_owner, get_lock, release_runner_lock
 
 
 class GradeBatchTests(unittest.TestCase):
@@ -158,6 +158,61 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(processed, [job.id])
             self.assertEqual(outcome, "processed:1")
 
+    def test_a_tick_that_could_not_drop_its_lease_does_not_wedge_the_daemon(self) -> None:
+        """Contention that outlasts a failed batch left the daemon's own live
+        lease on an in-progress row, and every later tick then idled."""
+
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            job = enqueue_job(
+                conn,
+                task="auto",
+                branch="auto",
+                auto_deploy=True,
+                approval_destination_sha="a" * 64,
+                approval_execution_policy_sha="b" * 64,
+            )
+            conn.close()
+            owner = f"daemon:{os.getpid()}"
+
+            def batch_hits_contention(conn, jobs):  # type: ignore[no-untyped-def]
+                raise QueueBusy("database is locked")
+
+            busy = QueueBusy("database is locked")
+            with (
+                patch("mergetrain.daemon.force_clear_lock_and_split", side_effect=busy),
+                patch("mergetrain.daemon.release_runner_lock", side_effect=busy),
+                self.assertRaises(QueueBusy),
+            ):
+                daemon_tick(
+                    db_path=str(db),
+                    process_batch=batch_hits_contention,
+                    owner=owner,
+                    say=lambda _: None,
+                    approval_destination_sha="a" * 64,
+                    approval_execution_policy_sha="b" * 64,
+                )
+            conn = connect(db)
+            try:
+                self.assertEqual(get_job(conn, job.id).status, "in_progress")
+                lock = get_lock(conn)
+                self.assertEqual(lock.owner if lock else "", owner)
+            finally:
+                conn.close()
+
+            processed: list[int] = []
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: processed.extend(item.id for item in jobs),
+                owner=owner,
+                say=lambda _: None,
+                approval_destination_sha="a" * 64,
+                approval_execution_policy_sha="b" * 64,
+            )
+            self.assertEqual(processed, [job.id])
+            self.assertEqual(outcome, "processed:1")
+
     def test_execution_policy_mismatch_blocks_auto_jobs_before_runner_work(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"
@@ -279,12 +334,14 @@ class DaemonTests(unittest.TestCase):
     def test_tick_reports_live_marker_owner_as_active_not_reconcile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "queue.sqlite"
-            owner = default_owner()
+            # Another live process: its PID is alive, and its owner is not the
+            # daemon's, which only ever finds its own lease left by a failed tick.
+            runner = f"other-runner:{os.getpid()}"
             conn = connect(db)
             enqueue_job(
                 conn, task="active", branch="active", auto_deploy=True
             )
-            claimed = claim_all_queued(conn, owner=owner, auto_only=True)
+            claimed = claim_all_queued(conn, owner=runner, auto_only=True)
             token = claimed[0].claim_token
             conn.execute(
                 "UPDATE deploy_queue SET pending_deploy_sha='active-sha' WHERE id=?",
@@ -297,7 +354,7 @@ class DaemonTests(unittest.TestCase):
             outcome = daemon_tick(
                 db_path=str(db),
                 process_batch=lambda conn, jobs: self.fail("active job was reclaimed"),
-                owner=owner,
+                owner=default_owner(),
                 say=messages.append,
             )
 
@@ -306,7 +363,7 @@ class DaemonTests(unittest.TestCase):
             conn = connect(db)
             try:
                 self.assertEqual(get_job(conn, claimed[0].id).status, "in_progress")
-                release_runner_lock(conn, owner=owner, token=token)
+                release_runner_lock(conn, owner=runner, token=token)
             finally:
                 conn.close()
 
