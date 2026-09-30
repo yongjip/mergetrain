@@ -62,7 +62,11 @@ INSTALL_HINT = (
 # Long enough for a validate that runs a real gate suite, bounded so a wedged
 # child cannot hold the server's event loop forever.
 _CLI_TIMEOUT_SECONDS = 3600
-_CLI_TERMINATE_GRACE_SECONDS = 5.0
+# How long a stopped CLI gets before its group is killed. On SIGINT it stops
+# each gate (SIGTERM, then SIGKILL, up to 5 s after each; see command_runner)
+# and then releases its lease. Gates run in their own sessions, beyond this
+# group, so killing the CLI sooner orphans them with the lease still held.
+_CLI_TERMINATE_GRACE_SECONDS = 20.0
 _LOG_TAIL_MAX_LINES = 200
 
 

@@ -55,6 +55,12 @@
   hash that agents are never shown. The message now tells the agent to read
   `mergetrain_status` before deciding what happened, and no MCP error message
   includes the plan hash.
+- Give a cancelled MCP validate or deploy time to stop its gates. The MCP
+  server sent the CLI SIGINT and killed it 5 seconds later, while the CLI
+  itself waits up to 5 seconds after SIGTERM before it kills a gate. A gate
+  that took longer to exit, as test runners and containers often do, kept
+  running in its own session, and the runner lease stayed with the dead CLI,
+  so `status` asked for recovery. The server now waits 20 seconds.
 
 ## 3.3.0 - 2026-09-30
 

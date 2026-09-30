@@ -492,6 +492,17 @@ class ProcessLifecycleTests(unittest.TestCase):
         self.assertEqual(result.stdout, f"out{os.linesep}")
         self.assertEqual(result.stderr, f"err{os.linesep}")
 
+    def test_the_cli_gets_time_to_stop_its_gates_before_it_is_killed(self) -> None:
+        # The CLI stops a gate with SIGTERM, then SIGKILL, waiting up to
+        # _STOP_GRACE_SECONDS after each, and only then releases its lease. A
+        # SIGKILL of the CLI before that orphans the gate in its own session.
+        from mergetrain import command_runner, mcp_server
+
+        self.assertGreaterEqual(
+            mcp_server._CLI_TERMINATE_GRACE_SECONDS,
+            2 * command_runner._STOP_GRACE_SECONDS + 5,
+        )
+
     def test_windows_break_failure_falls_back_to_tree_termination(self) -> None:
         process = MagicMock()
         process.pid = 123
