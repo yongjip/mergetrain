@@ -175,8 +175,10 @@ owner decision. It removes the `eta` and `progress` keys from each repository
 snapshot in `hub status --json`: they existed only for the web dashboard, 3.3.0
 removed that dashboard, and nothing else read them. The removal fixes no safety
 problem. It still bumps the machine contract and documents the migration
-([Contract 4 to 5](#contract-4-to-5-hub-read-model-retirement)), and it sets no
-precedent: every other incompatible change must meet the safety rule above.
+([Contract 4 to 5](#contract-4-to-5-hub-read-model-retirement)). A later
+removal of the same kind, output whose only consumer inside mergetrain is gone,
+needs its own owner decision and record; every other incompatible change must
+meet the safety rule above.
 
 ## Additive changes
 

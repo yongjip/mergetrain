@@ -29,7 +29,11 @@ people who depend on it.
 - Ship at most one feature (minor) release per week.
 - Bump the major version only for a breaking change to the machine contract,
   the CLI grammar, or the configuration schema. Group breaking changes into one
-  planned major release instead of shipping several majors in a row.
+  planned major release instead of shipping several majors in a row. The one
+  exception is removing machine output whose only consumer inside mergetrain is
+  gone: once the owner decides it and docs/contract.md records the contract
+  bump and migration, it may ship in a minor release, as contract 5 did in
+  3.4.0.
 - Do not publish a second version on the same day unless it fixes a regression
   in the first.
 - Changes to docs, tests, CI, or internal structure alone never justify a

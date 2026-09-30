@@ -678,3 +678,32 @@ question. Browser alerts go away; the persisted, deduplicated webhook path is
 the remaining notification backend. Reintroduce a visual surface only with
 evidence of a repeated workflow that `status`, `events --follow`, and
 `hub status` cannot serve, through the admission test above.
+
+## Hub read-model retirement record — 2026-09-30
+
+### Evidence
+
+After the dashboard removal above, the full `hub status --json` view still
+computed the dashboard's completion estimate (`eta`) and train summary
+(`progress`) for every repository: about 350 lines of phase and gate sampling,
+with their own tests. A code survey on 2026-09-30 found it the largest block of
+code whose only consumer was gone; nothing else in mergetrain read either key.
+
+### Existing fit and decision cost
+
+`inspect JOB_ID --json` reports a job's progress, `events --jsonl` streams it,
+and `stats --json` keeps the timing medians. Removing two keys is incompatible,
+so machine output moves to contract 5, with the migration in the
+[contract policy](contract.md#contract-4-to-5-hub-read-model-retirement). The
+owner decided to retire the keys rather than maintain output without a
+consumer, and to ship the change in 3.4.0 under the exception now recorded in
+the [release rules](release.md#when-to-cut-a-release). The CLI grammar, config
+schema, `hub status --summary --json`, and every other payload are unchanged;
+no command, flag, config field, state group, or MCP tool is added or removed.
+
+### Safety impact and removal trigger
+
+No safety behavior changes. A consumer that checks `contract_version` sees 5
+and finds the migration in the contract policy. Retire other output the same
+way only when its last consumer inside mergetrain is gone and the owner decides
+it, with its own record here.
