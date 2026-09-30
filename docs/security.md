@@ -191,7 +191,8 @@ class, never subprocess output.
 mergetrain listens on no network port. `status`, `inspect`, `events`, and
 `hub status` are local reads. The snapshot that `hub status --json` embeds for
 each repository omits lease tokens, local worktree paths, log paths, and the
-username portion of the runner owner. Active gate events also include the
+username portion of the runner owner, and it masks worktree and checkout paths
+in a job note before bounding the note. Active gate events also include the
 configured command template; obvious token/password assignments and flags are
 masked by the same policy described above, but command authors should never
 embed credentials directly in gate configuration.

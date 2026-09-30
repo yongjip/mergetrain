@@ -48,10 +48,10 @@ The hub owns no correctness-critical state
 ## Security model
 
 The hub listens on no network port: `hub status` is a one-shot local read. Its
-payload masks inline secrets in job notes, drops local worktree and log paths,
-and reports runner owners without the OS username. One deliberate difference:
-hub entries show each repo's home-relative path, because identifying repos is
-the report's purpose.
+payload masks inline secrets and the worktree and checkout paths in job notes,
+drops local worktree and log paths, and reports runner owners without the OS
+username. One deliberate difference: hub entries show each repo's home-relative
+path, because identifying repos is the report's purpose.
 
 Deploys, recovery, and cleanup remain explicit CLI actions inside each repo.
 `hub status` cannot ship anything; `hub daemon` ships only jobs enqueued with

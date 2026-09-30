@@ -359,6 +359,13 @@
   that had ended as current progress: the job said `queued` while `progress`
   said its gate was still running. A queued job's progress is now "Waiting
   for a runner", and the ended run's events stay in `events`.
+- Keep local paths out of the job notes that `hub status --json` shows. The
+  note was cut at 1,000 characters before the integration worktree paths in
+  it were masked, so a path that crossed the limit, such as one in a failed
+  test's output, showed its prefix, home directory included. A note from a
+  command that ran in the checkout itself, such as a failed `git fetch`,
+  showed the checkout path unmasked. Paths are now masked in the whole note
+  before it is cut, and the checkout path shows as `[repo]`.
 
 ## 3.3.0 - 2026-09-30
 

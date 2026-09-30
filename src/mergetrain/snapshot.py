@@ -13,7 +13,7 @@ from statistics import median
 from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
-from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound, redact_secrets
+from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound
 from .models import Job, RunEvent, RunnerLock, public_owner
 from .observability import _gate_runs, elapsed_seconds
 from .persistence.connection import connect
@@ -306,7 +306,7 @@ def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
     return plan_next_action(payload, config_version=config_version).code
 
 
-def _public_job(job: Job, *, worktree_root: str = "") -> dict[str, Any]:
+def _public_job(job: Job, *, worktree_root: str = "", repo: str = "") -> dict[str, Any]:
     data = job.to_dict()
     worktree_path = str(data.get("worktree_path") or "")
     # A snapshot needs queue identity and reasons, not local filesystem paths.
@@ -316,16 +316,20 @@ def _public_job(job: Job, *, worktree_root: str = "") -> dict[str, Any]:
     # notes are already masked at the source (errors.redact_secrets in
     # CommandFailed.__str__), but re-mask here so a note written before that
     # guard — or by any future non-CommandFailed path — is never served in clear.
-    note = data.get("note")
-    if note:
-        public_note = redact_secrets(note)
+    # The paths are masked in the whole note before it is bounded; masked
+    # after, a path cut at the limit kept its prefix.
+    if job.note:
+        public_note = job.note
         if worktree_path:
             public_note = public_note.replace(worktree_path, "[worktree]")
         if worktree_root:
             # A failed command's note names the integration worktree it ran in,
             # and that absolute path carries the user's home directory (#231).
             public_note = public_note.replace(worktree_root, "[worktrees]")
-        data["note"] = public_note
+        if repo:
+            # So does one that ran in the checkout itself.
+            public_note = public_note.replace(repo, "[repo]")
+        data["note"], data["note_truncated"] = redact_and_bound(public_note)
     return data
 
 
@@ -749,6 +753,7 @@ def build_repo_snapshot(
     """
 
     worktree_root = str(config.state.worktree_root)
+    repo = str(config.repo)
     conn = connect(config.state.db, read_only=read_only)
     try:
         with read_snapshot(conn):
@@ -796,10 +801,15 @@ def build_repo_snapshot(
             },
             "counts": count_data,
             "lock": lock,
-            "jobs": [_public_job(job, worktree_root=worktree_root) for job in recent_jobs],
+            "jobs": [
+                _public_job(job, worktree_root=worktree_root, repo=repo) for job in recent_jobs
+            ],
             "train": {
                 "selection": selection,
-                "jobs": [_public_job(job, worktree_root=worktree_root) for job in selected_jobs],
+                "jobs": [
+                    _public_job(job, worktree_root=worktree_root, repo=repo)
+                    for job in selected_jobs
+                ],
             },
             "events": [_public_event(event) for event in raw_events],
             "validated_trains": validated_trains,

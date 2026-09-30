@@ -300,6 +300,43 @@ class RepoSnapshotTests(unittest.TestCase):
             self.assertEqual(unlock["message"], "cleared dead runner lock (local:4242)")
             self.assertEqual(json.loads(unlock["detail"])["owner"], "local:4242")
 
+    def test_snapshot_masks_local_paths_before_bounding_a_note(self) -> None:
+        # The note was bounded first and its paths masked after, so a path cut
+        # at the limit kept its prefix, home directory included. A command
+        # that ran in the checkout itself named it with no mask at all.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = self.make_config(root)
+            repo = str(config.repo)
+            integration = config.state.worktree_root / "demo-mergetrain-7-0a1b2c3d"
+            head = f"command failed (1) in {integration}: make test\n"
+            # The next path starts under the checkout and crosses the limit.
+            filler = "x" * (PUBLIC_REASON_LIMIT - len(head) - len(repo) // 2)
+            report = f"{integration}/tests/test_app.py:12: AssertionError"
+            conn = connect(config.state.db)
+            try:
+                gate = enqueue_job(conn, task="gate", branch="codex/gate")
+                mark_job(conn, gate.id, status="failed", note=head + filler + report)
+                fetch = enqueue_job(conn, task="fetch", branch="codex/fetch")
+                mark_job(
+                    conn,
+                    fetch.id,
+                    status="blocked",
+                    note=f"command failed (128) in {repo}: git fetch origin",
+                )
+            finally:
+                conn.close()
+
+            payload = build_repo_snapshot(config, read_only=True)
+
+            notes = {item["id"]: item for item in payload["jobs"]}
+            self.assertNotIn(repo[: len(repo) // 2], notes[gate.id]["note"])
+            self.assertTrue(notes[gate.id]["note"].endswith("tests/test_app.py:12: AssertionError"))
+            self.assertFalse(notes[gate.id]["note_truncated"])
+            self.assertEqual(
+                notes[fetch.id]["note"], "command failed (128) in [repo]: git fetch origin"
+            )
+
     def test_snapshot_is_live_and_omits_local_paths_and_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
