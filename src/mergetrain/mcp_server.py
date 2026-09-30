@@ -69,6 +69,11 @@ _CLI_TIMEOUT_SECONDS = 3600
 # group, so killing the CLI sooner orphans them with the lease still held.
 _CLI_TERMINATE_GRACE_SECONDS = 20.0
 _LOG_TAIL_MAX_LINES = 200
+# Redaction runs on the event loop and is quadratic on some crafted text, such
+# as a long run of dashes, so what it scans is bounded, and a CLI argument too
+# long to show in a message is named by its length instead.
+_REDACTION_SCAN_MAX_CHARS = 4000
+_DISPLAY_ARG_MAX_CHARS = 200
 
 
 def _server_version() -> str:
@@ -106,7 +111,7 @@ def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
         "ok": False,
         "error": {
             "code": code,
-            "message": redact_secrets(message),
+            "message": redact_secrets(message[:_REDACTION_SCAN_MAX_CHARS]),
             "retryable": False,
         },
     }
@@ -124,6 +129,8 @@ def _display_command(args: list[str]) -> str:
             hidden = False
         elif arg == "--expected-plan":
             hidden = True
+        elif len(arg) > _DISPLAY_ARG_MAX_CHARS:
+            shown.append(f"[{len(arg)} characters]")
         else:
             shown.append(arg)
     return " ".join(shown)
@@ -405,7 +412,10 @@ class MergetrainTools:
         """Bound and mask contract-external CLI diagnostics for MCP output."""
 
         raw = next((item for item in candidates if item), "").strip()
-        detail = redact_secrets(raw)
+        # Scanning twice what is kept changes the kept text only when a secret
+        # that starts in it runs past the cut, or when masking shortens the
+        # text before the cut by more than what is kept.
+        detail = redact_secrets(raw[:_REDACTION_SCAN_MAX_CHARS])
         repo = str(self.repo)
         detail = _replace_local_path_root(detail, repo, "[repo]")
         home = str(Path.home())

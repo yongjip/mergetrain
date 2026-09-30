@@ -297,6 +297,14 @@
   verify hook that set that variable inline showed its value in job notes,
   `status`, event command templates, and `hub status`. A value such as
   `TOKEN=$'two words'` lost only its first word. Both are now masked whole.
+- Keep the MCP server responsive when an agent sends a very long task. When
+  the CLI did not return JSON, the server masked secrets in an error message
+  that repeated the task and branch, on the thread that serves every request,
+  and masking a long run of dashes took minutes; a long task in the deploy
+  summary refused to a client without a confirmation dialog did the same. No
+  other request, cancellation, or shutdown could run meanwhile. Messages now
+  name an argument over 200 characters by its length, and masking reads at
+  most 4,000 characters of a message or CLI diagnostic.
 
 ## 3.3.0 - 2026-09-30
 

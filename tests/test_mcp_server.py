@@ -394,6 +394,37 @@ class PayloadTests(unittest.TestCase):
         self.assertNotIn("ghp-secret", payload["error"]["message"])
         self.assertIn("GITHUB_PAT=[redacted]", payload["error"]["message"])
 
+    def test_crafted_text_cannot_stall_the_server_in_redaction(self) -> None:
+        # Redaction runs on the event loop and is quadratic on a long run of
+        # dashes, so a crafted task blocked every other request for minutes.
+        # What it scans must not grow with the text an agent sends.
+        crafted = "-" * 100_000
+        scanned: list[int] = []
+
+        def record(text: str) -> str:
+            scanned.append(len(text))
+            return text
+
+        preview = {**PREVIEW, "jobs": [{**PREVIEW["jobs"][0], "task": f"x{crafted}"}]}
+        with patch("mergetrain.mcp_server.redact_secrets", side_effect=record):
+            with patch.object(
+                MergetrainTools,
+                "_run",
+                return_value=completed("", returncode=2, stderr=f"error: {crafted}"),
+            ):
+                enqueue = asyncio.run(self.tools.enqueue(task=crafted, branch="agent/x"))
+            with patch.object(
+                MergetrainTools, "_run", return_value=completed(json.dumps(preview))
+            ):
+                plan = asyncio.run(self.tools.prepare_deploy(FakeContext(elicitation=False)))
+                refusal = asyncio.run(self.tools.deploy(plan, None))
+
+        self.assertEqual(enqueue["error"]["code"], "cli_output_unreadable")
+        self.assertIn("--branch agent/x --json", enqueue["error"]["message"])
+        self.assertEqual(refusal["error"]["code"], "confirmation_required")
+        self.assertTrue(scanned)
+        self.assertLess(max(scanned), 10_000)
+
     def test_local_path_minimization_accepts_both_separator_styles(self) -> None:
         self.assertEqual(
             _replace_local_path_root("at /repo/src/main.py", r"\repo", "[repo]"),
