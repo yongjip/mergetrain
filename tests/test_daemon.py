@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import io
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from mergetrain.cli import main
+from mergetrain.config import load_config
 from mergetrain.daemon import (
     _grade_batch,
     _grade_validation_batch,
     daemon_loop,
     daemon_tick,
 )
+from mergetrain.deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from mergetrain.errors import ConfigError, MergetrainError, QueueBusy, QueueError
 from mergetrain.models import Job
 from mergetrain.persistence.claims import claim_all_queued
@@ -730,6 +736,63 @@ class OrphanSelfHealTests(unittest.TestCase):
             finally:
                 conn.close()
             self.assertEqual([row["owner"] for row in locks], [live])
+
+
+class DaemonOnceExitStatusTests(unittest.TestCase):
+    """#24: a scheduler running `daemon --once` sees only its exit status."""
+
+    def _run_once(self, root: Path, *, queued: bool, batch) -> int:  # type: ignore[no-untyped-def]
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(root / "remote.git")], cwd=repo, check=True
+        )
+        (repo / ".mergetrain.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+        config = load_config(repo=repo)
+        conn = connect(config.state.db)
+        try:
+            if queued:
+                enqueue_job(
+                    conn,
+                    task="auto",
+                    branch="auto",
+                    auto_deploy=True,
+                    approval_destination_sha=deploy_destination_sha(config),
+                    approval_execution_policy_sha=deploy_execution_policy_sha(config),
+                )
+        finally:
+            conn.close()
+        runner = Mock()
+        runner.process_batch.side_effect = batch
+        with (
+            patch("mergetrain.commands.daemon.GitRunner", return_value=runner),
+            redirect_stdout(io.StringIO()),
+        ):
+            return main(["--repo", str(repo), "daemon", "--once"])
+
+    def test_once_fails_when_the_tick_errored_or_did_not_land(self) -> None:
+        def finish(status: str):  # type: ignore[no-untyped-def]
+            def batch(conn, jobs, **kwargs):  # type: ignore[no-untyped-def]
+                return [
+                    mark_job(conn, job.id, status=status, expected_claim_token=job.claim_token)
+                    for job in jobs
+                ]
+
+            return batch
+
+        def crash(conn, jobs, **kwargs):  # type: ignore[no-untyped-def]
+            raise OSError("disk full")
+
+        cases = (
+            ("landed", True, finish("deployed"), 0),
+            ("idle", False, finish("deployed"), 0),
+            ("no_landing", True, finish("blocked"), 1),
+            ("error", True, crash, 1),
+        )
+        for name, queued, batch, expected in cases:
+            with self.subTest(name), tempfile.TemporaryDirectory() as td:
+                self.assertEqual(self._run_once(Path(td), queued=queued, batch=batch), expected)
 
 
 class ReadOnlyTickTests(unittest.TestCase):

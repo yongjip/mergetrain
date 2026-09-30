@@ -332,13 +332,13 @@ def daemon_loop(
     validate_only: bool = False,
     approval_destination_sha: ApprovalDestination = "",
     approval_execution_policy_sha: ApprovalExecutionPolicy = "",
-) -> None:
+) -> str:
     """Run a mergetrain daemon loop in auto-deploy or manual-validation mode.
 
     Auto-deploy mode claims only ``auto_deploy = 1`` jobs. Validation mode
     claims only manual jobs and pauses after producing one validated train.
     The caller must hold the corresponding unattended-deploy or validation-runner
-    authorization before starting the loop.
+    authorization before starting the loop. Returns the last tick's outcome.
     """
 
     if validate_only and notifier is not None:
@@ -360,6 +360,7 @@ def daemon_loop(
             old_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, request_stop)
 
+    outcome = "idle"
     try:
         while True:
             # Checked at the TOP of the loop: a signal that lands during the
@@ -417,3 +418,4 @@ def daemon_loop(
         if install_signal_handlers:
             for saved_signum, saved_handler in old_handlers.items():
                 signal.signal(saved_signum, saved_handler)
+    return outcome

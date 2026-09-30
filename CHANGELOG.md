@@ -231,6 +231,13 @@
   other jobs beside them reported a clean landing. The tick now counts them
   as jobs that did not land: "Nothing landed" when it blocked every job, and
   "Partial" beside a landing.
+- Make `mergetrain daemon --once` exit 1 when its tick failed or did not ship
+  what it ran. It always exited 0, even when the tick raised an error or the
+  jobs it claimed failed their gates, so cron, launchd, or a systemd timer
+  recorded every run as a success. It now exits 1 for a tick that raised an
+  error, paused for a pending reconcile, or ran jobs that did not all land
+  (or, with `--validate-only`, validate), and 0 for a tick with nothing to
+  do, one waiting for a validated train to be deployed, and a landing.
 
 ## 3.3.0 - 2026-09-30
 

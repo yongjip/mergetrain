@@ -248,7 +248,8 @@ class GitRunnerTests(unittest.TestCase):
             daemon_out = io.StringIO()
             with redirect_stdout(daemon_out):
                 daemon_code = main(["--repo", str(repo), "daemon", "--once"])
-            self.assertEqual(daemon_code, 0, daemon_out.getvalue())
+            # The tick blocked the job, so nothing it claimed shipped.
+            self.assertEqual(daemon_code, 1, daemon_out.getvalue())
 
             config = load_config(repo=repo)
             conn = connect(config.state.db)

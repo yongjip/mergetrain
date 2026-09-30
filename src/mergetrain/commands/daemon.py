@@ -15,6 +15,23 @@ from ..models import Job
 from ..persistence.leases import default_owner
 
 
+def _once_exit_code(outcome: str) -> int:
+    """The exit status of a one-shot tick, all that a scheduler sees of it.
+
+    As for the other execution verbs, 1 is a tick that failed or ran work that
+    did not ship: an error, a pause for reconcile, or jobs that did not all
+    land (or validate). A tick with nothing to do, or waiting for approval of
+    a validated train, succeeded; so did a landing whose verification needs
+    attention, which ``status`` reports.
+    """
+
+    if outcome in {"idle", "validation_paused"} or outcome.startswith(
+        ("landed:", "unverified:", "processed:", "validated:", "validation_processed:")
+    ):
+        return 0
+    return 1
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     from ..notify import configured_notifier, repo_notify_state_path
 
@@ -64,7 +81,7 @@ def cmd_daemon(args: argparse.Namespace) -> int:
             ttl_minutes=config.queue.lock_ttl_minutes,
         )
 
-    daemon_loop(
+    outcome = daemon_loop(
         db_path=str(config.state.db),
         process_batch=process_batch,
         owner=owner,
@@ -87,4 +104,4 @@ def cmd_daemon(args: argparse.Namespace) -> int:
             else current_execution_policy_sha
         ),
     )
-    return 0
+    return _once_exit_code(outcome) if args.once else 0

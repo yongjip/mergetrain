@@ -61,6 +61,11 @@ mergetrain daemon --validate-only --once
 ```
 
 Then run it from cron, launchd, systemd timer, or a service-specific supervisor.
+With `--once`, the exit status reports the tick: 1 when it raised an error,
+paused for a pending reconcile, or ran jobs that did not all land (with
+`--validate-only`, validate); 0 when it had nothing to do, is waiting for a
+validated train to be deployed, or landed its jobs, including a landing whose
+verification needs attention in `status`.
 
 ## Safety boundary
 
