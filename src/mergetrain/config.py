@@ -381,11 +381,28 @@ def default_config_dict(project_name: str = "example-app") -> dict[str, Any]:
     }
 
 
+def _yaml_string(value: str) -> str:
+    """``value`` as a YAML scalar that loads back as the same string.
+
+    A directory name such as ``2048``, ``no``, or ``@scope`` is not a string,
+    or not YAML at all, when it is written unquoted.
+    """
+
+    try:
+        if load_yaml(f"value: {value}\n") == {"value": value}:
+            return value
+    except ConfigError:
+        pass
+    return yaml.safe_dump(
+        value, default_style='"', allow_unicode=True, width=float("inf")
+    ).rstrip("\n")
+
+
 def render_default_config(project_name: str = "example-app") -> str:
     return f"""version: {CONFIG_VERSION}
 
 project:
-  name: {project_name}
+  name: {_yaml_string(project_name)}
 
 gates: []
 """

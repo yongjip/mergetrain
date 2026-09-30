@@ -69,6 +69,24 @@ notify:
         self.assertNotIn("terminology", data)
         self.assertEqual(data["gates"], [])
 
+    def test_generated_yaml_keeps_any_project_name_a_string(self) -> None:
+        # init writes the directory name or --project here. Unquoted, YAML read
+        # these as a number, boolean, null, list, or mapping, or not at all.
+        names = (
+            "2048", "1.0", "true", "no", "yEs", "null", "~", "010", "0_600", "1:30",
+            "@scope", "[x]", "{x}", "a: b", "a #b", "-x", "it's", 'say "hi"',
+            "tab\there", "line break", "프로젝트",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            for name in names:
+                with self.subTest(name=name):
+                    (repo / ".mergetrain.yaml").write_text(
+                        render_default_config(name), encoding="utf-8"
+                    )
+                    self.assertEqual(load_config(repo=repo).project.name, name)
+        self.assertIn("\n  name: demo\n", render_default_config("demo"))
+
     def test_exact_builtin_diff_check_duplicate_is_not_effective(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

@@ -156,6 +156,13 @@
   always passed, and a repeated `gates:` or `push_refs:` replaced the earlier
   policy. Loading now fails with a `config_error` that names the key and its
   line.
+- Quote a project name that YAML would read as something else when `init`
+  writes the config. A directory or `--project` name such as `2048`, `1.0`,
+  `no`, `null`, `010`, `@scope`, `[x]`, or `a: b` was written unquoted, so
+  `init --write` reported success and every later command failed with
+  `project.name must be a non-empty string` or a YAML error, or took the
+  directory name instead. Such a name is now written as a quoted string, and
+  an ordinary name is written as before.
 
 ## 3.3.0 - 2026-09-30
 
