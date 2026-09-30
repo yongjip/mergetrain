@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO, Any
 
-from .command_runner import Pulse, run_command
+from .command_runner import Pulse, command_limits, run_command
 from .config import MergetrainConfig
 from .errors import CommandFailed, MergetrainError, QueueBusy
 from .gate_runner import GateRunner
@@ -265,8 +265,7 @@ class ValidationReuse:
                 log=log,
                 check=False,
                 pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
+                **command_limits(self.config),
             )
             if reset.returncode != 0:
                 reasons.append("validation commit could not be restored for fingerprinting")
@@ -303,16 +302,14 @@ class ValidationReuse:
                         cwd=worktree,
                         log=log,
                         pulse=pulse,
-                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                        timeout_seconds=self.config.queue.command_timeout_seconds,
+                        **command_limits(self.config),
                     )
                     run_command(
                         ["git", "clean", "-fdx"],
                         cwd=worktree,
                         log=log,
                         pulse=pulse,
-                        pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                        timeout_seconds=self.config.queue.command_timeout_seconds,
+                        **command_limits(self.config),
                     )
 
         if not environment_check_recorded:

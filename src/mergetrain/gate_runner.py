@@ -14,6 +14,7 @@ from typing import IO
 from .command_runner import (
     Pulse,
     command_env,
+    command_limits,
     display_command,
     expand_command,
     run_command,
@@ -315,8 +316,7 @@ class GateRunner:
                 cwd=worktree,
                 log=None,
                 pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
+                **command_limits(self.config),
             )
             return parse_name_status_z(completed.stdout)
         except (CommandFailed, ValueError):
@@ -372,8 +372,7 @@ class GateRunner:
             cwd=worktree,
             log=log,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            **command_limits(self.config),
         )
         if on_gate:
             on_gate("diff-check", "success", 1, total, display_command(diff_command))
@@ -410,8 +409,7 @@ class GateRunner:
                 log=log,
                 check=True,
                 pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
+                **command_limits(self.config),
             )
 
     def environment_fingerprint(
@@ -432,8 +430,7 @@ class GateRunner:
                 log=None,
                 check=True,
                 pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
+                **command_limits(self.config),
             )
             value = completed.stdout.strip()
             if not value or "\n" in value or len(value) > 512:

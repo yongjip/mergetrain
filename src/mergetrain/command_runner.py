@@ -14,7 +14,7 @@ from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, Any, cast
+from typing import IO, Any, TypedDict, cast
 
 from .config import MergetrainConfig
 from .errors import CancellationRequested, CommandFailed, MergetrainError, redact_secrets
@@ -432,6 +432,21 @@ def _run_managed(
 # Local Git operations normally finish in seconds. The ceiling only prevents a
 # pathological child from holding the sole runner indefinitely.
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 600.0
+
+
+class CommandLimits(TypedDict):
+    pulse_interval_seconds: float
+    timeout_seconds: float
+
+
+def command_limits(config: MergetrainConfig) -> CommandLimits:
+    """The configured heartbeat interval and command timeout, as keyword arguments."""
+
+    return {
+        "pulse_interval_seconds": config.queue.heartbeat_interval_seconds,
+        "timeout_seconds": config.queue.command_timeout_seconds,
+    }
+
 
 # Git exports GIT_DIR and GIT_INDEX_FILE to hooks, and to aliases run from a
 # linked worktree. These variables name a repository, index, or object store

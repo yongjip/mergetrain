@@ -9,7 +9,7 @@ from functools import partial
 from pathlib import Path
 from typing import IO
 
-from .command_runner import Pulse, redacting_log, run_command
+from .command_runner import Pulse, command_limits, redacting_log, run_command
 from .config import MergetrainConfig
 from .deploy_plan import verification_policy_sha
 from .errors import (
@@ -129,8 +129,7 @@ class AtomicPush:
                     env=destination.command_env(),
                     log=redacting_log(log),
                     pulse=pulse,
-                    pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                    timeout_seconds=self.config.queue.command_timeout_seconds,
+                    **command_limits(self.config),
                     pass_fds=inherited,
                     job_name=push_job_name(self.config, target),
                 )
@@ -161,8 +160,7 @@ class AtomicPush:
             env=destination.command_env(),
             log=redacting_log(log),
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            **command_limits(self.config),
         )
         if not reachable:
             raise MergetrainError(

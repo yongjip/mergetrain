@@ -20,7 +20,7 @@ from .atomic_push import (
 from .atomic_push import (
     post_push_verify_status as _post_push_verify_status,
 )
-from .command_runner import run_command
+from .command_runner import command_limits, run_command
 from .config import MergetrainConfig, load_config
 from .deploy_plan import deploy_execution_policy_sha, deploy_plan_sha
 from .errors import (
@@ -612,8 +612,7 @@ class GitRunner:
                     log=log,
                     check=False,
                     pulse=pulse,
-                    pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                    timeout_seconds=self.config.queue.command_timeout_seconds,
+                    **command_limits(self.config),
                 )
                 if merge.returncode != 0:
                     run_command(
@@ -1013,8 +1012,7 @@ class GitRunner:
                                 cwd=worktree,
                                 log=log,
                                 pulse=normal_pulse,
-                                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                                timeout_seconds=self.config.queue.command_timeout_seconds,
+                                **command_limits(self.config),
                             )
                             deploy_sha = git_rev_parse(worktree, "HEAD")
                             if deploy_sha != reused_validation_sha or not git_worktree_clean(
@@ -1078,8 +1076,7 @@ class GitRunner:
                             log=log,
                             check=False,
                             pulse=normal_pulse,
-                            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                            timeout_seconds=self.config.queue.command_timeout_seconds,
+                            **command_limits(self.config),
                         )
                         if merge.returncode != 0:
                             note = (

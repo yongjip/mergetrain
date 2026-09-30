@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO
 
-from .command_runner import Pulse, run_command
+from .command_runner import Pulse, command_limits, run_command
 from .config import MergetrainConfig
 from .errors import MergetrainError
 from .gate_runner import GateRunner
@@ -145,8 +145,7 @@ class WorktreeManager:
                 cwd=worktree,
                 log=log,
                 pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
+                **command_limits(self.config),
             )
         else:
             self.config.validation_workspace_marker.unlink(missing_ok=True)
@@ -167,8 +166,7 @@ class WorktreeManager:
                 cwd=self.repo,
                 log=log,
                 pulse=pulse,
-                pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-                timeout_seconds=self.config.queue.command_timeout_seconds,
+                **command_limits(self.config),
             )
         self.clean_untracked_except_validation_cache(worktree=worktree, log=log)
         if not git_worktree_clean(worktree):
@@ -232,8 +230,7 @@ class WorktreeManager:
             cwd=self.repo,
             log=log,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            **command_limits(self.config),
         )
         if persistent:
             return self.prepare_persistent(
@@ -253,8 +250,7 @@ class WorktreeManager:
             cwd=self.repo,
             log=log,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            **command_limits(self.config),
         )
         return False
 
@@ -281,8 +277,7 @@ class WorktreeManager:
             log=log,
             check=False,
             pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
-            timeout_seconds=self.config.queue.command_timeout_seconds,
+            **command_limits(self.config),
         )
         tip = run_command(
             ["git", "rev-parse", "--verify", "--quiet", f"{self.config.git.integration_tracking_ref}^{{commit}}"],
