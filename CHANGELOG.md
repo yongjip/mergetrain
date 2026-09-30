@@ -373,6 +373,14 @@
   `fetch_integration_ref`. The hub now checks the repository, the remote, and
   the integration ref as `status` does, with three read-only Git queries per
   repo.
+- Simplify internals without changing behavior. Code left behind by removed
+  interfaces is gone: the `recover()` function that `reconcile --apply`
+  wrapped, the notifier chain that held at most the webhook, the hub daemon's
+  unused single-notifier option, and parameters that no caller varied. Both
+  `hub status` views share one repo reader, and `mergetrain.cli` no longer
+  re-exports command helpers such as `config_from_args`; import them from the
+  module that owns them. The CLI, MCP tools, JSON contract, and config schema
+  are unchanged.
 
 ## 3.3.0 - 2026-09-30
 
