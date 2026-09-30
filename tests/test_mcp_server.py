@@ -292,6 +292,15 @@ class ToolSurfaceTests(unittest.TestCase):
         self.assertEqual(Path(api_payload["job"]["worktree_path"]), api.resolve())
         self.assertEqual(Path(ui_payload["job"]["worktree_path"]), ui.resolve())
 
+    def test_validate_description_does_not_grant_its_own_authority(self) -> None:
+        # The docstring is the tool description a model reads. It called
+        # validation free to run, while asking to queue work for validation
+        # authorizes enqueue only (docs/agent-contract.md).
+        description = " ".join((MergetrainTools.validate.__doc__ or "").split())
+        self.assertNotIn("free to run", description.lower())
+        self.assertIn("explicitly asked for validation", description)
+        self.assertIn("authorizes enqueue only", description)
+
     def test_events_detail_stays_scoped_to_the_named_job(self) -> None:
         # Job 0 is falsy: the events read dropped --job and returned every
         # job's frames as that job's evidence, while summary and logs failed.

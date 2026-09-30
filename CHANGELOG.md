@@ -322,6 +322,13 @@
   The refusal, still `deploy_plan_unavailable`, now says that validation ran,
   lists each job's result, and carries the CLI's validation payload under
   `validation`.
+- Stop describing validation to models as free to run. The description of
+  the MCP `mergetrain_validate` tool, which a model reads when it picks a tool,
+  called it "free to run per the operating contract", so a model asked to
+  queue work for validation could run the gates as well. It now says to run
+  validation only when the user explicitly asked for it or for the complete
+  validation-and-deployment workflow, since asking to queue work for
+  validation authorizes enqueue only.
 
 ## 3.3.0 - 2026-09-30
 

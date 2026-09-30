@@ -568,7 +568,9 @@ class MergetrainTools:
     async def validate(self) -> dict[str, Any]:
         """Validate the queued train without pushing anything.
 
-        Free to run per the operating contract, but not read-only: it creates a
+        Run it only when the user explicitly asked for validation or for the
+        complete validation-and-deployment workflow; asking to queue work for
+        validation authorizes enqueue only. Not read-only either: it creates a
         worktree, runs the configured gate commands, and moves jobs to
         ``validated`` or ``blocked``. The annotations say so rather than
         claiming otherwise to the client.
