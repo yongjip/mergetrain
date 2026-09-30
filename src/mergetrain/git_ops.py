@@ -267,7 +267,12 @@ def is_push_rejection(stderr: str) -> bool:
 
 
 def git_dirty_paths(path: str | Path, *, limit: int = 5) -> list[str]:
-    lines = git_output_or_empty(["status", "--porcelain"], cwd=path).splitlines()
+    completed = run_command(["git", "status", "--porcelain"], cwd=path, check=False)
+    if completed.returncode != 0:
+        return []
+    # Each line starts with a two-column status, often a space. Stripping the
+    # whole output would shift the first path by one character.
+    lines = completed.stdout.splitlines()
     paths = [line[3:].strip() for line in lines if len(line) > 3]
     return paths[:limit]
 

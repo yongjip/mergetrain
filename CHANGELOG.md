@@ -163,6 +163,11 @@
   `project.name must be a non-empty string` or a YAML error, or took the
   directory name instead. Such a name is now written as a quoted string, and
   an ordinary name is written as before.
+- Name the first uncommitted file correctly when `enqueue` refuses a dirty
+  worktree. The list dropped that file's first character, so a worktree with
+  changes to `app.py` and `lib.py` was reported as having uncommitted changes
+  in `pp.py, lib.py`. The error for a gate that left the integration worktree
+  dirty listed its files the same way. Every path is now reported whole.
 
 ## 3.3.0 - 2026-09-30
 

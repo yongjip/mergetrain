@@ -1,9 +1,33 @@
 from __future__ import annotations
 
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
-from mergetrain.git_ops import _parse_worktree_porcelain
+from mergetrain.git_ops import _parse_worktree_porcelain, git_dirty_paths
+
+
+class DirtyPathTests(unittest.TestCase):
+    def test_the_first_dirty_path_keeps_its_first_character(self) -> None:
+        # Stripping the whole porcelain output took the first line's leading
+        # status space, so enqueue reported "pp.py" for a modified app.py.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            names = ("a.txt", "app.py", "lib.py")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+            )
+            for name in names:
+                (repo / name).write_text("one\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "seed"], cwd=repo, check=True)
+            for name in names:
+                (repo / name).write_text("two\n", encoding="utf-8")
+
+            self.assertEqual(git_dirty_paths(repo), list(names))
 
 
 class WorktreePorcelainTests(unittest.TestCase):
