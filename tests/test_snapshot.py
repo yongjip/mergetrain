@@ -305,7 +305,11 @@ class RepoSnapshotTests(unittest.TestCase):
         # at the limit kept its prefix, home directory included. A command
         # that ran in the checkout itself named it with no mask at all.
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            # Temporary directories are short on Linux, where masking alone
+            # would not bring the note back under the bound. A long checkout
+            # path makes the masks save more than the note overflows everywhere.
+            root = Path(td) / ("checkout-" + "d" * 80)
+            root.mkdir()
             config = self.make_config(root)
             repo = str(config.repo)
             integration = config.state.worktree_root / "demo-mergetrain-7-0a1b2c3d"
