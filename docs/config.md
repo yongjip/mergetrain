@@ -285,7 +285,9 @@ For webhook delivery, `transitions` selects `landed`,
 `blocked`/partial, `needs_reconcile`, and daemon error/pause messages. A disabled
 transition is recorded as settled so enabling it later does not replay old
 history. `timeout_seconds` must be positive, and the URL must use HTTP(S).
-Treat `webhook_url` as a secret: diagnostic config JSON reports only
+The webhook is sent without HTTP authentication, so a URL with
+`user:password@` before the host is rejected; put a token the endpoint expects
+in its path or query instead. Treat `webhook_url` as a secret: diagnostic config JSON reports only
 `webhook_configured`, never the URL. Delivery errors likewise omit the
 credential-bearing URL, and a YAML syntax error names the line and column of
 the problem without quoting the text there.

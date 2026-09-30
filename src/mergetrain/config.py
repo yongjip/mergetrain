@@ -813,6 +813,12 @@ def load_config(
             raise ConfigError("notify.webhook_url must be an http or https URL") from exc
         if parsed_webhook.scheme not in {"http", "https"} or not parsed_webhook.hostname:
             raise ConfigError("notify.webhook_url must be an http or https URL")
+        if "@" in parsed_webhook.netloc:
+            # urllib would not send them: it resolves them as part of the host.
+            raise ConfigError(
+                "notify.webhook_url must not contain user:password@ credentials; "
+                "the webhook is sent without HTTP authentication"
+            )
     transitions_value = notify_data.get("transitions", list(NOTIFY_TRANSITIONS))
     if not isinstance(transitions_value, list):
         raise ConfigError("notify.transitions must be a list")

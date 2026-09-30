@@ -70,6 +70,27 @@ notify:
             with self.assertRaisesRegex(ConfigError, "http or https"):
                 load_config(repo=repo)
 
+    def test_notify_rejects_credentials_before_the_webhook_host(self) -> None:
+        # urllib sends no user:password@ credentials. It passed them to the
+        # resolver as part of the host name, so every delivery failed.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            config_path = repo / ".mergetrain.yaml"
+            for url in (
+                "https://user:hunter2@hooks.example.invalid/hook",
+                "https://user@hooks.example.invalid/hook",
+            ):
+                with self.subTest(url=url):
+                    config_path.write_text(f"notify:\n  webhook_url: {url}\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigError, "user:password@") as caught:
+                        load_config(repo=repo)
+                    self.assertNotIn("hunter2", str(caught.exception))
+            config_path.write_text(
+                "notify:\n  webhook_url: https://hooks.example.invalid/hook@v2\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(load_config(repo=repo).notify.webhook_url.endswith("@v2"))
+
     def test_generated_yaml_loads_with_required_parser(self) -> None:
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")

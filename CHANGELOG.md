@@ -179,6 +179,11 @@
   every command, `status --json` included, exit with a `ValueError: Invalid
   IPv6 URL` traceback and no JSON. It now fails like any other invalid URL:
   "notify.webhook_url must be an http or https URL".
+- Reject a `notify.webhook_url` with `user:password@` before the host. The
+  config accepted it, but the webhook is sent without HTTP authentication:
+  urllib handed the credentials to the resolver as part of the host name, and
+  every notification failed with an opaque "webhook delivery failed". Loading
+  the config now fails with a `config_error` that says so.
 
 ## 3.3.0 - 2026-09-30
 
