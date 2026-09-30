@@ -65,9 +65,10 @@ class GateRunner:
         *,
         worktree: Path,
         log: IO[str],
-        pulse: Pulse | None,
         cancel_event: threading.Event | None = None,
     ) -> None:
+        # A gate runs on a worker thread without a pulse of its own: the
+        # monitor loop in run_configured_plan pulses while the gates run.
         command = expand_command(gate.run, config=self.config, worktree=worktree)
         env = command_env(config=self.config, worktree=worktree)
         log.write(f"\n## gate: {gate.name}\n")
@@ -77,8 +78,6 @@ class GateRunner:
             env=env,
             log=log,
             check=True,
-            pulse=pulse,
-            pulse_interval_seconds=self.config.queue.heartbeat_interval_seconds,
             timeout_seconds=(
                 gate.timeout_seconds
                 if gate.timeout_seconds is not None
@@ -170,7 +169,6 @@ class GateRunner:
                         gate,
                         worktree=worktree,
                         log=gate_log,
-                        pulse=None,
                         cancel_event=batch_cancel,
                     )
                 except BaseException as exc:

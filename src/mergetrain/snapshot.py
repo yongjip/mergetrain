@@ -383,18 +383,15 @@ def _public_lock(lock: RunnerLock | None) -> dict[str, Any] | None:
     }
 
 
-def build_queue_summary(
-    config: MergetrainConfig,
-    *,
-    read_only: bool = False,
-) -> dict[str, Any]:
+def build_queue_summary(config: MergetrainConfig) -> dict[str, Any]:
     """Build the small queue truth needed by agents and Hub status.
 
     Unlike the full repo snapshot this does not load job history, events,
-    reuse analysis, progress, or ETA data.
+    reuse analysis, progress, or ETA data. Like it, it opens the queue
+    database read-only.
     """
 
-    conn = connect(config.state.db, read_only=read_only)
+    conn = connect(config.state.db, read_only=True)
     try:
         with read_snapshot(conn):
             count_data = counts(conn)
@@ -753,29 +750,24 @@ def _progress(
     }
 
 
-def build_repo_snapshot(
-    config: MergetrainConfig,
-    *,
-    job_limit: int = 50,
-    event_limit: int = 40,
-    read_only: bool = False,
-) -> dict[str, Any]:
+def build_repo_snapshot(config: MergetrainConfig) -> dict[str, Any]:
     """Build one repository's full read-only queue snapshot.
 
-    ``hub status --json`` reports one per registered repo. With ``read_only``
-    the queue database is opened without creating or migrating anything — the
-    hub's contract when observing other repos.
+    ``hub status --json`` reports one per registered repo. The queue database
+    is opened read-only, without creating or migrating anything — the hub's
+    contract when observing other repos.
     """
 
     worktree_root = str(config.state.worktree_root)
     repo = str(config.repo)
-    conn = connect(config.state.db, read_only=read_only)
+    conn = connect(config.state.db, read_only=True)
     try:
         with read_snapshot(conn):
-            recent_jobs = list_jobs(conn, limit=job_limit)
+            recent_jobs = list_jobs(conn, limit=50)
             selected_jobs, selection = _selected_jobs(conn)
             history_events = list_history_events(conn)
-            raw_events = history_events[-max(1, min(int(event_limit), 200)) :]
+            # The 40 newest events.
+            raw_events = history_events[-40:]
             lock = _public_lock(get_lock(conn))
             count_data = counts(conn)
             validated_trains = validated_train_summaries(conn)

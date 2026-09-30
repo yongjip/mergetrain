@@ -197,7 +197,7 @@ class PushLockLifetimeTests(unittest.TestCase):
             push = AtomicPush(config)
             destination = resolve_git_destination(config)
             audit_ref, expected = push.audit_ref_expectation(
-                worktree=repo, deploy_sha=target, log=None, destination=destination
+                deploy_sha=target, log=None, destination=destination
             )
             failures: list[BaseException] = []
 
@@ -261,7 +261,7 @@ class PushLockLifetimeTests(unittest.TestCase):
             push = AtomicPush(config)
             destination = resolve_git_destination(config)
             audit_ref, expected = push.audit_ref_expectation(
-                worktree=repo, deploy_sha=target, log=None, destination=destination
+                deploy_sha=target, log=None, destination=destination
             )
             push.push_verified_head(
                 worktree=repo,

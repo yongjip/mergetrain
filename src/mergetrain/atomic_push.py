@@ -145,7 +145,6 @@ class AtomicPush:
     def audit_ref_expectation(
         self,
         *,
-        worktree: Path,
         deploy_sha: str,
         log: IO[str] | None,
         destination: ResolvedGitDestination,
@@ -278,7 +277,6 @@ class AtomicPush:
         )
         try:
             audit_ref, audit_expected_sha = self.audit_ref_expectation(
-                worktree=worktree,
                 deploy_sha=deploy_sha,
                 log=log,
                 pulse=ownership_pulse,

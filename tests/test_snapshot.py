@@ -260,7 +260,7 @@ class RepoSnapshotTests(unittest.TestCase):
             )
             config = self.make_config(root)
             connect(config.state.db).close()
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
             self.assertEqual(payload["next_action"], "upgrade_mergetrain")
 
     def test_snapshot_omits_the_runner_username_and_integration_worktree_paths(self) -> None:
@@ -290,7 +290,7 @@ class RepoSnapshotTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
 
             self.assertNotIn("alice", json.dumps(payload))
             note = next(item["note"] for item in payload["jobs"] if item["id"] == job.id)
@@ -331,7 +331,7 @@ class RepoSnapshotTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
 
             notes = {item["id"]: item for item in payload["jobs"]}
             self.assertNotIn(repo[: len(repo) // 2], notes[gate.id]["note"])
@@ -374,7 +374,7 @@ class RepoSnapshotTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
             self.assertEqual(payload["train"]["selection"], "running")
             self.assertEqual(payload["progress"]["phase"], "gating")
             self.assertEqual(payload["progress"]["completed_job_ids"], [claimed[0].id])
@@ -593,7 +593,7 @@ class RepoSnapshotTests(unittest.TestCase):
                 "mergetrain.snapshot.utc_now",
                 return_value="2026-07-29T12:00:35Z",
             ):
-                payload = build_repo_snapshot(config, read_only=True)
+                payload = build_repo_snapshot(config)
 
             self.assertTrue(payload["eta"]["available"])
             self.assertEqual(payload["eta"]["coverage"], "complete")
@@ -640,7 +640,7 @@ class RepoSnapshotTests(unittest.TestCase):
             )
             config = self.make_config(root)
             connect(config.state.db).close()
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
             self.assertNotIn("terminology", payload["project"])
             self.assertEqual(payload["project"]["remote"], "upstream")
             self.assertEqual(payload["project"]["push_specs"], ["HEAD:main", "HEAD:release"])
@@ -682,7 +682,7 @@ class RepoSnapshotTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
             self.assertEqual(
                 [gate["state"] for gate in payload["progress"]["gates"]],
                 ["success", "skipped"],
@@ -721,7 +721,7 @@ class RepoSnapshotTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
             self.assertEqual(payload["jobs"][0]["status"], "deployed")
             self.assertEqual(payload["jobs"][0]["push_status"], "succeeded")
             self.assertEqual(payload["jobs"][0]["verify_status"], "failed")
@@ -749,7 +749,7 @@ class RepoSnapshotTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            payload = build_repo_snapshot(config, read_only=True)
+            payload = build_repo_snapshot(config)
             note = payload["jobs"][0]["note"]
             self.assertNotIn(sensitive, note)
             self.assertIn("[worktree]", note)

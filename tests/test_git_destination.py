@@ -70,7 +70,7 @@ def _preflight_and_push(push, repo, head, destination, log=None):  # type: ignor
     """Run the audit-ref preflight and the atomic push, as a deploy does."""
 
     audit_ref, expected = push.audit_ref_expectation(
-        worktree=repo, deploy_sha=head, log=log, destination=destination
+        deploy_sha=head, log=log, destination=destination
     )
     push.push_verified_head(
         worktree=repo,
@@ -244,7 +244,7 @@ class GitDestinationTests(unittest.TestCase):
             head = git(repo, "rev-parse", "HEAD")
             push = AtomicPush(config)
             audit_ref, expected = push.audit_ref_expectation(
-                worktree=repo, deploy_sha=head, log=None, destination=destination
+                deploy_sha=head, log=None, destination=destination
             )
             # These exact-length rules beat the old command-scope self-rule on
             # Git 2.55. Insert them after the audit lookup to exercise the

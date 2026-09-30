@@ -63,7 +63,7 @@ def _repo_entry(raw_path: str) -> dict[str, Any]:
             entry.update(
                 {
                     "ok": True,
-                    "snapshot": build_repo_snapshot(config, read_only=True),
+                    "snapshot": build_repo_snapshot(config),
                 }
             )
         return entry
@@ -120,7 +120,7 @@ def _repo_summary_entry(raw_path: str) -> dict[str, Any]:
         entry.update(
             {
                 "ok": True,
-                "summary": build_queue_summary(config, read_only=True),
+                "summary": build_queue_summary(config),
             }
         )
         return entry

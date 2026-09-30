@@ -2859,7 +2859,7 @@ def _preflight_and_push(runner: GitRunner, repo: Path, target: str) -> None:
 
     destination = resolve_git_destination(runner.config)
     audit_ref, expected = runner._pushes.audit_ref_expectation(
-        worktree=repo, deploy_sha=target, log=None, destination=destination
+        deploy_sha=target, log=None, destination=destination
     )
     runner._pushes.push_verified_head(
         worktree=repo,
