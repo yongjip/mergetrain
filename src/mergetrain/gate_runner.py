@@ -13,8 +13,8 @@ from typing import IO
 
 from .command_runner import (
     Pulse,
-    _display_command,
     command_env,
+    display_command,
     expand_command,
     run_command,
     run_shell,
@@ -153,7 +153,7 @@ class GateRunner:
                         "active",
                         indexes[gate.name],
                         total,
-                        _display_command(gate.run),
+                        display_command(gate.run),
                     )
 
             cancel_event = threading.Event()
@@ -246,7 +246,7 @@ class GateRunner:
                         indexes[gate.name],
                         total,
                         (
-                            _display_command(gate.run)
+                            display_command(gate.run)
                             if terminal_state == "success"
                             else failure_detail
                         ),
@@ -323,6 +323,31 @@ class GateRunner:
             log.write("\npath-aware gate selection failed; running all gates\n")
             return None
 
+    def _path_selection(
+        self,
+        *,
+        worktree: Path,
+        base_ref: str,
+        head_ref: str,
+        log: IO[str],
+        pulse: Pulse | None,
+    ) -> tuple[tuple[str, ...] | None, dict[str, tuple[str, str]]]:
+        """Return the changed paths (``None`` when unknown) and the gates they skip."""
+
+        changed_paths = None
+        if any(gate.paths for gate in self.gates):
+            changed_paths = self.changed_paths(
+                worktree=worktree, base_ref=base_ref, head_ref=head_ref, log=log, pulse=pulse
+            )
+        skipped = {
+            gate.name: ("skipped", "no changed paths matched configured paths")
+            for gate in self.gates
+            if gate.paths
+            and changed_paths is not None
+            and not any_path_matches(gate.paths, changed_paths)
+        }
+        return changed_paths, skipped
+
     def run_gates(
         self,
         *,
@@ -341,7 +366,7 @@ class GateRunner:
             f"{self.config.git.integration_tracking_ref}..HEAD",
         ]
         if on_gate:
-            on_gate("diff-check", "active", 1, total, _display_command(diff_command))
+            on_gate("diff-check", "active", 1, total, display_command(diff_command))
         run_command(
             diff_command,
             cwd=worktree,
@@ -351,27 +376,10 @@ class GateRunner:
             timeout_seconds=self.config.queue.command_timeout_seconds,
         )
         if on_gate:
-            on_gate("diff-check", "success", 1, total, _display_command(diff_command))
-        changed_paths = None
-        if any(gate.paths for gate in self.gates):
-            changed_paths = self.changed_paths(
-                worktree=worktree,
-                base_ref=base_ref,
-                head_ref=head_ref,
-                log=log,
-                pulse=pulse,
-            )
-        initial_states: dict[str, tuple[str, str]] = {}
-        for gate in self.gates:
-            if (
-                gate.paths
-                and changed_paths is not None
-                and not any_path_matches(gate.paths, changed_paths)
-            ):
-                initial_states[gate.name] = (
-                    "skipped",
-                    "no changed paths matched configured paths",
-                )
+            on_gate("diff-check", "success", 1, total, display_command(diff_command))
+        _, initial_states = self._path_selection(
+            worktree=worktree, base_ref=base_ref, head_ref=head_ref, log=log, pulse=pulse
+        )
         self.run_configured_plan(
             worktree=worktree,
             log=log,
@@ -449,28 +457,15 @@ class GateRunner:
         total = 1 + len(self.gates)
         if on_gate:
             on_gate("diff-check", "reused", 1, total, validation_sha)
-        changed_paths = None
-        if any(gate.paths for gate in self.gates):
-            changed_paths = self.changed_paths(
-                worktree=worktree,
-                base_ref=base_ref,
-                head_ref=validation_sha,
-                log=log,
-                pulse=pulse,
-            )
-        initial_states: dict[str, tuple[str, str]] = {}
+        changed_paths, initial_states = self._path_selection(
+            worktree=worktree, base_ref=base_ref, head_ref=validation_sha, log=log, pulse=pulse
+        )
         for gate in self.gates:
             if (
-                gate.paths
-                and changed_paths is not None
-                and not any_path_matches(gate.paths, changed_paths)
+                gate.name not in initial_states
+                and not gate.always_rerun_on_deploy
+                and not (gate.paths and changed_paths is None)
             ):
-                initial_states[gate.name] = (
-                    "skipped",
-                    "no changed paths matched configured paths",
-                )
-                continue
-            if not gate.always_rerun_on_deploy and not (gate.paths and changed_paths is None):
                 initial_states[gate.name] = ("reused", validation_sha)
         self.run_configured_plan(
             worktree=worktree,

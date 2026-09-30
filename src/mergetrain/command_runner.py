@@ -55,7 +55,7 @@ def _render_command(command: Sequence[str] | str) -> str:
     return " ".join(str(part) for part in command)
 
 
-def _display_command(command: Sequence[str] | str) -> str:
+def display_command(command: Sequence[str] | str) -> str:
     """Render a bounded gate command while masking obvious inline secrets."""
 
     rendered = redact_secrets(_render_command(command))

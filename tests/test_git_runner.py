@@ -53,9 +53,9 @@ def rmtree(path: Path | str) -> None:
 
 from mergetrain.cli import main
 from mergetrain.command_runner import (
-    _display_command,
     _shell_command,
     command_env,
+    display_command,
     expand_command,
     run_shell,
 )
@@ -2332,7 +2332,7 @@ deploy:
             push.assert_not_called()
 
     def test_display_command_masks_obvious_secret_values(self) -> None:
-        rendered = _display_command(
+        rendered = display_command(
             "TEST_TOKEN=fixture-value run-check --password fixture-password"
         )
         self.assertEqual(
