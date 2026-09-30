@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.4.0 - 2026-09-30
 
 - **Breaking:** `hub status --json` no longer includes `eta` and `progress` in
   each repository's `snapshot`, and `contract_version` is now 5. The web

@@ -12,10 +12,8 @@ changes without an explicit compatibility decision.
 | `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
 | Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-mergetrain 3.3.0 uses machine contract **4** and config schema **2**. Unreleased
-changes move machine output to contract **5**, which this page describes; the
-config schema stays **2**. Each version moves only when its own boundary
-changes; neither is tied to the SQLite schema.
+mergetrain 3.4.0 uses machine contract **5** and config schema **2**. They move
+only when their own boundary changes; neither is tied to the SQLite schema.
 
 ## Contract 5 envelope
 
