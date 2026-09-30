@@ -32,6 +32,8 @@ CONFIG_VERSION = 2
 NOTIFY_TRANSITIONS = ("landed", "blocked", "needs_reconcile", "daemon_paused")
 BUILTIN_DIFF_CHECK_NAME = "diff-check"
 BUILTIN_DIFF_CHECK_TEMPLATE = "git diff --check ${integration_ref}..HEAD"
+# How a gate runs within the plan; verify hooks and fingerprints have none.
+_GATE_EXECUTION_FIELDS = ("parallel_group", "needs", "workers", "timeout_seconds")
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,24 +197,8 @@ class MergetrainConfig:
                 gate.pop("workers", None)
             if gate.get("timeout_seconds") is None:
                 gate.pop("timeout_seconds", None)
-        for key in ("verify",):
-            for gate in data["deploy"][key]:
-                for field in (
-                    "paths",
-                    "parallel_group",
-                    "needs",
-                    "workers",
-                    "timeout_seconds",
-                ):
-                    gate.pop(field, None)
-        for gate in data["deploy"]["reuse"]["fingerprints"]:
-            for field in (
-                "paths",
-                "parallel_group",
-                "needs",
-                "workers",
-                "timeout_seconds",
-            ):
+        for gate in (*data["deploy"]["verify"], *data["deploy"]["reuse"]["fingerprints"]):
+            for field in ("paths", *_GATE_EXECUTION_FIELDS):
                 gate.pop(field, None)
         return data
 
@@ -429,12 +415,14 @@ gates: []
 """
 
 
-def _as_mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
+def _as_mapping(data: dict[str, Any], key: str, *, label: str = "") -> dict[str, Any]:
+    """Return ``data[key]``, ``{}`` when absent or null; ``label`` names it in errors."""
+
     value = data.get(key, {})
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ConfigError(f"{key} must be a mapping")
+        raise ConfigError(f"{label or key} must be a mapping")
     return value
 
 
@@ -486,13 +474,7 @@ def _as_gate_list(
         needs: tuple[str, ...] = ()
         workers = 1
         timeout_seconds: int | None = None
-        execution_fields = {
-            "parallel_group",
-            "needs",
-            "workers",
-            "timeout_seconds",
-        }
-        configured_execution_fields = execution_fields.intersection(item)
+        configured_execution_fields = set(_GATE_EXECUTION_FIELDS).intersection(item)
         if configured_execution_fields and not allow_parallel:
             field = sorted(configured_execution_fields)[0]
             raise ConfigError(f"{key}[{index}].{field} is unsupported")
@@ -723,11 +705,9 @@ def load_config(
 
     state_data = _as_mapping(data, "state")
     db_value = db_override if db_override is not None else state_data.get("db")
-    workspace_data = state_data.get("validation_workspace", {})
-    if workspace_data is None:
-        workspace_data = {}
-    if not isinstance(workspace_data, dict):
-        raise ConfigError("state.validation_workspace must be a mapping")
+    workspace_data = _as_mapping(
+        state_data, "validation_workspace", label="state.validation_workspace"
+    )
     workspace_mode = str(workspace_data.get("mode", "ephemeral")).strip()
     if workspace_mode not in {"ephemeral", "persistent"}:
         raise ConfigError("state.validation_workspace.mode must be 'ephemeral' or 'persistent'")
@@ -875,11 +855,7 @@ def load_config(
     )
 
     deploy_data = _as_mapping(data, "deploy")
-    reuse_value = deploy_data.get("reuse", {})
-    if reuse_value is None:
-        reuse_value = {}
-    if not isinstance(reuse_value, dict):
-        raise ConfigError("deploy.reuse must be a mapping")
+    reuse_value = _as_mapping(deploy_data, "reuse", label="deploy.reuse")
     on_mismatch = str(reuse_value.get("on_mismatch", "rerun")).strip()
     if on_mismatch not in {"rerun", "fail"}:
         raise ConfigError("deploy.reuse.on_mismatch must be 'rerun' or 'fail'")
