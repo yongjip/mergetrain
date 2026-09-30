@@ -887,7 +887,6 @@ class GitRunner:
         self._worktrees.ensure_state_dirs()
         log_path = self._log_path("batch", jobs[0].id)
         worktree, persistent_workspace = self._worktrees.primary_path(jobs[0].id, deploy=deploy)
-        reuse_authorized = self.config.deploy.reuse.enabled
 
         # A one-job train is that job's own run, so its events carry the job:
         # linear isolation runs several one-job trains under one claim, and
@@ -969,71 +968,9 @@ class GitRunner:
                 )
                 run.integration_base_sha = git_rev_parse(worktree, "HEAD")
                 if deploying_validated:
-                    validation_bases = {job.validation_base_sha for job in jobs}
-                    try:
-                        run.merge_shas = {
-                            job.id: self._merge_sha_for_job(job, deploying_validated=True)
-                            for job in jobs
-                        }
-                    except MergeBlocked as exc:
-                        note = f"validated train identity check failed: {exc}"
-                        return run.block_all(note)
-                    if reuse_authorized:
-                        reuse_decision = self._validation.decide(
-                            jobs,
-                            worktree=worktree,
-                            integration_base_sha=run.integration_base_sha,
-                            log=log,
-                            pulse=run.pulse,
-                        )
-                        if reuse_decision.eligible:
-                            run.reused_validation_sha = reuse_decision.reused_validation_sha
-                            emit(
-                                phase="assembling",
-                                state="active",
-                                message="Restoring exact validated train commit",
-                                detail=run.reused_validation_sha,
-                            )
-                            run_command(
-                                ["git", "reset", "--hard", run.reused_validation_sha],
-                                cwd=worktree,
-                                log=log,
-                                pulse=run.pulse,
-                                **command_limits(self.config),
-                            )
-                            run.deploy_sha = git_rev_parse(worktree, "HEAD")
-                            if (
-                                run.deploy_sha != run.reused_validation_sha
-                                or not git_worktree_clean(worktree)
-                            ):
-                                raise MergeBlocked(
-                                    "exact validation commit could not be restored cleanly"
-                                )
-                            run.merged_jobs.extend(jobs)
-                            emit(
-                                phase="assembling",
-                                state="success",
-                                message="Exact validated train commit restored",
-                                detail=run.reused_validation_sha,
-                            )
-                        else:
-                            run.reuse_fallback_reason = "; ".join(reuse_decision.reasons)
-                            log.write(
-                                f"\nvalidated gate reuse declined: {run.reuse_fallback_reason}\n"
-                            )
-                            if reuse_decision.action == "fail":
-                                raise MergeBlocked(
-                                    "validated gate reuse policy failed closed: "
-                                    f"{run.reuse_fallback_reason}"
-                                )
-                    if (
-                        not run.reused_validation_sha
-                        and validation_bases != {run.integration_base_sha}
-                    ):
-                        log.write(
-                            "\nintegration ref moved since validation; "
-                            "reassembling the exact train and rerunning gates\n"
-                        )
+                    stopped = self._restore_validated_train(run)
+                    if stopped is not None:
+                        return stopped
 
                 if not run.reused_validation_sha:
                     emit(
@@ -1351,6 +1288,76 @@ class GitRunner:
                     log=log,
                     keep_worktree=keep_worktree or persistent_workspace,
                 )
+
+    def _restore_validated_train(self, run: _TrainRun) -> list[Job] | None:
+        """Check a validated train's heads, and restore its exact commit if reuse allows.
+
+        Returns the finished jobs when the heads no longer match the
+        validation. Otherwise a restored commit skips the assembly, and a
+        declined reuse records why the gates run again.
+        """
+
+        validation_bases = {job.validation_base_sha for job in run.jobs}
+        try:
+            run.merge_shas = {
+                job.id: self._merge_sha_for_job(job, deploying_validated=True)
+                for job in run.jobs
+            }
+        except MergeBlocked as exc:
+            note = f"validated train identity check failed: {exc}"
+            return run.block_all(note)
+        if self.config.deploy.reuse.enabled:
+            reuse_decision = self._validation.decide(
+                run.jobs,
+                worktree=run.worktree,
+                integration_base_sha=run.integration_base_sha,
+                log=run.log,
+                pulse=run.pulse,
+            )
+            if reuse_decision.eligible:
+                run.reused_validation_sha = reuse_decision.reused_validation_sha
+                run.emit(
+                    phase="assembling",
+                    state="active",
+                    message="Restoring exact validated train commit",
+                    detail=run.reused_validation_sha,
+                )
+                run_command(
+                    ["git", "reset", "--hard", run.reused_validation_sha],
+                    cwd=run.worktree,
+                    log=run.log,
+                    pulse=run.pulse,
+                    **command_limits(self.config),
+                )
+                run.deploy_sha = git_rev_parse(run.worktree, "HEAD")
+                if (
+                    run.deploy_sha != run.reused_validation_sha
+                    or not git_worktree_clean(run.worktree)
+                ):
+                    raise MergeBlocked(
+                        "exact validation commit could not be restored cleanly"
+                    )
+                run.merged_jobs.extend(run.jobs)
+                run.emit(
+                    phase="assembling",
+                    state="success",
+                    message="Exact validated train commit restored",
+                    detail=run.reused_validation_sha,
+                )
+            else:
+                run.reuse_fallback_reason = "; ".join(reuse_decision.reasons)
+                run.log.write(f"\nvalidated gate reuse declined: {run.reuse_fallback_reason}\n")
+                if reuse_decision.action == "fail":
+                    raise MergeBlocked(
+                        "validated gate reuse policy failed closed: "
+                        f"{run.reuse_fallback_reason}"
+                    )
+        if not run.reused_validation_sha and validation_bases != {run.integration_base_sha}:
+            run.log.write(
+                "\nintegration ref moved since validation; "
+                "reassembling the exact train and rerunning gates\n"
+            )
+        return None
 
     def _finish_active_jobs(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
         """Finish each job the train still holds; report the others as they stand."""
