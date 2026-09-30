@@ -15,15 +15,11 @@ from . import __version__
 from .cli_support import (
     _dump_jsonl,
     _error_payload,
-    _job_result_line,
-    config_from_args,
     dump_json,
     normalize_global_options,
 )
 from .commands.daemon import cmd_daemon
 from .commands.deploy import (
-    _results_payload,
-    _run_exit_code,
     cmd_deploy,
     cmd_validate,
 )
@@ -49,19 +45,9 @@ from .commands.queue import (
     cmd_supersede,
 )
 from .commands.recovery import cmd_gc, cmd_reconcile, cmd_unlock, cmd_verify
-from .commands.setup import cmd_demo, cmd_init, cmd_mcp, render_agent_contract
+from .commands.setup import cmd_demo, cmd_init, cmd_mcp
 from .errors import CommandFailed, ConfigError, MergetrainError, QueueBusy, QueueError
 from .persistence.transactions import is_busy
-
-__all__ = [
-    "_job_result_line",
-    "_results_payload",
-    "_run_exit_code",
-    "config_from_args",
-    "main",
-    "normalize_global_options",
-    "render_agent_contract",
-]
 
 PUBLIC_COMMANDS = ("init", "status", "enqueue", "validate", "deploy", "inspect")
 

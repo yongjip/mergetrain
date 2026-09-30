@@ -15,14 +15,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mergetrain import __version__
-from mergetrain.cli import (
-    _job_result_line,
-    _results_payload,
-    _run_exit_code,
-    build_parser,
-    main,
-    normalize_global_options,
-)
+from mergetrain.cli import build_parser, main
+from mergetrain.cli_support import _job_result_line, normalize_global_options
+from mergetrain.commands.deploy import _results_payload, _run_exit_code
 from mergetrain.commands.setup import render_agent_contract
 from mergetrain.config import load_config, render_default_config
 from mergetrain.contract import CONTRACT_VERSION

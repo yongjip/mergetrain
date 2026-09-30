@@ -11,7 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from mergetrain.cli import build_parser, render_agent_contract  # noqa: E402
+from mergetrain.cli import build_parser  # noqa: E402
+from mergetrain.commands.setup import render_agent_contract  # noqa: E402
 from mergetrain.snapshot import NEXT_ACTION_VALUES  # noqa: E402
 
 START = "<!-- BEGIN GENERATED: mergetrain-agent-protocol -->"
