@@ -340,6 +340,61 @@ class ReconcileClassifierTests(unittest.TestCase):
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.pending_deploy_sha, "")
 
+    def _dismissed_during_the_remote_check(self, config, conn, job):  # type: ignore[no-untyped-def]
+        """Reconcile with an operator's ``dismiss --force`` landing while it
+        reads the remote, after it read the job."""
+
+        from mergetrain import recovery as recovery_module
+        from mergetrain.persistence.jobs import dismiss_job
+
+        real_classify = recovery_module._classify_group
+
+        def classify_then_dismiss(*args):  # type: ignore[no-untyped-def]
+            decisions = real_classify(*args)
+            control = connect(config.state.db)
+            try:
+                dismiss_job(control, job.id, force=True)
+            finally:
+                control.close()
+            return decisions
+
+        with patch.object(recovery_module, "_classify_group", side_effect=classify_then_dismiss):
+            return reconcile(config, conn, apply=True)
+
+    def test_a_decision_a_concurrent_transition_overtook_is_not_applied(self) -> None:
+        """#61: the CAS kept the newer state, but the output claimed the write."""
+
+        with tempfile.TemporaryDirectory() as td:
+            repo, config, conn, job, pending = self._landed_then_rewritten(Path(td))
+            try:
+                # The remote carries the deploy again, so the verdict is deployed.
+                git(repo, "push", "origin", f"{pending}:main")
+                outcome = self._dismissed_during_the_remote_check(config, conn, job)
+                current = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(current.status, "canceled")
+            self.assertEqual(
+                (outcome.jobs[0]["decision"], outcome.jobs[0]["applied"]), ("deployed", False)
+            )
+            self.assertEqual(outcome.summary["reconciled_deployed"], 0)
+            self.assertEqual(outcome.exit_code, 0)
+
+    def test_a_conflict_dismissed_during_its_recheck_is_not_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            _repo, config, conn, job, _pending = self._landed_then_rewritten(Path(td))
+            try:
+                outcome = self._dismissed_during_the_remote_check(config, conn, job)
+                current = get_job(conn, job.id)
+            finally:
+                conn.close()
+            self.assertEqual(current.status, "canceled")
+            self.assertEqual(
+                (outcome.jobs[0]["decision"], outcome.jobs[0]["applied"]), ("blocked", False)
+            )
+            self.assertEqual(outcome.summary["conflicts"], 0)
+            self.assertEqual(outcome.exit_code, 0)
+
     def test_stats_and_inspect_classify_a_conflict_alike(self) -> None:
         from mergetrain.observability import job_outcome, stats_payload
 

@@ -234,7 +234,12 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
                 f"{entry['reason']}"
             )
         for job in outcome.jobs:
-            print(f"  #{job['job_id']} {job['decision']}: {job['reason']}")
+            overtaken = (
+                " (not applied: the job changed while reconcile read the remote)"
+                if outcome.applied and not job["applied"]
+                else ""
+            )
+            print(f"  #{job['job_id']} {job['decision']}: {job['reason']}{overtaken}")
         print(f"next action: {next_action}")
     return outcome.exit_code
 

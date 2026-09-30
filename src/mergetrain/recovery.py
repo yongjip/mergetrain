@@ -40,7 +40,7 @@ from .git_ops import (
 )
 from .models import Job, public_owner
 from .persistence.events import record_run_event
-from .persistence.jobs import counts, is_reconcile_conflict, list_jobs_fifo, mark_job
+from .persistence.jobs import counts, get_job, is_reconcile_conflict, list_jobs_fifo, mark_job
 from .persistence.leases import (
     acquire_runner_lock,
     default_owner,
@@ -313,7 +313,9 @@ def _reconciled_verify_status(config: MergetrainConfig, job: Job) -> str:
     return "unknown"
 
 
-def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision) -> None:
+def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDecision) -> bool:
+    """Write one decision; ``False`` when a concurrent transition overtook it."""
+
     job = decision.job
     # Compare-and-swap on the source status. reconcile read this job as
     # needs_reconcile (or as a blocked conflict), then did seconds of remote I/O
@@ -352,6 +354,10 @@ def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDeci
                 conn, job.id, status="blocked",
                 note=f"reconcile conflict: {decision.reason}", expected_status=source,
             )
+        elif get_job(conn, job.id).status != "blocked":
+            # A conflict that stays blocked needs no write, so no CAS notices
+            # a dismiss that landed during the remote check.
+            return False
     except QueueBusy:
         # Contention is not "someone else won the race": nothing was written, so
         # reporting this decision as applied would be a false success. Surface it
@@ -360,7 +366,8 @@ def _apply(config: MergetrainConfig, conn: sqlite3.Connection, decision: JobDeci
     except (QueueError, CancellationRequested):
         # The job was transitioned by a concurrent op after our read — do not
         # overwrite the newer state (a landed cancel must survive reconcile).
-        return
+        return False
+    return True
 
 
 def _decision_dict(decision: JobDecision, *, applied: bool) -> dict[str, Any]:
@@ -587,12 +594,18 @@ def reconcile(
                     )
         # Emit in the original FIFO order, independent of target grouping.
         decisions = [decisions_by_id[job.id] for job in jobs]
+        # A decision a concurrent transition overtook was not written: report
+        # it unapplied, and summarize (and grade) only what was.
+        applied_ids: set[int] = set()
         if apply:
             for decision in decisions:
-                _apply(config, conn, decision)
-        summary = _summarize(decisions)
+                if _apply(config, conn, decision):
+                    applied_ids.add(decision.job.id)
+        summary = _summarize(
+            [d for d in decisions if d.job.id in applied_ids] if apply else decisions
+        )
         return ReconcileOutcome(
-            jobs=[_decision_dict(d, applied=apply) for d in decisions],
+            jobs=[_decision_dict(d, applied=d.job.id in applied_ids) for d in decisions],
             applied=apply,
             summary=summary,
             exit_code=10 if summary["conflicts"] else 0,

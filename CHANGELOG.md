@@ -269,6 +269,14 @@
   lock was already gone, and the retry answered "no runner lock to clear", so
   the clear, or a forced steal, was never recorded. A failed write now
   changes nothing, and the retry clears the lock and records it.
+- Report a `reconcile --apply` decision as applied only when reconcile wrote
+  it. When an operator canceled or dismissed a job while reconcile read the
+  remote, reconcile rightly kept that newer state, but it still listed the
+  decision with `applied: true`, counted it in `summary` (for example
+  `reconciled_deployed: 1`) and in the exit code, and recorded that summary
+  as the recovery operation's result, although the job was canceled. Such a
+  decision is now listed with `applied: false` and left out of the summary
+  and exit code, and the human output says it was not applied.
 
 ## 3.3.0 - 2026-09-30
 
