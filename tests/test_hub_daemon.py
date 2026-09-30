@@ -119,7 +119,7 @@ class HubSweepTests(unittest.TestCase):
                 ),
             )
 
-            self.assertEqual(outcomes[0]["outcome"], "idle")
+            self.assertEqual(outcomes[0]["outcome"], "no_landing:1")
             config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:

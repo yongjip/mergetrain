@@ -222,6 +222,15 @@
   approved gates.
   The daemon now runs the configuration it compared with the approval, as
   `hub daemon` already did.
+- Report `--auto` jobs that a daemon tick blocks because their approval no
+  longer matches. When the push URL, push refs, gates, or verify hooks
+  changed after `enqueue --auto`, `daemon` and `hub daemon` blocked the jobs
+  with `approval_destination_changed` or `approval_execution_policy_changed`
+  but reported the tick as idle ("no auto-approved queued jobs"), so
+  `--notify` never sent the `blocked` transition, and a tick that landed
+  other jobs beside them reported a clean landing. The tick now counts them
+  as jobs that did not land: "Nothing landed" when it blocked every job, and
+  "Partial" beside a landing.
 
 ## 3.3.0 - 2026-09-30
 

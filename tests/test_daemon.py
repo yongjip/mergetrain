@@ -101,7 +101,7 @@ class DaemonTests(unittest.TestCase):
                 approval_destination_sha=invalid_destination,
             )
 
-            self.assertEqual(outcome, "idle")
+            self.assertEqual(outcome, "no_landing:1")
             conn = connect(db)
             try:
                 blocked = get_job(conn, job.id)
@@ -238,7 +238,7 @@ class DaemonTests(unittest.TestCase):
                 approval_execution_policy_sha="policy-b",
             )
 
-            self.assertEqual(outcome, "idle")
+            self.assertEqual(outcome, "no_landing:1")
             conn = connect(db)
             try:
                 blocked = get_job(conn, job.id)
@@ -246,6 +246,76 @@ class DaemonTests(unittest.TestCase):
                 conn.close()
             self.assertEqual(blocked.status, "blocked")
             self.assertIn("approval_execution_policy_changed", blocked.note)
+
+    def test_jobs_blocked_for_a_changed_approval_notify_as_blocked(self) -> None:
+        """#23: the tick that blocked them reported idle, which never notifies."""
+
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            enqueue_job(
+                conn,
+                task="auto",
+                branch="auto",
+                auto_deploy=True,
+                approval_destination_sha="destination-a",
+                approval_execution_policy_sha="policy-a",
+            )
+            conn.close()
+            received: list[tuple[str, str]] = []
+
+            daemon_loop(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail("auto job reached runner work"),
+                owner="daemon:1",
+                once=True,
+                say=lambda _: None,
+                install_signal_handlers=False,
+                notifier=lambda title, message: received.append((title, message)),
+                notification_name="svc",
+                notification_transitions=("blocked",),
+                notification_state_path=Path(td) / "notify.json",
+                approval_destination_sha="destination-b",
+                approval_execution_policy_sha="policy-a",
+            )
+
+            self.assertEqual(
+                received, [("mergetrain · svc", "Nothing landed — 1 job blocked or failed")]
+            )
+
+    def test_a_job_blocked_beside_a_landing_makes_the_tick_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            for destination in ("destination-a", "destination-old"):
+                enqueue_job(
+                    conn,
+                    task=destination,
+                    branch=destination,
+                    auto_deploy=True,
+                    approval_destination_sha=destination,
+                    approval_execution_policy_sha="policy-a",
+                )
+            conn.close()
+
+            def land(conn, jobs):  # type: ignore[no-untyped-def]
+                return [
+                    mark_job(
+                        conn, job.id, status="deployed", expected_claim_token=job.claim_token
+                    )
+                    for job in jobs
+                ]
+
+            outcome = daemon_tick(
+                db_path=str(db),
+                process_batch=land,
+                owner="daemon:1",
+                say=lambda _: None,
+                approval_destination_sha="destination-a",
+                approval_execution_policy_sha="policy-a",
+            )
+
+            self.assertEqual(outcome, "partial:1/2")
 
     def test_validation_loop_rejects_deploy_notifier(self) -> None:
         with self.assertRaisesRegex(QueueError, "does not support"):

@@ -239,6 +239,10 @@ def daemon_tick(
                 raise
             except MergetrainError:
                 current_execution_policy_sha = "invalid-execution-policy"
+            # Jobs the claim blocks for a changed approval are part of what
+            # this tick did: grading it without them reported idle, which
+            # never notifies, or a clean landing beside them.
+            approval_blocked: list[Job] = []
             jobs = claim_all_queued(
                 conn,
                 owner=owner,
@@ -251,7 +255,14 @@ def daemon_tick(
                 approval_execution_policy_sha=(
                     "" if validate_only else current_execution_policy_sha
                 ),
+                blocked=approval_blocked,
             )
+            if approval_blocked:
+                say(
+                    f"mergetrain daemon tick: blocked {len(approval_blocked)} auto "
+                    "job(s) whose approval no longer matches the destination or "
+                    "execution policy"
+                )
             if jobs:
                 lease_token = jobs[0].claim_token
                 mode = "manual validation" if validate_only else "auto"
@@ -269,7 +280,11 @@ def daemon_tick(
                     raise
                 if validate_only:
                     return _grade_validation_batch(results, len(jobs), say)
+                if approval_blocked and isinstance(results, list):
+                    results = [*results, *approval_blocked]
                 return _grade_batch(results, len(jobs), say)
+            if approval_blocked:
+                return _grade_batch(approval_blocked, len(approval_blocked), say)
             if deploy_reconcile_pending(conn):
                 # The claim itself parked orphans as needs_reconcile and
                 # refused to proceed (TOCTOU guard in claim_all_queued).

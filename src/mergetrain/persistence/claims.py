@@ -86,8 +86,13 @@ def claim_all_queued(
     manual_only: bool = False,
     approval_destination_sha: str = "",
     approval_execution_policy_sha: str = "",
+    blocked: list[Job] | None = None,
 ) -> list[Job]:
-    """Claim queued jobs: all of them, only --auto ones (deploy), or only manual ones."""
+    """Claim queued jobs: all of them, only --auto ones (deploy), or only manual ones.
+
+    ``blocked``, when given, receives the --auto jobs this claim blocked
+    because their approval no longer matches.
+    """
 
     if auto_only and manual_only:
         raise QueueError("auto_only and manual_only are mutually exclusive")
@@ -148,6 +153,8 @@ def claim_all_queued(
                         message=message,
                         detail=detail,
                     )
+                    if blocked is not None:
+                        blocked.append(get_job(conn, job_id))
             rows = conn.execute(
                 """
                 SELECT id FROM deploy_queue

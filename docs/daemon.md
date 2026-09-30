@@ -27,6 +27,8 @@ mergetrain daemon --validate-only --once
   checks it again before gates and before the push marker. A blank
   legacy hash or mismatch becomes `blocked` with
   `approval_execution_policy_changed` and requires a fresh `--auto` enqueue.
+  The tick counts a job blocked for either mismatch as one that did not land,
+  so `--notify` reports it under the `blocked` transition.
 - `--validate-only` claims only manual jobs (`auto_deploy = 0`) and invokes the
   batch runner with `deploy=False`; it cannot push or run post-push verify.
 - Validation mode pauses before a writable claim whenever any `validated` row
