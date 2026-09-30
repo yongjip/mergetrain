@@ -994,53 +994,7 @@ class GitRunner:
                         task_commits=[run.merge_shas.get(job.id, "") for job in run.merged_jobs],
                         integration_base_sha=run.integration_base_sha,
                     )
-                status = "deployed" if deploy else "validated"
-                note = run.deploy_state.warning or (
-                    f"batch ok; reused validation {run.reused_validation_sha}"
-                    if run.reused_validation_sha
-                    else f"batch ok; merged {len(run.merged_jobs)} job(s)"
-                )
-                train_id = uuid.uuid4().hex if not deploy else ""
-                validated_at = utc_now() if not deploy else ""
-                validation_identity_fields: dict[str, str] = {}
-                if not deploy:
-                    validation_identity_fields = self._validation.identity_fields(
-                        jobs=run.merged_jobs,
-                        train_id=train_id,
-                        validated_heads=run.merge_shas,
-                        validation_sha=run.deploy_sha,
-                        worktree=worktree,
-                        log=log,
-                        pulse=run.pulse,
-                    )
-                for job in run.merged_jobs:
-                    validation_fields = {}
-                    if not deploy:
-                        validation_fields = {
-                            "train_id": train_id,
-                            "train_size": len(run.merged_jobs),
-                            "validated_at": validated_at,
-                            "validation_base_sha": run.integration_base_sha,
-                            "validation_sha": run.deploy_sha,
-                            "validated_head_sha": run.merge_shas[job.id],
-                            **validation_identity_fields,
-                        }
-                    run.results.append(
-                        run.finish(
-                            job,
-                            status=status,
-                            deploy_sha=run.deploy_sha,
-                            log_path=str(log_path),
-                            note=note,
-                            push_status=run.deploy_state.push_status,
-                            verify_status=run.deploy_state.verify_status,
-                            reused_validation_sha=run.reused_validation_sha,
-                            **validation_fields,
-                        )
-                    )
-                if deploy:
-                    self._pushes.clear_pending_refs([job.id for job in run.merged_jobs], log=log)
-                return run.results
+                return self._record_train(run)
             except LostLease:
                 raise
             except CancellationRequested:
@@ -1392,6 +1346,61 @@ class GitRunner:
             message="All train gates passed",
             detail=run.reused_validation_sha,
         )
+
+    def _record_train(self, run: _TrainRun) -> list[Job]:
+        """Finish the merged jobs as validated or deployed, with the train's evidence.
+
+        A validated train gets a new train ID and the identity that a deploy
+        of it checks; a deployed train clears its pending refs.
+        """
+
+        status = "deployed" if run.deploy else "validated"
+        note = run.deploy_state.warning or (
+            f"batch ok; reused validation {run.reused_validation_sha}"
+            if run.reused_validation_sha
+            else f"batch ok; merged {len(run.merged_jobs)} job(s)"
+        )
+        train_id = uuid.uuid4().hex if not run.deploy else ""
+        validated_at = utc_now() if not run.deploy else ""
+        validation_identity_fields: dict[str, str] = {}
+        if not run.deploy:
+            validation_identity_fields = self._validation.identity_fields(
+                jobs=run.merged_jobs,
+                train_id=train_id,
+                validated_heads=run.merge_shas,
+                validation_sha=run.deploy_sha,
+                worktree=run.worktree,
+                log=run.log,
+                pulse=run.pulse,
+            )
+        for job in run.merged_jobs:
+            validation_fields = {}
+            if not run.deploy:
+                validation_fields = {
+                    "train_id": train_id,
+                    "train_size": len(run.merged_jobs),
+                    "validated_at": validated_at,
+                    "validation_base_sha": run.integration_base_sha,
+                    "validation_sha": run.deploy_sha,
+                    "validated_head_sha": run.merge_shas[job.id],
+                    **validation_identity_fields,
+                }
+            run.results.append(
+                run.finish(
+                    job,
+                    status=status,
+                    deploy_sha=run.deploy_sha,
+                    log_path=str(run.log_path),
+                    note=note,
+                    push_status=run.deploy_state.push_status,
+                    verify_status=run.deploy_state.verify_status,
+                    reused_validation_sha=run.reused_validation_sha,
+                    **validation_fields,
+                )
+            )
+        if run.deploy:
+            self._pushes.clear_pending_refs([job.id for job in run.merged_jobs], log=run.log)
+        return run.results
 
     def _finish_active_jobs(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
         """Finish each job the train still holds; report the others as they stand."""
