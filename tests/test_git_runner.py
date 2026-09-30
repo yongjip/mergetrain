@@ -2789,6 +2789,43 @@ deploy:
             # Lease advanced from expired (past) to valid (~30 min ahead).
             self.assertGreater(after.expires_at, before.expires_at)
 
+    def test_lease_pulses_name_the_assembled_train_head(self) -> None:
+        # A pulse reads the train's head when it runs, so once the train is
+        # assembled every refresh names the commit under test. A pulse bound to
+        # a copy taken before assembly would keep publishing an empty head.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root)
+            config = load_config(repo=repo)
+            owner = f"runner:{os.getpid()}"
+            real_refresh = git_runner_module.refresh_runner_lock
+            heads: list[object] = []
+
+            def recording_refresh(*args: object, **kwargs: object) -> None:
+                heads.append(kwargs.get("head_sha"))
+                real_refresh(*args, **kwargs)  # type: ignore[arg-type]
+
+            conn = connect(config.state.db)
+            try:
+                enqueue_job(conn, task="a", branch="feature/a")
+                claimed = claim_all_queued(conn, owner=owner, ttl_minutes=30)
+                with patch.object(
+                    git_runner_module, "refresh_runner_lock", side_effect=recording_refresh
+                ):
+                    results = GitRunner(config).process_batch(
+                        conn, claimed, deploy=False, owner=owner, ttl_minutes=30
+                    )
+                lock = get_lock(conn)
+            finally:
+                conn.close()
+
+        [result] = results
+        self.assertEqual(result.status, "validated")
+        self.assertTrue(result.validation_sha)
+        self.assertIn(result.validation_sha, heads)
+        self.assertIsNotNone(lock)
+        self.assertEqual(lock.head_sha, result.validation_sha)
+
     def test_long_gate_heartbeats_and_cooperatively_cancels(self) -> None:
         # ignore_cleanup_errors: cancelling mid-gate kills the gate subprocess
         # and tears down its integration worktree; on Windows the OS may still
