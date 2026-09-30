@@ -473,16 +473,23 @@ class MergetrainTools:
 
         return await self._json(["inspect", str(job_id), "--json"])
 
-    async def _events(self, limit: int = 50, job_id: int = 0, after: int = 0) -> dict[str, Any]:
-        """Recent runner event frames, bounded and never following.
+    async def _events(self, job_id: int, limit: int = 50, after: int = 0) -> dict[str, Any]:
+        """One job's recent runner event frames, bounded and never following.
 
         Returns the CLI's own JSONL frames under ``frames``; the frames
         themselves are unchanged, including their ``stream_start`` header.
         """
 
-        args = ["events", "--jsonl", "--limit", str(max(1, min(limit, 200)))]
-        if job_id:
-            args += ["--job", str(job_id)]
+        # Always scoped, even to job 0: an unscoped read returns every job's
+        # frames, which would pass for this job's evidence.
+        args = [
+            "events",
+            "--jsonl",
+            "--limit",
+            str(max(1, min(limit, 200))),
+            "--job",
+            str(job_id),
+        ]
         if after:
             args += ["--after", str(after)]
         try:

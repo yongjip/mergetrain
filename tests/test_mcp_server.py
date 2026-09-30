@@ -292,6 +292,15 @@ class ToolSurfaceTests(unittest.TestCase):
         self.assertEqual(Path(api_payload["job"]["worktree_path"]), api.resolve())
         self.assertEqual(Path(ui_payload["job"]["worktree_path"]), ui.resolve())
 
+    def test_events_detail_stays_scoped_to_the_named_job(self) -> None:
+        # Job 0 is falsy: the events read dropped --job and returned every
+        # job's frames as that job's evidence, while summary and logs failed.
+        with patch.object(MergetrainTools, "_run", return_value=completed("")) as run:
+            asyncio.run(self.tools.inspect(job_id=0, detail="events"))
+        args = run.call_args.args[0]
+        self.assertIn("--job", args)
+        self.assertEqual(args[args.index("--job") + 1], "0")
+
     def test_operator_only_reads_are_not_public_methods(self) -> None:
         for name in ("doctor", "history", "stats", "agent_contract", "gc_preview"):
             self.assertFalse(hasattr(self.tools, name), name)

@@ -310,6 +310,11 @@
   and the deploy confirmation refusals, and the `events` and `logs` results
   carried no `contract_version`, so a client that checks it before acting
   could not. They now carry the same top-level `contract_version` as the CLI.
+- Keep `mergetrain_inspect` events on the job it names when that ID is 0. The
+  MCP tool dropped the job filter for job 0 and returned every job's events
+  as if they were that job's evidence, while the summary and logs details
+  failed for the same ID. It now reads job 0's events, and the stream ends
+  with the `job not found` error instead.
 
 ## 3.3.0 - 2026-09-30
 
