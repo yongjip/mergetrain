@@ -325,6 +325,21 @@ class CliTests(unittest.TestCase):
             "#1 deployed (push=succeeded, verify=failed): feature/a",
         )
 
+    def test_results_payload_warns_when_verification_did_not_finish(self) -> None:
+        # An error after the push and before the verify hooks finished leaves
+        # verify_status "unknown"; status puts that job in Attention too.
+        job = Job(
+            id=1,
+            task="a",
+            branch="feature/a",
+            status="deployed",
+            push_status="succeeded",
+            verify_status="unknown",
+        )
+        payload = _results_payload([job])
+        self.assertEqual(payload["result"], "warning")
+        self.assertEqual(_run_exit_code(payload), 0)
+
     def test_run_exit_code_treats_verify_warning_as_shipped(self) -> None:
         # A shipped train whose post-push verify warned must not report the same
         # exit 1 as a run that never shipped — exit 1 means "did not ship".

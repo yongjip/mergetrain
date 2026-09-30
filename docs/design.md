@@ -474,7 +474,10 @@ Because a push already updates the remote, a verify-hook failure after push does
 state so it cannot visually erase the unresolved verification result. A schema
 v4 migration backfills legacy `deployed` rows as pushed and recognizes the
 canonical warning-note prefix when available; otherwise historical verification
-remains `not_run` because no stronger fact was persisted. See [failure
+remains `not_run` because no stronger fact was persisted. A deploy whose
+verification did not finish, because an error came after the push, records
+`verify_status=unknown` and is also graded `result=warning`; the daemon reports
+both cases as `unverified:<n>` rather than `landed:<n>`. See [failure
 modes](failure-modes.md#post-push-verify-failure).
 
 Unknown and failed verification remain current Attention until explicitly

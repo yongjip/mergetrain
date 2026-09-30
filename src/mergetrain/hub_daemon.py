@@ -94,8 +94,8 @@ def hub_sweep(
     At most ``concurrency`` repos run at a time; each repo's outcome is
     isolated, so one broken repo never stops the sweep. Returns one outcome
     dict per repo: ``{"path", "name"?, "ok", "outcome", "error"?}`` where
-    outcome is ``landed:<n>``/``partial:<d>/<n>``/``no_landing:<n>``/``idle``/``reconcile_paused``/``skipped``/
-    ``excluded``/``error``.
+    outcome is ``landed:<n>``/``unverified:<n>``/``partial:<d>/<n>``/``no_landing:<n>``/
+    ``idle``/``reconcile_paused``/``skipped``/``excluded``/``error``.
     """
 
     factory = process_batch_factory or _default_factory(keep_worktree)

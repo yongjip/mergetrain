@@ -57,6 +57,16 @@ class SweepNotificationTests(unittest.TestCase):
         self.assertEqual(notification_transition("reconcile_paused"), "needs_reconcile")
         self.assertEqual(notification_transition("error:disk full"), "daemon_paused")
 
+    def test_a_landing_whose_verification_needs_attention_says_so(self) -> None:
+        messages, _settled = sweep_notifications(
+            [outcome("/w/a", "unverified:2")], {}, transitions=("landed",)
+        )
+        self.assertEqual(notification_transition("unverified:2"), "landed")
+        self.assertEqual(
+            [message[2:] for message in messages],
+            [("mergetrain · a", "Train landed (2 jobs); verification needs attention")],
+        )
+
     def test_processed_notifies_every_time_transitions_only_once(self) -> None:
         prev: dict[str, str] = {}
         first, prev = deliver(

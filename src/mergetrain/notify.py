@@ -22,7 +22,7 @@ _SILENT = {"idle", "skipped", "excluded"}
 def notification_transition(outcome: str) -> str:
     """Map detailed daemon outcomes onto stable configuration categories."""
 
-    if outcome.startswith(("landed:", "processed:")):
+    if outcome.startswith(("landed:", "processed:", "unverified:")):
         return "landed"
     if outcome.startswith(("partial:", "no_landing:")):
         return "blocked"
@@ -179,6 +179,17 @@ def sweep_notifications(
             count = outcome.split(":", 1)[1]
             job_word = "job" if count == "1" else "jobs"
             messages.append((path, key, title, f"Train landed ({count} {job_word})"))
+        elif outcome.startswith("unverified:"):
+            count = outcome.split(":", 1)[1]
+            job_word = "job" if count == "1" else "jobs"
+            messages.append(
+                (
+                    path,
+                    key,
+                    title,
+                    f"Train landed ({count} {job_word}); verification needs attention",
+                )
+            )
         elif outcome.startswith("partial:"):
             messages.append((path, key, title, f"Partial: {outcome.split(':', 1)[1]} landed, rest blocked/failed"))
         elif outcome.startswith("no_landing:"):

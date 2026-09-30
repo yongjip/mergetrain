@@ -42,11 +42,13 @@ def _grade_batch(results: object, claimed: int, say: Say) -> str:
     ``processed:<n>`` used to mean only "n jobs ran", but the notifier read it
     as "n landed" — so a sweep where every job blocked on a conflict reported a
     green deploy. Grade by what actually landed:
-    ``landed:<n>`` (all n deployed) / ``partial:<d>/<n>`` (some) /
-    ``no_landing:<n>`` (nothing deployed — blocked or failed).
+    ``landed:<n>`` (all n deployed) / ``unverified:<n>`` (all n deployed, but
+    verification failed or did not finish for some) / ``partial:<d>/<n>``
+    (some) / ``no_landing:<n>`` (nothing deployed — blocked or failed).
     """
 
-    statuses = [getattr(job, "status", "") for job in results] if isinstance(results, list) else []
+    jobs: list[object] = results if isinstance(results, list) else []
+    statuses = [getattr(job, "status", "") for job in jobs]
     if not statuses:
         # A caller (or test double) that returns no inspectable results: fall
         # back to the neutral "ran" report rather than claim a landing.
@@ -54,6 +56,15 @@ def _grade_batch(results: object, claimed: int, say: Say) -> str:
     deployed = sum(1 for status in statuses if status == "deployed")
     total = len(statuses)
     if deployed == total:
+        unverified = sum(
+            1 for job in jobs if getattr(job, "verify_status", "") in {"failed", "unknown"}
+        )
+        if unverified:
+            say(
+                f"mergetrain daemon: {deployed} landed; verification failed or did not "
+                f"finish for {unverified}"
+            )
+            return f"unverified:{deployed}"
         return f"landed:{deployed}"
     if deployed:
         say(f"mergetrain daemon: {deployed}/{total} landed, rest blocked/failed")

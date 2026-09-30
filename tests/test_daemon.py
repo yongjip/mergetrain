@@ -28,6 +28,17 @@ class GradeBatchTests(unittest.TestCase):
     def test_all_deployed_is_landed(self) -> None:
         self.assertEqual(_grade_batch(self._jobs("deployed", "deployed"), 2, lambda _: None), "landed:2")
 
+    def test_a_landing_with_failed_or_unfinished_verification_is_unverified(self) -> None:
+        for verify_status in ("failed", "unknown"):
+            with self.subTest(verify_status=verify_status):
+                jobs = [
+                    Job(id=1, task="t", branch="b1", status="deployed", verify_status="succeeded"),
+                    Job(id=2, task="t", branch="b2", status="deployed", verify_status=verify_status),
+                ]
+                said: list[str] = []
+                self.assertEqual(_grade_batch(jobs, 2, said.append), "unverified:2")
+                self.assertTrue(said)
+
     def test_nothing_deployed_is_no_landing_not_processed(self) -> None:
         # The bug: a sweep where every job blocked reported as a green deploy.
         out = _grade_batch(self._jobs("blocked", "failed"), 2, lambda _: None)

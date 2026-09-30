@@ -20,6 +20,15 @@
   refused because a train was ready, and `status` kept recommending the
   `deploy` that could not succeed. Isolation now stops at the first job that
   validates and returns the rest to the queue for the next validate.
+- Grade a deploy whose verification did not finish as `result: warning`, like
+  one whose verification failed. When an error came after the push, such as
+  SQLite contention before the verify hooks finished, the jobs were recorded
+  `deployed` with `verify_status: unknown` and `status` put them in Attention,
+  but `deploy --json` and the MCP deploy tool reported `result: success`. The
+  daemon also reported such a train, and one whose verification failed, as
+  `landed:<n>` and sent a plain "Train landed" notification. It now reports
+  `unverified:<n>`, which notifies under the `landed` transition as "Train
+  landed (n jobs); verification needs attention".
 
 ## 3.3.0 - 2026-09-30
 

@@ -60,7 +60,12 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
         {job.reused_validation_sha for job in results if job.reused_validation_sha}
     )
     successful = sum(status_counts[status] for status in ("validated", "deployed"))
-    warnings = sum(job.status == "deployed" and job.verify_status == "failed" for job in results)
+    # A failed verification, and one that did not finish (an error after the
+    # push), both leave a deployed job in Attention.
+    warnings = sum(
+        job.status == "deployed" and job.verify_status in {"failed", "unknown"}
+        for job in results
+    )
     if successful == len(results) and warnings:
         result = "warning"
     elif successful == len(results):
@@ -84,8 +89,8 @@ def _results_payload(results: list[Job]) -> dict[str, Any]:
 
 
 def _run_exit_code(payload: dict[str, Any]) -> int:
-    # "warning" = the train shipped but a post-push verify hook failed. The push
-    # already landed and cannot be un-shipped, so this is exit 0 (a caller reads
+    # "warning" = the train shipped but post-push verification failed or did not
+    # finish. The push already landed and cannot be un-shipped, so this is exit 0 (a caller reads
     # `result` to notice the warning). Only "partial"/"failed" — where something
     # did NOT ship — is exit 1. Exit 1 therefore never means "did not ship".
     return 0 if payload["result"] in ("success", "warning") else 1
