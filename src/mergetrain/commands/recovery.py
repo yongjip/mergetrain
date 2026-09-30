@@ -200,6 +200,7 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         "result": "conflict" if outcome.summary.get("conflicts") else "success",
         "applied": outcome.applied,
         "jobs": outcome.jobs,
+        "stranded": outcome.stranded,
         "summary": outcome.summary,
         "next_action": next_action,
     }
@@ -213,6 +214,11 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
             f"{summary['requeued']} requeued, {summary['canceled']} canceled, "
             f"{summary['conflicts']} conflict(s)"
         )
+        for entry in outcome.stranded:
+            print(
+                f"  #{entry['job_id']} stopped runner's claim -> {entry['decision']}: "
+                f"{entry['reason']}"
+            )
         for job in outcome.jobs:
             print(f"  #{job['job_id']} {job['decision']}: {job['reason']}")
         print(f"next action: {next_action}")

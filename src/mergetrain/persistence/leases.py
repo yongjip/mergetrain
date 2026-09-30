@@ -7,6 +7,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from ..errors import CancellationRequested, LockHeld, LostLease
 from ..models import RunnerLock
@@ -220,6 +221,72 @@ def _requeue_orphans(conn: sqlite3.Connection) -> None:
     )
 
 
+def stranded_claim_plan(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """What the orphan split would do to each ``in_progress`` claim, unwritten.
+
+    The same three buckets as ``_requeue_orphans``, so a preview can say what
+    taking the runner lock will change before anything does.
+    """
+
+    rows = conn.execute(
+        "SELECT id, branch, train_id, pending_deploy_sha, cancel_requested_at "
+        "FROM deploy_queue WHERE status = 'in_progress' ORDER BY id"
+    ).fetchall()
+    plan: list[dict[str, Any]] = []
+    for row in rows:
+        train_id = str(row["train_id"] or "")
+        if row["pending_deploy_sha"]:
+            decision = "needs_reconcile"
+            reason = "its push may have landed, so the remote decides"
+        elif row["cancel_requested_at"]:
+            decision = "canceled"
+            reason = "cancel requested and nothing was pushed"
+        elif train_id:
+            decision = "queued"
+            reason = (
+                f"re-queued; validated train {train_id} is dissolved and must be "
+                "validated and approved again"
+            )
+        else:
+            decision = "queued"
+            reason = "re-queued"
+        plan.append(
+            {
+                "job_id": int(row["id"]),
+                "branch": str(row["branch"]),
+                "train_id": train_id,
+                "decision": decision,
+                "reason": reason,
+            }
+        )
+    return plan
+
+
+def lock_takeover(conn: sqlite3.Connection) -> tuple[str, str]:
+    """What taking the runner lock would do now, without doing it.
+
+    ``("refuse", why)`` while an owner still fences its work, ``("split", "")``
+    when a stopped runner's claims must be split first, ``("clear", "")`` for
+    an expired lock with no claims, and ``("free", "")`` when nothing holds it.
+    """
+
+    row = conn.execute("SELECT * FROM locks WHERE name = ?", (RUNNER_LOCK_NAME,)).fetchone()
+    if row is None:
+        return ("split", "") if _in_progress_count(conn) > 0 else ("free", "")
+    current_owner = str(row["owner"])
+    live = owner_liveness(current_owner)
+    if live == Liveness.DEAD:
+        return ("split", "")
+    if _parse_utc(str(row["expires_at"])) > datetime.now(timezone.utc):
+        return ("refuse", f"runner lock is held by {live} owner: {current_owner}")
+    if _in_progress_count(conn) > 0:
+        return (
+            "refuse",
+            f"expired runner lock ({live} owner {current_owner}) has in-progress jobs",
+        )
+    return ("clear", "")
+
+
 def _acquire_runner_lock(
     conn: sqlite3.Connection,
     *,
@@ -232,23 +299,12 @@ def _acquire_runner_lock(
     now = utc_now()
     expires = _plus_minutes(ttl_minutes)
     token = uuid.uuid4().hex
-    row = conn.execute("SELECT * FROM locks WHERE name = ?", (RUNNER_LOCK_NAME,)).fetchone()
-    if row is not None:
-        current_owner = str(row["owner"])
-        live = owner_liveness(current_owner)
-        expired = _parse_utc(str(row["expires_at"])) <= datetime.now(timezone.utc)
-        if live == Liveness.DEAD:
-            _delete_lock(conn)
-            _requeue_orphans(conn)
-        elif not expired:
-            raise LockHeld(f"runner lock is held by {live} owner: {current_owner}")
-        elif _in_progress_count(conn) > 0:
-            raise LockHeld(
-                f"expired runner lock ({live} owner {current_owner}) has in-progress jobs"
-            )
-        else:
-            _delete_lock(conn)
-    elif _in_progress_count(conn) > 0:
+    action, refusal = lock_takeover(conn)
+    if action == "refuse":
+        raise LockHeld(refusal)
+    if action in {"split", "clear"}:
+        _delete_lock(conn)
+    if action == "split":
         _requeue_orphans(conn)
     conn.execute(
         """

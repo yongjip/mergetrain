@@ -207,7 +207,10 @@ Two consequences worth knowing:
   if the row carries a marker, run `reconcile`.
 - A row left `in_progress` with no runner lock is a stranded claim.
   `status` reports `next_action.code: reconcile_stranded_claim`;
-  `mergetrain reconcile --apply` clears it.
+  `mergetrain reconcile --apply` clears it. `mergetrain reconcile` without
+  `--apply` changes nothing: its `stranded[]` entries say what `--apply` will
+  do with each claim (`queued`, `needs_reconcile`, or `canceled`), and a claim
+  whose push may have landed is also checked against the remote in `jobs[]`.
 
   Recovering it **dissolves any validated-train identity it carried**, on
   purpose: a requeued row asserting a validation it no longer holds would

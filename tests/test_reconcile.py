@@ -28,7 +28,7 @@ from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.daemon import daemon_loop
 from mergetrain.deploy_plan import verification_policy_sha
-from mergetrain.errors import CommandFailed, QueueError, RemoteUnreachable
+from mergetrain.errors import CommandFailed, LockHeld, QueueError, RemoteUnreachable
 from mergetrain.git_destination import resolve_git_destination
 from mergetrain.git_ops import deploy_audit_ref_name, pending_ref_name
 from mergetrain.git_runner import GitRunner
@@ -46,6 +46,7 @@ from mergetrain.persistence.leases import (
     force_clear_lock_and_split,
     get_lock,
     release_runner_lock,
+    stranded_claim_plan,
 )
 from mergetrain.persistence.operations import list_recovery_operation_events
 from mergetrain.persistence.recovery import deploy_reconcile_pending, record_pending_push
@@ -649,6 +650,129 @@ class OrphanSplitTests(unittest.TestCase):
             self.assertEqual(raced_j.status, "needs_reconcile")
             self.assertEqual(raced_j.pending_deploy_sha, "b" * 40)
             self.assertTrue(raced_j.cancel_requested_at)
+
+    def test_the_preview_names_the_status_the_split_gives_each_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo, _ = make_demo_repo(Path(td))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                jobs = [
+                    enqueue_job(conn, task=name, branch=f"b/{name}")
+                    for name in ("clean", "marked", "canceled", "trained")
+                ]
+                for job in jobs:
+                    _stage_in_progress(
+                        conn, job.id, f"t-{job.task}",
+                        cancel=utc_now() if job.task == "canceled" else "",
+                    )
+                record_pending_push(
+                    conn, job_ids=[jobs[1].id], deploy_sha="a" * 40, claim_token="t-marked"
+                )
+                conn.execute(
+                    "UPDATE deploy_queue SET train_id = 'train-1' WHERE id = ?", (jobs[3].id,)
+                )
+                conn.commit()
+
+                planned = {entry["job_id"]: entry["decision"] for entry in stranded_claim_plan(conn)}
+                self._run_split(conn)
+                actual = {job.id: get_job(conn, job.id).status for job in jobs}
+            finally:
+                conn.close()
+
+            self.assertEqual(planned, actual)
+            self.assertEqual(
+                sorted(planned.values()), ["canceled", "needs_reconcile", "queued", "queued"]
+            )
+
+
+class DryRunReconcileTests(unittest.TestCase):
+    """`reconcile` without --apply previews; it must not change queue state."""
+
+    def _stranded(self, root: Path):
+        """A deploy runner that died holding a claimed, validated train."""
+
+        repo, _ = make_demo_repo(root)
+        config = load_config(repo=repo)
+        conn = connect(config.state.db)
+        job = enqueue_job(conn, task="a", branch="feature/a")
+        claim_deploy_batch(conn, owner=DEAD_OWNER, ttl_minutes=config.queue.lock_ttl_minutes)
+        conn.execute(
+            "UPDATE deploy_queue SET train_id = 'train-1', train_size = 1 WHERE id = ?",
+            (job.id,),
+        )
+        conn.commit()
+        return config, conn, job
+
+    def test_preview_leaves_a_stopped_runners_claim_and_train_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config, conn, job = self._stranded(Path(td))
+            try:
+                outcome = reconcile(config, conn, apply=False)
+                after = get_job(conn, job.id)
+                lock = get_lock(conn)
+            finally:
+                conn.close()
+
+        self.assertFalse(outcome.applied)
+        self.assertEqual((after.status, after.train_id), ("in_progress", "train-1"))
+        self.assertIsNotNone(lock)
+        assert lock is not None
+        self.assertEqual(lock.owner, DEAD_OWNER)
+        self.assertEqual(
+            [(entry["job_id"], entry["decision"], entry["applied"]) for entry in outcome.stranded],
+            [(job.id, "queued", False)],
+        )
+        self.assertIn("train-1", outcome.stranded[0]["reason"])
+
+    def test_apply_reports_the_claims_it_split(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config, conn, job = self._stranded(Path(td))
+            try:
+                outcome = recover(config, conn, gc=False).reconcile
+                after = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+        self.assertTrue(outcome.applied)
+        self.assertEqual((after.status, after.train_id), ("queued", ""))
+        self.assertEqual(
+            [(entry["job_id"], entry["decision"], entry["applied"]) for entry in outcome.stranded],
+            [(job.id, "queued", True)],
+        )
+
+    def test_cli_preview_prints_the_plan_and_changes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config, conn, job = self._stranded(Path(td))
+            conn.close()
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(config.repo), "reconcile", "--json"])
+            conn = connect(config.state.db)
+            try:
+                after = get_job(conn, job.id)
+            finally:
+                conn.close()
+
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0, payload)
+        self.assertFalse(payload["applied"])
+        self.assertEqual([entry["job_id"] for entry in payload["stranded"]], [job.id])
+        self.assertEqual(after.status, "in_progress")
+
+    def test_preview_refuses_while_a_live_runner_holds_the_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo, _ = make_demo_repo(Path(td))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                claim_deploy_batch(conn, owner=f"runner:{os.getpid()}", ttl_minutes=30)
+                with self.assertRaises(LockHeld):
+                    reconcile(config, conn, apply=False)
+                self.assertEqual(get_job(conn, job.id).status, "in_progress")
+            finally:
+                conn.close()
 
 
 class CrashRecoveryTests(unittest.TestCase):

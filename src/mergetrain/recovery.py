@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .command_runner import run_command
@@ -47,7 +47,9 @@ from .persistence.leases import (
     force_clear_lock_and_split,
     get_lock,
     live_worktree_path,
+    lock_takeover,
     release_runner_lock,
+    stranded_claim_plan,
 )
 from .persistence.recovery import unpack_push_refs
 from .push_liveness import push_in_flight, push_lock_path
@@ -471,6 +473,8 @@ class ReconcileOutcome:
     applied: bool
     summary: dict[str, int]
     exit_code: int  # 0 resolved/nothing · 10 ≥1 conflict
+    # A stopped runner's claims and what the orphan split does to each.
+    stranded: list[dict[str, Any]] = field(default_factory=list)
 
 
 def reconcile(
@@ -487,10 +491,23 @@ def reconcile(
 
     A blocked reconcile conflict is re-checked the same way, but only as far as
     its recorded target still answers; otherwise it is reported still blocked.
+
+    Without ``apply`` it writes nothing. Taking the runner lock would split a
+    stopped runner's claims, so a preview only reads the lock and reports in
+    ``stranded`` what the split will do. It classifies the claims the split
+    would park, as the applied run does right after parking them.
     """
+    action, refusal = lock_takeover(conn)
+    if action == "refuse":
+        raise LockHeld(refusal)
+    stranded = stranded_claim_plan(conn) if action == "split" else []
+    for entry in stranded:
+        entry["applied"] = apply
     owner = default_owner()
-    lock = acquire_runner_lock(
-        conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes
+    lock = (
+        acquire_runner_lock(conn, owner=owner, ttl_minutes=config.queue.lock_ttl_minutes)
+        if apply
+        else None
     )
     try:
         # An earlier reconcile that could not settle a push parked it blocked
@@ -502,12 +519,23 @@ def reconcile(
             for job in list_jobs_fifo(conn, status="blocked")
             if is_reconcile_conflict(job) and job.pending_deploy_destination_sha
         ]
+        parked = [] if apply or not stranded else [
+            job
+            for job in list_jobs_fifo(conn, status="in_progress")
+            if job.pending_deploy_sha
+        ]
         jobs = sorted(
-            [*list_jobs_fifo(conn, status="needs_reconcile"), *conflicts],
+            [*list_jobs_fifo(conn, status="needs_reconcile"), *conflicts, *parked],
             key=lambda job: job.id,
         )
         if not jobs:
-            return ReconcileOutcome(jobs=[], applied=apply, summary=_summarize([]), exit_code=0)
+            return ReconcileOutcome(
+                jobs=[],
+                applied=apply,
+                summary=_summarize([]),
+                exit_code=0,
+                stranded=stranded,
+            )
         # A runner killed mid-push leaves the push running in its own process
         # group. Until every process of it has exited it can still land, so the
         # remote cannot yet say whether it did (#220).
@@ -567,9 +595,11 @@ def reconcile(
             applied=apply,
             summary=summary,
             exit_code=10 if summary["conflicts"] else 0,
+            stranded=stranded,
         )
     finally:
-        release_runner_lock(conn, owner=owner, token=lock.token)
+        if lock is not None:
+            release_runner_lock(conn, owner=owner, token=lock.token)
 
 
 @dataclass(slots=True)

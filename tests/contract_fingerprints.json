@@ -784,6 +784,7 @@
       "next_action": null,
       "ok": null,
       "result": null,
+      "stranded": "[]?",
       "summary": {
         "canceled": null,
         "conflicts": null,

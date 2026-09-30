@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Make `mergetrain reconcile` without `--apply` a real preview. It took the
+  runner lock like the applied run, and taking the lock split a stopped
+  runner's claims: it requeued them, dissolving a validated train that had
+  been approved, parked the ones whose push may have landed, and canceled the
+  ones with a cancel request, while the output said `applied: false` with
+  nothing listed. The preview now only reads the lock and changes nothing. A
+  new `stranded` list names each stopped runner's claim and what `--apply`
+  will do with it, and the preview checks the claims it would park against
+  the remote, as the applied run does. `reconcile --apply` reports the same
+  list for the claims it split.
+
 ## 3.3.0 - 2026-09-30
 
 - Build every train on the integration branch itself, never on a tag or local
