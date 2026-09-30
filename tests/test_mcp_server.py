@@ -1009,6 +1009,31 @@ class DeployGateTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "deploy_plan_unavailable")
         self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
 
+    def test_a_validation_run_before_the_plan_is_reported(self) -> None:
+        # deploy --json validates queued work before it can show a plan, and
+        # stops with the validation result when a job fails its gate. The tool
+        # said "no deployable work is ready", which hid the gate results and
+        # was false when another job had passed.
+        validation = {
+            "contract_version": CONTRACT_VERSION,
+            "ok": True,
+            "result": "partial",
+            "counts": {"blocked": 1, "validated": 1},
+            "jobs": [
+                {"id": 7, "branch": "agent/one", "status": "validated"},
+                {"id": 8, "branch": "agent/two", "status": "blocked", "note": "gate failed"},
+            ],
+        }
+        payload, calls = self._deploy(FakeContext(), preview=validation)
+        self.assertEqual(payload["error"]["code"], "deploy_plan_unavailable")
+        message = payload["error"]["message"]
+        self.assertNotIn("no deployable work", message)
+        self.assertIn("partial", message)
+        self.assertIn("#7 validated, #8 blocked", message)
+        self.assertIn("nothing was pushed", message)
+        self.assertEqual(payload["validation"], validation)
+        self.assertFalse(any(is_guarded_deploy_call(args) for args in calls))
+
     def test_confirmation_requires_a_pydantic_accept_shape(self) -> None:
         # Guards the helper itself: anything but action=accept plus confirm=True
         # is a refusal, whatever the resolver returns.

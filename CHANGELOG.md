@@ -315,6 +315,13 @@
   as if they were that job's evidence, while the summary and logs details
   failed for the same ID. It now reads job 0's events, and the stream ends
   with the `job not found` error instead.
+- Report the validation that `mergetrain_deploy` ran before it could show a
+  plan. When queued work had to be validated first and a job failed its gate,
+  the MCP tool refused with "no deployable work is ready", which hid the gate
+  results and was false when another job had passed and was ready to deploy.
+  The refusal, still `deploy_plan_unavailable`, now says that validation ran,
+  lists each job's result, and carries the CLI's validation payload under
+  `validation`.
 
 ## 3.3.0 - 2026-09-30
 

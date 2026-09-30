@@ -46,6 +46,12 @@ cannot manufacture it in tool arguments. Decline, cancel, an unchecked box, a
 client without form elicitation, or a changed plan produces a typed refusal and
 zero pushes.
 
+When step 1 has to validate queued work and a job does not pass, there is no
+plan to show. The tool returns `deploy_plan_unavailable` with each job's result
+in the message and the CLI's validation payload under `validation`. After a
+partial result, the jobs that passed form the Ready train that the next call
+presents.
+
 From protocol 2026-07-28 the client returns the answer in a retried tool call,
 and the server prepares the plan again before it uses that answer. The
 confirmation schema carries a value derived from the plan hash, so if the plan

@@ -599,6 +599,21 @@ class MergetrainTools:
         preview = await self._json(["deploy", "--json"])
         if preview.get("ok") is False:
             return _DeployPlan(refusal=preview)
+        if preview.get("result") in {"partial", "failed"}:
+            # The CLI validated the queued work first, and not every job
+            # passed, so it stopped before a plan. Say what the gates decided:
+            # after a partial run, the jobs that passed are ready to deploy.
+            outcomes = ", ".join(
+                f"#{job.get('id')} {job.get('status')}" for job in preview.get("jobs") or []
+            )
+            return _DeployPlan(
+                refusal=_error(
+                    "deploy_plan_unavailable",
+                    f"validation ran first and ended {preview['result']} ({outcomes}); "
+                    "nothing was pushed",
+                    validation=preview,
+                )
+            )
         plan_sha = str(preview.get("deploy_plan_sha") or "")
         if preview.get("result") != "confirmation_required" or not plan_sha:
             note = str(preview.get("note") or "no deployable work is ready")
