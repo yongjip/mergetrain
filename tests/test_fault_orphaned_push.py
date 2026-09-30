@@ -31,7 +31,7 @@ from mergetrain.errors import CommandFailed, LockHeld
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.jobs import cancel_job, enqueue_job, get_job
 from mergetrain.push_liveness import push_in_flight
-from mergetrain.recovery import recover
+from mergetrain.recovery import reconcile
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 HOOK_SECONDS = 8
@@ -121,7 +121,7 @@ class OrphanedPushTests(unittest.TestCase):
                 self.assertEqual(git(remote, "rev-parse", "main"), base)
                 self.assertTrue(push_in_flight(config, pending_sha))
                 with self.assertRaisesRegex(LockHeld, "still running and may yet land"):
-                    recover(config, conn, gc=False)
+                    reconcile(config, conn, apply=True)
                 parked = get_job(conn, job_id)
                 self.assertEqual(parked.status, "needs_reconcile")
                 self.assertEqual(parked.pending_deploy_sha, pending_sha)
@@ -132,14 +132,14 @@ class OrphanedPushTests(unittest.TestCase):
                 )
                 self.assertEqual(git(remote, "rev-parse", "main"), pending_sha)
 
-                outcome = recover(config, conn, gc=False)
+                outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job_id)
             finally:
                 conn.close()
             self.assertEqual(outcome.exit_code, 0)
             self.assertEqual(healed.status, "deployed")
             self.assertEqual(healed.deploy_sha, pending_sha)
-            reason = outcome.reconcile.jobs[0]["reason"]
+            reason = outcome.jobs[0]["reason"]
             self.assertIn("push landed", reason)
             if cancel:
                 self.assertIn("late cancel ignored", reason)

@@ -16,7 +16,7 @@ suite would still be green, because no other test lets git speak for itself.
 
 The two cases are one decision table over which receive hook hangs:
 
-    hook          refs applied when it runs?   recover() must decide
+    hook          refs applied when it runs?   reconcile must decide
     post-receive  yes  (remote advanced)       deployed, push_status succeeded
     pre-receive   no   (remote untouched)      queued, marker + pin cleared
 
@@ -56,10 +56,10 @@ from mergetrain.git_runner import GitRunner
 from mergetrain.persistence.claims import claim_deploy_batch
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.jobs import enqueue_job, get_job
-from mergetrain.recovery import recover
+from mergetrain.recovery import reconcile
 
 # A pid that is never live, so the lock left by the killed "runner" reads as DEAD
-# and a later recover()/claim can reap it (the test process is alive, so it
+# and a later reconcile/claim can reap it (the test process is alive, so it
 # cannot itself be the owner).
 DEAD_OWNER = "ghost:999999"
 
@@ -98,7 +98,7 @@ sleep {sleep}
 class _Case:
     hook: str  # which receive hook hangs -> whether the refs are applied first
     remote_applied: bool  # did the remote apply the refs before the client died?
-    verdict: str  # the status recover() must reach from remote truth alone
+    verdict: str  # the status reconcile must reach from remote truth alone
 
 
 _DECISION_TABLE = (
@@ -300,7 +300,7 @@ class KilledAtomicPushTests(unittest.TestCase):
 
             conn = connect(config.state.db)
             try:
-                outcome = recover(config, conn, gc=False)
+                outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
                 conn.close()
@@ -319,7 +319,7 @@ class KilledAtomicPushTests(unittest.TestCase):
                 # reconcile records what a crash-free run would (#231).
                 self.assertEqual(healed.verify_status, "not_configured")
                 self.assertEqual(healed.deploy_sha, after_push_sha)
-                self.assertEqual(outcome.reconcile.summary["reconciled_deployed"], 1)
+                self.assertEqual(outcome.summary["reconciled_deployed"], 1)
                 # Finalized, so the write-ahead marker is retired: a row that
                 # stayed 'pending' would be re-decided by the next reconcile and
                 # would keep showing a phantom in-flight push in status/doctor.
@@ -338,7 +338,7 @@ class KilledAtomicPushTests(unittest.TestCase):
             # would inherit the dead attempt's field.
             self.assertEqual(healed.push_status, "not_run")
             self.assertEqual(_pending_refs(repo), "")
-            self.assertEqual(outcome.reconcile.summary["requeued"], 1)
+            self.assertEqual(outcome.summary["requeued"], 1)
             self.assertEqual(_applied_pushes(counter), 0)
 
             hook_path.unlink()  # let the retry through

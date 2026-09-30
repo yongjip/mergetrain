@@ -1,4 +1,4 @@
-"""Crash-safe recovery: marker-aware reconcile / recover / unlock (0.3.0 Phase 2).
+"""Crash-safe recovery: marker-aware reconcile / unlock (0.3.0 Phase 2).
 
 The one irreversible deploy step is ``git push --atomic``. Between that push and
 the final ``mark_job(deployed)`` there is a window where a crash leaves the
@@ -31,7 +31,6 @@ from .errors import (
 from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .git_ops import (
     PENDING_REF_PREFIX,
-    apply_gc,
     delete_pending_ref,
     deploy_audit_ref_name,
     git_output_or_empty,
@@ -46,7 +45,6 @@ from .persistence.leases import (
     default_owner,
     force_clear_lock_and_split,
     get_lock,
-    live_worktree_path,
     lock_takeover,
     release_runner_lock,
     stranded_claim_plan,
@@ -471,7 +469,7 @@ def _classify_group(
 
 
 # --------------------------------------------------------------------------- #
-# engine — reconcile / recover / unlock
+# engine — reconcile / unlock
 # --------------------------------------------------------------------------- #
 
 
@@ -616,13 +614,6 @@ def reconcile(
             release_runner_lock(conn, owner=owner, token=lock.token)
 
 
-@dataclass(slots=True)
-class RecoverOutcome:
-    reconcile: ReconcileOutcome
-    gc: dict[str, Any] | None
-    exit_code: int
-
-
 # Statuses whose pin ref is still load-bearing: blocked keeps it for
 # reconcile-conflict forensics, needs_reconcile is still being reconciled, and
 # in-flight/queued/validated rows may yet be pushed. Everything else
@@ -660,38 +651,6 @@ def sweep_pending_refs(
         delete_pending_ref(config.repo, job_id)
         swept.append({"job_id": job_id, "ref": ref, "status": status})
     return swept
-
-
-def recover(
-    config: MergetrainConfig,
-    conn: sqlite3.Connection,
-    *,
-    gc: bool,
-    apply: bool = True,
-) -> RecoverOutcome:
-    """One-button restart heal: split orphans, then ``reconcile --apply``.
-
-    The marker-aware orphan split runs as a side effect of acquiring the runner
-    lock inside :func:`reconcile`. Never ships queued/validated work (no deploy
-    as a side effect). Optionally gc's crashed worktrees + stale pin refs.
-    """
-    outcome = reconcile(config, conn, apply=apply)
-    gc_result = None
-    if gc:
-        # Never gc a live runner's worktree, even if a runner started between
-        # reconcile releasing its lock and this sweep. The protect snapshot below
-        # is backed by a per-deletion recheck of the live lock (#84, defect 5).
-        live = get_lock(conn)
-        protect = (
-            [live.worktree_path]
-            if live and live.worktree_path and live.liveness != "dead"
-            else []
-        )
-        gc_result = apply_gc(
-            config, protect=protect, live_worktree_now=lambda: live_worktree_path(conn)
-        )
-        gc_result["swept_pending_refs"] = sweep_pending_refs(config, conn)
-    return RecoverOutcome(reconcile=outcome, gc=gc_result, exit_code=outcome.exit_code)
 
 
 @dataclass(slots=True)

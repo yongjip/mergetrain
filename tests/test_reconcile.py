@@ -52,7 +52,7 @@ from mergetrain.persistence.operations import list_recovery_operation_events
 from mergetrain.persistence.recovery import deploy_reconcile_pending, record_pending_push
 from mergetrain.persistence.transactions import utc_now
 from mergetrain.push_liveness import push_lock_path
-from mergetrain.recovery import _classify, reconcile, recover, sweep_pending_refs
+from mergetrain.recovery import _classify, reconcile, sweep_pending_refs
 
 # A pid that is never live, so a lock left by the "crashed" runner reads as DEAD
 # during recovery (the test process itself is alive, so it cannot be the owner).
@@ -784,7 +784,7 @@ class DryRunReconcileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             config, conn, job = self._stranded(Path(td))
             try:
-                outcome = recover(config, conn, gc=False).reconcile
+                outcome = reconcile(config, conn, apply=True)
                 after = get_job(conn, job.id)
             finally:
                 conn.close()
@@ -831,7 +831,7 @@ class DryRunReconcileTests(unittest.TestCase):
 
 
 class CrashRecoveryTests(unittest.TestCase):
-    """End-to-end: crash mid-deploy, then recover() to the truthful state."""
+    """End-to-end: crash mid-deploy, then reconcile to the truthful state."""
 
     def _crash_after_push(self, runner: GitRunner):
         real_push = runner._pushes.push_verified_head
@@ -886,7 +886,7 @@ class CrashRecoveryTests(unittest.TestCase):
 
             conn = connect(config.state.db)
             try:
-                outcome = recover(config, conn, gc=False)
+                outcome = reconcile(config, conn, apply=True)
                 healed = get_job(conn, job.id)
             finally:
                 conn.close()
@@ -2185,74 +2185,6 @@ class ReviewHardeningTests(unittest.TestCase):
             self.assertIn(pending_ref_name(blocked.id), refs)
             self.assertNotIn(pending_ref_name(deployed.id), refs)
             self.assertTrue(any(s["job_id"] == deployed.id for s in swept))
-
-    def test_recover_gc_removes_orphans_sweeps_pins_and_spares_new_runner(self) -> None:
-        from mergetrain.git_ops import apply_gc as real_apply_gc
-
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo, _ = make_demo_repo(root)
-            config = load_config(repo=repo)
-            worktree_root = config.state.worktree_root
-            worktree_root.mkdir(parents=True, exist_ok=True)
-            orphan = worktree_root / f"{config.project.name}-mergetrain-1-orphan"
-            live = worktree_root / f"{config.project.name}-mergetrain-2-live"
-            orphan.mkdir()
-            live.mkdir()
-            conn = connect(config.state.db)
-            live_lock = None
-            try:
-                stale = enqueue_job(conn, task="stale", branch="feature/a")
-                deploy_sha = git(repo, "rev-parse", "feature/a")
-                _pin(repo, stale.id, deploy_sha)
-                mark_job(
-                    conn,
-                    stale.id,
-                    status="deployed",
-                    deploy_sha=deploy_sha,
-                    push_status="succeeded",
-                    verify_status="unknown",
-                )
-
-                def runner_starts_after_snapshot(
-                    config_arg, *, delete_branches=(), protect=(), live_worktree_now=None
-                ):  # type: ignore[no-untyped-def]
-                    nonlocal live_lock
-                    control = connect(config.state.db)
-                    try:
-                        live_lock = acquire_runner_lock(
-                            control,
-                            owner=f"runner:{os.getpid()}",
-                            ttl_minutes=30,
-                            worktree_path=str(live),
-                        )
-                    finally:
-                        control.close()
-                    return real_apply_gc(
-                        config_arg,
-                        delete_branches=delete_branches,
-                        protect=protect,
-                        live_worktree_now=live_worktree_now,
-                    )
-
-                with patch(
-                    "mergetrain.recovery.apply_gc",
-                    side_effect=runner_starts_after_snapshot,
-                ):
-                    outcome = recover(config, conn, gc=True)
-            finally:
-                if live_lock is not None:
-                    release_runner_lock(conn, owner=f"runner:{os.getpid()}", token=live_lock.token)
-                conn.close()
-
-            self.assertIsNotNone(outcome.gc)
-            assert outcome.gc is not None
-            self.assertFalse(orphan.exists())
-            self.assertTrue(live.exists())
-            self.assertTrue(
-                any(item["job_id"] == stale.id for item in outcome.gc["swept_pending_refs"])
-            )
-            self.assertNotIn(pending_ref_name(stale.id), _pending_refs(repo))
 
 
 class RetryReleasesDeploymentIdentityTests(unittest.TestCase):

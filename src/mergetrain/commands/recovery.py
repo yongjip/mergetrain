@@ -34,7 +34,7 @@ from ..persistence.jobs import (
 )
 from ..persistence.leases import get_lock, live_worktree_path
 from ..persistence.operations import finish_recovery_operation, start_recovery_operation
-from ..recovery import force_unlock, reconcile, recover, sweep_pending_refs
+from ..recovery import force_unlock, reconcile, sweep_pending_refs
 
 
 def _open_queue(config: MergetrainConfig, *, create: bool) -> sqlite3.Connection:
@@ -169,10 +169,7 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         # safely recoverable dead-owner claims, then classifies pending pushes
         # against the remote. Cleanup and non-repeatable verify remain separate
         # explicit operations.
-        if args.apply:
-            outcome = recover(config, conn, gc=False, apply=True).reconcile
-        else:
-            outcome = reconcile(config, conn, apply=False)
+        outcome = reconcile(config, conn, apply=bool(args.apply))
         next_action = _recovery_next_action(conn, config)
     except LockHeld as exc:
         _finish_recovery_evidence(
