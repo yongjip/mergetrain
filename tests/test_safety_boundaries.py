@@ -408,6 +408,55 @@ class GcOwnershipTests(unittest.TestCase):
         self.assertIn("checked out", result["failed"][0]["reason"])
 
 
+class WorktreeConfigTests(unittest.TestCase):
+    """A runner started in a linked task worktree runs the control checkout's
+    reviewed policy, never the task branch's own .mergetrain.yaml."""
+
+    def test_validate_from_a_task_worktree_runs_the_control_checkouts_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _marker = make_demo_repo(root, gate_command="exit 1")
+            git(repo, "add", ".mergetrain.yaml")
+            git(repo, "commit", "-m", "reviewed gate that fails")
+            git(repo, "push", "origin", "main")
+            git(repo, "switch", "feature/a")
+            git(repo, "rebase", "main")
+            git(repo, "switch", "main")
+            task = root / "task-a"
+            git(repo, "worktree", "add", str(task), "feature/a")
+            code, out = _run(
+                [
+                    "--repo", str(task), "enqueue", "--task", "a",
+                    "--branch", "feature/a", "--json",
+                ]
+            )
+            self.assertEqual(code, 0, out)
+            # The task worktree weakens its own copy of the policy, uncommitted.
+            config = task / ".mergetrain.yaml"
+            config.write_text(
+                config.read_text(encoding="utf-8").replace("run: exit 1", "run: exit 0"),
+                encoding="utf-8",
+            )
+
+            code, out = _run(["--repo", str(task), "validate", "--json"])
+
+            self.assertEqual(json.loads(out)["counts"], {"failed": 1}, out)
+            self.assertNotEqual(code, 0)
+
+    def test_status_in_a_task_worktree_reports_the_control_checkouts_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = _ready_feature_branch(root)
+            git(repo, "switch", "main")
+            task = root / "task-a"
+            git(repo, "worktree", "add", str(task), "feature/a")
+
+            config = load_config(repo=task)
+
+            self.assertEqual(config.config_path, (repo / ".mergetrain.yaml").resolve())
+            self.assertEqual(config.repo, task.resolve())
+
+
 class PushScopeTests(unittest.TestCase):
     """The deploy pushes the approved refs and its audit ref, and nothing else."""
 

@@ -247,7 +247,8 @@ terminology:
 
             self.assertEqual(task_config.state, control_config.state)
             self.assertEqual(task_config.repo, task)
-            self.assertEqual(task_config.config_path, task / ".mergetrain.yaml")
+            # The policy is the control checkout's, as the queue is.
+            self.assertEqual(task_config.config_path, control / ".mergetrain.yaml")
             self.assertEqual(task_config.state.db, control / ".mergetrain" / "queue.sqlite")
             overridden = load_config(repo=task, db_override="override.sqlite")
             self.assertEqual(overridden.state.db, task / "override.sqlite")

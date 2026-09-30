@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 from ..cli_support import dump_json
-from ..config import render_default_config
+from ..config import render_default_config, shared_state_root
 from ..errors import ConfigError
 
 _AGENT_RULES = (
@@ -81,7 +81,9 @@ def _write_generated(path: Path, content: str, *, replace: bool) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    repo = Path(args.repo or Path.cwd()).expanduser().resolve()
+    # Write where load_config reads: in a linked task worktree, the control
+    # checkout that owns the shared queue.
+    repo = shared_state_root(Path(args.repo or Path.cwd()))
     project = args.project or repo.name or "example-app"
     config_text = render_default_config(project)
     if args.refresh_instructions:

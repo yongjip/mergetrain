@@ -75,6 +75,15 @@
   with no client. On POSIX both signals now end the server through its normal
   exit, which stops every CLI still running the way a cancellation does, and
   any other exit of the server does the same.
+- Run the control checkout's `.mergetrain.yaml` when mergetrain starts in a
+  linked task worktree. The queue, logs, and lock already came from the
+  control checkout, but the configuration came from the worktree, so a
+  `validate`, `deploy`, `daemon`, or MCP server started there gated and
+  pushed everyone's queued work with that task branch's own gates, verify
+  hooks, remote, and push refs, even an uncommitted edit of them. A queued
+  branch whose tests failed could be validated with a weakened gate and then
+  deployed. The configuration now comes from the control checkout unless
+  `--config` names another file, and `init --write` writes it there.
 
 ## 3.3.0 - 2026-09-30
 

@@ -84,7 +84,11 @@ Relative runtime-state paths are resolved from one shared control root. In a
 standard Git linked worktree, mergetrain follows Git's `.git`/`commondir`
 metadata to the control checkout, so the control checkout and all task
 worktrees use the same queue DB, logs, runner lock, and integration-worktree
-directory. In an ordinary checkout, a non-Git directory, a submodule, or
+directory. The configuration is read from the control checkout's
+`.mergetrain.yaml` too, unless `--config` names another file, and
+`init --write` writes there. A task branch's own copy, committed or not, never
+becomes the policy for the shared queue: a configuration change takes effect
+once it has landed and the control checkout has it. In an ordinary checkout, a non-Git directory, a submodule, or
 malformed/nonstandard worktree metadata, mergetrain keeps the historical
 repository-root resolution. Absolute paths remain unchanged, and a relative
 global `--db` override remains relative to the explicitly selected `--repo`.

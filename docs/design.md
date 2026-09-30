@@ -27,7 +27,8 @@ and destination.
 Relative queue, log, and integration-worktree state resolves to one shared
 control checkout across standard Git linked worktrees. The current task
 worktree remains the repository/branch identity used for readiness checks, but
-all linked worktrees observe the same SQLite queue and runner lock. This keeps
+all linked worktrees observe the same SQLite queue and runner lock and run the
+control checkout's `.mergetrain.yaml`. This keeps
 state ownership singular without adding a queue-selection mode.
 
 ## Runtime responsibility boundaries

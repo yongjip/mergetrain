@@ -605,21 +605,25 @@ def load_config(
 ) -> MergetrainConfig:
     repo_path = Path(repo or Path.cwd()).expanduser().resolve()
     state_root = _shared_state_root(repo_path)
-    path = Path(config_path).expanduser() if config_path else repo_path / DEFAULT_CONFIG_NAME
+    # The policy lives where the queue lives. A linked task worktree shares the
+    # control checkout's queue, so a runner started there must not validate or
+    # deploy that queue with the task branch's own .mergetrain.yaml, committed
+    # or not. The worktree stays the repository and branch identity.
+    path = Path(config_path).expanduser() if config_path else state_root / DEFAULT_CONFIG_NAME
     if not path.is_absolute():
         path = (repo_path / path).resolve()
     exists = path.exists()
     if exists:
         data = load_yaml(path.read_text(encoding="utf-8"))
     else:
-        data = default_config_dict(repo_path.name or "example-app")
+        data = default_config_dict(state_root.name or "example-app")
 
     config_version, data = _read_config_version(data)
 
     project_data = _as_mapping(data, "project")
     project_name_value = project_data.get("name")
     project_name = (
-        (repo_path.name or "example-app")
+        (state_root.name or "example-app")
         if project_name_value is None
         else _nonempty_string(project_name_value, key="project.name")
     )
