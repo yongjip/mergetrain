@@ -272,7 +272,12 @@ def gate_policy_warnings(config: MergetrainConfig) -> list[dict[str, str]]:
 
 
 _LEGACY_YAML_BOOLEAN = re.compile(r"^(?:yes|no|on|off)$", re.IGNORECASE)
-_AMBIGUOUS_YAML_INTEGER = re.compile(r"^[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-9]+)$")
+# Prefixed and leading-zero integers, with the '_' separators YAML 1.1 allows,
+# and its base-60 integers such as 1:30.
+_AMBIGUOUS_YAML_INTEGER = re.compile(
+    r"^[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|0[0-9_]+"
+    r"|[1-9][0-9_]*(?::[0-5]?[0-9])+)$"
+)
 
 
 def _validate_yaml_text(text: str) -> None:

@@ -144,6 +144,12 @@
   scoped to `src/[^_]*.py` was skipped for a train that changed `src/main.py`
   and ran for one that changed only `src/_private.py`. `[^...]` now means the
   same as `[!...]`.
+- Reject the YAML 1.1 integers that the prefixed and leading-zero rule missed.
+  A value with `_` separators, such as `command_timeout_seconds: 0_600`,
+  `0x_1F`, or `0b_101`, and a base-60 value such as `1:30` loaded as 384, 31,
+  5, and 90, although the config reference says such values are rejected.
+  They now fail with the same "ambiguous YAML integer" error as `010`; quote
+  them to keep a string.
 
 ## 3.3.0 - 2026-09-30
 

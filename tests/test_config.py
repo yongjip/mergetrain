@@ -170,14 +170,21 @@ terminology:
             "queue:\n  lock_ttl_minutes: 0x10\n": "quote it",
             "values: [yes]\n": "true/false",
             "values: [010]\n": "quote it",
+            # YAML 1.1 also reads these as octal, hexadecimal, binary, and
+            # base 60: 384, 31, 5, and 90.
+            "queue:\n  command_timeout_seconds: 0_600\n": "quote it",
+            "queue:\n  command_timeout_seconds: 0x_1F\n": "quote it",
+            "queue:\n  command_timeout_seconds: 0b_101\n": "quote it",
+            "queue:\n  command_timeout_seconds: 1:30\n": "quote it",
+            "values: [-1_0:30, 0x_]\n": "quote it",
         }
         for document, message in cases.items():
             with self.subTest(document=document):
                 with self.assertRaisesRegex(ConfigError, message):
                     load_yaml(document)
         self.assertEqual(
-            load_yaml("values: ['yes', '010']\n"),
-            {"values": ["yes", "010"]},
+            load_yaml("values: ['yes', '010', '0_600', '1:30']\n"),
+            {"values": ["yes", "010", "0_600", "1:30"]},
         )
 
     def test_yaml_loader_handles_plain_config_shapes(self) -> None:
