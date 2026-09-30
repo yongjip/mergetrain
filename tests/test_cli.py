@@ -2450,6 +2450,19 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(payload["error"]["code"], "removed_interface")
                 self.assertIn("mergetrain validate", payload["error"]["message"])
 
+    def test_removed_enqueue_options_in_equals_form_return_a_migration_error(self) -> None:
+        # Only the separate-value spelling was recognized; '--base-sha=abc'
+        # reached argparse and exited 2 with a usage error and empty stdout.
+        for option in ("--base-sha=abc", "--head-sha=abc", "--capture-sha=abc"):
+            with self.subTest(option=option):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = main(["enqueue", "--task", "t", "--branch", "b", option, "--json"])
+                payload = json.loads(out.getvalue())
+                self.assertEqual(code, 2)
+                self.assertEqual(payload["error"]["code"], "removed_interface")
+                self.assertIn(option.split("=", 1)[0], payload["error"]["message"])
+
     def test_removed_hub_list_command_is_rejected(self) -> None:
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as raised:

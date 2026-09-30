@@ -430,7 +430,12 @@ def _migration_error(raw: Sequence[str], normalized: Sequence[str]) -> str | Non
     if command in {"run-batch", "run-next"}:
         replacement = "mergetrain deploy" if "--deploy" in raw else "mergetrain validate"
         return f"v3 removed '{command}'; use {replacement}"
-    removed_enqueue = sorted(_REMOVED_ENQUEUE_FLAGS.intersection(raw))
+    # A v2 script may spell an option with its value as --base-sha=<sha>.
+    removed_enqueue = sorted(
+        flag
+        for flag in _REMOVED_ENQUEUE_FLAGS
+        if any(token == flag or token.startswith(f"{flag}=") for token in raw)
+    )
     if command == "enqueue" and removed_enqueue:
         return (
             f"v3 removed enqueue option {removed_enqueue[0]}; exact SHAs and "

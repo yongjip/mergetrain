@@ -184,6 +184,11 @@
   urllib handed the credentials to the resolver as part of the host name, and
   every notification failed with an opaque "webhook delivery failed". Loading
   the config now fails with a `config_error` that says so.
+- Answer a removed `enqueue` option written as `--option=value`, such as
+  `--base-sha=abc`, with the documented `removed_interface` error. Only the
+  `--base-sha abc` spelling was recognized, so a v2 script using the `=` form
+  got an argparse usage error on stderr and nothing on stdout instead of the
+  JSON error that names the replacement.
 
 ## 3.3.0 - 2026-09-30
 
