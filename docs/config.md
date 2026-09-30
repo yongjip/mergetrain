@@ -88,7 +88,13 @@ directory. The configuration is read from the control checkout's
 `.mergetrain.yaml` too, unless `--config` names another file, and
 `init --write` writes there. A task branch's own copy, committed or not, never
 becomes the policy for the shared queue: a configuration change takes effect
-once it has landed and the control checkout has it. In an ordinary checkout, a non-Git directory, a submodule, or
+once it has landed and the control checkout has it.
+
+Run from a subdirectory of a configured checkout, mergetrain uses the top of
+that checkout, so `status` there reports the real queue and `init --write`
+refuses to start a second one. A directory with its own `.git` or
+`.mergetrain.yaml` is used as given, and so is a directory inside a checkout
+that has no mergetrain configuration. In an ordinary checkout, a non-Git directory, a submodule, or
 malformed/nonstandard worktree metadata, mergetrain keeps the historical
 repository-root resolution. Absolute paths remain unchanged, and a relative
 global `--db` override remains relative to the explicitly selected `--repo`.

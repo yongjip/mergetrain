@@ -581,7 +581,27 @@ def shared_state_root(repo: str | Path) -> Path:
     one repository reaches the same queue; anything else is its own root.
     """
 
-    return _shared_state_root(Path(repo).expanduser().resolve())
+    return _shared_state_root(configured_checkout(repo))
+
+
+def configured_checkout(repo: str | Path) -> Path:
+    """The top of the configured checkout ``repo`` lies in, or ``repo`` itself.
+
+    Run from a subdirectory of a configured repository, mergetrain looked for
+    its config and queue in that subdirectory, reported the repository
+    unconfigured, and recommended an ``init`` that would start a second queue.
+    A directory with its own ``.git`` or config is taken as given, and so is
+    one inside a checkout that mergetrain is not configured in.
+    """
+
+    path = Path(repo).expanduser().resolve()
+    if (path / ".git").exists() or (path / DEFAULT_CONFIG_NAME).exists():
+        return path
+    for parent in path.parents:
+        if (parent / ".git").exists():
+            configured = (_shared_state_root(parent) / DEFAULT_CONFIG_NAME).exists()
+            return parent if configured else path
+    return path
 
 
 def _resolve_path(repo: Path, value: Any, default: str, *, key: str) -> Path:
@@ -603,7 +623,7 @@ def load_config(
     repo: str | Path | None = None,
     db_override: str | Path | None = None,
 ) -> MergetrainConfig:
-    repo_path = Path(repo or Path.cwd()).expanduser().resolve()
+    repo_path = configured_checkout(repo or Path.cwd())
     state_root = _shared_state_root(repo_path)
     # The policy lives where the queue lives. A linked task worktree shares the
     # control checkout's queue, so a runner started there must not validate or

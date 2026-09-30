@@ -253,6 +253,32 @@ terminology:
             overridden = load_config(repo=task, db_override="override.sqlite")
             self.assertEqual(overridden.state.db, task / "override.sqlite")
 
+    def test_a_subdirectory_of_a_configured_checkout_reads_that_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td).resolve()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            (repo / "app" / "src").mkdir(parents=True)
+
+            config = load_config(repo=repo / "app" / "src")
+
+            self.assertEqual(config.repo, repo)
+            self.assertTrue(config.config_exists)
+            self.assertEqual(config.state.db, repo / ".mergetrain" / "queue.sqlite")
+
+    def test_a_subdirectory_of_an_unconfigured_checkout_stays_as_given(self) -> None:
+        # Never climb into a checkout mergetrain is not set up in, such as a
+        # home directory kept under Git.
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td).resolve()
+            subprocess.run(["git", "init", "-q", str(home)], check=True)
+            project = home / "projects" / "new"
+            project.mkdir(parents=True)
+
+            self.assertEqual(load_config(repo=project).repo, project)
+
     def test_malformed_linked_worktree_metadata_keeps_repo_relative_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td).resolve()

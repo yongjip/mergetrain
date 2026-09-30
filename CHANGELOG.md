@@ -109,6 +109,15 @@
   failed on the arrow it prints. JSON now escapes the characters such a
   stdout cannot carry, which parses to the same payload, and human-readable
   output prints them as escapes instead of failing.
+- Use the top of a configured checkout when mergetrain runs in one of its
+  subdirectories. `status` run from a subdirectory looked for the config and
+  queue there, reported the repository unconfigured and idle while jobs
+  waited, and recommended `init --write`, which created a second config and
+  queue in the subdirectory that no runner watches. A subdirectory now
+  resolves to its configured checkout, and `init` there refuses to overwrite
+  the existing config. A checkout with no mergetrain config is never used
+  this way, so a project folder inside a home directory kept under Git stays
+  as given.
 
 ## 3.3.0 - 2026-09-30
 

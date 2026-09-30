@@ -442,6 +442,9 @@ def _cap_init(repo):
     # has no --json flag: the payload is unconditional, so capture it directly.
     target = repo / "new-project"
     target.mkdir()
+    # A repository of its own: a plain folder inside the configured fixture
+    # repo would resolve to that checkout, where init refuses to overwrite.
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
     out = io.StringIO()
     with redirect_stdout(out):
         main(["--repo", str(target), "init", "--project", "demo", "--write"])

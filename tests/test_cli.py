@@ -2940,6 +2940,27 @@ class CliTests(unittest.TestCase):
                 "interrupted",
             )
 
+    def test_status_and_init_in_a_subdirectory_use_the_configured_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            app = repo / "app"
+            app.mkdir()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(app), "status", "--json"])
+            self.assertNotEqual(json.loads(out.getvalue())["health"], "unconfigured")
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = main(["--repo", str(app), "init", "--write"])
+            self.assertNotEqual(code, 0)
+            self.assertFalse((app / ".mergetrain.yaml").exists())
+            self.assertFalse((app / ".mergetrain").exists())
+
     def test_output_survives_a_stdout_without_utf8(self) -> None:
         # A Windows pipe without UTF-8 mode encodes stdout with the ANSI code
         # page, which cannot carry CJK task text, emoji, or the arrow in stats.
