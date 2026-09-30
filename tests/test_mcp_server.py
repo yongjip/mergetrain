@@ -715,6 +715,22 @@ class DeployGateTests(unittest.TestCase):
         )
         self.assertEqual(sum(is_guarded_deploy_call(args) for args in calls), 1)
 
+    def test_a_deploy_timeout_says_the_push_may_have_landed_and_hides_the_plan(self) -> None:
+        # The adapter stops a deploy that outlives its timeout, possibly after
+        # the atomic push, so a failure envelope alone would mislead the agent.
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            side_effect=subprocess.TimeoutExpired(cmd=["mergetrain"], timeout=1),
+        ):
+            payload = asyncio.run(
+                self.tools._json(["deploy", "--expected-plan", PLAN_SHA, "--json"])
+            )
+        self.assertEqual(payload["error"]["code"], "cli_timeout")
+        self.assertIn("may already have landed", payload["error"]["message"])
+        self.assertIn("mergetrain_status", payload["error"]["message"])
+        self.assertNotIn(PLAN_SHA, json.dumps(payload))
+
     def test_the_human_sees_the_operating_contract_summary(self) -> None:
         ctx = FakeContext()
         with patch.object(

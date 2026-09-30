@@ -48,6 +48,13 @@
   run. The server accepted both options and dropped them, so
   `mergetrain --db shared.sqlite mcp` enqueued into, reported, validated, and
   deployed the repository's default queue and configuration instead.
+- Say that the push may already have landed when the MCP deploy tool stops a
+  deploy that outlived its timeout. The tool returned only
+  `cli_timeout` with "exceeded 3600s", which reads as a failed deploy although
+  the stop can come after the atomic push, and the message echoed the plan
+  hash that agents are never shown. The message now tells the agent to read
+  `mergetrain_status` before deciding what happened, and no MCP error message
+  includes the plan hash.
 
 ## 3.3.0 - 2026-09-30
 

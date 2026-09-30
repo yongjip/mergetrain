@@ -109,6 +109,21 @@ def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return payload
 
 
+def _display_command(args: list[str]) -> str:
+    """A CLI command for a message, without the plan hash agents never see."""
+
+    shown: list[str] = []
+    hidden = False
+    for arg in args:
+        if hidden:
+            hidden = False
+        elif arg == "--expected-plan":
+            hidden = True
+        else:
+            shown.append(arg)
+    return " ".join(shown)
+
+
 def _replace_local_path_root(text: str, root: str, replacement: str) -> str:
     """Shorten a filesystem path root without rewriting matching URL paths."""
 
@@ -339,26 +354,31 @@ class MergetrainTools:
         output that is not a JSON object needs a synthesized envelope.
         """
 
+        command = _display_command(args)
         try:
             completed = await self._run(args)
         except subprocess.TimeoutExpired:
-            return _error(
-                "cli_timeout",
-                f"'mergetrain {' '.join(args)}' exceeded {_CLI_TIMEOUT_SECONDS}s",
-            )
+            message = f"'mergetrain {command}' exceeded {_CLI_TIMEOUT_SECONDS}s and was stopped"
+            if args[:1] == ["deploy"]:
+                # It may have been stopped after the atomic push.
+                message += (
+                    "; the push may already have landed, so read mergetrain_status "
+                    "before deciding what happened"
+                )
+            return _error("cli_timeout", message)
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError:
             detail = self._safe_detail(completed.stderr, completed.stdout)
             return _error(
                 "cli_output_unreadable",
-                f"'mergetrain {' '.join(args)}' did not return JSON: {detail}",
+                f"'mergetrain {command}' did not return JSON: {detail}",
                 exit_code=completed.returncode,
             )
         if not isinstance(payload, dict):
             return _error(
                 "cli_output_unreadable",
-                f"'mergetrain {' '.join(args)}' returned a non-object payload",
+                f"'mergetrain {command}' returned a non-object payload",
                 exit_code=completed.returncode,
             )
         return payload
