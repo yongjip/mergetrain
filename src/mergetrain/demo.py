@@ -35,13 +35,11 @@ def _shell_argument(value: str) -> str:
     Gate commands run through a POSIX ``sh`` on every platform (see
     ``command_runner._posix_shell``), so one dialect is enough. Double quotes
     keep executable paths with spaces intact while preserving the command as
-    one readable YAML scalar.
+    one readable YAML scalar. Inside them ``sh`` still reads ``\\``, ``$``, and
+    backquotes, so those are escaped on Windows too: unescaped, a UNC path lost
+    a backslash and ``$name`` in a directory name expanded.
     """
 
-    if os.name == "nt":
-        # Windows paths cannot contain a double quote, and their backslashes
-        # must survive verbatim, so wrap without escaping.
-        return f'"{value}"'
     escaped = (
         value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
     )

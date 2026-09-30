@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mergetrain.cli import main
+from mergetrain.command_runner import _posix_shell
 from mergetrain.config import load_config
 from mergetrain.demo import DemoFailure, DemoSandbox, DemoWalkthrough
 from mergetrain.persistence.connection import connect
@@ -272,20 +273,34 @@ class DemoConfigTests(unittest.TestCase):
         )
         self.assertIn(f'--git-dir="{walkthrough.remote}"', config.deploy.verify[0].run)
 
-    def test_windows_paths_keep_their_separators(self) -> None:
-        walkthrough = self._walkthrough("brief")
-        executable = r"C:\tools\Python\3.13\python.exe"
-        with (
-            patch.object(sys, "executable", executable),
-            patch.object(os, "name", "nt"),
+    def test_windows_paths_reach_the_gate_shell_verbatim(self) -> None:
+        # Gates run through a POSIX sh on Windows too, which reads '\\', '\$',
+        # and '$name' inside double quotes: a UNC path lost a backslash, and a
+        # '$' in a directory name expanded.
+        for executable in (
+            r"C:\tools\Python\3.13\python.exe",
+            r"\\server\share\python.exe",
+            r"C:\Users\dev$ops\python.exe",
         ):
-            walkthrough._write_demo_config()
+            with self.subTest(executable=executable):
+                walkthrough = self._walkthrough("brief")
+                with (
+                    patch.object(sys, "executable", executable),
+                    patch.object(os, "name", "nt"),
+                ):
+                    walkthrough._write_demo_config()
 
-        config = load_config(repo=walkthrough.repo)
-        self.assertEqual(
-            config.gates[0].run,
-            f'"{executable}" -m unittest discover -s tests',
-        )
+                gate = load_config(repo=walkthrough.repo).gates[0].run
+                completed = subprocess.run(
+                    [_posix_shell(), "-c", f"printf '%s\\n' {gate}"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                self.assertEqual(
+                    completed.stdout.splitlines(),
+                    [executable, "-m", "unittest", "discover", "-s", "tests"],
+                )
 
     def test_path_with_a_single_quote_round_trips_through_yaml(self) -> None:
         walkthrough = self._walkthrough("quote")
@@ -325,16 +340,16 @@ class DemoConfigTests(unittest.TestCase):
             self.assertNotIn(b"\r", blob, f"{ref}:{path} was committed with CRLF")
 
     @unittest.skipUnless(shutil.which("git"), "git is required")
-    def test_generated_commands_run_through_the_platform_shell(self) -> None:
+    def test_generated_commands_run_through_the_gate_shell(self) -> None:
         walkthrough = self._walkthrough("space in name", make_repo=False)
         walkthrough._bootstrap()
         walkthrough._commit_seed()
 
         config = load_config(repo=walkthrough.repo)
         for command in (config.gates[0].run, config.deploy.verify[0].run):
+            # The POSIX sh that runs gates, not cmd.exe, even on Windows.
             completed = subprocess.run(
-                command,
-                shell=True,
+                [_posix_shell(), "-c", command],
                 cwd=walkthrough.repo,
                 env=walkthrough.env,
                 text=True,

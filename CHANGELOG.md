@@ -201,6 +201,13 @@
   missing directory, `.mergetrain/`, the database, and its `.gitignore`. They
   now report an empty queue and write nothing there. An existing queue is
   opened as before, so `gc --json` still migrates an older one.
+- Keep `mergetrain demo` working on Windows when the path of Python or of the
+  sandbox contains a `$` or a doubled backslash, as in `C:\Users\dev$ops\...`
+  or a `\\server\share\python.exe` on a network share. The demo wrapped those
+  paths in double quotes without escaping them, but gates run through a POSIX
+  `sh` on Windows too, which expanded `$ops` and turned `\\` into `\`, so the
+  demo's gate or verify command pointed at a path that did not exist. The
+  paths are now escaped for `sh` as on every other platform.
 
 ## 3.3.0 - 2026-09-30
 
