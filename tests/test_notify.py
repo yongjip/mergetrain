@@ -413,7 +413,9 @@ class HubDaemonNotifyIntegrationTests(unittest.TestCase):
                 say=lambda _: None,
                 install_signal_handlers=False,
                 process_batch_factory=lambda config, owner: (lambda conn, jobs: None),
-                notifier=lambda title, message: received.append((title, message)),
+                notifier_resolver=lambda path, key: (
+                    lambda title, message: received.append((title, message))
+                ),
             )
             self.assertEqual(received, [("mergetrain · svc", "Train landed (1 job)")])
 

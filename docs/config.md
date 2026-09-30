@@ -283,8 +283,8 @@ or error pause is sent again while it lasts.
 
 If `--notify` is supplied without `webhook_url`, the single-repo daemon warns at
 startup and Hub warns once per affected repository when a transition needs
-delivery. This avoids treating an intentionally empty backend chain as a
-successful headless notification.
+delivery. This avoids treating `--notify` without a webhook as a successful
+headless notification.
 
 For webhook delivery, `transitions` selects `landed`,
 `blocked`/partial, `needs_reconcile`, and daemon error/pause messages. A disabled

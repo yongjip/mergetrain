@@ -215,7 +215,6 @@ def hub_daemon_loop(
     say: Say = print,
     install_signal_handlers: bool = True,
     process_batch_factory: ProcessBatchFactory | None = None,
-    notifier: Notifier | None = None,
     notifier_resolver: NotifierResolver | None = None,
 ) -> list[dict[str, Any]]:
     """Sweep every registered repo on an interval until stopped.
@@ -232,7 +231,7 @@ def hub_daemon_loop(
         say(f"mergetrain hub daemon received signal {signum}; finishing current sweep")
 
     def deliver(path: str, key: str, title: str, message: str) -> None:
-        delivery = notifier_resolver(path, key) if notifier_resolver is not None else notifier
+        delivery = notifier_resolver(path, key) if notifier_resolver is not None else None
         if delivery is not None:
             delivery(title, message)
 
@@ -246,9 +245,7 @@ def hub_daemon_loop(
     # Persisted across invocations so --once/cron mode does not re-notify
     # every persistent error on every run, and a restart resumes dedup.
     last_outcomes: dict[str, str] = (
-        load_notify_state(registry)
-        if notifier is not None or notifier_resolver is not None
-        else {}
+        load_notify_state(registry) if notifier_resolver is not None else {}
     )
     try:
         while True:
@@ -278,7 +275,7 @@ def hub_daemon_loop(
                         f"mergetrain hub sweep: {len(outcomes)} repo(s), "
                         f"{processed} with work processed"
                     )
-                    if notifier is not None or notifier_resolver is not None:
+                    if notifier_resolver is not None:
                         last_outcomes = deliver_notifications(
                             outcomes,
                             last_outcomes,

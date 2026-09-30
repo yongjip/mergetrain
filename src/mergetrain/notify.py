@@ -109,34 +109,12 @@ def webhook_notifier(url: str, *, timeout_seconds: int = 10) -> Notifier:
     return send
 
 
-def notifier_chain(*notifiers: Notifier) -> Notifier:
-    """Deliver to every configured backend, in order."""
-
-    def send(title: str, message: str) -> None:
-        failures: list[Exception] = []
-        for notifier in notifiers:
-            try:
-                notifier(title, message)
-            except Exception as exc:  # noqa: BLE001 - other backends still get a turn
-                failures.append(exc)
-        if failures:
-            raise failures[0]
-
-    return send
-
-
 def configured_notifier(config: NotifyConfig) -> Notifier:
-    """Build the configured webhook chain."""
+    """Build the configured webhook notifier; without a webhook it sends nothing."""
 
-    backends: list[Notifier] = []
-    if config.webhook_url:
-        backends.append(
-            webhook_notifier(
-                config.webhook_url,
-                timeout_seconds=config.timeout_seconds,
-            )
-        )
-    return notifier_chain(*backends)
+    if not config.webhook_url:
+        return lambda title, message: None
+    return webhook_notifier(config.webhook_url, timeout_seconds=config.timeout_seconds)
 
 
 def sweep_notifications(
