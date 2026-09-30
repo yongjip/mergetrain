@@ -865,6 +865,11 @@ class GitRunner:
         def finish(item: Job, **values: Any) -> Job:
             return self._finish_job(conn, item.id, lease_token=lease_token, **values)
 
+        def block_all(note: str) -> list[Job]:
+            return [
+                finish(item, status="blocked", log_path=str(log_path), note=note) for item in jobs
+            ]
+
         def finish_active_jobs(*, status: str, note: str) -> list[Job]:
             finished: list[Job] = []
             for item in jobs:
@@ -949,10 +954,7 @@ class GitRunner:
                     or {job.train_size for job in jobs} != {len(jobs)}
                 ):
                     note = "validated train identity is incomplete or mixes multiple trains; enqueue a fresh train"
-                    return [
-                        finish(job, status="blocked", log_path=str(log_path), note=note)
-                        for job in jobs
-                    ]
+                    return block_all(note)
                 emit(
                     phase="fetching",
                     state="active",
@@ -987,10 +989,7 @@ class GitRunner:
                         }
                     except MergeBlocked as exc:
                         note = f"validated train identity check failed: {exc}"
-                        return [
-                            finish(job, status="blocked", log_path=str(log_path), note=note)
-                            for job in jobs
-                        ]
+                        return block_all(note)
                     if reuse_authorized:
                         reuse_decision = self._validation.decide(
                             jobs,
@@ -1089,12 +1088,7 @@ class GitRunner:
                                     ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
                                 )
                                 note = f"validated train could not be reassembled: {note}"
-                                return [
-                                    finish(
-                                        item, status="blocked", log_path=str(log_path), note=note
-                                    )
-                                    for item in jobs
-                                ]
+                                return block_all(note)
                             results.append(
                                 finish(job, status="blocked", log_path=str(log_path), note=note)
                             )
@@ -1105,12 +1099,7 @@ class GitRunner:
                         if not git_worktree_clean(worktree):
                             if deploying_validated:
                                 note = "validated train produced a dirty integration worktree after reassembly"
-                                return [
-                                    finish(
-                                        item, status="blocked", log_path=str(log_path), note=note
-                                    )
-                                    for item in jobs
-                                ]
+                                return block_all(note)
                             results.append(
                                 finish(
                                     job,
