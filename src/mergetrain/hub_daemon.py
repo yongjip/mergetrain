@@ -11,7 +11,6 @@ default 1, so heavy gates from different repos never stack).
 from __future__ import annotations
 
 import os
-import signal
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -19,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, load_config, shared_state_root
-from .daemon import ProcessBatch, Say, daemon_tick
+from .daemon import ProcessBatch, Say, daemon_tick, handling_stop_signals
 from .deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from .hub import display_path
 from .notify import (
@@ -235,19 +234,13 @@ def hub_daemon_loop(
         if delivery is not None:
             delivery(title, message)
 
-    old_handlers: dict[int, Any] = {}
-    if install_signal_handlers:
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            old_handlers[signum] = signal.getsignal(signum)
-            signal.signal(signum, request_stop)
-
     outcomes: list[dict[str, Any]] = []
-    # Persisted across invocations so --once/cron mode does not re-notify
-    # every persistent error on every run, and a restart resumes dedup.
-    last_outcomes: dict[str, str] = (
-        load_notify_state(registry) if notifier_resolver is not None else {}
-    )
-    try:
+    with handling_stop_signals(request_stop, install=install_signal_handlers):
+        # Persisted across invocations so --once/cron mode does not re-notify
+        # every persistent error on every run, and a restart resumes dedup.
+        last_outcomes: dict[str, str] = (
+            load_notify_state(registry) if notifier_resolver is not None else {}
+        )
         while True:
             # Top-of-loop check: a signal landing during the inter-sweep wait
             # must never trigger one more full (deploying) sweep — PEP 475
@@ -291,8 +284,4 @@ def hub_daemon_loop(
             if once or stop.is_set():
                 break
             stop.wait(max(1, int(interval_seconds)))
-    finally:
-        if install_signal_handlers:
-            for saved_signum, saved_handler in old_handlers.items():
-                signal.signal(saved_signum, saved_handler)
     return outcomes

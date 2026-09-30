@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import signal
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +102,41 @@ def _validation_pause(say: Say) -> str:
     return "validation_paused"
 
 
+def _reconcile_pause(say: Say, jobs: str, *, validate_only: bool) -> str:
+    say(
+        f"mergetrain daemon tick: {jobs} pending reconcile; "
+        f"{'validation' if validate_only else 'deploy'} paused "
+        "(run 'mergetrain reconcile --apply')"
+    )
+    return "reconcile_paused"
+
+
+def _idle(say: Say, *, validate_only: bool) -> str:
+    if validate_only:
+        say("mergetrain validation daemon tick: no manual queued jobs")
+    else:
+        say("mergetrain daemon tick: no auto-approved queued jobs")
+    return "idle"
+
+
+@contextmanager
+def handling_stop_signals(
+    handler: Callable[[int, Any], None], *, install: bool
+) -> Iterator[None]:
+    """Route SIGINT and SIGTERM to ``handler`` inside the block, if ``install``."""
+
+    previous: dict[int, Any] = {}
+    if install:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, handler)
+    try:
+        yield
+    finally:
+        for saved_signum, saved_handler in previous.items():
+            signal.signal(saved_signum, saved_handler)
+
+
 def daemon_tick(
     *,
     db_path: str,
@@ -152,12 +188,7 @@ def daemon_tick(
                 # deploys to the same push refs, so it must not push over a
                 # pending reconcile (0.3.0 Phase 2, decision Q4). Pause until
                 # an operator runs `mergetrain reconcile --apply`.
-                say(
-                    f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
-                    f"{'validation' if validate_only else 'deploy'} paused "
-                    "(run 'mergetrain reconcile --apply')"
-                )
-                return "reconcile_paused"
+                return _reconcile_pause(say, f"{pending} job(s)", validate_only=validate_only)
             if validate_only and validated_train_summaries(probe):
                 return _validation_pause(say)
             has_work = (
@@ -183,11 +214,7 @@ def daemon_tick(
         finally:
             probe.close()
         if not has_work and not has_orphans and not stale_token:
-            if validate_only:
-                say("mergetrain validation daemon tick: no manual queued jobs")
-            else:
-                say("mergetrain daemon tick: no auto-approved queued jobs")
-            return "idle"
+            return _idle(say, validate_only=validate_only)
     conn = connect(db_path)
     try:
         if stale_token and force_clear_lock_and_split(conn, owner=owner, token=stale_token):
@@ -201,12 +228,7 @@ def daemon_tick(
             recover_orphans(conn, owner=owner, ttl_minutes=lock_ttl_minutes)
         pending = deploy_reconcile_pending(conn)
         if pending:
-            say(
-                f"mergetrain daemon tick: {pending} job(s) pending reconcile; "
-                f"{'validation' if validate_only else 'deploy'} paused "
-                "(run 'mergetrain reconcile --apply')"
-            )
-            return "reconcile_paused"
+            return _reconcile_pause(say, f"{pending} job(s)", validate_only=validate_only)
         if validate_only and validated_train_summaries(conn):
             return _validation_pause(say)
         has_work = has_queued_manual(conn) if validate_only else has_queued_auto(conn)
@@ -299,19 +321,10 @@ def daemon_tick(
             if deploy_reconcile_pending(conn):
                 # The claim itself parked orphans as needs_reconcile and
                 # refused to proceed (TOCTOU guard in claim_all_queued).
-                say(
-                    "mergetrain daemon tick: jobs pending reconcile; "
-                    f"{'validation' if validate_only else 'deploy'} "
-                    "paused (run 'mergetrain reconcile --apply')"
-                )
-                return "reconcile_paused"
+                return _reconcile_pause(say, "jobs", validate_only=validate_only)
             if validate_only and validated_train_summaries(conn):
                 return _validation_pause(say)
-        if validate_only:
-            say("mergetrain validation daemon tick: no manual queued jobs")
-        else:
-            say("mergetrain daemon tick: no auto-approved queued jobs")
-        return "idle"
+        return _idle(say, validate_only=validate_only)
     finally:
         try:
             if lease_token:
@@ -369,14 +382,8 @@ def daemon_loop(
         if notifier is not None:
             notifier(title, message)
 
-    old_handlers: dict[int, Any] = {}
-    if install_signal_handlers:
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            old_handlers[signum] = signal.getsignal(signum)
-            signal.signal(signum, request_stop)
-
     outcome = "idle"
-    try:
+    with handling_stop_signals(request_stop, install=install_signal_handlers):
         while True:
             # Checked at the TOP of the loop: a signal that lands during the
             # inter-tick wait must never start one more tick (PEP 475 resumes
@@ -423,8 +430,4 @@ def daemon_loop(
             if once or stop.is_set():
                 break
             stop.wait(max(1, int(interval_seconds)))
-    finally:
-        if install_signal_handlers:
-            for saved_signum, saved_handler in old_handlers.items():
-                signal.signal(saved_signum, saved_handler)
     return outcome
