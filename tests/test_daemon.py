@@ -24,7 +24,12 @@ from mergetrain.models import Job
 from mergetrain.persistence.claims import claim_all_queued
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.jobs import enqueue_job, get_job, list_jobs, mark_job
-from mergetrain.persistence.leases import default_owner, get_lock, release_runner_lock
+from mergetrain.persistence.leases import (
+    acquire_runner_lock,
+    default_owner,
+    get_lock,
+    release_runner_lock,
+)
 
 
 class GradeBatchTests(unittest.TestCase):
@@ -322,6 +327,49 @@ class DaemonTests(unittest.TestCase):
             )
 
             self.assertEqual(outcome, "partial:1/2")
+
+    def test_a_runner_that_takes_the_lock_after_the_probe_is_waited_for(self) -> None:
+        """#42: ordinary lock contention is not a daemon error to notify about."""
+
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "queue.sqlite"
+            conn = connect(db)
+            enqueue_job(
+                conn,
+                task="auto",
+                branch="auto",
+                auto_deploy=True,
+                approval_destination_sha="a" * 64,
+                approval_execution_policy_sha="b" * 64,
+            )
+            # A manual validate that has finished its jobs but still holds the
+            # lock while it cleans up, so the probe sees no work in progress.
+            runner = f"alice:{os.getpid()}"
+            lock = acquire_runner_lock(conn, owner=runner)
+            conn.close()
+            received: list[tuple[str, str]] = []
+
+            outcome = daemon_loop(
+                db_path=str(db),
+                process_batch=lambda conn, jobs: self.fail("the lock was held"),
+                owner="daemon:1",
+                once=True,
+                say=lambda _: None,
+                install_signal_handlers=False,
+                notifier=lambda title, message: received.append((title, message)),
+                notification_name="svc",
+                notification_state_path=Path(td) / "notify.json",
+                approval_destination_sha="a" * 64,
+                approval_execution_policy_sha="b" * 64,
+            )
+
+            self.assertEqual(outcome, "idle")
+            self.assertEqual(received, [])
+            conn = connect(db)
+            try:
+                release_runner_lock(conn, owner=runner, token=lock.token)
+            finally:
+                conn.close()
 
     def test_validation_loop_rejects_deploy_notifier(self) -> None:
         with self.assertRaisesRegex(QueueError, "does not support"):

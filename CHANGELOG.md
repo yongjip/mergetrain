@@ -245,6 +245,16 @@
   the MCP deploy tool then refused. The claim now checks again under the
   runner lock: `validate` stops with `validated_train_pending`, and `deploy`
   presents the train that became Ready.
+- Keep error text out of `daemon --notify` and `hub daemon --notify`
+  webhooks, and stop notifying about ordinary lock contention. A tick error
+  was posted verbatim, so the webhook received local home-directory paths,
+  command output, and, when a manual `validate` or `deploy` held the runner
+  lock, "runner lock is held by alive owner: <user>:<pid>" with the OS
+  username. Each later manual run posted it again with a new process ID. A
+  tick that finds another runner holding the lock now waits for it and
+  reports itself idle, as it already did while that runner had jobs in
+  progress, and an error notification says only "Deploy paused: the daemon
+  hit an error; see its log".
 
 ## 3.3.0 - 2026-09-30
 

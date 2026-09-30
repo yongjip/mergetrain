@@ -20,6 +20,8 @@ from mergetrain.notify import (
     webhook_notifier,
 )
 
+PAUSED = "Deploy paused: the daemon hit an error; see its log"
+
 
 def outcome(path: str, result: str, **extra):
     return {"path": path, "name": Path(path).name, "outcome": result, **extra}
@@ -82,7 +84,7 @@ class SweepNotificationTests(unittest.TestCase):
             first,
             [
                 ("mergetrain · api", "Train landed (2 jobs)"),
-                ("mergetrain · web", "repo directory is missing"),
+                ("mergetrain · web", PAUSED),
             ],
         )
 
@@ -104,7 +106,7 @@ class SweepNotificationTests(unittest.TestCase):
             prev,
         )
         # The error cleared (idle) and came back: that transition notifies again.
-        self.assertEqual(fourth, [("mergetrain · web", "repo directory is missing")])
+        self.assertEqual(fourth, [("mergetrain · web", PAUSED)])
 
     def test_landing_grades_are_honest_and_no_landing_dedups(self) -> None:
         prev: dict[str, str] = {}
@@ -140,7 +142,7 @@ class SweepNotificationTests(unittest.TestCase):
         # First delivery fails: the transition must NOT be marked as notified.
         _, prev = deliver(broken, {}, fail_paths={"/w/web"})
         second, prev = deliver(broken, prev)
-        self.assertEqual(second, [("mergetrain · web", "repo directory is missing")])
+        self.assertEqual(second, [("mergetrain · web", PAUSED)])
         # Now that it delivered, the unchanged error goes quiet.
         third, prev = deliver(broken, prev)
         self.assertEqual(third, [])
@@ -151,9 +153,16 @@ class SweepNotificationTests(unittest.TestCase):
         second, prev = deliver([outcome("/w/web", "error", error="permission denied")], prev)
         # A materially different failure is a genuine transition, not the
         # "same broken repo" the dedup is meant to silence.
-        self.assertEqual(second, [("mergetrain · web", "permission denied")])
+        self.assertEqual(second, [("mergetrain · web", PAUSED)])
         third, prev = deliver([outcome("/w/web", "error", error="permission denied")], prev)
         self.assertEqual(third, [])
+
+    def test_an_error_notification_leaves_the_error_text_in_the_log(self) -> None:
+        """#42: a tick error can name the OS user, home paths, or command output."""
+
+        error = "cannot observe /Users/alice/src/app/.mergetrain/queue.sqlite"
+        messages, _ = sweep_notifications([outcome("/w/app", "error", error=error)], {})
+        self.assertEqual([message[2:] for message in messages], [("mergetrain · app", PAUSED)])
 
     def test_state_round_trips_through_disk(self) -> None:
         with tempfile.TemporaryDirectory() as td:

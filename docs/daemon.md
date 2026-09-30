@@ -36,9 +36,12 @@ mergetrain daemon --validate-only --once
   partial validation creates a validated train, later ticks remain paused until
   that train is deployed, dismissed, or superseded.
 - Both modes pause while deploy reconciliation is pending.
-- Uses the same runner lock as manual runners.
+- Uses the same runner lock as manual runners. While another runner holds it,
+  a tick waits and reports itself idle.
 - Catches tick exceptions, logs them to stdout/stderr, and attempts an
-  owner-guarded lock release.
+  owner-guarded lock release. A `--notify` webhook learns only that the
+  daemon hit an error; the error text, which can name local users, paths, or
+  command output, stays in the log.
 - Handles SIGINT/SIGTERM by finishing the current tick before exiting.
 
 `--validate-only` cannot be combined with `--notify`. Existing headless

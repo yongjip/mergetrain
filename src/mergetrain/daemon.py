@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .errors import ConfigError, MergetrainError, QueueError
+from .errors import ConfigError, LockHeld, MergetrainError, QueueError
 from .models import Job
 from .notify import (
     Notifier,
@@ -243,20 +243,31 @@ def daemon_tick(
             # this tick did: grading it without them reported idle, which
             # never notifies, or a clean landing beside them.
             approval_blocked: list[Job] = []
-            jobs = claim_all_queued(
-                conn,
-                owner=owner,
-                ttl_minutes=lock_ttl_minutes,
-                auto_only=not validate_only,
-                manual_only=validate_only,
-                approval_destination_sha=(
-                    "" if validate_only else current_destination_sha
-                ),
-                approval_execution_policy_sha=(
-                    "" if validate_only else current_execution_policy_sha
-                ),
-                blocked=approval_blocked,
-            )
+            try:
+                jobs = claim_all_queued(
+                    conn,
+                    owner=owner,
+                    ttl_minutes=lock_ttl_minutes,
+                    auto_only=not validate_only,
+                    manual_only=validate_only,
+                    approval_destination_sha=(
+                        "" if validate_only else current_destination_sha
+                    ),
+                    approval_execution_policy_sha=(
+                        "" if validate_only else current_execution_policy_sha
+                    ),
+                    blocked=approval_blocked,
+                )
+            except LockHeld:
+                # Another runner took the lock after the read-only probe, or
+                # holds it with nothing in progress, as a manual run does while
+                # it cleans up. Wait for it as the probe does: ordinary
+                # contention is not a daemon error to report or notify about.
+                say(
+                    "mergetrain daemon tick: runner is active; "
+                    "leaving queued work for a later tick"
+                )
+                return "idle"
             if approval_blocked:
                 say(
                     f"mergetrain daemon tick: blocked {len(approval_blocked)} auto "

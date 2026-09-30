@@ -199,7 +199,10 @@ def sweep_notifications(
         elif outcome == "reconcile_paused":
             messages.append((path, key, title, "Deploy paused: jobs need reconcile"))
         elif outcome == "error":
-            messages.append((path, key, title, str(item.get("error") or "sweep error")))
+            # The error text stays in the local log and dedup state: it can
+            # name the OS user, home-directory paths, or command output, none
+            # of which a third-party webhook should receive.
+            messages.append((path, key, title, "Deploy paused: the daemon hit an error; see its log"))
     return messages, settled
 
 
