@@ -806,7 +806,11 @@ def load_config(
     else:
         raise ConfigError("notify.webhook_url must be a string")
     if webhook_url:
-        parsed_webhook = urlsplit(webhook_url)
+        try:
+            parsed_webhook = urlsplit(webhook_url)
+        except ValueError as exc:
+            # An unbalanced '[' of an IPv6 host does not parse at all.
+            raise ConfigError("notify.webhook_url must be an http or https URL") from exc
         if parsed_webhook.scheme not in {"http", "https"} or not parsed_webhook.hostname:
             raise ConfigError("notify.webhook_url must be an http or https URL")
     transitions_value = notify_data.get("transitions", list(NOTIFY_TRANSITIONS))

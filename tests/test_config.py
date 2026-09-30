@@ -58,6 +58,18 @@ notify:
             with self.assertRaisesRegex(ConfigError, r"notify.transitions\[1\]"):
                 load_config(repo=repo)
 
+    def test_notify_rejects_a_webhook_url_that_does_not_parse(self) -> None:
+        # urlsplit raises ValueError for an unbalanced '[', which every
+        # command, status --json included, printed as a traceback.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                'notify:\n  webhook_url: "https://[hooks.example.invalid/hook"\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "http or https"):
+                load_config(repo=repo)
+
     def test_generated_yaml_loads_with_required_parser(self) -> None:
         data = load_yaml(render_default_config("demo"))
         self.assertEqual(data["project"]["name"], "demo")

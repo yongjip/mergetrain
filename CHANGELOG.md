@@ -174,6 +174,11 @@
   `status --json`, `inspect --json`, the `events --jsonl` stream, MCP, and Hub
   output, which otherwise never reveal the URL. The message now names the
   problem with its line and column only.
+- Report a `notify.webhook_url` that does not parse as a `config_error`. A
+  typo such as an unbalanced `[` in `https://[hooks.example.invalid/...` made
+  every command, `status --json` included, exit with a `ValueError: Invalid
+  IPv6 URL` traceback and no JSON. It now fails like any other invalid URL:
+  "notify.webhook_url must be an http or https URL".
 
 ## 3.3.0 - 2026-09-30
 
