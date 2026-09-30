@@ -973,100 +973,9 @@ class GitRunner:
                         return stopped
 
                 if not run.reused_validation_sha:
-                    emit(
-                        phase="assembling",
-                        state="active",
-                        message=f"Assembling train with {len(jobs)} job(s)",
-                    )
-                    for job in jobs:
-                        log.write(f"\n## merge job {job.id}: {job.branch}\n")
-                        run.pulse()
-                        emit(
-                            job_id=job.id,
-                            phase="assembling",
-                            state="active",
-                            message=f"Merging {job.branch}",
-                        )
-                        if not deploying_validated:
-                            try:
-                                run.merge_shas[job.id] = self._merge_sha_for_job(
-                                    job, deploying_validated=False
-                                )
-                            except MergeBlocked as exc:
-                                run.results.append(
-                                    run.finish(
-                                        job, status="blocked", log_path=str(log_path), note=str(exc)
-                                    )
-                                )
-                                continue
-                        pre_merge_head = git_output(["rev-parse", "HEAD"], cwd=worktree)
-                        merge = run_command(
-                            ["git", "merge", "--no-edit", run.merge_shas[job.id]],
-                            cwd=worktree,
-                            log=log,
-                            check=False,
-                            pulse=run.pulse,
-                            **command_limits(self.config),
-                        )
-                        if merge.returncode != 0:
-                            note = (
-                                merge.stderr.strip()
-                                or merge.stdout.strip()
-                                or f"merge failed for {job.branch}"
-                            )
-                            if deploying_validated:
-                                run_command(
-                                    ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
-                                )
-                                note = f"validated train could not be reassembled: {note}"
-                                return run.block_all(note)
-                            run.results.append(
-                                run.finish(job, status="blocked", log_path=str(log_path), note=note)
-                            )
-                            run_command(
-                                ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
-                            )
-                            continue
-                        if not git_worktree_clean(worktree):
-                            if deploying_validated:
-                                note = "validated train produced a dirty integration worktree after reassembly"
-                                return run.block_all(note)
-                            run.results.append(
-                                run.finish(
-                                    job,
-                                    status="blocked",
-                                    log_path=str(log_path),
-                                    note="integration worktree is dirty after merge",
-                                )
-                            )
-                            # the merge already committed (HEAD advanced), so
-                            # `reset --hard HEAD` would only drop the stray dirt
-                            # and keep this blocked job's merge commit in the
-                            # assembled tree. Reset to the pre-merge tip instead
-                            # so a blocked job can never ride the train.
-                            run_command(
-                                ["git", "reset", "--hard", pre_merge_head],
-                                cwd=worktree,
-                                log=log,
-                                check=True,
-                            )
-                            continue
-                        run.merged_jobs.append(job)
-                        emit(
-                            job_id=job.id,
-                            phase="assembling",
-                            state="success",
-                            message=f"Merged {job.branch}",
-                        )
-                    if not run.merged_jobs:
-                        log.write("\nno jobs were merged\n")
-                        return run.results
-                    emit(
-                        phase="assembling",
-                        state="success",
-                        message=f"Assembled {len(run.merged_jobs)} job(s)",
-                    )
-                    run.deploy_sha = git_rev_parse(worktree, "HEAD")
+                    stopped = self._assemble_train(run)
+                    if stopped is not None:
+                        return stopped
                 run.pulse()
                 if persistent_workspace:
                     cache_reused = self._worktrees.activate_persistent_cache(
@@ -1357,6 +1266,110 @@ class GitRunner:
                 "\nintegration ref moved since validation; "
                 "reassembling the exact train and rerunning gates\n"
             )
+        return None
+
+    def _assemble_train(self, run: _TrainRun) -> list[Job] | None:
+        """Merge each job's exact commit onto the integration base, in train order.
+
+        A job that does not merge cleanly is blocked and left out, except in a
+        validated train, which it blocks whole. Returns the finished jobs when
+        the train stops here; otherwise records the assembled deploy SHA.
+        """
+
+        run.emit(
+            phase="assembling",
+            state="active",
+            message=f"Assembling train with {len(run.jobs)} job(s)",
+        )
+        for job in run.jobs:
+            run.log.write(f"\n## merge job {job.id}: {job.branch}\n")
+            run.pulse()
+            run.emit(
+                job_id=job.id,
+                phase="assembling",
+                state="active",
+                message=f"Merging {job.branch}",
+            )
+            if not run.deploying_validated:
+                try:
+                    run.merge_shas[job.id] = self._merge_sha_for_job(
+                        job, deploying_validated=False
+                    )
+                except MergeBlocked as exc:
+                    run.results.append(
+                        run.finish(
+                            job, status="blocked", log_path=str(run.log_path), note=str(exc)
+                        )
+                    )
+                    continue
+            pre_merge_head = git_output(["rev-parse", "HEAD"], cwd=run.worktree)
+            merge = run_command(
+                ["git", "merge", "--no-edit", run.merge_shas[job.id]],
+                cwd=run.worktree,
+                log=run.log,
+                check=False,
+                pulse=run.pulse,
+                **command_limits(self.config),
+            )
+            if merge.returncode != 0:
+                note = (
+                    merge.stderr.strip()
+                    or merge.stdout.strip()
+                    or f"merge failed for {job.branch}"
+                )
+                if run.deploying_validated:
+                    run_command(
+                        ["git", "merge", "--abort"], cwd=run.worktree, log=run.log, check=False
+                    )
+                    note = f"validated train could not be reassembled: {note}"
+                    return run.block_all(note)
+                run.results.append(
+                    run.finish(job, status="blocked", log_path=str(run.log_path), note=note)
+                )
+                run_command(
+                    ["git", "merge", "--abort"], cwd=run.worktree, log=run.log, check=False
+                )
+                continue
+            if not git_worktree_clean(run.worktree):
+                if run.deploying_validated:
+                    note = "validated train produced a dirty integration worktree after reassembly"
+                    return run.block_all(note)
+                run.results.append(
+                    run.finish(
+                        job,
+                        status="blocked",
+                        log_path=str(run.log_path),
+                        note="integration worktree is dirty after merge",
+                    )
+                )
+                # the merge already committed (HEAD advanced), so
+                # `reset --hard HEAD` would only drop the stray dirt
+                # and keep this blocked job's merge commit in the
+                # assembled tree. Reset to the pre-merge tip instead
+                # so a blocked job can never ride the train.
+                run_command(
+                    ["git", "reset", "--hard", pre_merge_head],
+                    cwd=run.worktree,
+                    log=run.log,
+                    check=True,
+                )
+                continue
+            run.merged_jobs.append(job)
+            run.emit(
+                job_id=job.id,
+                phase="assembling",
+                state="success",
+                message=f"Merged {job.branch}",
+            )
+        if not run.merged_jobs:
+            run.log.write("\nno jobs were merged\n")
+            return run.results
+        run.emit(
+            phase="assembling",
+            state="success",
+            message=f"Assembled {len(run.merged_jobs)} job(s)",
+        )
+        run.deploy_sha = git_rev_parse(run.worktree, "HEAD")
         return None
 
     def _finish_active_jobs(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
