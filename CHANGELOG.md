@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Breaking:** `hub status --json` no longer includes `eta` and `progress` in
+  each repository's `snapshot`, and `contract_version` is now 5. The web
+  dashboard that 3.3.0 removed was the only reader of either key. This is not
+  a safety fix: the owner retired output that nothing read, and the contract
+  bump marks the removal. Read a running job's phase, current gate, and
+  elapsed time with `mergetrain inspect JOB_ID --json` or
+  `mergetrain events --jsonl` in its repository instead; `stats --json` still
+  reports per-phase and per-gate timing medians. The rest of the full view,
+  `hub status --summary --json`, every other command's JSON, the failure
+  envelope, and exit codes are unchanged, and no CLI verb, flag, config field,
+  or MCP tool is added or removed.
 - Make `mergetrain reconcile` without `--apply` a real preview. It took the
   runner lock like the applied run, and taking the lock split a stopped
   runner's claims: it requeued them, dissolving a validated train that had
