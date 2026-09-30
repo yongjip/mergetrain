@@ -271,12 +271,17 @@ class DemoConfigTests(unittest.TestCase):
             config.gates[0].run,
             '"/opt/py 3.12/python3" -m unittest discover -s tests',
         )
-        self.assertIn(f'--git-dir="{walkthrough.remote}"', config.deploy.verify[0].run)
+        remote = str(walkthrough.remote)
+        if os.name == "nt":
+            remote = remote.replace("\\", "/")
+        self.assertIn(f'--git-dir="{remote}"', config.deploy.verify[0].run)
 
-    def test_windows_paths_reach_the_gate_shell_verbatim(self) -> None:
+    def test_windows_paths_reach_the_gate_shell_intact(self) -> None:
         # Gates run through a POSIX sh on Windows too, which reads '\\', '\$',
-        # and '$name' inside double quotes: a UNC path lost a backslash, and a
-        # '$' in a directory name expanded.
+        # and '$name' inside double quotes, and the Windows command line that
+        # carries `sh -c` reads '\\' once more: a UNC path lost a backslash,
+        # and a '$' in a directory name expanded. The demo hands sh the same
+        # paths with forward slashes, which Windows accepts.
         for executable in (
             r"C:\tools\Python\3.13\python.exe",
             r"\\server\share\python.exe",
@@ -299,7 +304,7 @@ class DemoConfigTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     completed.stdout.splitlines(),
-                    [executable, "-m", "unittest", "discover", "-s", "tests"],
+                    [executable.replace("\\", "/"), "-m", "unittest", "discover", "-s", "tests"],
                 )
 
     def test_path_with_a_single_quote_round_trips_through_yaml(self) -> None:

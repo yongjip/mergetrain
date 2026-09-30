@@ -38,8 +38,15 @@ def _shell_argument(value: str) -> str:
     one readable YAML scalar. Inside them ``sh`` still reads ``\\``, ``$``, and
     backquotes, so those are escaped on Windows too: unescaped, a UNC path lost
     a backslash and ``$name`` in a directory name expanded.
+
+    On Windows the command reaches Git for Windows' ``sh`` through the process
+    command line, whose parser also reads a doubled backslash as one, so even
+    an escaped UNC path lost a backslash. Windows accepts forward slashes in
+    every path the demo writes, so no backslash has to survive both.
     """
 
+    if os.name == "nt":
+        value = value.replace("\\", "/")
     escaped = (
         value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
     )

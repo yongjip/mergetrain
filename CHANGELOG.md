@@ -208,7 +208,9 @@
   paths in double quotes without escaping them, but gates run through a POSIX
   `sh` on Windows too, which expanded `$ops` and turned `\\` into `\`, so the
   demo's gate or verify command pointed at a path that did not exist. The
-  paths are now escaped for `sh` as on every other platform.
+  paths are now escaped for `sh` as on every other platform, and on Windows
+  they use forward slashes, because the command line that carries `sh -c`
+  also reads `\\` as `\`.
 
 ## 3.3.0 - 2026-09-30
 
