@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from mergetrain.cli import main
 from mergetrain.config import load_config
+from mergetrain.contract import CONTRACT_VERSION
 from mergetrain.mcp_server import (
     MergetrainTools,
     _deploy_approval,
@@ -498,6 +499,39 @@ class PayloadTests(unittest.TestCase):
         with patch.object(MergetrainTools, "_run", return_value=completed(raw)):
             payload = asyncio.run(self.tools.inspect(job_id=4, detail="logs"))
         self.assertEqual(payload["log"], raw)
+
+    def test_payloads_the_adapter_builds_carry_the_contract_version(self) -> None:
+        # A client that checks contract_version before acting found none on
+        # the refusals, the events wrapper, or the log tail built here.
+        header = '{"type": "stream_start", "contract_version": 4, "after_event_id": 0}\n'
+        payloads: dict[str, dict[str, Any]] = {}
+        with patch.object(
+            MergetrainTools, "_run", return_value=completed("not json", returncode=1)
+        ):
+            payloads["unreadable"] = asyncio.run(self.tools.status())
+            payloads["log_unavailable"] = asyncio.run(
+                self.tools.inspect(job_id=4, detail="logs")
+            )
+        with patch.object(
+            MergetrainTools,
+            "_run",
+            side_effect=subprocess.TimeoutExpired(cmd="mergetrain", timeout=1),
+        ):
+            payloads["timeout"] = asyncio.run(self.tools.status())
+        with patch.object(MergetrainTools, "_run", return_value=completed(header)):
+            payloads["events"] = asyncio.run(self.tools.inspect(job_id=4, detail="events"))
+            payloads["log"] = asyncio.run(self.tools.inspect(job_id=4, detail="logs"))
+        payloads["invalid_detail"] = asyncio.run(
+            self.tools.inspect(job_id=4, detail="bogus")  # type: ignore[arg-type]
+        )
+        with patch.object(MergetrainTools, "_run", return_value=completed(json.dumps(PREVIEW))):
+            plan = asyncio.run(self.tools.prepare_deploy(FakeContext()))
+        payloads["not_confirmed"] = asyncio.run(
+            self.tools.deploy(plan, SimpleNamespace(action="decline", data=None))
+        )
+        for name, payload in payloads.items():
+            with self.subTest(name=name):
+                self.assertEqual(payload["contract_version"], CONTRACT_VERSION)
 
 
 class ProcessLifecycleTests(unittest.TestCase):

@@ -33,6 +33,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+from .contract import CONTRACT_VERSION
 from .errors import escape_controls, redact_secrets
 from .windows_job import CREATE_SUSPENDED, WindowsJob
 
@@ -108,6 +109,7 @@ def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
     """Mirror the CLI's one failure envelope so consumers parse a single shape."""
 
     payload: dict[str, Any] = {
+        "contract_version": CONTRACT_VERSION,
         "ok": False,
         "error": {
             "code": code,
@@ -501,7 +503,7 @@ class MergetrainTools:
         if not frames and completed.returncode != 0:
             detail = self._safe_detail(completed.stderr)
             return _error("cli_output_unreadable", f"events failed: {detail}")
-        return {"frames": frames}
+        return {"contract_version": CONTRACT_VERSION, "frames": frames}
 
     async def _logs(self, job_id: int, tail: int = 200) -> dict[str, Any]:
         """A capped tail of one job's runner log. Never follows.
@@ -523,7 +525,12 @@ class MergetrainTools:
                 f"could not read the log for job {job_id}: {detail}",
                 exit_code=completed.returncode,
             )
-        return {"job_id": job_id, "tail_lines": lines, "log": completed.stdout}
+        return {
+            "contract_version": CONTRACT_VERSION,
+            "job_id": job_id,
+            "tail_lines": lines,
+            "log": completed.stdout,
+        }
 
     async def inspect(
         self,

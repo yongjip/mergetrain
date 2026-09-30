@@ -95,6 +95,8 @@ and the agent reads `mergetrain_status` before deciding what happened.
 The tool names and required inputs are part of the long-lived v3 compatibility
 promise. Successful CLI-backed responses preserve the CLI payload unchanged,
 including `contract_version`. Adapter-only failures use the same
-`{ok:false,error:{code,message,retryable}}` shape.
+`{contract_version,ok:false,error:{code,message,retryable}}` shape, and the
+`events` (`frames`) and `logs` (`job_id`, `tail_lines`, `log`) results that the
+adapter wraps also carry top-level `contract_version`.
 
 See [the machine contract](contract.md) and [agent contract](agent-contract.md).

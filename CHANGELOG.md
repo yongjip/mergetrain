@@ -305,6 +305,11 @@
   other request, cancellation, or shutdown could run meanwhile. Messages now
   name an argument over 200 characters by its length, and masking reads at
   most 4,000 characters of a message or CLI diagnostic.
+- Stamp `contract_version` on the MCP responses the server builds itself. Its
+  refusals, such as `cli_timeout`, `cli_output_unreadable`, `log_unavailable`,
+  and the deploy confirmation refusals, and the `events` and `logs` results
+  carried no `contract_version`, so a client that checks it before acting
+  could not. They now carry the same top-level `contract_version` as the CLI.
 
 ## 3.3.0 - 2026-09-30
 

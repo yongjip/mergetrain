@@ -134,7 +134,8 @@ only event IDs as resume cursors.
 MCP may additionally return adapter refusals such as
 `confirmation_required`, `deploy_not_confirmed`, `cli_timeout`,
 `cli_output_unreadable`, and `log_unavailable`. They do not occur on CLI
-output.
+output. They, and the MCP `events` and `logs` results, carry top-level
+`contract_version` like every other response.
 
 ## Long-lived v3 compatibility policy
 
