@@ -255,6 +255,13 @@
   reports itself idle, as it already did while that runner had jobs in
   progress, and an error notification says only "Deploy paused: the daemon
   hit an error; see its log".
+- Send a landed, partial, or blocked notification again when its webhook
+  delivery fails. The daemons said a failed delivery would be retried, but
+  only a lasting state such as a daemon error came back on the next tick: a
+  tick that landed a train is usually followed by idle ones, so after one
+  transient network error "Train landed (1 job)" was never delivered. Such a
+  message is now kept in the notify state and sent again by later ticks until
+  it is delivered, before newer messages for its repository.
 
 ## 3.3.0 - 2026-09-30
 

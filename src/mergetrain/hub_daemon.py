@@ -24,9 +24,9 @@ from .deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
 from .hub import display_path
 from .notify import (
     Notifier,
+    deliver_notifications,
     load_notify_state,
     save_notify_state,
-    sweep_notifications,
 )
 from .persistence.leases import default_owner
 from .registry import load_registry, same_repo
@@ -231,6 +231,11 @@ def hub_daemon_loop(
         stop.set()
         say(f"mergetrain hub daemon received signal {signum}; finishing current sweep")
 
+    def deliver(path: str, key: str, title: str, message: str) -> None:
+        delivery = notifier_resolver(path, key) if notifier_resolver is not None else notifier
+        if delivery is not None:
+            delivery(title, message)
+
     old_handlers: dict[int, Any] = {}
     if install_signal_handlers:
         for signum in (signal.SIGINT, signal.SIGTERM):
@@ -274,25 +279,12 @@ def hub_daemon_loop(
                         f"{processed} with work processed"
                     )
                     if notifier is not None or notifier_resolver is not None:
-                        messages, settled = sweep_notifications(outcomes, last_outcomes)
-                        # Commit no-delivery outcomes immediately; a message's
-                        # key is committed only once its notifier succeeds, so
-                        # a failed delivery is retried next sweep instead of
-                        # being silently marked as already-notified.
-                        next_state = dict(settled)
-                        for path, key, title, message in messages:
-                            try:
-                                delivery = (
-                                    notifier_resolver(path, key)
-                                    if notifier_resolver is not None
-                                    else notifier
-                                )
-                                if delivery is not None:
-                                    delivery(title, message)
-                                next_state[path] = key
-                            except Exception as exc:  # noqa: BLE001 - never break a sweep
-                                say(f"mergetrain hub notify error: {exc}")
-                        last_outcomes = next_state
+                        last_outcomes = deliver_notifications(
+                            outcomes,
+                            last_outcomes,
+                            deliver,
+                            on_error=lambda exc: say(f"mergetrain hub notify error: {exc}"),
+                        )
                         save_notify_state(last_outcomes, registry)
                 else:
                     outcomes = []

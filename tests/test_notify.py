@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 from mergetrain.config import NotifyConfig
 from mergetrain.notify import (
     configured_notifier,
+    deliver_notifications,
     load_notify_state,
     notification_transition,
     save_notify_state,
@@ -157,6 +158,31 @@ class SweepNotificationTests(unittest.TestCase):
         third, prev = deliver([outcome("/w/web", "error", error="permission denied")], prev)
         self.assertEqual(third, [])
 
+    def test_a_failed_event_is_kept_until_delivered_but_a_state_is_not(self) -> None:
+        """#50: only a state is reported again by the next sweep."""
+
+        sent: list[str] = []
+        down = {"/w/a", "/w/b"}
+
+        def send(path: str, key: str, title: str, body: str) -> None:
+            if path in down:
+                raise RuntimeError("webhook delivery failed (URLError)")
+            sent.append(body)
+
+        def sweep(*outcomes, state):  # type: ignore[no-untyped-def]
+            return deliver_notifications(list(outcomes), state, send, on_error=lambda exc: None)
+
+        state = sweep(
+            outcome("/w/a", "no_landing:1"), outcome("/w/b", "error", error="boom"), state={}
+        )
+        down.clear()
+        # The blocked job is still news once, however /w/a is now; the error
+        # has cleared, so a late "paused" would be wrong.
+        state = sweep(outcome("/w/a", "no_landing:1"), outcome("/w/b", "idle"), state=state)
+        self.assertEqual(sent, ["Nothing landed — 1 job blocked or failed"])
+        sweep(outcome("/w/a", "idle"), outcome("/w/b", "idle"), state=state)
+        self.assertEqual(len(sent), 1)
+
     def test_an_error_notification_leaves_the_error_text_in_the_log(self) -> None:
         """#42: a tick error can name the OS user, home paths, or command output."""
 
@@ -289,6 +315,53 @@ class SingleDaemonNotifyIntegrationTests(unittest.TestCase):
                 received,
                 [("mergetrain · svc", "Train landed (1 job)")],
             )
+
+    def test_a_landing_whose_delivery_failed_is_sent_by_a_later_tick(self) -> None:
+        """#50: the next tick is idle, so nothing else would report it."""
+
+        from mergetrain.daemon import daemon_loop
+        from mergetrain.persistence.connection import connect
+        from mergetrain.persistence.jobs import enqueue_job, mark_job
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db = root / "queue.sqlite"
+            conn = connect(db)
+            try:
+                enqueue_job(conn, task="t", branch="agent/t", auto_deploy=True)
+            finally:
+                conn.close()
+            attempts: list[str] = []
+
+            def flaky(title: str, message: str) -> None:
+                attempts.append(message)
+                if len(attempts) == 1:
+                    raise RuntimeError("webhook delivery failed (URLError)")
+
+            def land(conn, jobs):  # type: ignore[no-untyped-def]
+                return [
+                    mark_job(
+                        conn, job.id, status="deployed", expected_claim_token=job.claim_token
+                    )
+                    for job in jobs
+                ]
+
+            for _tick in range(3):
+                daemon_loop(
+                    db_path=str(db),
+                    process_batch=land,
+                    once=True,
+                    say=lambda _: None,
+                    install_signal_handlers=False,
+                    notifier=flaky,
+                    notification_name="svc",
+                    notification_path=str(root),
+                    notification_transitions=("landed",),
+                    notification_state_path=root / "notify.json",
+                )
+
+            # The failed send, its retry on the idle tick, and nothing after.
+            self.assertEqual(attempts, ["Train landed (1 job)"] * 2)
 
 
 class HubDaemonNotifyIntegrationTests(unittest.TestCase):

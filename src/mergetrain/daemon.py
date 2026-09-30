@@ -12,10 +12,10 @@ from .errors import ConfigError, LockHeld, MergetrainError, QueueError
 from .models import Job
 from .notify import (
     Notifier,
+    deliver_notifications,
     load_notify_state_file,
     repo_notify_state_path,
     save_notify_state_file,
-    sweep_notifications,
 )
 from .persistence.claims import claim_all_queued
 from .persistence.connection import connect
@@ -365,6 +365,10 @@ def daemon_loop(
         stop.set()
         say(f"mergetrain daemon received signal {signum}; finishing current tick")
 
+    def deliver(path: str, key: str, title: str, message: str) -> None:
+        if notifier is not None:
+            notifier(title, message)
+
     old_handlers: dict[int, Any] = {}
     if install_signal_handlers:
         for signum in (signal.SIGINT, signal.SIGTERM):
@@ -401,7 +405,7 @@ def daemon_loop(
             else:
                 error = ""
             if notifier is not None:
-                messages, settled = sweep_notifications(
+                last_outcomes = deliver_notifications(
                     [
                         {
                             "path": outcome_path,
@@ -411,16 +415,10 @@ def daemon_loop(
                         }
                     ],
                     last_outcomes,
+                    deliver,
                     transitions=notification_transitions,
+                    on_error=lambda exc: say(f"mergetrain notify error: {exc}"),
                 )
-                next_state = dict(settled)
-                for path, key, title, message in messages:
-                    try:
-                        notifier(title, message)
-                        next_state[path] = key
-                    except Exception as exc:  # noqa: BLE001 - never break a daemon tick
-                        say(f"mergetrain notify error: {exc}")
-                last_outcomes = next_state
                 save_notify_state_file(last_outcomes, state_path)
             if once or stop.is_set():
                 break

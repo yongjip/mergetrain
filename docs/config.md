@@ -277,6 +277,10 @@ notifications through the provider-neutral JSON webhook. The webhook receives an
 Slack/Discord-specific message shaping belongs in an adapter or relay; core does
 not embed provider credentials or schemas.
 
+When a delivery fails, a landing or a batch that did not land is sent again by
+later ticks until it is delivered (at most the newest 20 wait), and a reconcile
+or error pause is sent again while it lasts.
+
 If `--notify` is supplied without `webhook_url`, the single-repo daemon warns at
 startup and Hub warns once per affected repository when a transition needs
 delivery. This avoids treating an intentionally empty backend chain as a
