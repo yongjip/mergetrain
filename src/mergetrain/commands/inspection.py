@@ -50,6 +50,7 @@ from ..persistence.jobs import (
     get_job,
     list_attention_jobs,
     list_jobs,
+    list_jobs_fifo,
     list_train_jobs,
     validated_train_summaries,
 )
@@ -462,13 +463,18 @@ def cmd_events(args: argparse.Namespace) -> int:
                 jobs = [get_job(conn, job_id) for job_id in event_job_ids or []]
             events, latest, lock = _event_scope(conn, args, cursor, event_job_ids)
             if not scoped:
-                known_ids = {job.id for job in jobs}
-                for job_id in dict.fromkeys(
+                # An operator-wide stream follows whatever runs now, so read
+                # the jobs these events name, and those in progress, fresh on
+                # every poll; rows kept from an earlier poll go stale.
+                named = dict.fromkeys(
                     event.job_id for event in events if event.job_id is not None
-                ):
-                    if job_id not in known_ids:
-                        jobs.append(get_job(conn, job_id))
-                        known_ids.add(job_id)
+                )
+                jobs = [get_job(conn, job_id) for job_id in named]
+                jobs.extend(
+                    job
+                    for job in list_jobs_fifo(conn, status="in_progress")
+                    if job.id not in named
+                )
             for event in events:
                 payload = event_record(event, jobs, lock)
                 _print_event_record(payload, jsonl=args.jsonl)

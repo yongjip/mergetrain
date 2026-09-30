@@ -95,6 +95,13 @@
   under `diff.ignoreSubmodules` or a `.gitmodules` `ignore` setting that the
   train itself can add. The gate was then skipped as "no changed paths
   matched". The diff now passes `--ignore-submodules=none`.
+- Report current lease liveness in an `events --follow` stream that is not
+  scoped to a job or train. The stream kept each job's row as it first saw
+  it, so a job claimed after the stream started still read as queued: the
+  events of its live run said `lease_liveness: "inactive"`, no heartbeat was
+  sent, and a job first seen running kept reading as running, so its last
+  events said `"lost"` after it finished normally. It now reads the jobs its
+  events name, and the ones in progress, on every poll.
 
 ## 3.3.0 - 2026-09-30
 

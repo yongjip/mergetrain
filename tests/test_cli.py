@@ -2940,6 +2940,63 @@ class CliTests(unittest.TestCase):
                 "interrupted",
             )
 
+    def test_unscoped_events_follow_reads_each_jobs_current_state(self) -> None:
+        # An operator-wide stream used to keep the job rows it first saw, so a
+        # job claimed later still read as queued: its live run's events said
+        # lease_liveness "inactive", and no heartbeat was ever sent.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            try:
+                job = enqueue_job(conn, task="a", branch="feature/a")
+                first = record_run_event(
+                    conn, job_id=job.id, phase="queue", state="success", message="queued"
+                )
+            finally:
+                conn.close()
+            owner = f"owner:{os.getpid()}"
+            polls: list[float] = []
+
+            def between_polls(seconds: float) -> None:
+                polls.append(seconds)
+                if len(polls) > 1:
+                    raise KeyboardInterrupt
+                conn = connect(db)
+                try:
+                    claimed = claim_all_queued(conn, owner=owner)[0]
+                    record_run_event(
+                        conn,
+                        claim_token=claimed.claim_token,
+                        job_id=job.id,
+                        phase="gating",
+                        state="active",
+                        message="Running gate 1/1: tests",
+                    )
+                finally:
+                    conn.close()
+
+            out = io.StringIO()
+            with (
+                patch("mergetrain.commands.inspection.time.sleep", side_effect=between_polls),
+                redirect_stdout(out),
+            ):
+                code = main(
+                    [
+                        "--repo", str(repo), "--db", str(db), "events",
+                        "--after", str(first.id - 1), "--follow", "--jsonl",
+                    ]
+                )
+
+            records = [json.loads(line) for line in out.getvalue().splitlines()]
+            gate = next(
+                record
+                for record in records
+                if record.get("message") == "Running gate 1/1: tests"
+            )
+            self.assertEqual(code, 130)
+            self.assertEqual(gate["lease_liveness"], "alive")
+
     def test_events_follow_reuses_one_read_only_connection(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
