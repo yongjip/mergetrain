@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import io
 import math
+import subprocess
 import unittest
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 from mergetrain.config import (
     DeployConfig,
@@ -18,6 +22,7 @@ from mergetrain.config import (
     StateConfig,
 )
 from mergetrain.deploy_plan import deploy_execution_policy_sha
+from mergetrain.errors import CommandFailed
 from mergetrain.models import Job
 from mergetrain.reuse import (
     ReuseCheck,
@@ -29,7 +34,7 @@ from mergetrain.reuse import (
     train_identity_sha,
     validation_age_minutes,
 )
-from mergetrain.validation_reuse import unauthorized_reuse_decision
+from mergetrain.validation_reuse import ValidationReuse, unauthorized_reuse_decision
 
 # A fixed "now" so validation_age_minutes assertions are deterministic.
 NOW = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -467,6 +472,559 @@ class ReuseDecisionTests(unittest.TestCase):
         self.assertEqual(timed["estimated_savings"]["seconds"], 2.0)
         self.assertEqual(timed["estimated_savings"]["sample_count"], 10)
         self.assertEqual(timed["estimated_savings"]["confidence"], "high")
+
+
+_BASE = "b" * 40
+_VALIDATION = "c" * 40
+_TREE = "d" * 40
+_ENVIRONMENT = "e" * 64
+_UNSHARED = "one shared non-empty SHA"
+
+
+class _FingerprintGates:
+    """The two GateRunner calls decide() makes, answering from a fixture."""
+
+    def __init__(self, environment: str | BaseException) -> None:
+        self.environment = environment
+
+    def environment_fingerprint(self, **_: Any) -> str:
+        if isinstance(self.environment, BaseException):
+            raise self.environment
+        return self.environment
+
+    def changed_paths(self, **_: Any) -> tuple[str, ...]:
+        raise AssertionError("no configured gate is scoped to paths")
+
+
+def _validated_train(config: MergetrainConfig) -> list[Job]:
+    jobs = [
+        Job(
+            id=index,
+            task=f"task-{index}",
+            branch=f"feature/{index}",
+            train_id="train-1",
+            train_size=2,
+            validated_at="2026-07-22T11:55:00Z",
+            validation_base_sha=_BASE,
+            validation_sha=_VALIDATION,
+            validated_head_sha=str(index) * 40,
+            validation_tree_sha=_TREE,
+            validation_gate_policy_sha=gate_policy_sha(config),
+            validation_environment_sha=_ENVIRONMENT,
+        )
+        for index in (1, 2)
+    ]
+    identity = train_identity_sha(jobs)
+    return [replace(job, validation_train_sha=identity) for job in jobs]
+
+
+def _replaced(
+    checks: list[tuple[Any, ...]], *, drop: tuple[str, ...] = (), **changes: tuple[Any, ...]
+) -> list[tuple[Any, ...]]:
+    return [changes.get(check[0], check) for check in checks if check[0] not in drop]
+
+
+class ValidationReuseDecideTests(unittest.TestCase):
+    """Pin every identity check decide() records, in order, and its reasons."""
+
+    maxDiff = None
+
+    def setUp(self) -> None:
+        self.config = _config()
+        self.jobs = _validated_train(self.config)
+        self.identity = self.jobs[0].validation_train_sha
+        self.policy = gate_policy_sha(self.config)
+
+    def _decide(
+        self,
+        jobs: list[Job],
+        *,
+        age: float = 5.0,
+        commit_exists: bool = True,
+        tree: str = _TREE,
+        reset_code: int = 0,
+        environment: str | BaseException = _ENVIRONMENT,
+    ) -> ReuseDecision:
+        def run_command(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+            restore = command == ["git", "reset", "--hard", _VALIDATION]
+            return subprocess.CompletedProcess(command, reset_code if restore else 0, "", "")
+
+        with (
+            patch("mergetrain.validation_reuse.validation_age_minutes", return_value=age),
+            patch("mergetrain.validation_reuse.git_ref_exists", return_value=commit_exists),
+            patch("mergetrain.validation_reuse.git_tree_sha", return_value=tree),
+            patch("mergetrain.validation_reuse.run_command", side_effect=run_command),
+        ):
+            return ValidationReuse(self.config, _FingerprintGates(environment)).decide(
+                jobs,
+                worktree=Path("/x/wt/train"),
+                integration_base_sha=_BASE,
+                log=io.StringIO(),
+                pulse=None,
+            )
+
+    @staticmethod
+    def _pinned(decision: ReuseDecision) -> tuple[list[tuple[Any, ...]], list[str]]:
+        return (
+            [
+                (check.code, check.status, check.expected, check.actual, check.detail)
+                for check in decision.checks
+            ],
+            list(decision.reasons),
+        )
+
+    def _matching_checks(self) -> list[tuple[Any, ...]]:
+        return [
+            ("authorization", "match", True, True, "reuse was explicitly authorized"),
+            (
+                "train_membership",
+                "match",
+                "one non-empty train id",
+                ["train-1"],
+                "train membership is complete",
+            ),
+            ("train_size", "match", 2, [2], "validated train size matches membership"),
+            (
+                "validation_commit",
+                "match",
+                "one shared validation SHA",
+                [_VALIDATION],
+                "validated jobs share one validation SHA",
+            ),
+            (
+                "integration_base",
+                "match",
+                _BASE,
+                [_BASE],
+                "integration ref still matches validation",
+            ),
+            (
+                "train_identity",
+                "match",
+                self.identity,
+                self.identity,
+                "train membership identity matches validation",
+            ),
+            (
+                "gate_policy",
+                "match",
+                self.policy,
+                self.policy,
+                "gate and fingerprint policy matches validation",
+            ),
+            (
+                "validation_age",
+                "match",
+                {"maximum_minutes": 60},
+                {"age_minutes": 5.0},
+                "validation is within the configured reuse age",
+            ),
+            (
+                "shared_validation_tree_sha",
+                "match",
+                _UNSHARED,
+                [_TREE],
+                "validated jobs share validation_tree_sha",
+            ),
+            (
+                "shared_validation_gate_policy_sha",
+                "match",
+                _UNSHARED,
+                [self.policy],
+                "validated jobs share validation_gate_policy_sha",
+            ),
+            (
+                "shared_validation_environment_sha",
+                "match",
+                _UNSHARED,
+                [_ENVIRONMENT],
+                "validated jobs share validation_environment_sha",
+            ),
+            (
+                "shared_validation_train_sha",
+                "match",
+                _UNSHARED,
+                [self.identity],
+                "validated jobs share validation_train_sha",
+            ),
+            (
+                "validation_commit_available",
+                "match",
+                True,
+                True,
+                "validation commit exists in the local repository",
+            ),
+            (
+                "validation_tree",
+                "match",
+                _TREE,
+                _TREE,
+                "validation commit tree matches recorded identity",
+            ),
+            (
+                "environment",
+                "match",
+                _ENVIRONMENT,
+                _ENVIRONMENT,
+                "environment fingerprint matches validation",
+            ),
+        ]
+
+    def _skipped_environment(self, expected: str = _ENVIRONMENT) -> tuple[Any, ...]:
+        return (
+            "environment",
+            "not_evaluated",
+            expected,
+            None,
+            "environment check was skipped because an earlier identity check did not match",
+        )
+
+    def test_a_matching_train_passes_every_check(self) -> None:
+        decision = self._decide(self.jobs)
+
+        self.assertEqual(self._pinned(decision), (self._matching_checks(), []))
+        self.assertTrue(decision.eligible)
+        self.assertEqual(decision.action, "reuse")
+        self.assertEqual(decision.reused_validation_sha, _VALIDATION)
+        self.assertEqual(decision.changed_paths, ())
+
+    def test_an_empty_train_fails_membership_but_gives_no_identity_reasons(self) -> None:
+        decision = self._decide([])
+
+        shared_fields = (
+            "validation_tree_sha",
+            "validation_gate_policy_sha",
+            "validation_environment_sha",
+            "validation_train_sha",
+        )
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                [
+                    ("authorization", "match", True, True, "reuse was explicitly authorized"),
+                    (
+                        "train_membership",
+                        "mismatch",
+                        "one non-empty train id",
+                        [],
+                        "train membership is incomplete or mixed",
+                    ),
+                    (
+                        "train_size",
+                        "mismatch",
+                        0,
+                        [],
+                        "train size does not match its validated membership",
+                    ),
+                    (
+                        "validation_commit",
+                        "mismatch",
+                        "one shared validation SHA",
+                        [],
+                        "validated jobs do not share one validation SHA",
+                    ),
+                    (
+                        "integration_base",
+                        "mismatch",
+                        _BASE,
+                        [],
+                        "integration ref moved since validation",
+                    ),
+                    (
+                        "train_identity",
+                        "mismatch",
+                        "",
+                        "",
+                        "train membership identity changed since validation",
+                    ),
+                    (
+                        "gate_policy",
+                        "mismatch",
+                        "",
+                        self.policy,
+                        "gate or fingerprint policy changed since validation",
+                    ),
+                    (
+                        "validation_age",
+                        "mismatch",
+                        {"maximum_minutes": 60},
+                        {"age_minutes": None},
+                        "validation is older than the configured reuse age",
+                    ),
+                    *(
+                        (
+                            f"shared_{field}",
+                            "mismatch",
+                            _UNSHARED,
+                            [],
+                            f"validated jobs lack one shared {field}",
+                        )
+                        for field in shared_fields
+                    ),
+                    (
+                        "validation_commit_available",
+                        "mismatch",
+                        True,
+                        False,
+                        "validation commit is missing from the local repository",
+                    ),
+                    self._skipped_environment(expected=""),
+                ],
+                [
+                    "train membership is incomplete or mixed",
+                    "train size does not match its validated membership",
+                    "validated jobs do not share one validation SHA",
+                    "integration ref moved since validation",
+                    *(f"validated jobs lack one shared {field}" for field in shared_fields),
+                ],
+            ),
+        )
+        self.assertFalse(decision.eligible)
+        self.assertEqual(decision.action, "rerun")
+
+    def test_a_mixed_train_reports_every_identity_mismatch(self) -> None:
+        first, second = self.jobs
+        jobs = [
+            replace(
+                first,
+                train_size=3,
+                validation_gate_policy_sha="0" * 64,
+                validation_train_sha="",
+            ),
+            replace(
+                second,
+                train_id="train-2",
+                train_size=3,
+                validation_sha="f" * 40,
+                validation_base_sha="a" * 40,
+                validation_tree_sha="",
+                validation_gate_policy_sha="0" * 64,
+                validation_train_sha="",
+            ),
+        ]
+        current_identity = train_identity_sha(jobs)
+
+        decision = self._decide(jobs, age=float("inf"))
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                [
+                    ("authorization", "match", True, True, "reuse was explicitly authorized"),
+                    (
+                        "train_membership",
+                        "mismatch",
+                        "one non-empty train id",
+                        ["train-1", "train-2"],
+                        "train membership is incomplete or mixed",
+                    ),
+                    (
+                        "train_size",
+                        "mismatch",
+                        2,
+                        [3],
+                        "train size does not match its validated membership",
+                    ),
+                    (
+                        "validation_commit",
+                        "mismatch",
+                        "one shared validation SHA",
+                        [_VALIDATION, "f" * 40],
+                        "validated jobs do not share one validation SHA",
+                    ),
+                    (
+                        "integration_base",
+                        "mismatch",
+                        _BASE,
+                        ["a" * 40, _BASE],
+                        "integration ref moved since validation",
+                    ),
+                    (
+                        "train_identity",
+                        "mismatch",
+                        "",
+                        current_identity,
+                        "train membership identity changed since validation",
+                    ),
+                    (
+                        "gate_policy",
+                        "mismatch",
+                        "0" * 64,
+                        self.policy,
+                        "gate or fingerprint policy changed since validation",
+                    ),
+                    (
+                        "validation_age",
+                        "mismatch",
+                        {"maximum_minutes": 60},
+                        {"age_minutes": None},
+                        "validation is older than the configured reuse age",
+                    ),
+                    (
+                        "shared_validation_tree_sha",
+                        "mismatch",
+                        _UNSHARED,
+                        [_TREE],
+                        "validated jobs lack one shared validation_tree_sha",
+                    ),
+                    (
+                        "shared_validation_gate_policy_sha",
+                        "match",
+                        _UNSHARED,
+                        ["0" * 64],
+                        "validated jobs share validation_gate_policy_sha",
+                    ),
+                    (
+                        "shared_validation_environment_sha",
+                        "match",
+                        _UNSHARED,
+                        [_ENVIRONMENT],
+                        "validated jobs share validation_environment_sha",
+                    ),
+                    (
+                        "shared_validation_train_sha",
+                        "mismatch",
+                        _UNSHARED,
+                        [],
+                        "validated jobs lack one shared validation_train_sha",
+                    ),
+                    (
+                        "validation_commit_available",
+                        "mismatch",
+                        True,
+                        False,
+                        "validation commit is missing from the local repository",
+                    ),
+                    self._skipped_environment(),
+                ],
+                [
+                    "train membership is incomplete or mixed",
+                    "train size does not match its validated membership",
+                    "validated jobs do not share one validation SHA",
+                    "integration ref moved since validation",
+                    "train membership identity changed since validation",
+                    "gate or fingerprint policy changed since validation",
+                    "validation is older than the configured reuse age",
+                    "validated jobs lack one shared validation_tree_sha",
+                    "validated jobs lack one shared validation_train_sha",
+                ],
+            ),
+        )
+
+    def test_a_stale_validation_is_older_than_the_reuse_age(self) -> None:
+        decision = self._decide(self.jobs, age=61.0)
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                _replaced(
+                    self._matching_checks(),
+                    validation_age=(
+                        "validation_age",
+                        "mismatch",
+                        {"maximum_minutes": 60},
+                        {"age_minutes": 61.0},
+                        "validation is older than the configured reuse age",
+                    ),
+                    environment=self._skipped_environment(),
+                ),
+                ["validation is older than the configured reuse age"],
+            ),
+        )
+
+    def test_a_missing_validation_commit_skips_the_tree_check(self) -> None:
+        decision = self._decide(self.jobs, commit_exists=False)
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                _replaced(
+                    self._matching_checks(),
+                    drop=("validation_tree",),
+                    validation_commit_available=(
+                        "validation_commit_available",
+                        "mismatch",
+                        True,
+                        False,
+                        "validation commit is missing from the local repository",
+                    ),
+                    environment=self._skipped_environment(),
+                ),
+                ["validation commit is missing from the local repository"],
+            ),
+        )
+
+    def test_a_changed_validation_tree_does_not_match_its_identity(self) -> None:
+        decision = self._decide(self.jobs, tree="9" * 40)
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                _replaced(
+                    self._matching_checks(),
+                    validation_tree=(
+                        "validation_tree",
+                        "mismatch",
+                        _TREE,
+                        "9" * 40,
+                        "validation commit tree does not match its recorded identity",
+                    ),
+                    environment=self._skipped_environment(),
+                ),
+                ["validation commit tree does not match its recorded identity"],
+            ),
+        )
+
+    def test_an_unrestorable_commit_leaves_the_environment_unevaluated(self) -> None:
+        decision = self._decide(self.jobs, reset_code=1)
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                _replaced(self._matching_checks(), environment=self._skipped_environment()),
+                ["validation commit could not be restored for fingerprinting"],
+            ),
+        )
+
+    def test_an_unreproducible_fingerprint_is_an_environment_mismatch(self) -> None:
+        decision = self._decide(self.jobs, environment=CommandFailed("fingerprint", 1))
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                _replaced(
+                    self._matching_checks(),
+                    environment=(
+                        "environment",
+                        "mismatch",
+                        _ENVIRONMENT,
+                        "unavailable",
+                        "required environment fingerprint could not be reproduced",
+                    ),
+                ),
+                ["required environment fingerprint could not be reproduced"],
+            ),
+        )
+
+    def test_a_changed_fingerprint_is_an_environment_mismatch(self) -> None:
+        decision = self._decide(self.jobs, environment="f" * 64)
+
+        self.assertEqual(
+            self._pinned(decision),
+            (
+                _replaced(
+                    self._matching_checks(),
+                    environment=(
+                        "environment",
+                        "mismatch",
+                        _ENVIRONMENT,
+                        "f" * 64,
+                        "environment or toolchain fingerprint changed",
+                    ),
+                ),
+                ["environment or toolchain fingerprint changed"],
+            ),
+        )
 
 
 if __name__ == "__main__":
