@@ -1289,50 +1289,8 @@ class GitRunner:
             )
         if run.deploy:
             self._assert_auto_execution_policy(run.merged_jobs)
-        gate_progress = self._gate_progress_callback(run.emit)
         try:
-            if run.reuse_fallback_reason:
-                run.emit(
-                    phase="gating",
-                    state="warning",
-                    message="Validated gates were not reused; rerunning all gates",
-                    detail=run.reuse_fallback_reason,
-                )
-            run.emit(
-                phase="gating",
-                state="active",
-                message=(
-                    "Reusing validated gates"
-                    if run.reused_validation_sha
-                    else "Running train gates"
-                ),
-                detail=run.reused_validation_sha,
-            )
-            if run.reused_validation_sha:
-                self._gates.run_reused_gates(
-                    worktree=run.worktree,
-                    validation_sha=run.reused_validation_sha,
-                    base_ref=run.integration_base_sha,
-                    log=run.log,
-                    pulse=run.pulse,
-                    on_gate=gate_progress,
-                )
-            else:
-                self._gates.run_gates(
-                    worktree=run.worktree,
-                    log=run.log,
-                    pulse=run.pulse,
-                    on_gate=gate_progress,
-                    base_ref=run.integration_base_sha,
-                    head_ref=run.deploy_sha,
-                )
-            self._pushes.assert_tree_unchanged(run.worktree, run.deploy_sha)
-            run.emit(
-                phase="gating",
-                state="success",
-                message="All train gates passed",
-                detail=run.reused_validation_sha,
-            )
+            self._run_train_gates(run)
         except CommandFailed as exc:
             if run.deploying_validated:
                 gate_mode = "validated reuse" if run.reused_validation_sha else "reassembly"
@@ -1384,6 +1342,56 @@ class GitRunner:
             )
             return run.results
         return None
+
+    def _run_train_gates(self, run: _TrainRun) -> None:
+        """Run every gate over the assembled train, or reuse its validated gates.
+
+        Then check that the gates left the gated commit and a clean tree.
+        """
+
+        gate_progress = self._gate_progress_callback(run.emit)
+        if run.reuse_fallback_reason:
+            run.emit(
+                phase="gating",
+                state="warning",
+                message="Validated gates were not reused; rerunning all gates",
+                detail=run.reuse_fallback_reason,
+            )
+        run.emit(
+            phase="gating",
+            state="active",
+            message=(
+                "Reusing validated gates"
+                if run.reused_validation_sha
+                else "Running train gates"
+            ),
+            detail=run.reused_validation_sha,
+        )
+        if run.reused_validation_sha:
+            self._gates.run_reused_gates(
+                worktree=run.worktree,
+                validation_sha=run.reused_validation_sha,
+                base_ref=run.integration_base_sha,
+                log=run.log,
+                pulse=run.pulse,
+                on_gate=gate_progress,
+            )
+        else:
+            self._gates.run_gates(
+                worktree=run.worktree,
+                log=run.log,
+                pulse=run.pulse,
+                on_gate=gate_progress,
+                base_ref=run.integration_base_sha,
+                head_ref=run.deploy_sha,
+            )
+        self._pushes.assert_tree_unchanged(run.worktree, run.deploy_sha)
+        run.emit(
+            phase="gating",
+            state="success",
+            message="All train gates passed",
+            detail=run.reused_validation_sha,
+        )
 
     def _finish_active_jobs(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
         """Finish each job the train still holds; report the others as they stand."""
