@@ -35,6 +35,7 @@ from .git_ops import (
     deploy_audit_ref_name,
     git_output_or_empty,
     git_ref_exists,
+    git_remote_ref_sha,
     resolve_pending_ref,
 )
 from .models import Job, public_owner
@@ -54,8 +55,8 @@ from .persistence.transactions import immediate
 from .push_liveness import push_in_flight, push_lock_path
 
 # --------------------------------------------------------------------------- #
-# git primitives — all reuse run_command(check=False) so a non-zero return is a
-# datum, not an exception (git_runner has no ls-remote / merge-base wrappers).
+# git primitives — all run with check=False, so a non-zero return is a datum,
+# not an exception. Remote refs are read by exact name with git_remote_ref_sha.
 # --------------------------------------------------------------------------- #
 
 
@@ -84,40 +85,6 @@ def _localize_ref(
         env=destination.command_env(),
         check=False,
     )
-
-
-def _ls_remote(
-    config: MergetrainConfig, destination: ResolvedGitDestination, ref: str
-) -> tuple[bool, str]:
-    """Resolve ``ref`` on the remote by **exact** name.
-
-    Returns ``(reachable, remote_sha)``. A reachable remote that does not carry
-    the exact push ref yields ``(True, "")`` — never a sibling ref's sha.
-    ``git ls-remote <remote> main`` is a tail/suffix match, so it can also return
-    ``refs/tags/main`` when ``refs/heads/main`` is absent; attributing that sha to
-    the push ref would let reconcile mark a job ``deployed`` off a ref the deploy
-    never touched. Only an exact match on ``refs/heads/<ref>`` (or a
-    fully-qualified ``ref``) counts; peeled ``^{}`` tag lines are skipped.
-    """
-    completed = run_command(
-        ["git", "ls-remote", destination.remote_alias, ref],
-        cwd=config.repo,
-        env=destination.command_env(),
-        check=False,
-    )
-    if completed.returncode != 0:
-        return False, ""
-    target = ref if ref.startswith("refs/") else f"refs/heads/{ref}"
-    for line in completed.stdout.strip().splitlines():
-        parts = line.split("\t") if "\t" in line else line.split()
-        if len(parts) < 2:
-            continue
-        sha, name = parts[0].strip(), parts[1].strip()
-        if name.endswith("^{}"):  # peeled tag object, not the ref itself
-            continue
-        if name == target:
-            return True, sha
-    return True, ""  # reachable, but the exact push ref is absent
 
 
 def _ancestor_state(config: MergetrainConfig, sha: str, remote_sha: str) -> str:
@@ -396,7 +363,9 @@ def _classify_group(
     ref_shas: dict[str, str] = {}
     for ref in refs:
         _localize_ref(effective, destination, ref)  # bring the tip local so ancestry resolves
-        reachable, remote_sha = _ls_remote(effective, destination, ref)
+        reachable, remote_sha = git_remote_ref_sha(
+            effective.repo, destination.remote_alias, ref, env=destination.command_env()
+        )
         if not reachable:
             raise RemoteUnreachable(f"cannot ls-remote '{ref}' on '{remote}'")
         ref_shas[ref] = remote_sha
@@ -405,7 +374,9 @@ def _classify_group(
         audit_ref = _audit_ref_for_sha(job.pending_deploy_sha)
         if not audit_ref or audit_ref in audit_shas:
             continue
-        reachable, audit_sha = _ls_remote(effective, destination, audit_ref)
+        reachable, audit_sha = git_remote_ref_sha(
+            effective.repo, destination.remote_alias, audit_ref, env=destination.command_env()
+        )
         if not reachable:
             raise RemoteUnreachable(f"cannot ls-remote deploy audit ref on '{remote}'")
         audit_shas[audit_ref] = audit_sha

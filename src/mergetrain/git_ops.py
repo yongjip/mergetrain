@@ -305,7 +305,13 @@ def git_remote_ref_sha(
     pulse_interval_seconds: float = 10,
     timeout_seconds: float | None = None,
 ) -> tuple[bool, str]:
-    """Resolve one exact remote ref without accepting a suffix match."""
+    """Resolve one remote ref by exact name: ``(reachable, sha)``.
+
+    A reachable remote without the exact ref yields ``(True, "")``, never a
+    sibling's sha: ``git ls-remote <remote> main`` is a suffix match and can
+    return ``refs/tags/main`` when ``refs/heads/main`` is absent. Only
+    ``refs/heads/<ref>``, or ``ref`` itself when fully qualified, counts.
+    """
 
     completed = run_command(
         ["git", "ls-remote", "--refs", remote, ref],
