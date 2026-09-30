@@ -379,8 +379,12 @@
   unused single-notifier option, and parameters that no caller varied. Both
   `hub status` views share one repo reader, and `mergetrain.cli` no longer
   re-exports command helpers such as `config_from_args`; import them from the
-  module that owns them. The CLI, MCP tools, JSON contract, and config schema
-  are unchanged.
+  module that owns them. Repeated code now has one home: the run-event
+  emitter, the validated-reuse checks, reconcile and unlock results, the CLI's
+  run and failure output, the daemons' signal handling, path-scoped gate
+  selection, and the configured heartbeat and command timeout each go through
+  one helper, and duplicated helpers and constants are gone. The CLI, MCP
+  tools, JSON contract, and config schema are unchanged.
 
 ## 3.3.0 - 2026-09-30
 
