@@ -499,11 +499,11 @@ def list_dismissable_jobs(conn: sqlite3.Connection) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
-def list_verify_unknown_jobs(conn: sqlite3.Connection) -> list[Job]:
-    """Deployed jobs whose post-push verify never resolved (crash recovery)."""
+def list_unresolved_verify_jobs(conn: sqlite3.Connection) -> list[Job]:
+    """Deployed jobs whose post-push verify never resolved or failed."""
     rows = conn.execute(
-        "SELECT * FROM deploy_queue WHERE status = 'deployed' AND verify_status = 'unknown' "
-        "ORDER BY id ASC"
+        "SELECT * FROM deploy_queue WHERE status = 'deployed' "
+        "AND verify_status IN ('unknown', 'failed') ORDER BY id ASC"
     ).fetchall()
     return [Job.from_row(row) for row in rows]
 

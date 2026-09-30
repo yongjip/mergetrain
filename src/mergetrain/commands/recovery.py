@@ -28,7 +28,7 @@ from ..persistence.connection import connect
 from ..persistence.jobs import (
     get_job,
     get_verification_group,
-    list_verify_unknown_jobs,
+    list_unresolved_verify_jobs,
     resolve_deployment_verify_status,
     terminal_branch_candidates,
 )
@@ -301,7 +301,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 )
             targets = [job]
         else:
-            targets = list_verify_unknown_jobs(conn)
+            # Every deployment --job would accept, a failed verification too.
+            targets = list_unresolved_verify_jobs(conn)
         unique_targets = []
         seen_deployments: set[str] = set()
         for job in targets:

@@ -398,10 +398,9 @@ class DeployUnderWriterContentionTests(unittest.TestCase):
     # `status --json` and `hub status`, so this reports a *failed verification*
     # on a repo that has none — sending an operator hunting a hook that does not
     # exist. The vocabulary already has the honest answer: models.py:14 lists
-    # 'unknown', and persistence.jobs.list_verify_unknown_jobs queries
-    # `status='deployed' AND verify_status='unknown'` for exactly the "we could
-    # not determine it" case. 'not_configured' (unchanged) or 'unknown' are both
-    # honest here; 'failed' is not.
+    # 'unknown', the verify_status for exactly the "we could not determine it"
+    # case. 'not_configured' (unchanged) or 'unknown' are both honest here;
+    # 'failed' is not.
     #
     # The overall outcome stays honest (deployed + a visible warning), which is
     # why the test above passes — this was the narrower lie inside it, now fixed

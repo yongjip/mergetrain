@@ -1677,6 +1677,38 @@ class VerifyRerunTests(unittest.TestCase):
                 [{"job_id": job_id, "verify_status": "succeeded"}],
             )
 
+    def test_verify_without_a_job_also_rechecks_a_failed_verification(self) -> None:
+        """#62: "all unresolved" left the failure alone and reported success."""
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker = root / "verify-recovered.txt"
+            command = (
+                f'{SHELL_PYTHON} -c "from pathlib import Path; '
+                f"Path('{py_path(marker)}').write_text('healthy')\""
+            )
+            repo, _ = make_demo_repo(root, verify_command=command)
+            job_id, _ = self._stage_unknown_deploy(repo)
+            conn = connect(load_config(repo=repo).state.db)
+            try:
+                resolve_deployment_verify_status(
+                    conn, job_id, verify_status="failed", note="first failed"
+                )
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "verify", "--json"])
+            payload = json.loads(out.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "healthy")
+            self.assertEqual(
+                payload["resolved"],
+                [{"job_id": job_id, "verify_status": "succeeded"}],
+            )
+
     def test_verify_runs_once_and_resolves_every_member_of_the_deployment(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

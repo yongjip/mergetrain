@@ -277,6 +277,14 @@
   as the recovery operation's result, although the job was canceled. Such a
   decision is now listed with `applied: false` and left out of the summary
   and exit code, and the human output says it was not applied.
+- Recheck failed verifications too when `mergetrain verify` runs without
+  `--job`, as its help ("default: all unresolved") says. It selected only
+  verifications that a crash left unknown, so with just a failed
+  verification outstanding it resolved nothing and answered
+  `result: success` with exit 0, while `status` still asked for
+  `resolve_failed_verification`. It now reruns, or with `--ack` records,
+  every deployment whose verification is unknown or failed, the same ones
+  `--job` accepts.
 
 ## 3.3.0 - 2026-09-30
 
