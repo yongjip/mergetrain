@@ -100,9 +100,10 @@ they do not understand the required action.
 ## JSONL streams
 
 `events --jsonl` emits a `stream_start` record carrying `contract_version` on
-every connection, including resumed connections. `event`, `heartbeat`, and
-`stream_end` records do not repeat it. Dispatch every record by `type`; persist
-only event IDs as resume cursors.
+every connection, including resumed connections. It is the first record even
+when an option or the configuration is rejected and a `stream_end` error
+follows. `event`, `heartbeat`, and `stream_end` records do not repeat it.
+Dispatch every record by `type`; persist only event IDs as resume cursors.
 
 ## `error.code` vocabulary
 

@@ -3188,6 +3188,37 @@ class CliTests(unittest.TestCase):
             self.assertFalse(records[-1]["ok"])
             self.assertEqual(records[-1]["error"]["code"], "queue_error")
 
+    def test_events_jsonl_argument_and_config_errors_follow_the_header(self) -> None:
+        # The option checks and the config load ran before the stream_start
+        # header, so their only frame was a stream_end with no contract_version.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            db = repo / "queue.sqlite"
+            connect(db).close()
+            broken = Path(td) / "broken"
+            broken.mkdir()
+            (broken / ".mergetrain.yaml").write_text("gates: [\n", encoding="utf-8")
+            base = ["--repo", str(repo), "--db", str(db), "events", "--jsonl"]
+            cases = {
+                "limit": [*base, "--limit", "0"],
+                "after": [*base, "--after", "-1"],
+                "poll_interval": [*base, "--poll-interval", "0"],
+                "config": ["--repo", str(broken), "events", "--jsonl"],
+            }
+            for name, argv in cases.items():
+                with self.subTest(name=name):
+                    out = io.StringIO()
+                    with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                        code = main(argv)
+                    records = [json.loads(line) for line in out.getvalue().splitlines()]
+                    self.assertEqual(code, 1)
+                    self.assertEqual(records[0]["type"], "stream_start")
+                    self.assertEqual(records[0]["contract_version"], CONTRACT_VERSION)
+                    self.assertEqual(records[0]["after_event_id"], 0)
+                    self.assertEqual(records[-1]["type"], "stream_end")
+                    self.assertEqual(records[-1]["reason"], "error")
+
     def test_events_follow_reports_lost_lease_and_interrupt(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

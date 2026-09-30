@@ -444,6 +444,20 @@ def _print_event_record(payload: dict[str, Any], *, jsonl: bool) -> None:
 
 
 def cmd_events(args: argparse.Namespace) -> int:
+    if args.jsonl:
+        # A stream header on every connect (including an --after resume, which
+        # is a fresh and possibly different-binary process) lets a long-lived
+        # consumer re-confirm the contract. It carries no event id, so id-based
+        # resume dedupe is unaffected; consumers dispatch JSONL frames on `type`.
+        # It comes before the option checks and the config load, so the
+        # stream_end of their errors also follows a contract_version.
+        _dump_jsonl(
+            {
+                "type": "stream_start",
+                "contract_version": CONTRACT_VERSION,
+                "after_event_id": max(0, int(args.after or 0)),
+            }
+        )
     if args.after is not None and args.after < 0:
         raise QueueError("--after must be zero or greater")
     if not 1 <= args.limit <= 200:
@@ -455,18 +469,6 @@ def cmd_events(args: argparse.Namespace) -> int:
     cursor = args.after
     last_heartbeat = ""
     scoped = args.job_id is not None or bool(args.train_id)
-    if args.jsonl:
-        # A stream header on every connect (including an --after resume, which
-        # is a fresh and possibly different-binary process) lets a long-lived
-        # consumer re-confirm the contract. It carries no event id, so id-based
-        # resume dedupe is unaffected; consumers dispatch JSONL frames on `type`.
-        _dump_jsonl(
-            {
-                "type": "stream_start",
-                "contract_version": CONTRACT_VERSION,
-                "after_event_id": int(cursor or 0),
-            }
-        )
     try:
         conn = connect(config.state.db, read_only=True)
         jobs, event_job_ids = _resolve_event_scope(conn, args)

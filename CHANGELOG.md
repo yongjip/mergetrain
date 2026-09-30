@@ -335,6 +335,12 @@
   `GITHUB_TOKEN=... ./check`, which events, `inspect`, and `hub status` mask,
   appeared there in clear, as did the command in a redundant `diff-check`
   recommendation. They are now masked the same way.
+- Start every `events --jsonl` stream with its `stream_start` header, even
+  when the command then fails. An invalid `--limit`, `--after`, or
+  `--poll-interval`, or a configuration that could not be loaded, printed only
+  a `stream_end` error, which carries no `contract_version`, so a consumer
+  that checks the header first could not check the contract. The header now
+  comes first and the `stream_end` error follows it.
 
 ## 3.3.0 - 2026-09-30
 
