@@ -13,6 +13,7 @@ from typing import NoReturn
 
 from . import __version__
 from .cli_support import (
+    GLOBAL_OPTIONS_WITH_VALUES,
     _dump_jsonl,
     _error_payload,
     dump_json,
@@ -372,7 +373,7 @@ def _command_index(argv: Sequence[str]) -> int | None:
     index = 0
     while index < len(argv):
         value = argv[index]
-        if value in {"--config", "--repo", "--db"}:
+        if value in GLOBAL_OPTIONS_WITH_VALUES:
             index += 2
             continue
         if value == "--version":
@@ -470,25 +471,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except KeyboardInterrupt:
+        # Route through the single builder so Ctrl-C emits the same
+        # {code,message,retryable} shape as every other failure — a consumer
+        # doing resp["error"]["retryable"] must not KeyError on interrupt.
         error_payload = _error_payload("interrupted", "interrupted", retryable=False)
-        if getattr(args, "json", False):
-            # Route through the single builder so Ctrl-C emits the same
-            # {code,message,retryable} shape as every other failure — a consumer
-            # doing resp["error"]["retryable"] must not KeyError on interrupt.
-            dump_json(error_payload)
-        elif getattr(args, "jsonl", False):
-            _dump_jsonl(
-                {
-                    "type": "stream_end",
-                    "reason": "interrupted",
-                    "exit_code": 130,
-                    "ok": False,
-                    "error": error_payload["error"],
-                }
-            )
-        else:
-            print("mergetrain: interrupted", file=sys.stderr)
-        return 130
+        reason, exit_code, text = "interrupted", 130, "mergetrain: interrupted"
     except (MergetrainError, CommandFailed, ConfigError, QueueError, OSError, sqlite3.Error) as exc:
         # A path of the wrong kind, such as a --worktree that is a file or a
         # --db that is a directory, fails in the operating system or SQLite
@@ -507,21 +494,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             str(exc),
             retryable=type(exc).__name__ in {"LockHeld", "LostLease", "QueueBusy"},
         )
-        if getattr(args, "json", False):
-            dump_json(error_payload)
-        elif getattr(args, "jsonl", False):
-            _dump_jsonl(
-                {
-                    "type": "stream_end",
-                    "reason": "error",
-                    "exit_code": 1,
-                    "ok": False,
-                    "error": error_payload["error"],
-                }
-            )
-        else:
-            print(f"mergetrain: error: {exc}", file=sys.stderr)
-        return 1
+        reason, exit_code, text = "error", 1, f"mergetrain: error: {exc}"
+    if getattr(args, "json", False):
+        dump_json(error_payload)
+    elif getattr(args, "jsonl", False):
+        _dump_jsonl(
+            {
+                "type": "stream_end",
+                "reason": reason,
+                "exit_code": exit_code,
+                "ok": False,
+                "error": error_payload["error"],
+            }
+        )
+    else:
+        print(text, file=sys.stderr)
+    return exit_code
 
 
 if __name__ == "__main__":  # pragma: no cover

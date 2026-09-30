@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hmac
+import sqlite3
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -16,7 +17,7 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
-from ..config import gate_policy_warnings
+from ..config import MergetrainConfig, gate_policy_warnings
 from ..deploy_plan import deploy_plan_sha
 from ..errors import DeployPlanChanged, QueueError, escape_controls, redact_secrets
 from ..git_destination import resolve_git_destination
@@ -106,6 +107,44 @@ def _print_run_payload(payload: dict[str, Any]) -> None:
         print(payload.get("note", "done"))
 
 
+def _emit_run_payload(args: argparse.Namespace, payload: dict[str, Any]) -> None:
+    if args.json:
+        dump_json(payload)
+    else:
+        _print_run_payload(payload)
+
+
+def _run_claimed(
+    conn: sqlite3.Connection,
+    config: MergetrainConfig,
+    args: argparse.Namespace,
+    jobs: list[Job],
+    *,
+    owner: str,
+    deploy: bool,
+    expected_plan: str = "",
+) -> dict[str, Any]:
+    """Run a claimed train, release its lease, and return the run payload."""
+
+    if not jobs:
+        return {**_results_payload([]), "note": "no queued jobs"}
+    lease_token = jobs[0].claim_token
+    try:
+        results = GitRunner(config).process_batch(
+            conn,
+            jobs,
+            deploy=deploy,
+            keep_worktree=args.keep_worktree,
+            owner=owner,
+            ttl_minutes=config.queue.lock_ttl_minutes,
+            expected_plan_sha=expected_plan,
+        )
+    finally:
+        if lease_token:
+            release_runner_lock(conn, owner=owner, token=lease_token)
+    return _results_payload(results)
+
+
 def _execute_batch(
     args: argparse.Namespace,
     *,
@@ -117,7 +156,6 @@ def _execute_batch(
     config = config_from_args(args)
     _preflight_config(config)
     owner = default_owner()
-    lease_token = ""
     conn = connect(config.state.db)
     try:
         if deploy:
@@ -175,28 +213,12 @@ def _execute_batch(
             ):
                 # Another runner made a train Ready after cmd_validate looked.
                 return _emit_validated_train_pending(args)
-        if not jobs:
-            payload = {**_results_payload([]), "note": "no queued jobs"}
-        else:
-            lease_token = jobs[0].claim_token
-            results = GitRunner(config).process_batch(
-                conn,
-                jobs,
-                deploy=deploy,
-                keep_worktree=args.keep_worktree,
-                owner=owner,
-                ttl_minutes=config.queue.lock_ttl_minutes,
-                expected_plan_sha=expected_plan,
-            )
-            payload = _results_payload(results)
+        payload = _run_claimed(
+            conn, config, args, jobs, owner=owner, deploy=deploy, expected_plan=expected_plan
+        )
     finally:
-        if lease_token:
-            release_runner_lock(conn, owner=owner, token=lease_token)
         conn.close()
-    if args.json:
-        dump_json(payload)
-    else:
-        _print_run_payload(payload)
+    _emit_run_payload(args, payload)
     return _run_exit_code(payload)
 
 
@@ -282,11 +304,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     if not ready:
         if not queued and not in_progress:
-            payload = {**_results_payload([]), "note": "no queued or ready jobs"}
-            if args.json:
-                dump_json(payload)
-            else:
-                _print_run_payload(payload)
+            _emit_run_payload(args, {**_results_payload([]), "note": "no queued or ready jobs"})
             return 0
 
         # A deploy command is explicit deploy intent, but no push can occur
@@ -294,7 +312,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         # exact plan is shown. Keep JSON to one document by capturing the
         # validation output internally.
         owner = default_owner()
-        lease_token = ""
         conn = connect(config.state.db)
         try:
             # A train another runner made Ready since the check above leaves
@@ -305,32 +322,13 @@ def cmd_deploy(args: argparse.Namespace) -> int:
                 ttl_minutes=config.queue.lock_ttl_minutes,
                 unless_ready=True,
             )
-            if not jobs:
-                validation_payload = {
-                    **_results_payload([]),
-                    "note": "no queued jobs",
-                }
-            else:
-                lease_token = jobs[0].claim_token
-                results = GitRunner(config).process_batch(
-                    conn,
-                    jobs,
-                    deploy=False,
-                    keep_worktree=args.keep_worktree,
-                    owner=owner,
-                    ttl_minutes=config.queue.lock_ttl_minutes,
-                        expected_plan_sha="",
-                )
-                validation_payload = _results_payload(results)
+            validation_payload = _run_claimed(
+                conn, config, args, jobs, owner=owner, deploy=False
+            )
         finally:
-            if lease_token:
-                release_runner_lock(conn, owner=owner, token=lease_token)
             conn.close()
         if _run_exit_code(validation_payload):
-            if args.json:
-                dump_json(validation_payload)
-            else:
-                _print_run_payload(validation_payload)
+            _emit_run_payload(args, validation_payload)
             return _run_exit_code(validation_payload)
         if not args.json:
             _print_run_payload(validation_payload)
