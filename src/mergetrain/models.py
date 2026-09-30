@@ -141,6 +141,12 @@ class RunnerLock:
         data.pop("token", None)
         return data
 
+    @property
+    def live_worktree(self) -> str:
+        """The worktree this lock names, or "" once its owner is dead."""
+
+        return "" if self.liveness == "dead" else self.worktree_path
+
 
 @dataclass(slots=True)
 class RunEvent:

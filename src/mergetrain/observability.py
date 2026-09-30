@@ -18,6 +18,7 @@ from .evidence import (
     history_status,
     product_evidence,
     run_mode,
+    runs_by_claim,
 )
 from .models import Job, RunEvent, RunnerLock
 from .persistence.connection import connect
@@ -110,10 +111,7 @@ def _run_latency(
     for job in jobs:
         if job.claim_token:
             job_ids_by_token[job.claim_token].add(job.id)
-    events_by_token: dict[str, list[RunEvent]] = defaultdict(list)
-    for event in events:
-        if event.claim_token:
-            events_by_token[event.claim_token].append(event)
+    runs = runs_by_claim(events)
 
     run_totals: dict[str, list[float]] = defaultdict(list)
     phase_totals: dict[tuple[str, str], list[float]] = defaultdict(list)
@@ -124,10 +122,7 @@ def _run_latency(
     observed_starts = 0
     observed_terminals = 0
 
-    for claim_token, token_events in events_by_token.items():
-        ordered = sorted(token_events, key=lambda event: event.id)
-        if not ordered:
-            continue
+    for claim_token, ordered in runs.items():
         mode = run_mode(ordered)
         claim_event = next(
             (
@@ -236,7 +231,7 @@ def _run_latency(
             "retained_events": len(events),
             "retention_limit": RUN_EVENT_RETENTION,
             "history_complete": len(events) < RUN_EVENT_RETENTION,
-            "observed_runs": len(events_by_token),
+            "observed_runs": len(runs),
             "runs_with_observed_start": observed_starts,
             "runs_with_terminal": observed_terminals,
             "complete_runs": complete_runs,
@@ -458,13 +453,8 @@ def _current_run_stats(
 ) -> dict[str, Any]:
     """Summarize the latest complete claim-token runs only."""
 
-    grouped: dict[str, list[RunEvent]] = defaultdict(list)
-    for event in events:
-        if event.claim_token:
-            grouped[event.claim_token].append(event)
     complete: list[tuple[int, str, RunEvent, RunEvent]] = []
-    for token, token_events in grouped.items():
-        ordered = sorted(token_events, key=lambda event: event.id)
+    for token, ordered in runs_by_claim(events).items():
         claim = next(
             (
                 event

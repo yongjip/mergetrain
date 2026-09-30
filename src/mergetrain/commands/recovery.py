@@ -32,7 +32,7 @@ from ..persistence.jobs import (
     resolve_deployment_verify_status,
     terminal_branch_candidates,
 )
-from ..persistence.leases import get_lock, live_worktree_path
+from ..persistence.leases import live_worktree_path
 from ..persistence.operations import finish_recovery_operation, start_recovery_operation
 from ..recovery import force_unlock, reconcile, sweep_pending_refs
 
@@ -57,10 +57,8 @@ def cmd_gc(args: argparse.Namespace) -> int:
         branch_candidates_raw = terminal_branch_candidates(conn)
         # Protect the worktree of a live runner from removal (Blocker: gc
         # --apply must never destroy a worktree a running deploy is inside).
-        lock = get_lock(conn)
-        protect_worktrees = (
-            [lock.worktree_path] if lock and lock.worktree_path and lock.liveness != "dead" else []
-        )
+        live_worktree = live_worktree_path(conn)
+        protect_worktrees = [live_worktree] if live_worktree else []
         branch_candidates: list[dict[str, Any]] = []
         delete_branch_heads: dict[str, str] = {}
         for candidate in branch_candidates_raw:

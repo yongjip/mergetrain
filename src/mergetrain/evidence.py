@@ -136,17 +136,26 @@ def _claimed_job_count(events: Sequence[RunEvent]) -> int | None:
     return None
 
 
-def run_attempts(events: Sequence[RunEvent]) -> list[RunAttempt]:
-    """Reconstruct run outcomes without exposing lease/claim tokens publicly."""
+def runs_by_claim(events: Sequence[RunEvent]) -> dict[str, list[RunEvent]]:
+    """Group claimed events into runs by claim token, each run in id order.
+
+    Runs keep the order in which their tokens first appear.
+    """
 
     grouped: dict[str, list[RunEvent]] = {}
     for event in events:
         if event.claim_token:
             grouped.setdefault(event.claim_token, []).append(event)
+    return {
+        token: sorted(run, key=lambda event: event.id) for token, run in grouped.items()
+    }
+
+
+def run_attempts(events: Sequence[RunEvent]) -> list[RunAttempt]:
+    """Reconstruct run outcomes without exposing lease/claim tokens publicly."""
 
     attempts: list[RunAttempt] = []
-    for token, token_events in grouped.items():
-        ordered = sorted(token_events, key=lambda event: event.id)
+    for token, ordered in runs_by_claim(events).items():
         mode = run_mode(ordered)
         success_phase = "complete" if mode == "deploy" else "ready"
         succeeded = any(

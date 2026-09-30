@@ -251,11 +251,7 @@ def _diagnostics(
         "gc": {
             "worktree_candidates": find_worktree_gc_candidates(
                 config,
-                protect=(
-                    [lock.worktree_path]
-                    if lock and lock.worktree_path and lock.liveness != "dead"
-                    else []
-                ),
+                protect=[lock.live_worktree] if lock and lock.live_worktree else [],
             )
         },
     }

@@ -138,9 +138,7 @@ def live_worktree_path(conn: sqlite3.Connection) -> str | None:
     deletion — a runner that acquired the lock after GC's protect snapshot was
     built is invisible to that snapshot but visible here (#84, defect 5)."""
     lock = get_lock(conn)
-    if lock and lock.worktree_path and lock.liveness != Liveness.DEAD:
-        return lock.worktree_path
-    return None
+    return (lock.live_worktree if lock else "") or None
 
 
 def _in_progress_count(conn: sqlite3.Connection) -> int:
