@@ -211,6 +211,17 @@
   paths are now escaped for `sh` as on every other platform, and on Windows
   they use forward slashes, because the command line that carries `sh -c`
   also reads `\\` as `\`.
+  paths are now escaped for `sh` as on every other platform.
+- Run the configuration that `mergetrain daemon` checked against an `--auto`
+  approval. The daemon compared each job's approved gates and verify hooks
+  with the config it loaded for the claim, then loaded `.mergetrain.yaml`
+  again to run the train. If the file changed in between, for example during
+  a branch switch in the control checkout, the train ran the changed gates,
+  and when the change was undone before the runner reloaded the file for its
+  own checks, those checks passed and the train was pushed without the
+  approved gates.
+  The daemon now runs the configuration it compared with the approval, as
+  `hub daemon` already did.
 
 ## 3.3.0 - 2026-09-30
 

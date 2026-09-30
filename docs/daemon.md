@@ -22,8 +22,9 @@ mergetrain daemon --validate-only --once
   untouched.
 - The persisted execution-policy hash must also match the effective gates,
   default command timeout, validation-reuse configuration and authorization,
-  and post-push verify hooks. The daemon checks it transactionally at claim;
-  the runner reloads it before gates and again before the push marker. A blank
+  and post-push verify hooks. The daemon checks it transactionally at claim
+  and runs the configuration it checked; the runner reloads the file and
+  checks it again before gates and before the push marker. A blank
   legacy hash or mismatch becomes `blocked` with
   `approval_execution_policy_changed` and requires a fresh `--auto` enqueue.
 - `--validate-only` claims only manual jobs (`auto_deploy = 0`) and invokes the

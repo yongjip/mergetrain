@@ -46,11 +46,15 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         return deploy_destination_sha(latest)
 
     def current_execution_policy_sha() -> str:
-        latest = approval_snapshot.pop() if approval_snapshot else current_config()
+        latest = approval_snapshot[0] if approval_snapshot else current_config()
         return deploy_execution_policy_sha(latest)
 
     def process_batch(conn, jobs: list[Job]) -> object:  # type: ignore[no-untyped-def]
-        latest = current_config()
+        # Run the config the claim just compared with each job's approval. A
+        # reload could read a file edited after the claim, and the runner's
+        # own checks reload the file too, so they would never see the policy
+        # it actually runs. Validate-only mode compares no approval.
+        latest = approval_snapshot.pop() if approval_snapshot else current_config()
         return GitRunner(latest).process_batch(
             conn,
             jobs,

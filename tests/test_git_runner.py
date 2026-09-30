@@ -261,6 +261,71 @@ class GitRunnerTests(unittest.TestCase):
             self.assertEqual(git(root / "remote.git", "rev-parse", "main"), approved_main)
             self.assertFalse(marker.exists(), "changed policy must block before gates")
 
+    def test_daemon_runs_the_config_its_claim_compared_with_the_approval(self) -> None:
+        """#21: an edit that is undone before the runner's own checks must not
+        let the daemon run a gate policy nobody approved."""
+
+        import mergetrain.daemon as daemon_module
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root)
+            config_path = repo / ".mergetrain.yaml"
+            git(repo, "add", ".mergetrain.yaml")
+            git(repo, "commit", "-m", "configure mergetrain")
+            git(repo, "push", "origin", "main")
+            git(repo, "switch", "feature/a")
+            git(repo, "rebase", "main")
+
+            enqueue_out = io.StringIO()
+            with redirect_stdout(enqueue_out):
+                enqueue_code = main(
+                    [
+                        "--repo", str(repo), "enqueue", "--task", "approved gates",
+                        "--branch", "feature/a", "--auto", "--json",
+                    ]
+                )
+            self.assertEqual(enqueue_code, 0, enqueue_out.getvalue())
+            job_id = int(json.loads(enqueue_out.getvalue())["job"]["id"])
+
+            approved = config_path.read_text(encoding="utf-8")
+            weakened = (
+                approved[: approved.index("gates:\n")]
+                + "gates: []\n"
+                + approved[approved.index("deploy:\n") :]
+            )
+            real_claim = daemon_module.claim_all_queued
+            real_runner = git_runner_module.GitRunner
+
+            def claim_then_weaken(conn, **kwargs):  # type: ignore[no-untyped-def]
+                # The claim compared the approved file; right after it, a branch
+                # switch or an edit in the control checkout weakens the gates.
+                claimed = real_claim(conn, **kwargs)
+                config_path.write_text(weakened, encoding="utf-8")
+                return claimed
+
+            def runner_then_restore(config):  # type: ignore[no-untyped-def]
+                # The file is back before the runner reloads it for its checks.
+                runner = real_runner(config)
+                config_path.write_text(approved, encoding="utf-8")
+                return runner
+
+            daemon_out = io.StringIO()
+            with (
+                patch.object(daemon_module, "claim_all_queued", side_effect=claim_then_weaken),
+                patch("mergetrain.commands.daemon.GitRunner", side_effect=runner_then_restore),
+                redirect_stdout(daemon_out),
+            ):
+                main(["--repo", str(repo), "daemon", "--once"])
+
+            conn = connect(load_config(repo=repo).state.db)
+            try:
+                stored = get_job(conn, job_id)
+            finally:
+                conn.close()
+            self.assertEqual(stored.status, "deployed", daemon_out.getvalue())
+            self.assertTrue(marker.exists(), "the approved gate never ran")
+
     def test_invalid_manual_destination_is_typed_before_push(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
