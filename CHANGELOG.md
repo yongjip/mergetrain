@@ -139,6 +139,11 @@
   differently, and `"$MERGETRAIN_REPO"` or `"$MERGETRAIN_WORKTREE"` works
   there instead. Outside double quotes, a `$`, `{`, or `[` after `$$` no
   longer starts an expansion of its own.
+- Negate a `paths` character class that starts with `^`, as Git and the shells
+  do. Gate path matching read `[^_]` as the set of `^` and `_`, so a gate
+  scoped to `src/[^_]*.py` was skipped for a train that changed `src/main.py`
+  and ran for one that changed only `src/_private.py`. `[^...]` now means the
+  same as `[!...]`.
 
 ## 3.3.0 - 2026-09-30
 

@@ -9,6 +9,21 @@ from functools import cache
 
 _WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:/")
 _NAME_STATUS = re.compile(r"^[A-Z][0-9]*$")
+# One character class as fnmatch reads it, with its leading '!' or '^'.
+_CHARACTER_CLASS = re.compile(r"\[([!^]?)(\]?[^\]]*)\]")
+
+
+def _fnmatch_segment(part: str) -> str:
+    """Spell a class that a leading ``^`` negates the way fnmatch negates one.
+
+    Git's wildmatch and the shells read ``[^...]`` as ``[!...]``. fnmatch reads
+    that ``^`` as a member, which would invert the class.
+    """
+
+    return _CHARACTER_CLASS.sub(
+        lambda match: f"[!{match.group(2)}]" if match.group(1) == "^" else match.group(0),
+        part,
+    )
 
 
 def validate_gate_path_pattern(pattern: str) -> str:
@@ -40,7 +55,7 @@ def validate_gate_path_pattern(pattern: str) -> str:
 def path_matches(pattern: str, path: str) -> bool:
     """Return whether a repository-relative path matches a validated pattern."""
 
-    pattern_parts = tuple(pattern.split("/"))
+    pattern_parts = tuple(_fnmatch_segment(part) for part in pattern.split("/"))
     path_parts = tuple(path.split("/"))
 
     @cache

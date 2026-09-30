@@ -35,6 +35,23 @@ class PathPatternTests(unittest.TestCase):
             )
         )
 
+    def test_a_leading_caret_negates_a_class_as_git_and_the_shells_read_it(self) -> None:
+        # fnmatch negates a class only with '!' and took '^' for a member,
+        # which inverted a pattern written for Git or a shell.
+        cases = [
+            ("src/[^_]*.py", "src/main.py", True),
+            ("src/[^_]*.py", "src/_private.py", False),
+            ("src/[!_]*.py", "src/main.py", True),
+            ("src/[!_]*.py", "src/_private.py", False),
+            ("docs/[^]].md", "docs/a.md", True),
+            ("docs/[^]].md", "docs/].md", False),
+            ("docs/[a^].md", "docs/^.md", True),
+            ("docs/[a[^].md", "docs/^.md", True),
+        ]
+        for pattern, path, expected in cases:
+            with self.subTest(pattern=pattern, path=path):
+                self.assertEqual(path_matches(pattern, path), expected)
+
     def test_invalid_patterns_are_rejected(self) -> None:
         invalid = (
             "",

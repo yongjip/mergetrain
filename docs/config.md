@@ -337,7 +337,8 @@ built-in `diff-check`.
 
 Patterns are repository-relative POSIX globs on every platform. `*`, `?`, and
 character classes match within one path segment; a segment containing only
-`**` matches zero or more complete segments. Absolute paths, `.`/`..` segments,
+`**` matches zero or more complete segments. A class that starts with `!` or
+`^`, such as `[!_]` or `[^_]`, is negated, as in Git and the shells. Absolute paths, `.`/`..` segments,
 backslashes, empty segments, duplicate patterns, and `**` embedded inside
 another segment are rejected. `paths` is supported only for top-level
 pre-push `gates`, not `deploy.verify` or reuse fingerprints.
