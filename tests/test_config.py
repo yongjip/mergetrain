@@ -187,6 +187,23 @@ terminology:
             {"values": ["yes", "010", "0_600", "1:30"]},
         )
 
+    def test_a_repeated_mapping_key_is_rejected(self) -> None:
+        # PyYAML keeps the last value, so a second `run` left behind by a
+        # merge resolution silently replaced the real gate command.
+        cases = {
+            "gates:\n  - name: tests\n    run: pytest\n    run: 'true'\n": "'run' on line 4",
+            "gates: []\ngates:\n  - name: lint\n    run: ruff\n": "'gates' on line 2",
+            'git:\n  push_refs: [main]\n  "push_refs": [release]\n': "'push_refs' on line 3",
+        }
+        for document, where in cases.items():
+            with self.subTest(document=document):
+                with self.assertRaisesRegex(ConfigError, f"duplicate YAML key {where}"):
+                    load_yaml(document)
+        self.assertEqual(
+            load_yaml("gates:\n  - {name: a, run: a}\n  - {name: b, run: b}\n")["gates"][1],
+            {"name": "b", "run": "b"},
+        )
+
     def test_yaml_loader_handles_plain_config_shapes(self) -> None:
         document = (
             "project:\n"

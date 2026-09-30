@@ -150,6 +150,12 @@
   5, and 90, although the config reference says such values are rejected.
   They now fail with the same "ambiguous YAML integer" error as `010`; quote
   them to keep a string.
+- Reject a key repeated in one mapping of `.mergetrain.yaml`. The parser kept
+  the last value without a word, so a second `run:` left in a gate by a merge
+  resolution, such as `run: 'true'` after `run: pytest`, loaded as a gate that
+  always passed, and a repeated `gates:` or `push_refs:` replaced the earlier
+  policy. Loading now fails with a `config_error` that names the key and its
+  line.
 
 ## 3.3.0 - 2026-09-30
 

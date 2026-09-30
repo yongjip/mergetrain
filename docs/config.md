@@ -30,7 +30,9 @@ flow-style collections such as `[main, release]` and `{name: tests}` now work
 consistently on every installation. Legacy YAML booleans (`yes`, `no`, `on`,
 `off`), prefixed or leading-zero integers (`0x1F`, `010`, `0_600`), base-60
 integers (`1:30`), and tab indentation are rejected so operator policy cannot
-change meaning through implicit scalar conversion.
+change meaning through implicit scalar conversion. So is a key repeated in one
+mapping, such as a second `run:` in a gate, which the parser would otherwise
+let replace the first.
 Invalid mapping, list, string, boolean, path, and positive-integer values also
 fail closed during typed config validation.
 

@@ -319,7 +319,17 @@ def _validate_yaml_text(text: str) -> None:
         if isinstance(node, MappingNode):
             # Mapping keys name schema fields and were never scalar-validated;
             # preserve that compatibility while checking every nested value.
-            for _key, value in node.value:
+            # PyYAML keeps the last of repeated keys, so a second `run` would
+            # silently replace the first; refuse it instead.
+            keys: set[tuple[str, str]] = set()
+            for key, value in node.value:
+                if isinstance(key, ScalarNode):
+                    if (key.tag, key.value) in keys:
+                        raise ConfigError(
+                            f"duplicate YAML key {key.value!r} on line "
+                            f"{key.start_mark.line + 1}"
+                        )
+                    keys.add((key.tag, key.value))
                 validate_node(value)
 
     if root is not None:
