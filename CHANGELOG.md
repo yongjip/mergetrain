@@ -84,6 +84,9 @@
   branch whose tests failed could be validated with a weakened gate and then
   deployed. The configuration now comes from the control checkout unless
   `--config` names another file, and `init --write` writes it there.
+  `status --diagnose` in a task worktree compares that file with the
+  integration ref's copy and reports `operator_config_drift` when they
+  differ, instead of `config_outside_repo`.
 - Open the queue read-only in `inspect`, as `status` and `history` do.
   `inspect`, which MCP also offers as the read-only `mergetrain_inspect`, opened
   it writable: in a repository without a queue it created `.mergetrain/` and

@@ -230,12 +230,14 @@ that suite first.
 
 ## Keep one operator checkout authoritative
 
-The runner reads configuration from the checkout where mergetrain is invoked.
-For self-hosting repositories, an old or locally edited `.mergetrain.yaml` can
-silently select different gates from the integration branch.
+The runner reads configuration from the control checkout, the one that holds
+the shared queue, even when mergetrain starts in a linked task worktree. An old
+or locally edited `.mergetrain.yaml` there can silently select different gates
+from the integration branch.
 
-`status --diagnose --json` compares the local configuration bytes with the configuration
-at the locally known integration ref and reports:
+`status --diagnose --json`, run from the control checkout or any of its task
+worktrees, compares that configuration's bytes with the configuration at the
+locally known integration ref and reports:
 
 - `config_drift.state=in_sync` when the blobs match;
 - `drifted` plus an `operator_config_drift` recommendation when they differ;

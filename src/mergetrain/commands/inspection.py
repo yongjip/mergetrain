@@ -26,6 +26,7 @@ from ..contract import CONTRACT_VERSION
 from ..errors import QueueError, redact_secrets
 from ..git_ops import (
     find_worktree_gc_candidates,
+    git_common_dir,
     git_current_branch,
     git_ref_exists,
     git_remote_exists,
@@ -810,7 +811,7 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
     if not repo_root:
         payload["state"] = "git_unavailable"
         return payload
-    repo_path = Path(repo_root).resolve()
+    repo_path = Path(_config_checkout_root(config, repo_root=repo_root)).resolve()
     try:
         relative_path = local_path.relative_to(repo_path).as_posix()
     except ValueError:
@@ -851,6 +852,24 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
     payload["comparable"] = True
     payload["matches"] = matches
     return payload
+
+
+def _config_checkout_root(config: MergetrainConfig, *, repo_root: str) -> str:
+    """The checkout of this repository that holds the configuration file.
+
+    Started in a linked task worktree, mergetrain runs the control checkout's
+    ``.mergetrain.yaml``, so drift is judged there. Judged against the task
+    worktree, that file looked outside the repository and drift went unreported.
+    A file in another repository stays outside.
+    """
+
+    config_dir = config.config_path.resolve().parent
+    if not config_dir.is_dir():
+        return repo_root
+    config_root = git_repo_root(config_dir)
+    if not config_root or git_common_dir(config_dir) != git_common_dir(config.repo):
+        return repo_root
+    return config_root
 
 
 def _doctor_recommendations(

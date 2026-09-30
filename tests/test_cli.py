@@ -696,6 +696,56 @@ class CliTests(unittest.TestCase):
             "services/api/.mergetrain.yaml",
         )
 
+    def test_doctor_compares_the_control_checkout_config_from_a_task_worktree(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            task = Path(td) / "task"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=repo,
+                check=True,
+            )
+            config_path = repo / ".mergetrain.yaml"
+            config_path.write_text(render_default_config("drift"), encoding="utf-8")
+            subprocess.run(["git", "add", ".mergetrain.yaml"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "add config"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "worktree", "add", "-q", "-b", "agent/task", str(task)],
+                cwd=repo,
+                check=True,
+            )
+            # The runner uses the control checkout's copy, which no longer
+            # matches the integration ref; the task worktree's copy still does.
+            config_path.write_text(render_default_config("operator-copy"), encoding="utf-8")
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(task), "status", "--diagnose", "--json"])
+            payload = json.loads(out.getvalue())
+
+        diagnostics = payload["diagnostics"]
+        drift = diagnostics["config_drift"]
+        self.assertEqual(code, 0)
+        self.assertEqual(drift["state"], "drifted")
+        self.assertEqual(drift["local"]["path"], ".mergetrain.yaml")
+        self.assertEqual(
+            diagnostics["recommendations"][0]["code"],
+            "operator_config_drift",
+        )
+
     def test_doctor_does_not_invent_drift_without_an_integration_ref(
         self,
     ) -> None:
