@@ -6,6 +6,7 @@ import io
 import sqlite3
 import uuid
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import IO, Any
@@ -67,6 +68,64 @@ class _AlreadyLanded(PushRejected):
     the deployment. Anything that does not expect it treats it as the push
     rejection it also is.
     """
+
+
+@dataclass(slots=True)
+class _TrainRun:
+    """What the phases of one ``process_batch`` train share.
+
+    The lease pulses and the error paths read it when they run, not when the
+    train starts: a pulse reports the deploy SHA assembled so far, and an
+    error finishes the jobs merged so far with the evidence gathered so far.
+    Every phase therefore records its progress here, never in a copy.
+    """
+
+    conn: sqlite3.Connection
+    jobs: list[Job]
+    deploy: bool
+    keep_worktree: bool
+    owner: str | None
+    ttl_minutes: int
+    expected_plan_sha: str
+    lease_token: str
+    deploying_validated: bool
+    log_path: Path
+    log: IO[str]
+    worktree: Path
+    persistent_workspace: bool
+    emit: EventWriter
+    # GitRunner._refresh_lease and _finish_job, bound to this train's lease.
+    refresh_lease: Callable[..., None]
+    finish_job: Callable[..., Job]
+    merged_jobs: list[Job] = field(default_factory=list)
+    results: list[Job] = field(default_factory=list)
+    merge_shas: dict[int, str] = field(default_factory=dict)
+    deploy_sha: str = ""
+    integration_base_sha: str = ""
+    deploy_state: _PushVerifyState = field(default_factory=_PushVerifyState)
+    reused_validation_sha: str = ""
+    reuse_fallback_reason: str = ""
+
+    def pulse(self) -> None:
+        """Refresh the lease; a cancel request stops the train here."""
+
+        self.refresh_lease(head_sha=self.deploy_sha, check_cancel=True)
+
+    def ownership_pulse(self) -> None:
+        """Refresh the lease without checking for a cancel request."""
+
+        self.refresh_lease(head_sha=self.deploy_sha, check_cancel=False)
+
+    def finish(self, job: Job, **values: Any) -> Job:
+        return self.finish_job(job.id, **values)
+
+    def block_all(self, note: str) -> list[Job]:
+        """Block every job: a validated train deploys whole or not at all."""
+
+        return [
+            self.finish(job, status="blocked", log_path=str(self.log_path), note=note)
+            for job in self.jobs
+        ]
 
 
 class GitRunner:
@@ -828,32 +887,7 @@ class GitRunner:
         self._worktrees.ensure_state_dirs()
         log_path = self._log_path("batch", jobs[0].id)
         worktree, persistent_workspace = self._worktrees.primary_path(jobs[0].id, deploy=deploy)
-        merged_jobs: list[Job] = []
-        results: list[Job] = []
-        merge_shas: dict[int, str] = {}
-        deploy_sha = ""
-        integration_base_sha = ""
-        deploy_state = _PushVerifyState()
-        reused_validation_sha = ""
-        reuse_fallback_reason = ""
         reuse_authorized = self.config.deploy.reuse.enabled
-
-        def pulse(*, check_cancel: bool = True) -> None:
-            self._refresh_lease(
-                conn,
-                owner=owner,
-                lease_token=lease_token,
-                ttl_minutes=ttl_minutes,
-                worktree=worktree,
-                head_sha=deploy_sha,
-                check_cancel=check_cancel,
-            )
-
-        def normal_pulse() -> None:
-            pulse(check_cancel=True)
-
-        def ownership_pulse() -> None:
-            pulse(check_cancel=False)
 
         # A one-job train is that job's own run, so its events carry the job:
         # linear isolation runs several one-job trains under one claim, and
@@ -862,78 +896,32 @@ class GitRunner:
         emit = partial(self._event, conn, lease_token=lease_token, job_id=event_job_id)
         gate_progress = self._gate_progress_callback(emit)
 
-        def finish(item: Job, **values: Any) -> Job:
-            return self._finish_job(conn, item.id, lease_token=lease_token, **values)
-
-        def block_all(note: str) -> list[Job]:
-            return [
-                finish(item, status="blocked", log_path=str(log_path), note=note) for item in jobs
-            ]
-
-        def finish_active_jobs(*, status: str, note: str) -> list[Job]:
-            finished: list[Job] = []
-            for item in jobs:
-                current = get_job(conn, item.id)
-                if current.status == "in_progress" and current.claim_token == lease_token:
-                    finished.append(
-                        finish(item, status=status, log_path=str(log_path), note=note)
-                    )
-                else:
-                    finished.append(current)
-            return finished
-
-        def cancel_active_jobs() -> list[Job]:
-            return finish_active_jobs(
-                status="canceled", note="canceled by user while the train was running"
-            )
-
-        def finish_active_after_error(*, status: str, note: str) -> list[Job]:
-            affected_jobs = jobs if deploying_validated else merged_jobs or jobs
-            if deploy_state.push_status == "succeeded":
-                status = "deployed"
-                note = f"post-push completion warning: {note}"
-                post_push_verify_status = _post_push_verify_status(deploy_state)
-            else:
-                post_push_verify_status = deploy_state.verify_status
-            deployed_ids: list[int] = []
-            for item in affected_jobs:
-                current = get_job(conn, item.id)
-                if current.status == "in_progress" and current.claim_token == lease_token:
-                    result = finish(
-                        item,
-                        status=status,
-                        deploy_sha=deploy_sha,
-                        log_path=str(log_path),
-                        note=note,
-                        push_status=deploy_state.push_status,
-                        verify_status=post_push_verify_status,
-                        reused_validation_sha=reused_validation_sha,
-                    )
-                    results.append(result)
-                    if result.status == "deployed":
-                        deployed_ids.append(item.id)
-            if deployed_ids:
-                self._pushes.clear_pending_refs(deployed_ids, log=log)
-            # A claimed job the train never reached is still in progress under
-            # this lease. It rode no push and was never judged, so it goes back
-            # to the queue instead of stranding in progress (#231).
-            affected_ids = {item.id for item in affected_jobs}
-            for item in jobs:
-                if item.id in affected_ids:
-                    continue
-                current = get_job(conn, item.id)
-                if current.status == "in_progress" and current.claim_token == lease_token:
-                    results.append(
-                        finish(
-                            item,
-                            status="queued",
-                            log_path=str(log_path),
-                            note=f"requeued: the train stopped before merging this job ({note})",
-                        )
-                    )
-            return results
-
         with log_path.open("w", encoding="utf-8") as log:
+            run = _TrainRun(
+                conn=conn,
+                jobs=jobs,
+                deploy=deploy,
+                keep_worktree=keep_worktree,
+                owner=owner,
+                ttl_minutes=ttl_minutes,
+                expected_plan_sha=expected_plan_sha,
+                lease_token=lease_token,
+                deploying_validated=deploying_validated,
+                log_path=log_path,
+                log=log,
+                worktree=worktree,
+                persistent_workspace=persistent_workspace,
+                emit=emit,
+                refresh_lease=partial(
+                    self._refresh_lease,
+                    conn,
+                    owner=owner,
+                    lease_token=lease_token,
+                    ttl_minutes=ttl_minutes,
+                    worktree=worktree,
+                ),
+                finish_job=partial(self._finish_job, conn, lease_token=lease_token),
+            )
             log.write(f"mergetrain batch starting at job {jobs[0].id}\n")
             mode = "deploy" if deploy else "validate"
             log.write(f"jobs: {[job.id for job in jobs]}\nmode: {mode}\n")
@@ -954,7 +942,7 @@ class GitRunner:
                     or {job.train_size for job in jobs} != {len(jobs)}
                 ):
                     note = "validated train identity is incomplete or mixes multiple trains; enqueue a fresh train"
-                    return block_all(note)
+                    return run.block_all(note)
                 emit(
                     phase="fetching",
                     state="active",
@@ -963,7 +951,7 @@ class GitRunner:
                 workspace_reused = self._worktrees.prepare(
                     worktree=worktree,
                     log=log,
-                    pulse=normal_pulse,
+                    pulse=run.pulse,
                     persistent=persistent_workspace,
                 )
                 emit(
@@ -979,69 +967,75 @@ class GitRunner:
                         )
                     ),
                 )
-                integration_base_sha = git_rev_parse(worktree, "HEAD")
+                run.integration_base_sha = git_rev_parse(worktree, "HEAD")
                 if deploying_validated:
                     validation_bases = {job.validation_base_sha for job in jobs}
                     try:
-                        merge_shas = {
+                        run.merge_shas = {
                             job.id: self._merge_sha_for_job(job, deploying_validated=True)
                             for job in jobs
                         }
                     except MergeBlocked as exc:
                         note = f"validated train identity check failed: {exc}"
-                        return block_all(note)
+                        return run.block_all(note)
                     if reuse_authorized:
                         reuse_decision = self._validation.decide(
                             jobs,
                             worktree=worktree,
-                            integration_base_sha=integration_base_sha,
+                            integration_base_sha=run.integration_base_sha,
                             log=log,
-                            pulse=normal_pulse,
+                            pulse=run.pulse,
                         )
                         if reuse_decision.eligible:
-                            reused_validation_sha = reuse_decision.reused_validation_sha
+                            run.reused_validation_sha = reuse_decision.reused_validation_sha
                             emit(
                                 phase="assembling",
                                 state="active",
                                 message="Restoring exact validated train commit",
-                                detail=reused_validation_sha,
+                                detail=run.reused_validation_sha,
                             )
                             run_command(
-                                ["git", "reset", "--hard", reused_validation_sha],
+                                ["git", "reset", "--hard", run.reused_validation_sha],
                                 cwd=worktree,
                                 log=log,
-                                pulse=normal_pulse,
+                                pulse=run.pulse,
                                 **command_limits(self.config),
                             )
-                            deploy_sha = git_rev_parse(worktree, "HEAD")
-                            if deploy_sha != reused_validation_sha or not git_worktree_clean(
-                                worktree
+                            run.deploy_sha = git_rev_parse(worktree, "HEAD")
+                            if (
+                                run.deploy_sha != run.reused_validation_sha
+                                or not git_worktree_clean(worktree)
                             ):
                                 raise MergeBlocked(
                                     "exact validation commit could not be restored cleanly"
                                 )
-                            merged_jobs.extend(jobs)
+                            run.merged_jobs.extend(jobs)
                             emit(
                                 phase="assembling",
                                 state="success",
                                 message="Exact validated train commit restored",
-                                detail=reused_validation_sha,
+                                detail=run.reused_validation_sha,
                             )
                         else:
-                            reuse_fallback_reason = "; ".join(reuse_decision.reasons)
-                            log.write(f"\nvalidated gate reuse declined: {reuse_fallback_reason}\n")
+                            run.reuse_fallback_reason = "; ".join(reuse_decision.reasons)
+                            log.write(
+                                f"\nvalidated gate reuse declined: {run.reuse_fallback_reason}\n"
+                            )
                             if reuse_decision.action == "fail":
                                 raise MergeBlocked(
                                     "validated gate reuse policy failed closed: "
-                                    f"{reuse_fallback_reason}"
+                                    f"{run.reuse_fallback_reason}"
                                 )
-                    if not reused_validation_sha and validation_bases != {integration_base_sha}:
+                    if (
+                        not run.reused_validation_sha
+                        and validation_bases != {run.integration_base_sha}
+                    ):
                         log.write(
                             "\nintegration ref moved since validation; "
                             "reassembling the exact train and rerunning gates\n"
                         )
 
-                if not reused_validation_sha:
+                if not run.reused_validation_sha:
                     emit(
                         phase="assembling",
                         state="active",
@@ -1049,7 +1043,7 @@ class GitRunner:
                     )
                     for job in jobs:
                         log.write(f"\n## merge job {job.id}: {job.branch}\n")
-                        normal_pulse()
+                        run.pulse()
                         emit(
                             job_id=job.id,
                             phase="assembling",
@@ -1058,23 +1052,23 @@ class GitRunner:
                         )
                         if not deploying_validated:
                             try:
-                                merge_shas[job.id] = self._merge_sha_for_job(
+                                run.merge_shas[job.id] = self._merge_sha_for_job(
                                     job, deploying_validated=False
                                 )
                             except MergeBlocked as exc:
-                                results.append(
-                                    finish(
+                                run.results.append(
+                                    run.finish(
                                         job, status="blocked", log_path=str(log_path), note=str(exc)
                                     )
                                 )
                                 continue
                         pre_merge_head = git_output(["rev-parse", "HEAD"], cwd=worktree)
                         merge = run_command(
-                            ["git", "merge", "--no-edit", merge_shas[job.id]],
+                            ["git", "merge", "--no-edit", run.merge_shas[job.id]],
                             cwd=worktree,
                             log=log,
                             check=False,
-                            pulse=normal_pulse,
+                            pulse=run.pulse,
                             **command_limits(self.config),
                         )
                         if merge.returncode != 0:
@@ -1088,9 +1082,9 @@ class GitRunner:
                                     ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
                                 )
                                 note = f"validated train could not be reassembled: {note}"
-                                return block_all(note)
-                            results.append(
-                                finish(job, status="blocked", log_path=str(log_path), note=note)
+                                return run.block_all(note)
+                            run.results.append(
+                                run.finish(job, status="blocked", log_path=str(log_path), note=note)
                             )
                             run_command(
                                 ["git", "merge", "--abort"], cwd=worktree, log=log, check=False
@@ -1099,9 +1093,9 @@ class GitRunner:
                         if not git_worktree_clean(worktree):
                             if deploying_validated:
                                 note = "validated train produced a dirty integration worktree after reassembly"
-                                return block_all(note)
-                            results.append(
-                                finish(
+                                return run.block_all(note)
+                            run.results.append(
+                                run.finish(
                                     job,
                                     status="blocked",
                                     log_path=str(log_path),
@@ -1120,28 +1114,28 @@ class GitRunner:
                                 check=True,
                             )
                             continue
-                        merged_jobs.append(job)
+                        run.merged_jobs.append(job)
                         emit(
                             job_id=job.id,
                             phase="assembling",
                             state="success",
                             message=f"Merged {job.branch}",
                         )
-                    if not merged_jobs:
+                    if not run.merged_jobs:
                         log.write("\nno jobs were merged\n")
-                        return results
+                        return run.results
                     emit(
                         phase="assembling",
                         state="success",
-                        message=f"Assembled {len(merged_jobs)} job(s)",
+                        message=f"Assembled {len(run.merged_jobs)} job(s)",
                     )
-                    deploy_sha = git_rev_parse(worktree, "HEAD")
-                normal_pulse()
+                    run.deploy_sha = git_rev_parse(worktree, "HEAD")
+                run.pulse()
                 if persistent_workspace:
                     cache_reused = self._worktrees.activate_persistent_cache(
                         worktree=worktree,
                         log=log,
-                        pulse=normal_pulse,
+                        pulse=run.pulse,
                     )
                     emit(
                         phase="gating",
@@ -1153,88 +1147,88 @@ class GitRunner:
                         ),
                     )
                 if deploy:
-                    self._assert_auto_execution_policy(merged_jobs)
+                    self._assert_auto_execution_policy(run.merged_jobs)
                 try:
-                    if reuse_fallback_reason:
+                    if run.reuse_fallback_reason:
                         emit(
                             phase="gating",
                             state="warning",
                             message="Validated gates were not reused; rerunning all gates",
-                            detail=reuse_fallback_reason,
+                            detail=run.reuse_fallback_reason,
                         )
                     emit(
                         phase="gating",
                         state="active",
                         message=(
                             "Reusing validated gates"
-                            if reused_validation_sha
+                            if run.reused_validation_sha
                             else "Running train gates"
                         ),
-                        detail=reused_validation_sha,
+                        detail=run.reused_validation_sha,
                     )
-                    if reused_validation_sha:
+                    if run.reused_validation_sha:
                         self._gates.run_reused_gates(
                             worktree=worktree,
-                            validation_sha=reused_validation_sha,
-                            base_ref=integration_base_sha,
+                            validation_sha=run.reused_validation_sha,
+                            base_ref=run.integration_base_sha,
                             log=log,
-                            pulse=normal_pulse,
+                            pulse=run.pulse,
                             on_gate=gate_progress,
                         )
                     else:
                         self._gates.run_gates(
                             worktree=worktree,
                             log=log,
-                            pulse=normal_pulse,
+                            pulse=run.pulse,
                             on_gate=gate_progress,
-                            base_ref=integration_base_sha,
-                            head_ref=deploy_sha,
+                            base_ref=run.integration_base_sha,
+                            head_ref=run.deploy_sha,
                         )
-                    self._pushes.assert_tree_unchanged(worktree, deploy_sha)
+                    self._pushes.assert_tree_unchanged(worktree, run.deploy_sha)
                     emit(
                         phase="gating",
                         state="success",
                         message="All train gates passed",
-                        detail=reused_validation_sha,
+                        detail=run.reused_validation_sha,
                     )
                 except CommandFailed as exc:
                     if deploying_validated:
-                        gate_mode = "validated reuse" if reused_validation_sha else "reassembly"
+                        gate_mode = "validated reuse" if run.reused_validation_sha else "reassembly"
                         note = f"validated train gate failed after {gate_mode}: {exc}"
                         return [
-                            finish(
+                            run.finish(
                                 job,
                                 status="failed",
-                                deploy_sha=deploy_sha,
+                                deploy_sha=run.deploy_sha,
                                 log_path=str(log_path),
                                 note=note,
                             )
                             for job in jobs
                         ]
-                    if len(merged_jobs) == 1:
+                    if len(run.merged_jobs) == 1:
                         # The tree that failed is exactly the base plus this one
                         # job, so there is nothing to isolate: running it again
                         # would only retry a failed gate, and a pass could ship.
                         raise
                     log.write(
                         "\ntrain gate failed; probing "
-                        f"{len(merged_jobs)} merged jobs for semantic conflicts\n"
+                        f"{len(run.merged_jobs)} merged jobs for semantic conflicts\n"
                     )
                     emit(
                         phase="gating",
                         state="warning",
                         message=(
                             "Train gate failed; probing "
-                            f"{len(merged_jobs)} jobs for semantic conflicts"
+                            f"{len(run.merged_jobs)} jobs for semantic conflicts"
                         ),
                         detail=f"exit_code={exc.returncode}",
                     )
-                    results.extend(
+                    run.results.extend(
                         self._bisect_failed_train(
                             conn,
-                            merged_jobs,
-                            merge_shas=merge_shas,
-                            integration_base_sha=integration_base_sha,
+                            run.merged_jobs,
+                            merge_shas=run.merge_shas,
+                            integration_base_sha=run.integration_base_sha,
                             worktree=worktree,
                             log=log,
                             log_path=log_path,
@@ -1246,83 +1240,88 @@ class GitRunner:
                             expected_plan_sha=expected_plan_sha,
                         )
                     )
-                    return results
+                    return run.results
                 if deploy:
                     self._push_and_verify(
                         conn,
-                        job_ids=[job.id for job in merged_jobs],
-                        deploy_sha=deploy_sha,
+                        job_ids=[job.id for job in run.merged_jobs],
+                        deploy_sha=run.deploy_sha,
                         lease_token=lease_token,
                         worktree=worktree,
                         log=log,
-                        before_push=normal_pulse,
-                        ownership_pulse=ownership_pulse,
-                        state=deploy_state,
+                        before_push=run.pulse,
+                        ownership_pulse=run.ownership_pulse,
+                        state=run.deploy_state,
                         event_job_id=event_job_id,
                         expected_plan_sha=expected_plan_sha,
-                        task_commits=[merge_shas.get(job.id, "") for job in merged_jobs],
-                        integration_base_sha=integration_base_sha,
+                        task_commits=[run.merge_shas.get(job.id, "") for job in run.merged_jobs],
+                        integration_base_sha=run.integration_base_sha,
                     )
                 status = "deployed" if deploy else "validated"
-                note = deploy_state.warning or (
-                    f"batch ok; reused validation {reused_validation_sha}"
-                    if reused_validation_sha
-                    else f"batch ok; merged {len(merged_jobs)} job(s)"
+                note = run.deploy_state.warning or (
+                    f"batch ok; reused validation {run.reused_validation_sha}"
+                    if run.reused_validation_sha
+                    else f"batch ok; merged {len(run.merged_jobs)} job(s)"
                 )
                 train_id = uuid.uuid4().hex if not deploy else ""
                 validated_at = utc_now() if not deploy else ""
                 validation_identity_fields: dict[str, str] = {}
                 if not deploy:
                     validation_identity_fields = self._validation.identity_fields(
-                        jobs=merged_jobs,
+                        jobs=run.merged_jobs,
                         train_id=train_id,
-                        validated_heads=merge_shas,
-                        validation_sha=deploy_sha,
+                        validated_heads=run.merge_shas,
+                        validation_sha=run.deploy_sha,
                         worktree=worktree,
                         log=log,
-                        pulse=normal_pulse,
+                        pulse=run.pulse,
                     )
-                for job in merged_jobs:
+                for job in run.merged_jobs:
                     validation_fields = {}
                     if not deploy:
                         validation_fields = {
                             "train_id": train_id,
-                            "train_size": len(merged_jobs),
+                            "train_size": len(run.merged_jobs),
                             "validated_at": validated_at,
-                            "validation_base_sha": integration_base_sha,
-                            "validation_sha": deploy_sha,
-                            "validated_head_sha": merge_shas[job.id],
+                            "validation_base_sha": run.integration_base_sha,
+                            "validation_sha": run.deploy_sha,
+                            "validated_head_sha": run.merge_shas[job.id],
                             **validation_identity_fields,
                         }
-                    results.append(
-                        finish(
+                    run.results.append(
+                        run.finish(
                             job,
                             status=status,
-                            deploy_sha=deploy_sha,
+                            deploy_sha=run.deploy_sha,
                             log_path=str(log_path),
                             note=note,
-                            push_status=deploy_state.push_status,
-                            verify_status=deploy_state.verify_status,
-                            reused_validation_sha=reused_validation_sha,
+                            push_status=run.deploy_state.push_status,
+                            verify_status=run.deploy_state.verify_status,
+                            reused_validation_sha=run.reused_validation_sha,
                             **validation_fields,
                         )
                     )
                 if deploy:
-                    self._pushes.clear_pending_refs([job.id for job in merged_jobs], log=log)
-                return results
+                    self._pushes.clear_pending_refs([job.id for job in run.merged_jobs], log=log)
+                return run.results
             except LostLease:
                 raise
             except CancellationRequested:
-                if deploy_state.push_status == "succeeded":
-                    return finish_active_after_error(
+                if run.deploy_state.push_status == "succeeded":
+                    return self._finish_active_after_error(
+                        run,
                         status="canceled",
                         note="canceled by user while the train was running",
                     )
-                return cancel_active_jobs()
+                return self._finish_active_jobs(
+                    run, status="canceled", note="canceled by user while the train was running"
+                )
             except _AlreadyLanded as exc:
-                return finish_active_jobs(status="queued", note=str(exc))
+                return self._finish_active_jobs(run, status="queued", note=str(exc))
             except AmbiguousPush as exc:
-                return finish_active_after_error(status="needs_reconcile", note=str(exc))
+                return self._finish_active_after_error(
+                    run, status="needs_reconcile", note=str(exc)
+                )
             except QueueBusy as exc:
                 # This frame pushed and saw the refs land, so it can finalize
                 # honestly. Anything less certain writes NOTHING: every status
@@ -1335,18 +1334,87 @@ class GitRunner:
                 # rows as the last successful write left them makes contention
                 # indistinguishable from a crash at the same instant, which
                 # persistence.leases.recover_orphans settles from the durable marker.
-                if deploy_state.push_status != "succeeded":
+                if run.deploy_state.push_status != "succeeded":
                     raise
-                return finish_active_after_error(status="deployed", note=str(exc))
+                return self._finish_active_after_error(run, status="deployed", note=str(exc))
             except CommandFailed as exc:
-                return finish_active_after_error(status="failed", note=str(exc))
+                return self._finish_active_after_error(run, status="failed", note=str(exc))
             except MergetrainError as exc:
-                return finish_active_after_error(status="blocked", note=str(exc))
+                return self._finish_active_after_error(run, status="blocked", note=str(exc))
             except Exception as exc:  # pragma: no cover - defensive boundary
-                return finish_active_after_error(status="failed", note=f"unexpected error: {exc}")
+                return self._finish_active_after_error(
+                    run, status="failed", note=f"unexpected error: {exc}"
+                )
             finally:
                 self._worktrees.cleanup(
                     worktree,
                     log=log,
                     keep_worktree=keep_worktree or persistent_workspace,
                 )
+
+    def _finish_active_jobs(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
+        """Finish each job the train still holds; report the others as they stand."""
+
+        finished: list[Job] = []
+        for item in run.jobs:
+            current = get_job(run.conn, item.id)
+            if current.status == "in_progress" and current.claim_token == run.lease_token:
+                finished.append(
+                    run.finish(item, status=status, log_path=str(run.log_path), note=note)
+                )
+            else:
+                finished.append(current)
+        return finished
+
+    def _finish_active_after_error(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
+        """Finish the jobs an error stopped, with what the train had reached.
+
+        It reads ``run`` when the error arrives, not when the train started:
+        the merged jobs, the deploy SHA, a reused validation, and whether the
+        push landed, in which case the jobs are recorded as deployed.
+        """
+
+        affected_jobs = run.jobs if run.deploying_validated else run.merged_jobs or run.jobs
+        if run.deploy_state.push_status == "succeeded":
+            status = "deployed"
+            note = f"post-push completion warning: {note}"
+            post_push_verify_status = _post_push_verify_status(run.deploy_state)
+        else:
+            post_push_verify_status = run.deploy_state.verify_status
+        deployed_ids: list[int] = []
+        for item in affected_jobs:
+            current = get_job(run.conn, item.id)
+            if current.status == "in_progress" and current.claim_token == run.lease_token:
+                result = run.finish(
+                    item,
+                    status=status,
+                    deploy_sha=run.deploy_sha,
+                    log_path=str(run.log_path),
+                    note=note,
+                    push_status=run.deploy_state.push_status,
+                    verify_status=post_push_verify_status,
+                    reused_validation_sha=run.reused_validation_sha,
+                )
+                run.results.append(result)
+                if result.status == "deployed":
+                    deployed_ids.append(item.id)
+        if deployed_ids:
+            self._pushes.clear_pending_refs(deployed_ids, log=run.log)
+        # A claimed job the train never reached is still in progress under
+        # this lease. It rode no push and was never judged, so it goes back
+        # to the queue instead of stranding in progress (#231).
+        affected_ids = {item.id for item in affected_jobs}
+        for item in run.jobs:
+            if item.id in affected_ids:
+                continue
+            current = get_job(run.conn, item.id)
+            if current.status == "in_progress" and current.claim_token == run.lease_token:
+                run.results.append(
+                    run.finish(
+                        item,
+                        status="queued",
+                        log_path=str(run.log_path),
+                        note=f"requeued: the train stopped before merging this job ({note})",
+                    )
+                )
+        return run.results
