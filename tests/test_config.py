@@ -337,6 +337,25 @@ terminology:
         with self.assertRaises(ConfigError):
             load_yaml("project:\n  name: x\n bad-indent: y\n")
 
+    def test_a_yaml_error_never_quotes_the_offending_line(self) -> None:
+        # PyYAML quotes the text around an error, and that line can be the
+        # secret notify.webhook_url, which status and events JSON then carry.
+        secret = "SUPERSECRETTOKEN42"
+        url = f"https://hooks.example.invalid/services/T000/B000/{secret}"
+        documents = {
+            f'notify:\n  webhook_url: "{url}" x\n': "line 2, column",
+            f"notify:\n  webhook_url: {url}\n bad: indent\n": "line 3, column",
+            f'notify:\n  webhook_url: "{url}\n': "line 3, column",
+        }
+        for document, where in documents.items():
+            with self.subTest(document=document):
+                with self.assertRaises(ConfigError) as caught:
+                    load_yaml(document)
+                message = str(caught.exception)
+                self.assertTrue(message.startswith("invalid YAML: "), message)
+                self.assertIn(where, message)
+                self.assertNotIn(secret, message)
+
     def test_explicit_empty_push_refs_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

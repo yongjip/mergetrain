@@ -168,6 +168,12 @@
   changes to `app.py` and `lib.py` was reported as having uncommitted changes
   in `pp.py, lib.py`. The error for a gate that left the integration worktree
   dirty listed its files the same way. Every path is now reported whole.
+- Keep a YAML syntax error from quoting `.mergetrain.yaml`. The error message
+  carried PyYAML's excerpt of the offending line, so a typo on the
+  `notify.webhook_url` line put the webhook's secret token into
+  `status --json`, `inspect --json`, the `events --jsonl` stream, MCP, and Hub
+  output, which otherwise never reveal the URL. The message now names the
+  problem with its line and column only.
 
 ## 3.3.0 - 2026-09-30
 

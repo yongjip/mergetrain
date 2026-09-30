@@ -280,6 +280,21 @@ _AMBIGUOUS_YAML_INTEGER = re.compile(
 )
 
 
+def _invalid_yaml(exc: Exception) -> ConfigError:
+    """Say what is wrong with the YAML, and where, without quoting it.
+
+    PyYAML's own message quotes the text around the error, and that line can
+    be the secret ``notify.webhook_url``.
+    """
+
+    if isinstance(exc, yaml.MarkedYAMLError):
+        mark = exc.problem_mark or exc.context_mark
+        where = f" (line {mark.line + 1}, column {mark.column + 1})" if mark else ""
+        problem = "; ".join(part for part in (exc.context, exc.problem) if part)
+        return ConfigError(f"invalid YAML: {problem}{where}")
+    return ConfigError(f"invalid YAML: {exc}")
+
+
 def _validate_yaml_text(text: str) -> None:
     """Reject legacy YAML scalars that are unsafe in operator policy.
 
@@ -295,7 +310,7 @@ def _validate_yaml_text(text: str) -> None:
     try:
         root = yaml.compose(text, Loader=yaml.SafeLoader)
     except yaml.YAMLError as exc:
-        raise ConfigError(f"invalid YAML: {exc}") from exc
+        raise _invalid_yaml(exc) from exc
 
     seen: set[int] = set()
 
@@ -343,7 +358,7 @@ def load_yaml(text: str) -> dict[str, Any]:
     except (yaml.YAMLError, ValueError) as exc:
         # PyYAML raises ValueError for a value it recognizes but cannot build,
         # such as the date 2026-13-45.
-        raise ConfigError(f"invalid YAML: {exc}") from exc
+        raise _invalid_yaml(exc) from exc
     if not isinstance(loaded, dict):
         raise ConfigError("top-level YAML value must be a mapping")
     return loaded

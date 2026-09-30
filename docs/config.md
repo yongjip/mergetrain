@@ -287,7 +287,8 @@ transition is recorded as settled so enabling it later does not replay old
 history. `timeout_seconds` must be positive, and the URL must use HTTP(S).
 Treat `webhook_url` as a secret: diagnostic config JSON reports only
 `webhook_configured`, never the URL. Delivery errors likewise omit the
-credential-bearing URL.
+credential-bearing URL, and a YAML syntax error names the line and column of
+the problem without quoting the text there.
 
 ## `gates`
 
