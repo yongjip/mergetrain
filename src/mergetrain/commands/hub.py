@@ -34,17 +34,18 @@ def cmd_hub_status(args: argparse.Namespace) -> int:
         if entry.get("empty"):
             print(f"{name}: no queue database yet")
             continue
-        repo_snapshot = entry.get("summary") or entry["snapshot"]
-        counts = repo_snapshot.get("counts", {})
+        # Text output is always built from the summary view.
+        summary = entry["summary"]
+        counts = summary.get("counts", {})
         active = " ".join(
             f"{key}={counts[key]}"
             for key in ("queued", "in_progress", "blocked", "failed", "needs_reconcile", "validated")
             if counts.get(key)
         )
-        lock = repo_snapshot.get("lock")
+        lock = summary.get("lock")
         runner = "runner=active" if lock and lock.get("liveness") == "alive" else ""
         detail = " ".join(part for part in (active or "idle", runner) if part)
-        print(f"{name}: {detail} | next: {repo_snapshot.get('next_action')}")
+        print(f"{name}: {detail} | next: {summary.get('next_action')}")
     return 0
 
 
