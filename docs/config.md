@@ -89,9 +89,10 @@ metadata to the control checkout, so the control checkout and all task
 worktrees use the same queue DB, logs, runner lock, and integration-worktree
 directory. The configuration is read from the control checkout's
 `.mergetrain.yaml` too, unless `--config` names another file, and
-`init --write` writes there. A task branch's own copy, committed or not, never
-becomes the policy for the shared queue: a configuration change takes effect
-once it has landed and the control checkout has it.
+`init --write` writes the file that is read. A task branch's own copy,
+committed or not, never becomes the policy for the shared queue: a
+configuration change takes effect once it has landed and the control checkout
+has it.
 
 Run from a subdirectory of a configured checkout, mergetrain uses the top of
 that checkout, so `status` there reports the real queue and `init --write`

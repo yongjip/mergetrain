@@ -653,6 +653,24 @@ def configured_checkout(repo: str | Path) -> Path:
     return path
 
 
+def _config_file(config_path: str | Path | None, *, repo_path: Path, state_root: Path) -> Path:
+    # The policy lives where the queue lives. A linked task worktree shares the
+    # control checkout's queue, so a runner started there must not validate or
+    # deploy that queue with the task branch's own .mergetrain.yaml, committed
+    # or not. The worktree stays the repository and branch identity.
+    path = Path(config_path).expanduser() if config_path else state_root / DEFAULT_CONFIG_NAME
+    if not path.is_absolute():
+        path = (repo_path / path).resolve()
+    return path
+
+
+def config_file_path(config_path: str | Path | None, repo: str | Path | None = None) -> Path:
+    """The file ``load_config`` reads for the same ``--config`` and ``--repo``."""
+
+    repo_path = configured_checkout(repo or Path.cwd())
+    return _config_file(config_path, repo_path=repo_path, state_root=_shared_state_root(repo_path))
+
+
 def _resolve_path(repo: Path, value: Any, default: str, *, key: str) -> Path:
     if value is None:
         raw = default
@@ -674,13 +692,7 @@ def load_config(
 ) -> MergetrainConfig:
     repo_path = configured_checkout(repo or Path.cwd())
     state_root = _shared_state_root(repo_path)
-    # The policy lives where the queue lives. A linked task worktree shares the
-    # control checkout's queue, so a runner started there must not validate or
-    # deploy that queue with the task branch's own .mergetrain.yaml, committed
-    # or not. The worktree stays the repository and branch identity.
-    path = Path(config_path).expanduser() if config_path else state_root / DEFAULT_CONFIG_NAME
-    if not path.is_absolute():
-        path = (repo_path / path).resolve()
+    path = _config_file(config_path, repo_path=repo_path, state_root=state_root)
     exists = path.exists()
     if exists:
         try:

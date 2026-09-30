@@ -189,6 +189,12 @@
   `--base-sha abc` spelling was recognized, so a v2 script using the `=` form
   got an argparse usage error on stderr and nothing on stdout instead of the
   JSON error that names the replacement.
+- Write the file a global `--config` names in `init --write`. The command
+  always wrote `.mergetrain.yaml` at the repository root, so after
+  `mergetrain --config ci/mt.yaml init --write` reported success, every
+  command given that `--config` still found no config and recommended
+  `init --write`, which now refused because the files existed. The config now
+  goes where the same `--config` makes every other command read it.
 
 ## 3.3.0 - 2026-09-30
 

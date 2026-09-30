@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 from ..cli_support import dump_json
-from ..config import render_default_config, shared_state_root
+from ..config import config_file_path, render_default_config, shared_state_root
 from ..errors import ConfigError
 
 _AGENT_RULES = (
@@ -112,7 +112,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(config_text, end="")
         return 0
     files = {
-        repo / ".mergetrain.yaml": config_text,
+        # The file every later command reads, including one --config names.
+        config_file_path(args.config, args.repo or Path.cwd()): config_text,
         repo / "AGENTS.mergetrain.md": render_agent_contract(),
         repo / "CLAUDE.mergetrain.md": render_agent_contract(),
     }

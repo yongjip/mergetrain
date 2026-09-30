@@ -26,8 +26,9 @@ mergetrain init --refresh-instructions
 ```
 
 Without `--write`, prints the minimal config. With `--write`, creates
-`.mergetrain.yaml`, `AGENTS.mergetrain.md`, and `CLAUDE.mergetrain.md` and
-refuses to overwrite any existing file. `--refresh-instructions` rewrites only
+`.mergetrain.yaml` (or the file a global `--config` names),
+`AGENTS.mergetrain.md`, and `CLAUDE.mergetrain.md` and refuses to overwrite
+any existing file. `--refresh-instructions` rewrites only
 the two generated sidecars.
 
 ## `status`

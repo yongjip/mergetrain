@@ -2534,6 +2534,27 @@ class CliTests(unittest.TestCase):
             payload = json.loads(out.getvalue())
             self.assertIn("standard AGENTS.md and/or CLAUDE.md", payload["next_step"])
 
+    def test_init_write_writes_the_file_a_global_config_names(self) -> None:
+        # init wrote <repo>/.mergetrain.yaml whatever --config said, so status
+        # with the same --config kept recommending an init that then refused.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td).resolve()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "ci").mkdir()
+            options = ["--repo", str(repo), "--config", "ci/mt.yaml"]
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main([*options, "init", "--project", "demo", "--write"])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out.getvalue())["written"][0], str(repo / "ci" / "mt.yaml"))
+            self.assertFalse((repo / ".mergetrain.yaml").exists())
+            self.assertTrue((repo / "AGENTS.mergetrain.md").is_file())
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main([*options, "status", "--json"])
+            self.assertNotEqual(json.loads(out.getvalue())["health"], "unconfigured")
+
     def test_init_write_preflights_all_conflicts_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
