@@ -2376,6 +2376,12 @@ deploy:
             'DB_PASS="fixture secret" PGPASS=second GITHUB_PAT=third': (
                 "DB_PASS=[redacted] PGPASS=[redacted] GITHUB_PAT=[redacted]"
             ),
+            "APIKEY=sk_live_2 ./check --apikey sk_live_3": (
+                "APIKEY=[redacted] ./check --apikey [redacted]"
+            ),
+            "TOKEN=$'fixture secret' ./check --token $'second secret'": (
+                "TOKEN=[redacted] ./check --token [redacted]"
+            ),
         }
         for raw, expected in cases.items():
             with self.subTest(raw=raw):

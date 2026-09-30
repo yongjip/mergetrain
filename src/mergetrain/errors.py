@@ -7,7 +7,10 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-_SECRET_VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)'''
+_QUOTED_VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
+# The shell's $'...' and $"..." quote one value too, spaces included, and the
+# rest of the word after the closing quote still belongs to it.
+_SECRET_VALUE = rf"(?:{_QUOTED_VALUE}|\${_QUOTED_VALUE}[^\s]*|[^\s]+)"
 _SENSITIVE_ASSIGNMENT = re.compile(
     rf"\b([A-Z_][A-Z0-9_]*)=({_SECRET_VALUE})", re.IGNORECASE
 )
@@ -26,6 +29,8 @@ _SENSITIVE_KEY_MARKERS = (
     "PASSWORD",
     "PASSWD",
     "API_KEY",
+    # The option rule accepts API[-_]?KEY, and a name cannot contain "-".
+    "APIKEY",
     "CREDENTIAL",
 )
 _SENSITIVE_KEYS = {"DB_PASS", "PGPASS", "GITHUB_PAT"}

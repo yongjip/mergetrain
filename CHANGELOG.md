@@ -292,6 +292,11 @@
   `enqueue` from that checkout refused the change. A `.gitignore` that
   mergetrain writes there now ignores itself too, and only in that
   directory.
+- Mask an `APIKEY=` assignment and a secret in the shell's `$'...'` quoting.
+  Redaction masked `--apikey` but not `APIKEY=sk_live_...`, so a gate or
+  verify hook that set that variable inline showed its value in job notes,
+  `status`, event command templates, and `hub status`. A value such as
+  `TOKEN=$'two words'` lost only its first word. Both are now masked whole.
 
 ## 3.3.0 - 2026-09-30
 
