@@ -208,89 +208,42 @@ def _classify(
         if state == "unknown":
             unknown = True
         refs.append(RefVerdict(ref, remote_sha, state == "yes"))
-    if not resolvable:
+
+    def decided(decision: str, reason: str) -> JobDecision:
         return JobDecision(
-            job,
-            pending,
-            False,
-            refs,
-            "blocked",
-            "pending deploy sha is unresolvable (pin ref gone and object pruned)",
-            audit_ref,
-            audit_ref_sha,
+            job, pending, resolvable, refs, decision, reason, audit_ref, audit_ref_sha
+        )
+
+    if not resolvable:
+        return decided(
+            "blocked", "pending deploy sha is unresolvable (pin ref gone and object pruned)"
         )
     if unknown:
-        return JobDecision(
-            job,
-            pending,
-            True,
-            refs,
+        return decided(
             "blocked",
             "cannot determine remote containment for a push ref (tip unresolvable); refusing to guess",
-            audit_ref,
-            audit_ref_sha,
         )
     if audit_ref_sha and not audit_ref_present:
-        return JobDecision(
-            job,
-            pending,
-            True,
-            refs,
-            "blocked",
-            "deploy audit ref points to an unexpected sha; refusing to guess",
-            audit_ref,
-            audit_ref_sha,
+        return decided(
+            "blocked", "deploy audit ref points to an unexpected sha; refusing to guess"
         )
     contained = [verdict.contains for verdict in refs]
     if refs and all(contained):
         reason = "push landed: deploy sha present on every push ref"
         if job.cancel_requested_at:
             reason += "; late cancel ignored (the push had already landed)"
-        return JobDecision(
-            job, pending, True, refs, "deployed", reason, audit_ref, audit_ref_sha
-        )
+        return decided("deployed", reason)
     if not any(contained):
         if audit_ref_present:
-            return JobDecision(
-                job,
-                pending,
-                True,
-                refs,
+            return decided(
                 "blocked",
                 "deploy audit ref proves the push landed before every payload ref was rewritten; manual recovery required",
-                audit_ref,
-                audit_ref_sha,
             )
         if job.cancel_requested_at:
-            return JobDecision(
-                job,
-                pending,
-                True,
-                refs,
-                "canceled",
-                "push did not land; late cancel honored",
-                audit_ref,
-                audit_ref_sha,
-            )
-        return JobDecision(
-            job,
-            pending,
-            True,
-            refs,
-            "queued",
-            "push did not land; requeued for a fresh deploy",
-            audit_ref,
-            audit_ref_sha,
-        )
-    return JobDecision(
-        job,
-        pending,
-        True,
-        refs,
-        "blocked",
-        "deploy sha present on some but not all push refs (mixed remote state)",
-        audit_ref,
-        audit_ref_sha,
+            return decided("canceled", "push did not land; late cancel honored")
+        return decided("queued", "push did not land; requeued for a fresh deploy")
+    return decided(
+        "blocked", "deploy sha present on some but not all push refs (mixed remote state)"
     )
 
 
@@ -664,6 +617,12 @@ class UnlockOutcome:
     exit_code: int  # 0 cleared · 4 refused · 5 no lock
 
 
+# The inspected lock was replaced (or released) during the remote probe.
+_LOCK_CHANGED = (
+    "runner lock changed during the remote check; nothing cleared (re-run if still wedged)"
+)
+
+
 def _remote_reachable(config: MergetrainConfig) -> bool:
     try:
         destination = resolve_git_destination(config)
@@ -711,13 +670,28 @@ def force_unlock(
     # username (#231); the command's own output keeps the full owner.
     audited_owner = public_owner(lock.owner)
     audited = json.dumps({**context, "owner": audited_owner}, sort_keys=True)
+
+    def outcome(
+        reason: str, *, exit_code: int = 0, audit_event_id: int | None = None
+    ) -> UnlockOutcome:
+        # A clear is always audited, so the lock was cleared iff there is an event.
+        return UnlockOutcome(
+            cleared=audit_event_id is not None,
+            prior_owner=lock.owner,
+            liveness=lock.liveness,
+            reason=reason,
+            audit_event_id=audit_event_id,
+            context=context,
+            exit_code=exit_code,
+        )
+
     if lock.liveness == "dead":
         # The clear and its audit event commit together. Separately, an audit
         # write that failed after the clear left an unaudited clear that a
         # retry could not repair: it found no lock left to clear.
         with immediate(conn):
             if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
-                return _lock_changed(lock, context)
+                return outcome(_LOCK_CHANGED)
             event = record_run_event(
                 conn,
                 phase="unlock",
@@ -725,23 +699,10 @@ def force_unlock(
                 message=f"cleared dead runner lock ({audited_owner})",
                 detail=audited,
             )
-        return UnlockOutcome(
-            cleared=True,
-            prior_owner=lock.owner,
-            liveness=lock.liveness,
-            reason="dead owner lock cleared",
-            audit_event_id=event.id,
-            context=context,
-            exit_code=0,
-        )
+        return outcome("dead owner lock cleared", audit_event_id=event.id)
     if not force:
-        return UnlockOutcome(
-            cleared=False,
-            prior_owner=lock.owner,
-            liveness=lock.liveness,
-            reason=f"runner lock owner is {lock.liveness}; rerun with --force to steal it",
-            audit_event_id=None,
-            context=context,
+        return outcome(
+            f"runner lock owner is {lock.liveness}; rerun with --force to steal it",
             exit_code=4,
         )
     if not _remote_reachable(config):
@@ -754,7 +715,7 @@ def force_unlock(
     # The steal commits with its audit event, as the dead-owner clear does.
     with immediate(conn):
         if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
-            return _lock_changed(lock, context)
+            return outcome(_LOCK_CHANGED)
         event = record_run_event(
             conn,
             phase="unlock",
@@ -762,25 +723,4 @@ def force_unlock(
             message=f"force-cleared {lock.liveness} runner lock ({audited_owner})",
             detail=audited,
         )
-    return UnlockOutcome(
-        cleared=True,
-        prior_owner=lock.owner,
-        liveness=lock.liveness,
-        reason=f"forced steal of {lock.liveness} owner lock",
-        audit_event_id=event.id,
-        context=context,
-        exit_code=0,
-    )
-
-
-def _lock_changed(lock: Any, context: dict[str, Any]) -> UnlockOutcome:
-    """The inspected lock was replaced (or released) during the remote probe."""
-    return UnlockOutcome(
-        cleared=False,
-        prior_owner=lock.owner,
-        liveness=lock.liveness,
-        reason="runner lock changed during the remote check; nothing cleared (re-run if still wedged)",
-        audit_event_id=None,
-        context=context,
-        exit_code=0,
-    )
+    return outcome(f"forced steal of {lock.liveness} owner lock", audit_event_id=event.id)
