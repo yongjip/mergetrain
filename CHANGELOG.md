@@ -12,6 +12,14 @@
   will do with it, and the preview checks the claims it would park against
   the remote, as the applied run does. `reconcile --apply` reports the same
   list for the claims it split.
+- Leave one Ready train after a validate that had to isolate jobs. When a
+  train failed and bisect could not reproduce the failure, as with a flaky
+  gate, validate checked each job alone, and every job that passed became a
+  train of its own. `validate` still reported success, but `deploy` and the
+  MCP deploy tool then refused because several trains were ready, `validate`
+  refused because a train was ready, and `status` kept recommending the
+  `deploy` that could not succeed. Isolation now stops at the first job that
+  validates and returns the rest to the queue for the next validate.
 
 ## 3.3.0 - 2026-09-30
 

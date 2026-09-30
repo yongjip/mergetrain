@@ -482,13 +482,15 @@ class GitRunner:
         lease_token: str,
         expected_plan_sha: str = "",
     ) -> list[Job]:
-        """Process isolated jobs in order, stopping at an ambiguous deploy.
+        """Process isolated jobs in order, stopping where FIFO must hold.
 
         Isolation happens after the whole batch has already been claimed. If an
         isolated push becomes ambiguous, no later job may target the same refs
-        until reconcile resolves that outcome. Return the untouched suffix to
-        ``queued`` so it is neither stranded in-progress nor pushed out of FIFO
-        order.
+        until reconcile resolves that outcome. When validating, each isolated
+        job that passes becomes a train of its own, and v3 keeps one Ready
+        train, so isolation stops at the first. Either way the untouched suffix
+        returns to ``queued``, neither stranded in-progress nor handled out of
+        FIFO order; the next run takes it up.
         """
 
         results: list[Job] = []
@@ -503,19 +505,28 @@ class GitRunner:
                 expected_plan_sha=expected_plan_sha,
             )
             results.extend(finished)
-            if not deploy or not any(item.status == "needs_reconcile" for item in finished):
-                continue
-
-            note = (
-                f"deferred because isolated job {job.id} has an unresolved "
-                "push; reconcile before deploying this job"
-            )
+            if deploy:
+                if not any(item.status == "needs_reconcile" for item in finished):
+                    continue
+                note = (
+                    f"deferred because isolated job {job.id} has an unresolved "
+                    "push; reconcile before deploying this job"
+                )
+                phase, message = "pushing", "Isolation stopped for pending reconcile"
+            else:
+                if not any(item.status == "validated" for item in finished):
+                    continue
+                note = (
+                    f"re-queued because isolated job {job.id} is the one validated "
+                    "train; the next validate includes this job"
+                )
+                phase, message = "gating", "Isolation stopped at the first validated train"
             self._event(
                 conn,
                 lease_token=lease_token,
-                phase="pushing",
+                phase=phase,
                 state="warning",
-                message="Isolation stopped for pending reconcile",
+                message=message,
                 detail=f"job_id={job.id}",
             )
             for pending in jobs[index + 1 :]:

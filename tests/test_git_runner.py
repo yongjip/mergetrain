@@ -78,7 +78,13 @@ from mergetrain.git_runner import GitRunner
 from mergetrain.persistence.claims import claim_all_queued, claim_deploy_batch
 from mergetrain.persistence.connection import connect
 from mergetrain.persistence.events import list_run_events
-from mergetrain.persistence.jobs import cancel_job, counts, enqueue_job, get_job
+from mergetrain.persistence.jobs import (
+    cancel_job,
+    counts,
+    enqueue_job,
+    get_job,
+    validated_train_summaries,
+)
 from mergetrain.persistence.leases import get_lock, release_runner_lock
 from mergetrain.snapshot import next_action
 
@@ -3455,9 +3461,22 @@ class BisectIsolationTests(unittest.TestCase):
                 GitRunner(config).process_batch(conn, jobs, deploy=False)
                 stored = [get_job(conn, job.id) for job in jobs]
                 events = list_run_events(conn, limit=200)
+                ready = [
+                    train
+                    for train in validated_train_summaries(conn)
+                    if train["deploy_eligible"]
+                ]
             finally:
                 conn.close()
-            self.assertEqual([job.status for job in stored], ["validated"] * 4)
+            # Each isolated validation mints its own train, and v3 keeps one
+            # Ready train, so isolation stops at the first and requeues the rest.
+            self.assertEqual(
+                [job.status for job in stored], ["validated", "queued", "queued", "queued"]
+            )
+            self.assertEqual(len(ready), 1)
+            for job in stored[1:]:
+                self.assertIn(f"job {stored[0].id}", job.note)
+                self.assertEqual(job.train_id, "")
             self.assertEqual([job.conflict_with for job in stored], [""] * 4)
             messages = [event.message for event in events]
             self.assertIn("Bisect inconclusive; isolating jobs one-by-one", messages)
