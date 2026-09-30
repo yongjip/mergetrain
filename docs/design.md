@@ -287,8 +287,9 @@ pre-baseline interval.
 
 Lease tokens remain internal. `RunEvent.to_dict()` removes `claim_token`, as do
 the public job and lock models. `RecoveryOperationEvent.to_dict()` likewise
-removes its internal correlation ID. The browser payload also omits local
-worktree and log paths and reduces the owner identity to `local:<pid>`.
+removes its internal correlation ID. The `hub status --json` payload also
+omits local worktree and log paths and reduces the owner identity to
+`local:<pid>`.
 
 ### Connection policy
 

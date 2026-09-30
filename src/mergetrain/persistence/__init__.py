@@ -1,1 +1,1 @@
-"""Explicit SQLite persistence boundaries used by the compatibility store API."""
+"""Explicit SQLite persistence boundaries; callers import the module that owns each operation."""
