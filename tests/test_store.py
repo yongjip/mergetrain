@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -340,7 +341,8 @@ class StoreTests(unittest.TestCase):
             for line in text.splitlines()
             if line.strip() and not line.startswith("#")
         }
-        # Exactly the DB and its sidecars — nothing that could hide app.py.
+        # Exactly the DB, its sidecars, and this ignore file itself, anchored
+        # to the directory — nothing that could hide app.py.
         self.assertEqual(
             patterns,
             {
@@ -348,8 +350,28 @@ class StoreTests(unittest.TestCase):
                 "queue.sqlite-wal",
                 "queue.sqlite-shm",
                 "queue.sqlite-journal",
+                "/.gitignore",
             },
         )
+
+    def test_state_db_at_repo_root_leaves_the_checkout_clean(self) -> None:
+        """#63: the ignore file written for the queue was itself untracked,
+        and the next enqueue from that checkout refused it as a change."""
+
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        conn = connect(root / "queue.sqlite")
+        conn.close()
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertEqual(status, "")
 
     def test_self_ignore_never_clobbers_an_existing_gitignore(self) -> None:
         # A user's own root .gitignore is never overwritten (defensively: even

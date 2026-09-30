@@ -97,12 +97,15 @@ def _self_ignore(state_dir: Path, *, db_name: str, dedicated: bool) -> None:
         artifacts = "\n".join(
             db_name + suffix for suffix in ("", "-wal", "-shm", "-journal")
         )
+        # The file ignores itself too, anchored to this directory: untracked,
+        # it would dirty the checkout it exists to keep clean.
         body = (
             "# Managed by mergetrain — local queue state.\n"
             "# state.db is not in a mergetrain-owned directory, so only the exact\n"
             "# queue artifacts are ignored — never a wildcard, which would hide\n"
             "# the whole directory and fake a clean worktree.\n"
             f"{artifacts}\n"
+            "/.gitignore\n"
         )
     try:
         marker.write_text(body, encoding="utf-8")

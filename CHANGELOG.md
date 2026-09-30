@@ -285,6 +285,13 @@
   `resolve_failed_verification`. It now reruns, or with `--ack` records,
   every deployment whose verification is unknown or failed, the same ones
   `--job` accepts.
+- Keep the checkout clean when `state.db` points into a directory mergetrain
+  did not create, such as the repository root. The first command that opened
+  the queue there, even `gc --json`, wrote a `.gitignore` that listed the
+  queue files but not itself, so it showed up as untracked and the next
+  `enqueue` from that checkout refused the change. A `.gitignore` that
+  mergetrain writes there now ignores itself too, and only in that
+  directory.
 
 ## 3.3.0 - 2026-09-30
 
