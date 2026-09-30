@@ -292,6 +292,13 @@ in its path or query instead. Treat `webhook_url` as a secret: diagnostic config
 credential-bearing URL, and a YAML syntax error names the line and column of
 the problem without quoting the text there.
 
+mergetrain reads `webhook_url` only from this file; there is no environment
+variable for it. `.mergetrain.yaml` is normally committed, so everyone who can
+read the repository can read the URL and post to the webhook. When that is
+wider than the webhook's audience, point `webhook_url` at a relay you control,
+such as one on the runner host, that holds the provider's credentials. See
+[Secrets](security.md#secrets).
+
 ## `gates`
 
 ```yaml

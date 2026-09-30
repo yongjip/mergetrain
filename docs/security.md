@@ -60,6 +60,12 @@ therefore requires a fresh approved enqueue instead of silently weakening QA.
 ## Secrets
 
 - Do not store provider tokens or credentials in `.mergetrain.yaml`.
+- The one exception is `notify.webhook_url`, which mergetrain reads only from
+  the config file, and a webhook URL often embeds a token. The config is
+  normally committed, so everyone who can read the repository can post to
+  that webhook. When that is wider than the webhook's audience, point
+  `webhook_url` at a relay you control, such as one on the runner host, and
+  keep the provider's credentials in the relay.
 - Prefer environment variables, your shell environment, or a service-specific
   secret manager.
 - Logs may contain command output. Gate and verify commands should avoid printing
