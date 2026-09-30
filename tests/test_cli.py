@@ -2878,6 +2878,29 @@ class CliTests(unittest.TestCase):
             self.assertFalse(json.loads(out.getvalue())["ok"])
             self.assertFalse((repo / ".mergetrain").exists())
 
+    def test_dry_runs_never_create_a_queue(self) -> None:
+        # gc and reconcile without --apply, and a verify with nothing to
+        # verify, opened the queue writable: under a mistyped --repo that
+        # created the missing directories, .mergetrain/, and the database.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            typo = root / "typo" / "does" / "not" / "exist"
+            fresh = root / "fresh"
+            subprocess.run(["git", "init", "-q", str(fresh)], check=True)
+            (fresh / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+            for repo in (typo, fresh):
+                for command in ("gc", "reconcile", "verify"):
+                    with self.subTest(repo=repo.name, command=command):
+                        out = io.StringIO()
+                        with redirect_stdout(out):
+                            code = main(["--repo", str(repo), command, "--json"])
+                        self.assertEqual(code, 0)
+                        self.assertTrue(json.loads(out.getvalue())["ok"])
+                        self.assertFalse((root / "typo").exists())
+                        self.assertFalse((fresh / ".mergetrain").exists())
+
     def test_inspect_train_has_structured_failure_categories(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

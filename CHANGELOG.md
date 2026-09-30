@@ -195,6 +195,12 @@
   command given that `--config` still found no config and recommended
   `init --write`, which now refused because the files existed. The config now
   goes where the same `--config` makes every other command read it.
+- Keep `gc` and `reconcile` without `--apply`, and `verify`, from creating a
+  queue where none exists. They opened the queue writable, so under a
+  mistyped `--repo` such as `../typo/does/not/exist` they created every
+  missing directory, `.mergetrain/`, the database, and its `.gitignore`. They
+  now report an empty queue and write nothing there. An existing queue is
+  opened as before, so `gc --json` still migrates an older one.
 
 ## 3.3.0 - 2026-09-30
 

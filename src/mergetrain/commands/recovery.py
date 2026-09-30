@@ -14,6 +14,7 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
+from ..config import MergetrainConfig
 from ..deploy_plan import verification_policy_sha
 from ..errors import ConfigError, LockHeld, QueueError, RemoteUnreachable
 from ..git_ops import (
@@ -36,9 +37,22 @@ from ..persistence.operations import finish_recovery_operation, start_recovery_o
 from ..recovery import force_unlock, reconcile, recover, sweep_pending_refs
 
 
+def _open_queue(config: MergetrainConfig, *, create: bool) -> sqlite3.Connection:
+    """Open the queue; without ``create``, a queue that does not exist is empty.
+
+    A dry run must not create a queue, and every missing directory above it,
+    wherever a mistyped --repo points. An in-memory queue that is never saved
+    answers its reads as a new queue would.
+    """
+
+    if create or config.state.db.exists():
+        return connect(config.state.db)
+    return connect(":memory:")
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     config = config_from_args(args)
-    conn = connect(config.state.db)
+    conn = _open_queue(config, create=bool(args.apply))
     try:
         branch_candidates_raw = terminal_branch_candidates(conn)
         # Protect the worktree of a live runner from removal (Blocker: gc
@@ -144,7 +158,7 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         config = config_from_args(args)
     except ConfigError as exc:
         return _emit_recovery_error(args, str(exc), 2, error_code="config_error")
-    conn = connect(config.state.db)
+    conn = _open_queue(config, create=bool(args.apply))
     operation = start_recovery_operation(
         conn,
         operation="reconcile",
@@ -270,7 +284,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     """
 
     config = config_from_args(args)
-    conn = connect(config.state.db)
+    # Without a queue there is no deployed job to verify.
+    conn = _open_queue(config, create=False)
     try:
         if args.job is not None:
             job = get_job(conn, args.job)

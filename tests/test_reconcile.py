@@ -1768,10 +1768,13 @@ class CommandExitCodeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            # A dry run records its evidence in an existing queue; it never
+            # creates one.
+            connect(config.state.db).close()
             code, payload = self._run(repo, "reconcile", "--json")
             self.assertEqual(code, 0)
             self.assertTrue(payload["ok"])
-            config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
                 events = list_recovery_operation_events(conn)
@@ -1848,6 +1851,8 @@ class CommandExitCodeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            connect(config.state.db).close()
             with patch(
                 "mergetrain.commands.recovery.reconcile",
                 side_effect=CommandFailed(["git", "fetch"], 1),
@@ -1855,7 +1860,6 @@ class CommandExitCodeTests(unittest.TestCase):
                 code, payload = self._run(repo, "reconcile", "--json")
             self.assertEqual(code, 1)
             self.assertEqual(payload["error"]["code"], "command_failed")
-            config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
                 events = list_recovery_operation_events(conn)
@@ -1871,6 +1875,8 @@ class CommandExitCodeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            connect(config.state.db).close()
             with patch(
                 "mergetrain.commands.recovery.finish_recovery_operation",
                 side_effect=QueueError("ledger tail unavailable"),
@@ -1878,13 +1884,12 @@ class CommandExitCodeTests(unittest.TestCase):
                 code, payload = self._run(repo, "reconcile", "--json")
             self.assertEqual(code, 0)
             self.assertTrue(payload["ok"])
-            config = load_config(repo=repo)
             conn = connect(config.state.db)
             try:
                 events = list_recovery_operation_events(conn)
             finally:
                 conn.close()
-            self.assertEqual(events[-1].state, "started")
+            self.assertEqual((events[-1].operation, events[-1].state), ("reconcile", "started"))
 
     def test_unlock_no_lock_exits_five(self) -> None:
         with tempfile.TemporaryDirectory() as td:
