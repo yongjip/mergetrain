@@ -591,17 +591,11 @@ def list_train_jobs(conn: sqlite3.Connection, train_id: str) -> list[Job]:
     return [Job.from_row(row) for row in rows]
 
 
-def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued", auto_only: bool = False) -> list[Job]:
-    if auto_only:
-        rows = conn.execute(
-            "SELECT * FROM deploy_queue WHERE status = ? AND auto_deploy = 1 ORDER BY id ASC",
-            (status,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM deploy_queue WHERE status = ? ORDER BY id ASC",
-            (status,),
-        ).fetchall()
+def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued") -> list[Job]:
+    rows = conn.execute(
+        "SELECT * FROM deploy_queue WHERE status = ? ORDER BY id ASC",
+        (status,),
+    ).fetchall()
     return [Job.from_row(row) for row in rows]
 
 
