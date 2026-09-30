@@ -353,6 +353,12 @@
   message bounded at 1,000 characters but no `message_truncated`, unlike
   every other note-derived message, so a consumer could not tell that text
   was discarded. Each entry now has `message_truncated`.
+- Show a requeued job in `inspect` as waiting, not as still running. Putting
+  a job back in the queue, when its train stopped or when a stranded claim
+  was recovered, writes no event, so `inspect` took the last event of the run
+  that had ended as current progress: the job said `queued` while `progress`
+  said its gate was still running. A queued job's progress is now "Waiting
+  for a runner", and the ended run's events stay in `events`.
 
 ## 3.3.0 - 2026-09-30
 

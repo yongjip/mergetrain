@@ -762,6 +762,10 @@ def train_outcome(jobs: Sequence[Job]) -> dict[str, Any]:
 
 def _latest_run_events(job: Job, events: Sequence[RunEvent]) -> list[RunEvent]:
     latest_token = job.claim_token
+    if not latest_token and job.status == "queued":
+        # A queued job is in no run. A requeue writes no event, so the newest
+        # run in its events is one that ended, and its last event is not progress.
+        return []
     if not latest_token:
         latest_token = next(
             (event.claim_token for event in reversed(events) if event.claim_token),

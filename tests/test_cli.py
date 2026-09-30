@@ -2982,6 +2982,55 @@ class CliTests(unittest.TestCase):
                     release_runner_lock(conn, owner=owner, token=current.claim_token)
                 conn.close()
 
+    def test_inspect_does_not_show_a_requeued_jobs_last_run_as_progress(self) -> None:
+        # A requeue writes no event, so the newest events of a queued job are
+        # those of the run that ended, and inspect showed its last gate as
+        # still running.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            owner = f"owner:{os.getpid()}"
+            try:
+                queued = enqueue_job(conn, task="a", branch="feature/a")
+                token = claim_all_queued(conn, owner=owner)[0].claim_token
+                record_run_event(
+                    conn,
+                    claim_token=token,
+                    job_id=queued.id,
+                    phase="gating",
+                    state="active",
+                    message="Running gate 2/2: marker",
+                )
+                # The runner puts the job back when its train stops.
+                mark_job(
+                    conn,
+                    queued.id,
+                    status="queued",
+                    note="requeued: the train stopped before merging this job",
+                    expected_claim_token=token,
+                )
+                release_runner_lock(conn, owner=owner, token=token)
+            finally:
+                conn.close()
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(
+                    ["--repo", str(repo), "--db", str(db), "inspect", str(queued.id), "--json"]
+                )
+            payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["job"]["status"], "queued")
+        progress = payload["progress"]
+        self.assertEqual((progress["phase"], progress["state"]), ("claiming", "queued"))
+        self.assertEqual(progress["message"], "Waiting for a runner")
+        self.assertIsNone(progress["gate"])
+        self.assertIsNone(progress["latest_event_id"])
+        # The run that ended is still there as history.
+        self.assertEqual(payload["events"][-1]["message"], "Running gate 2/2: marker")
+
     def test_inspect_text_exposes_the_bounded_block_reason(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
