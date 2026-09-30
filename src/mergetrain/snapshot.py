@@ -16,7 +16,7 @@ from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
 from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound
 from .git_ops import git_ref_exists, git_remote_exists, git_repo_root
 from .models import Job, RunEvent, RunnerLock, public_owner
-from .observability import _gate_runs, elapsed_seconds
+from .observability import GATE_EVENT, TIMED_PHASES, _gate_runs, elapsed_seconds
 from .persistence.connection import connect
 from .persistence.events import list_history_events
 from .persistence.jobs import counts, list_jobs, list_jobs_fifo, validated_train_summaries
@@ -35,10 +35,6 @@ PHASES = (
     "complete",
 )
 
-GATE_EVENT = re.compile(
-    r"^(?:Running|Passed|Reused|Skipped|Failed|Canceled) gate (\d+)/(\d+): (.+)$"
-)
-ESTIMATE_PHASES = ("fetching", "assembling", "gating", "pushing", "verifying")
 ESTIMATE_SAMPLE_LIMIT = 20
 PUBLIC_REASON_LIMIT = PUBLIC_TEXT_LIMIT
 
@@ -462,7 +458,7 @@ def _phase_duration_samples(
         if (
             not event.claim_token
             or event.claim_token == exclude_token
-            or event.phase not in ESTIMATE_PHASES
+            or event.phase not in TIMED_PHASES
         ):
             continue
         grouped[(event.claim_token, event.phase)].append(event)
@@ -513,7 +509,7 @@ def _eta_payload(
     phase_samples = _phase_duration_samples(events, exclude_token=token)
     phases: list[dict[str, Any]] = []
     phase_estimates: dict[str, tuple[int, float | None]] = {}
-    for phase in ESTIMATE_PHASES:
+    for phase in TIMED_PHASES:
         sample_count, estimate = _median_samples(phase_samples.get(phase, []))
         phase_estimates[phase] = (sample_count, estimate)
         phases.append(
@@ -572,9 +568,9 @@ def _eta_payload(
     deploying = any(
         job.status == "in_progress" and bool(job.train_id) for job in selected_jobs
     ) or current_phase in {"pushing", "verifying", "complete"}
-    target_phases = list(ESTIMATE_PHASES[:3])
+    target_phases = list(TIMED_PHASES[:3])
     if deploying:
-        target_phases.extend(ESTIMATE_PHASES[3:])
+        target_phases.extend(TIMED_PHASES[3:])
 
     if selection == "running":
         try:

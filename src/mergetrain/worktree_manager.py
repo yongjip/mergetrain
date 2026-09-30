@@ -53,12 +53,6 @@ class WorktreeManager:
             return self.config.validation_worktree_path, True
         return self.worktree_path(first_job_id), False
 
-    def persistent_workspace_marker(self) -> Path:
-        return (
-            self.config.state.worktree_root
-            / f".{self.config.project.name}-validation-workspace.json"
-        )
-
     def cleanup(
         self,
         worktree: Path,
@@ -155,7 +149,7 @@ class WorktreeManager:
                 timeout_seconds=self.config.queue.command_timeout_seconds,
             )
         else:
-            self.persistent_workspace_marker().unlink(missing_ok=True)
+            self.config.validation_workspace_marker.unlink(missing_ok=True)
             # --force reclaims a stale registration of this one path (its
             # directory was deleted). A repository-wide `git worktree prune`
             # would also drop user worktrees whose directory is only
@@ -199,7 +193,7 @@ class WorktreeManager:
                 pulse=pulse,
             ),
         }
-        marker = self.persistent_workspace_marker()
+        marker = self.config.validation_workspace_marker
         previous: object = None
         try:
             previous = json.loads(marker.read_text(encoding="utf-8"))

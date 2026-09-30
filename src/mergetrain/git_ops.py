@@ -622,10 +622,7 @@ def apply_gc(
                 {"path": str(candidate["path"]), "reason": str(candidate["reason"])}
             )
             if path == config.validation_worktree_path:
-                config_marker = (
-                    config.state.worktree_root / f".{config.project.name}-validation-workspace.json"
-                )
-                config_marker.unlink(missing_ok=True)
+                config.validation_workspace_marker.unlink(missing_ok=True)
         else:
             failed.append({"path": str(path), "reason": "could not remove worktree"})
     for branch, recorded_head in dict(delete_branches or {}).items():

@@ -2,25 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Iterable
 from typing import Any
 
 from .config import MergetrainConfig
 from .git_destination import ResolvedGitDestination, resolve_git_destination
 from .models import Job
-from .reuse import gate_policy_sha, train_identity_sha
-
-
-def _sha256_json(value: Any) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+from .reuse import _sha256_json, gate_policy_sha, train_identity_sha
 
 
 def deploy_destination_sha(config: MergetrainConfig) -> str:

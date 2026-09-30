@@ -16,7 +16,6 @@ from ..cli_support import (
     config_from_args,
     dump_json,
 )
-from ..command_runner import run_command
 from ..config import (
     MergetrainConfig,
     gate_policy_warnings,
@@ -28,6 +27,7 @@ from ..git_ops import (
     find_worktree_gc_candidates,
     git_common_dir,
     git_current_branch,
+    git_output_or_empty,
     git_ref_exists,
     git_remote_exists,
     git_remote_url,
@@ -47,6 +47,7 @@ from ..observability import (
 from ..persistence.connection import connect
 from ..persistence.events import list_run_events
 from ..persistence.jobs import (
+    COUNT_KEYS,
     counts,
     get_job,
     list_attention_jobs,
@@ -74,9 +75,9 @@ def _validated_trains_with_integration_state(
     if not trains:
         return []
     current_sha = (
-        _git_object_sha(
-            config.repo,
+        git_output_or_empty(
             ["rev-parse", "--verify", f"{config.git.integration_tracking_ref}^{{commit}}"],
+            cwd=config.repo,
         )
         if config.repo.is_dir()
         else ""
@@ -183,28 +184,6 @@ def _state_summary(state: str, grouped: dict[str, int]) -> str:
     return "No active work; enqueue a clean task branch when ready"
 
 
-def _empty_counts() -> dict[str, int]:
-    return dict.fromkeys(
-        (
-            "queued",
-            "in_progress",
-            "blocked",
-            "failed",
-            "validated",
-            "needs_reconcile",
-            "deployed",
-            "canceled",
-            "auto_queued",
-            "manual_queued",
-            "in_progress_with_marker",
-            "blocked_with_marker",
-            "deployed_verify_unknown",
-            "deployed_verify_failed",
-        ),
-        0,
-    )
-
-
 def _diagnostic_config(config: MergetrainConfig) -> dict[str, Any]:
     """The configuration, its commands masked the way event templates are."""
 
@@ -247,9 +226,7 @@ def _diagnostics(
                 "exists": config.validation_worktree_path.exists(),
                 "cache_key": config.state.validation_workspace.cache_key,
                 "cache_paths": list(config.state.validation_workspace.cache_paths),
-                "initialized": (
-                    config.state.worktree_root / f".{config.project.name}-validation-workspace.json"
-                ).is_file(),
+                "initialized": config.validation_workspace_marker.is_file(),
             },
         },
         "git": {
@@ -290,7 +267,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     lock = None
     validated_trains: list[dict[str, Any]] = []
-    count_data = _empty_counts()
+    count_data = dict.fromkeys(COUNT_KEYS, 0)
     recent_jobs: list[Job] = []
     decision_jobs: list[Job] = []
     if config.state.db.is_file():
@@ -803,17 +780,6 @@ def cmd_logs(args: argparse.Namespace) -> int:
         conn.close()
 
 
-def _git_object_sha(repo: Path, arguments: Sequence[str]) -> str:
-    completed = run_command(
-        ["git", *arguments],
-        cwd=repo,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return ""
-    return completed.stdout.strip()
-
-
 def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]:
     local_path = config.config_path.resolve()
     local_exists = config.config_exists and local_path.is_file()
@@ -854,13 +820,10 @@ def _config_drift(config: MergetrainConfig, *, repo_root: str) -> dict[str, Any]
         payload["state"] = "integration_ref_missing"
         return payload
 
-    local_sha = _git_object_sha(
-        repo_path,
-        ["hash-object", "--", relative_path],
-    )
-    integration_sha = _git_object_sha(
-        repo_path,
+    local_sha = git_output_or_empty(["hash-object", "--", relative_path], cwd=repo_path)
+    integration_sha = git_output_or_empty(
         ["rev-parse", "--verify", f"{integration_ref}:{relative_path}"],
+        cwd=repo_path,
     )
     payload["local"]["blob_sha"] = local_sha
     payload["integration"]["blob_sha"] = integration_sha

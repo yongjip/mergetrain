@@ -599,6 +599,18 @@ def list_jobs_fifo(conn: sqlite3.Connection, *, status: str = "queued") -> list[
     return [Job.from_row(row) for row in rows]
 
 
+# The keys of counts(), in order.
+COUNT_KEYS = (
+    *ALL_STATUSES,
+    "auto_queued",
+    "manual_queued",
+    "in_progress_with_marker",
+    "blocked_with_marker",
+    "deployed_verify_unknown",
+    "deployed_verify_failed",
+)
+
+
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
     row = conn.execute(
         """
@@ -626,16 +638,7 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
         FROM deploy_queue
         """
     ).fetchone()
-    keys = (
-        *ALL_STATUSES,
-        "auto_queued",
-        "manual_queued",
-        "in_progress_with_marker",
-        "blocked_with_marker",
-        "deployed_verify_unknown",
-        "deployed_verify_failed",
-    )
-    return {key: int(row[key] or 0) for key in keys}
+    return {key: int(row[key] or 0) for key in COUNT_KEYS}
 
 
 def has_queued_auto(conn: sqlite3.Connection) -> bool:

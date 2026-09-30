@@ -161,6 +161,12 @@ class MergetrainConfig:
     def validation_worktree_path(self) -> Path:
         return self.state.worktree_root / f"{self.project.name}-validation-workspace"
 
+    @property
+    def validation_workspace_marker(self) -> Path:
+        """Where the persistent validation workspace records its cache identity."""
+
+        return self.state.worktree_root / f".{self.project.name}-validation-workspace.json"
+
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         workspace = data["state"].pop("validation_workspace")

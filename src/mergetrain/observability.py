@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime
 from math import ceil
 from statistics import mean, median
 from typing import Any
@@ -25,7 +25,7 @@ from .persistence.events import RUN_EVENT_RETENTION, list_history_events, list_r
 from .persistence.jobs import get_job, list_history_jobs, list_train_jobs
 from .persistence.leases import get_lock
 from .persistence.operations import list_recovery_operation_events
-from .persistence.transactions import utc_now
+from .persistence.transactions import _parse_utc, utc_now
 
 GATE_EVENT = re.compile(
     r"^(?:Running|Passed|Reused|Skipped|Failed|Canceled) gate (\d+)/(\d+): (.+)$"
@@ -44,12 +44,9 @@ def _timestamp(value: str) -> datetime | None:
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return _parse_utc(value)
     except ValueError:
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def elapsed_seconds(start: str, end: str = "") -> float | None:
