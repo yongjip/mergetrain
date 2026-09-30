@@ -13,6 +13,7 @@ from typing import IO, Any
 from .command_runner import Pulse, run_command
 from .config import MergetrainConfig
 from .errors import MergetrainError
+from .persistence.leases import Liveness, owner_liveness
 
 
 def git_output(args: Sequence[str], *, cwd: str | Path) -> str:
@@ -372,6 +373,13 @@ def delete_pending_ref(path: str | Path, job_id: int, *, log: IO[str] | None = N
     )
 
 
+def _process_worktree_pid(name: str, prefix: str) -> int | None:
+    """The process a lease-less helper worktree belongs to, from its name."""
+
+    match = re.fullmatch(rf"{re.escape(prefix)}pid(\d+)-[0-9a-f]+", name)
+    return int(match.group(1)) if match else None
+
+
 def find_worktree_gc_candidates(
     config: MergetrainConfig, *, protect: Iterable[str] = ()
 ) -> list[dict[str, Any]]:
@@ -416,6 +424,16 @@ def find_worktree_gc_candidates(
                 {
                     "path": str(path),
                     "reason": "active runner worktree, skipped",
+                    "protected": True,
+                }
+            )
+            continue
+        pid = _process_worktree_pid(path.name, prefix)
+        if pid is not None and owner_liveness(f"process:{pid}") != Liveness.DEAD:
+            candidates.append(
+                {
+                    "path": str(path),
+                    "reason": f"in use by process {pid}, skipped",
                     "protected": True,
                 }
             )

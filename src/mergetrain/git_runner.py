@@ -212,7 +212,7 @@ class GitRunner:
         validation_shas = {job.validation_sha for job in jobs if job.validation_sha}
         validation_sha = next(iter(validation_shas)) if len(validation_shas) == 1 else ""
         self._worktrees.ensure_state_dirs()
-        worktree = self._worktrees.worktree_path(jobs[0].id if jobs else 0)
+        worktree = self._worktrees.process_worktree_path()
         log = io.StringIO()
         try:
             self._worktrees.prepare(worktree=worktree, log=log, pulse=None)
@@ -261,7 +261,7 @@ class GitRunner:
                 "after explicit review"
             )
         self._worktrees.ensure_state_dirs()
-        worktree = self._worktrees.worktree_path(0)
+        worktree = self._worktrees.process_worktree_path()
         run_command(
             ["git", "fetch", self.config.git.remote],
             cwd=self.repo,

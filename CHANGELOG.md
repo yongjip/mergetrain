@@ -37,6 +37,13 @@
   `unlock --force` or restarted the daemon. A daemon runs one tick at a time,
   so a tick now clears a lease left under its own name by an earlier tick and
   returns the claimed jobs to the queue.
+- Keep `gc --apply` from removing the worktree of a `mergetrain verify` that is
+  still running. The verify checkout, like the one a deploy preview builds to
+  judge validation reuse, held no runner lease, so gc took it for a leftover.
+  Hooks that read the deployed files then failed, and verify recorded a
+  failed verification for every job of the deployment. These worktrees now
+  carry the ID of the process that made them: gc keeps them while it runs
+  and still removes the ones a stopped process left behind.
 
 ## 3.3.0 - 2026-09-30
 

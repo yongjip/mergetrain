@@ -342,7 +342,8 @@ which `git branch -d` refuses.
 Worktree cleanup removes only directories under `state.worktree_root` that
 carry the project's temporary-worktree name and that nothing else owns. A
 worktree locked with `git worktree lock`, a worktree of another repository
-(two clones can share an absolute `worktree_root`), and a nested repository are
+(two clones can share an absolute `worktree_root`), a nested repository, and
+the worktree of a `verify` or deploy preview whose process is still running are
 listed as protected, with the reason, and left in place.
 
 ## Why a persisted marker, instead of reconstructing from Git?

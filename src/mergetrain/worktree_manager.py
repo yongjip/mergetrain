@@ -35,6 +35,18 @@ class WorktreeManager:
         name = f"{self.config.project.name}-mergetrain-{first_job_id}-{suffix}"
         return self.config.state.worktree_root / name
 
+    def process_worktree_path(self) -> Path:
+        """A worktree for work that holds no runner lease, such as a verify.
+
+        gc spares only the worktree a lease names, so this name carries the
+        process ID instead: gc keeps it while this process lives and removes
+        it once the process is gone.
+        """
+
+        suffix = uuid.uuid4().hex[:8]
+        name = f"{self.config.project.name}-mergetrain-pid{os.getpid()}-{suffix}"
+        return self.config.state.worktree_root / name
+
     def primary_path(self, first_job_id: int, *, deploy: bool) -> tuple[Path, bool]:
         persistent = not deploy and self.config.state.validation_workspace.mode == "persistent"
         if persistent:

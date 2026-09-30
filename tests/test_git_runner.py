@@ -3668,6 +3668,52 @@ class GcWorktreeGuardTests(unittest.TestCase):
             main(["--repo", str(repo), "gc", *args, "--json"])
         return json.loads(out.getvalue())
 
+    def test_gc_spares_the_worktree_of_a_running_verify(self) -> None:
+        """A verify holds no runner lease, so gc once took its worktree for a
+        leftover and removed it mid-hook, recording a false failure."""
+
+        from mergetrain.git_ops import apply_gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root, verify_command="exit 0")
+            config = load_config(repo=repo)
+            runner = GitRunner(config)
+            seen: list[tuple[bool, list[dict[str, str]]]] = []
+
+            def hooks_while_gc_runs(*, worktree, log, pulse):  # type: ignore[no-untyped-def]
+                removed = apply_gc(config)["removed_worktrees"]
+                seen.append((worktree.exists(), removed))
+
+            with patch.object(runner._gates, "run_verify_hooks", side_effect=hooks_while_gc_runs):
+                verified = runner.reverify_deploy(
+                    deploy_sha=git(repo, "rev-parse", "main"), log=io.StringIO()
+                )
+
+            self.assertTrue(verified)
+            self.assertEqual(seen, [(True, [])])
+
+    def test_gc_removes_a_process_worktree_its_process_left_behind(self) -> None:
+        from mergetrain.git_ops import apply_gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, _ = make_demo_repo(root)
+            config = load_config(repo=repo)
+            worktrees = config.state.worktree_root
+            ours = worktrees / f"demo-mergetrain-pid{os.getpid()}-0a1b2c3d"
+            gone = worktrees / "demo-mergetrain-pid999999-4e5f6a7b"
+            for path in (ours, gone):
+                git(repo, "worktree", "add", "--detach", str(path), "main")
+
+            result = apply_gc(config)
+
+            self.assertTrue(ours.exists())
+            self.assertFalse(gone.exists())
+            self.assertEqual(
+                [item["path"] for item in result["removed_worktrees"]], [str(gone)]
+            )
+
     def test_gc_deletes_a_branch_only_at_its_recorded_merged_head(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
