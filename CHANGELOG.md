@@ -329,6 +329,12 @@
   validation only when the user explicitly asked for it or for the complete
   validation-and-deployment workflow, since asking to queue work for
   validation authorizes enqueue only.
+- Mask secrets in the commands that `status --diagnose --json` shows. Its
+  `diagnostics.config` copied every gate, verify hook, and reuse fingerprint
+  command verbatim, so an inline credential such as
+  `GITHUB_TOKEN=... ./check`, which events, `inspect`, and `hub status` mask,
+  appeared there in clear, as did the command in a redundant `diff-check`
+  recommendation. They are now masked the same way.
 
 ## 3.3.0 - 2026-09-30
 

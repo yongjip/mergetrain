@@ -205,6 +205,19 @@ def _empty_counts() -> dict[str, int]:
     )
 
 
+def _diagnostic_config(config: MergetrainConfig) -> dict[str, Any]:
+    """The configuration, its commands masked the way event templates are."""
+
+    data = config.to_dict()
+    for command in (
+        *data["gates"],
+        *data["deploy"]["verify"],
+        *data["deploy"]["reuse"]["fingerprints"],
+    ):
+        command["run"] = redact_secrets(command["run"])
+    return data
+
+
 def _diagnostics(
     config: MergetrainConfig,
     *,
@@ -222,7 +235,7 @@ def _diagnostics(
     return {
         "version": __version__,
         "runtime": runtime_provenance(),
-        "config": config.to_dict(),
+        "config": _diagnostic_config(config),
         "config_exists": config.config_exists,
         "db": str(config.state.db),
         "state": {
@@ -918,7 +931,7 @@ def _doctor_recommendations(
                 "evidence": {
                     "configured_gate_count": len(redundant),
                     "gate": "diff-check",
-                    "run": redundant[0].run,
+                    "run": redact_secrets(redundant[0].run),
                 },
                 "actions": [
                     "remove the redundant diff-check entry from .mergetrain.yaml",

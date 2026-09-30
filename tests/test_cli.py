@@ -457,6 +457,47 @@ class CliTests(unittest.TestCase):
         )
         self.assertNotIn("fixture-secret", out.getvalue())
 
+    def test_diagnose_json_masks_secrets_in_configured_commands(self) -> None:
+        # Events, inspect, and hub status mask a gate's inline credential, but
+        # the diagnostics copied every configured command verbatim.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                "version: 2\n"
+                "project:\n"
+                "  name: masked\n"
+                "gates:\n"
+                "  - name: check\n"
+                "    run: GITHUB_TOKEN=ghp-gate-secret echo ok\n"
+                "deploy:\n"
+                "  verify:\n"
+                "    - name: health\n"
+                "      run: curl --token verify-secret https://example.invalid/health\n"
+                "  reuse:\n"
+                "    fingerprints:\n"
+                "      - name: toolchain\n"
+                "        run: API_TOKEN=fingerprint-secret ./toolchain-id\n",
+                encoding="utf-8",
+            )
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "status", "--diagnose", "--json"])
+            payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        for secret in ("ghp-gate-secret", "verify-secret", "fingerprint-secret"):
+            self.assertNotIn(secret, out.getvalue())
+        config = payload["diagnostics"]["config"]
+        self.assertEqual(config["gates"][0]["run"], "GITHUB_TOKEN=[redacted] echo ok")
+        self.assertEqual(
+            config["deploy"]["verify"][0]["run"],
+            "curl --token [redacted] https://example.invalid/health",
+        )
+        self.assertEqual(
+            config["deploy"]["reuse"]["fingerprints"][0]["run"],
+            "API_TOKEN=[redacted] ./toolchain-id",
+        )
+
     def test_doctor_reports_operator_config_in_sync_with_integration_ref(
         self,
     ) -> None:
