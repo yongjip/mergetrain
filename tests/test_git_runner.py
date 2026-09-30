@@ -1142,6 +1142,28 @@ deploy:
             self.assertEqual(skipped.state, "skipped")
             self.assertEqual(skipped.detail, "no changed paths matched configured paths")
 
+    def test_path_scoped_gate_sees_a_gitlink_that_submodule_config_hides(self) -> None:
+        # Git drops a changed gitlink from `git diff` under diff.ignoreSubmodules
+        # or a .gitmodules `ignore = all`, which the train itself controls.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, marker = make_demo_repo(root, gate_paths=("vendor/**",))
+            git(repo, "switch", "-c", "agent/vendor", "main")
+            git(repo, "update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},vendor/lib")
+            git(repo, "commit", "-m", "bump vendor/lib")
+            git(repo, "switch", "main")
+            git(repo, "config", "diff.ignoreSubmodules", "all")
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                job = enqueue_job(conn, task="vendor", branch="agent/vendor")
+                result = GitRunner(config).process_batch(conn, [job], deploy=False)[0]
+            finally:
+                conn.close()
+
+            self.assertEqual(result.status, "validated", result.note)
+            self.assertTrue(marker.exists(), "the vendor gate was skipped")
+
     def test_path_scoped_gate_runs_for_a_train_wide_match(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

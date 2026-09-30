@@ -89,6 +89,12 @@
   it writable: in a repository without a queue it created `.mergetrain/` and
   the database, and against a queue from an older mergetrain it migrated the
   schema, which then locked that older runner or daemon out.
+- Run a gate scoped to a submodule path when the train changes that
+  submodule, even when Git is told to ignore it. Path-aware gate selection
+  read the changed paths from `git diff`, which leaves out a changed gitlink
+  under `diff.ignoreSubmodules` or a `.gitmodules` `ignore` setting that the
+  train itself can add. The gate was then skipped as "no changed paths
+  matched". The diff now passes `--ignore-submodules=none`.
 
 ## 3.3.0 - 2026-09-30
 

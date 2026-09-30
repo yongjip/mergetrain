@@ -307,6 +307,10 @@ class GateRunner:
                     "--name-status",
                     "-z",
                     "--find-renames",
+                    # diff.ignoreSubmodules, or a .gitmodules `ignore` the
+                    # train itself may set, would drop a changed gitlink and
+                    # skip the gates scoped to it.
+                    "--ignore-submodules=none",
                     f"{base_ref}..{head_ref}",
                     "--",
                 ],
