@@ -394,8 +394,10 @@
   emitter, the validated-reuse checks, reconcile and unlock results, the CLI's
   run and failure output, the daemons' signal handling, path-scoped gate
   selection, and the configured heartbeat and command timeout each go through
-  one helper, and duplicated helpers and constants are gone. The CLI, MCP
-  tools, JSON contract, and config schema are unchanged.
+  one helper, and duplicated helpers and constants are gone. The runner's
+  `process_batch` now hands a train's restore, assembly, gate, and record
+  phases to separate methods that share one run state. The CLI, MCP tools,
+  JSON contract, and config schema are unchanged.
 
 ## 3.3.0 - 2026-09-30
 
