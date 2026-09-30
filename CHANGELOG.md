@@ -341,6 +341,12 @@
   a `stream_end` error, which carries no `contract_version`, so a consumer
   that checks the header first could not check the contract. The header now
   comes first and the `stream_end` error follows it.
+- Keep a job's final event in a scoped `events --follow` stream. The runner
+  records a job's final status and then, separately, the event that announces
+  it, such as `Job #1 validated`. A poll that landed between the two ended
+  the stream, and that event never reached it. The stream now reads once more
+  after it first sees the final status, one poll interval later, and ends
+  after that read.
 
 ## 3.3.0 - 2026-09-30
 

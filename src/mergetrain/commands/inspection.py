@@ -469,6 +469,7 @@ def cmd_events(args: argparse.Namespace) -> int:
     cursor = args.after
     last_heartbeat = ""
     scoped = args.job_id is not None or bool(args.train_id)
+    terminal_seen = False
     try:
         conn = connect(config.state.db, read_only=True)
         jobs, event_job_ids = _resolve_event_scope(conn, args)
@@ -513,7 +514,12 @@ def cmd_events(args: argparse.Namespace) -> int:
                     last_heartbeat = lock.heartbeat_at
 
             terminal = stream_terminal(jobs, lock) if scoped else None
-            if args.follow and terminal is not None and (not events or len(events) < args.limit):
+            if (
+                args.follow
+                and terminal is not None
+                and terminal_seen
+                and (not events or len(events) < args.limit)
+            ):
                 payload = {
                     "type": "stream_end",
                     "after_event_id": int(cursor or 0),
@@ -522,6 +528,10 @@ def cmd_events(args: argparse.Namespace) -> int:
                 }
                 _print_event_record(payload, jsonl=args.jsonl)
                 return int(terminal["exit_code"])
+            # The runner commits a job's final status before the event that
+            # announces it, so the stream reads the events once more after it
+            # first sees the final status, and only then ends.
+            terminal_seen = terminal is not None
             if not args.follow:
                 return 0
             if len(events) >= args.limit:

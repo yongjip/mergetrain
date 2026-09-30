@@ -3188,6 +3188,74 @@ class CliTests(unittest.TestCase):
             self.assertFalse(records[-1]["ok"])
             self.assertEqual(records[-1]["error"]["code"], "queue_error")
 
+    def test_events_follow_reads_once_more_after_a_final_status(self) -> None:
+        # The runner commits a job's final status, then the event that
+        # announces it. A poll between the two commits ended the stream, and
+        # the job's final event never reached it.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            db = repo / "queue.sqlite"
+            conn = connect(db)
+            owner = f"owner:{os.getpid()}"
+            try:
+                queued = enqueue_job(conn, task="a", branch="feature/a")
+                token = claim_all_queued(conn, owner=owner)[0].claim_token
+                record_run_event(
+                    conn,
+                    claim_token=token,
+                    job_id=queued.id,
+                    phase="gating",
+                    state="active",
+                    message="Running gate 1/1: tests",
+                )
+                mark_job(
+                    conn,
+                    queued.id,
+                    status="validated",
+                    note="ok",
+                    expected_claim_token=token,
+                )
+                release_runner_lock(conn, owner=owner, token=token)
+            finally:
+                conn.close()
+            announced = False
+
+            def announce(_interval: float) -> None:
+                nonlocal announced
+                if announced:
+                    return
+                announced = True
+                writer = connect(db)
+                try:
+                    record_run_event(
+                        writer,
+                        claim_token=token,
+                        job_id=queued.id,
+                        phase="ready",
+                        state="success",
+                        message=f"Job #{queued.id} validated",
+                    )
+                finally:
+                    writer.close()
+
+            out = io.StringIO()
+            with (
+                patch("mergetrain.commands.inspection.time.sleep", side_effect=announce),
+                redirect_stdout(out),
+            ):
+                code = main(
+                    [
+                        "--repo", str(repo), "--db", str(db), "events",
+                        "--job", str(queued.id), "--follow", "--jsonl",
+                    ]
+                )
+
+            records = [json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(code, 0)
+            self.assertEqual(records[-2]["message"], f"Job #{queued.id} validated")
+            self.assertEqual(records[-1]["type"], "stream_end")
+            self.assertEqual(records[-1]["after_event_id"], records[-2]["id"])
+
     def test_events_jsonl_argument_and_config_errors_follow_the_header(self) -> None:
         # The option checks and the config load ran before the stream_start
         # header, so their only frame was a stream_end with no contract_version.
