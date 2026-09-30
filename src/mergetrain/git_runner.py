@@ -893,7 +893,6 @@ class GitRunner:
         # inspect must never show one job another job's progress.
         event_job_id = jobs[0].id if len(jobs) == 1 else None
         emit = partial(self._event, conn, lease_token=lease_token, job_id=event_job_id)
-        gate_progress = self._gate_progress_callback(emit)
 
         with log_path.open("w", encoding="utf-8") as log:
             run = _TrainRun(
@@ -976,117 +975,9 @@ class GitRunner:
                     stopped = self._assemble_train(run)
                     if stopped is not None:
                         return stopped
-                run.pulse()
-                if persistent_workspace:
-                    cache_reused = self._worktrees.activate_persistent_cache(
-                        worktree=worktree,
-                        log=log,
-                        pulse=run.pulse,
-                    )
-                    emit(
-                        phase="gating",
-                        state="reused" if cache_reused else "success",
-                        message=(
-                            "Persistent validation cache reused"
-                            if cache_reused
-                            else "Persistent validation cache initialized"
-                        ),
-                    )
-                if deploy:
-                    self._assert_auto_execution_policy(run.merged_jobs)
-                try:
-                    if run.reuse_fallback_reason:
-                        emit(
-                            phase="gating",
-                            state="warning",
-                            message="Validated gates were not reused; rerunning all gates",
-                            detail=run.reuse_fallback_reason,
-                        )
-                    emit(
-                        phase="gating",
-                        state="active",
-                        message=(
-                            "Reusing validated gates"
-                            if run.reused_validation_sha
-                            else "Running train gates"
-                        ),
-                        detail=run.reused_validation_sha,
-                    )
-                    if run.reused_validation_sha:
-                        self._gates.run_reused_gates(
-                            worktree=worktree,
-                            validation_sha=run.reused_validation_sha,
-                            base_ref=run.integration_base_sha,
-                            log=log,
-                            pulse=run.pulse,
-                            on_gate=gate_progress,
-                        )
-                    else:
-                        self._gates.run_gates(
-                            worktree=worktree,
-                            log=log,
-                            pulse=run.pulse,
-                            on_gate=gate_progress,
-                            base_ref=run.integration_base_sha,
-                            head_ref=run.deploy_sha,
-                        )
-                    self._pushes.assert_tree_unchanged(worktree, run.deploy_sha)
-                    emit(
-                        phase="gating",
-                        state="success",
-                        message="All train gates passed",
-                        detail=run.reused_validation_sha,
-                    )
-                except CommandFailed as exc:
-                    if deploying_validated:
-                        gate_mode = "validated reuse" if run.reused_validation_sha else "reassembly"
-                        note = f"validated train gate failed after {gate_mode}: {exc}"
-                        return [
-                            run.finish(
-                                job,
-                                status="failed",
-                                deploy_sha=run.deploy_sha,
-                                log_path=str(log_path),
-                                note=note,
-                            )
-                            for job in jobs
-                        ]
-                    if len(run.merged_jobs) == 1:
-                        # The tree that failed is exactly the base plus this one
-                        # job, so there is nothing to isolate: running it again
-                        # would only retry a failed gate, and a pass could ship.
-                        raise
-                    log.write(
-                        "\ntrain gate failed; probing "
-                        f"{len(run.merged_jobs)} merged jobs for semantic conflicts\n"
-                    )
-                    emit(
-                        phase="gating",
-                        state="warning",
-                        message=(
-                            "Train gate failed; probing "
-                            f"{len(run.merged_jobs)} jobs for semantic conflicts"
-                        ),
-                        detail=f"exit_code={exc.returncode}",
-                    )
-                    run.results.extend(
-                        self._bisect_failed_train(
-                            conn,
-                            run.merged_jobs,
-                            merge_shas=run.merge_shas,
-                            integration_base_sha=run.integration_base_sha,
-                            worktree=worktree,
-                            log=log,
-                            log_path=log_path,
-                            lease_token=lease_token,
-                            deploy=deploy,
-                            keep_worktree=keep_worktree or persistent_workspace,
-                            owner=owner,
-                            ttl_minutes=ttl_minutes,
-                            expected_plan_sha=expected_plan_sha,
-                        )
-                    )
-                    return run.results
+                stopped = self._gate_train(run)
+                if stopped is not None:
+                    return stopped
                 if deploy:
                     self._push_and_verify(
                         conn,
@@ -1370,6 +1261,128 @@ class GitRunner:
             message=f"Assembled {len(run.merged_jobs)} job(s)",
         )
         run.deploy_sha = git_rev_parse(run.worktree, "HEAD")
+        return None
+
+    def _gate_train(self, run: _TrainRun) -> list[Job] | None:
+        """Run or reuse the gates of the assembled train, and sort out a failure.
+
+        A failed gate fails a validated train whole, fails a one-job train
+        through the caller's error path, and has a larger train bisected.
+        Returns the finished jobs when the gates failed.
+        """
+
+        run.pulse()
+        if run.persistent_workspace:
+            cache_reused = self._worktrees.activate_persistent_cache(
+                worktree=run.worktree,
+                log=run.log,
+                pulse=run.pulse,
+            )
+            run.emit(
+                phase="gating",
+                state="reused" if cache_reused else "success",
+                message=(
+                    "Persistent validation cache reused"
+                    if cache_reused
+                    else "Persistent validation cache initialized"
+                ),
+            )
+        if run.deploy:
+            self._assert_auto_execution_policy(run.merged_jobs)
+        gate_progress = self._gate_progress_callback(run.emit)
+        try:
+            if run.reuse_fallback_reason:
+                run.emit(
+                    phase="gating",
+                    state="warning",
+                    message="Validated gates were not reused; rerunning all gates",
+                    detail=run.reuse_fallback_reason,
+                )
+            run.emit(
+                phase="gating",
+                state="active",
+                message=(
+                    "Reusing validated gates"
+                    if run.reused_validation_sha
+                    else "Running train gates"
+                ),
+                detail=run.reused_validation_sha,
+            )
+            if run.reused_validation_sha:
+                self._gates.run_reused_gates(
+                    worktree=run.worktree,
+                    validation_sha=run.reused_validation_sha,
+                    base_ref=run.integration_base_sha,
+                    log=run.log,
+                    pulse=run.pulse,
+                    on_gate=gate_progress,
+                )
+            else:
+                self._gates.run_gates(
+                    worktree=run.worktree,
+                    log=run.log,
+                    pulse=run.pulse,
+                    on_gate=gate_progress,
+                    base_ref=run.integration_base_sha,
+                    head_ref=run.deploy_sha,
+                )
+            self._pushes.assert_tree_unchanged(run.worktree, run.deploy_sha)
+            run.emit(
+                phase="gating",
+                state="success",
+                message="All train gates passed",
+                detail=run.reused_validation_sha,
+            )
+        except CommandFailed as exc:
+            if run.deploying_validated:
+                gate_mode = "validated reuse" if run.reused_validation_sha else "reassembly"
+                note = f"validated train gate failed after {gate_mode}: {exc}"
+                return [
+                    run.finish(
+                        job,
+                        status="failed",
+                        deploy_sha=run.deploy_sha,
+                        log_path=str(run.log_path),
+                        note=note,
+                    )
+                    for job in run.jobs
+                ]
+            if len(run.merged_jobs) == 1:
+                # The tree that failed is exactly the base plus this one
+                # job, so there is nothing to isolate: running it again
+                # would only retry a failed gate, and a pass could ship.
+                raise
+            run.log.write(
+                "\ntrain gate failed; probing "
+                f"{len(run.merged_jobs)} merged jobs for semantic conflicts\n"
+            )
+            run.emit(
+                phase="gating",
+                state="warning",
+                message=(
+                    "Train gate failed; probing "
+                    f"{len(run.merged_jobs)} jobs for semantic conflicts"
+                ),
+                detail=f"exit_code={exc.returncode}",
+            )
+            run.results.extend(
+                self._bisect_failed_train(
+                    run.conn,
+                    run.merged_jobs,
+                    merge_shas=run.merge_shas,
+                    integration_base_sha=run.integration_base_sha,
+                    worktree=run.worktree,
+                    log=run.log,
+                    log_path=run.log_path,
+                    lease_token=run.lease_token,
+                    deploy=run.deploy,
+                    keep_worktree=run.keep_worktree or run.persistent_workspace,
+                    owner=run.owner,
+                    ttl_minutes=run.ttl_minutes,
+                    expected_plan_sha=run.expected_plan_sha,
+                )
+            )
+            return run.results
         return None
 
     def _finish_active_jobs(self, run: _TrainRun, *, status: str, note: str) -> list[Job]:
