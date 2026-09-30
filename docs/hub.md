@@ -21,7 +21,9 @@ it, so adding or removing a repo takes effect immediately.
 Routine coordinators should use `hub status --summary --json`. It reads only
 queue counts, the public runner lock, validated-train identities, and the next
 safe action for each repo. Full `hub status --json` adds each repo's recent
-jobs and events.
+jobs and events. Both views choose the next action as `status` does, so a repo
+whose Git repository, remote, or integration ref is missing is pointed at that
+first, which takes three read-only Git queries per repo.
 
 ## The contract: sovereign repos, stateless hub
 

@@ -366,6 +366,13 @@
   command that ran in the checkout itself, such as a failed `git fetch`,
   showed the checkout path unmasked. Paths are now masked in the whole note
   before it is cut, and the checkout path shows as `[repo]`.
+- Give each repo in `hub status` the next action that `status` gives it.
+  Both hub views chose it without looking at Git, so for a repo whose remote
+  or integration ref was missing they recommended `validate_queued_jobs` or
+  another queue step while `status` said `configure_git_remote` or
+  `fetch_integration_ref`. The hub now checks the repository, the remote, and
+  the integration ref as `status` does, with three read-only Git queries per
+  repo.
 
 ## 3.3.0 - 2026-09-30
 

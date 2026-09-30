@@ -14,6 +14,7 @@ from typing import Any
 
 from .config import CONFIG_VERSION, MergetrainConfig, effective_gates
 from .errors import PUBLIC_TEXT_LIMIT, redact_and_bound
+from .git_ops import git_ref_exists, git_remote_exists, git_repo_root
 from .models import Job, RunEvent, RunnerLock, public_owner
 from .observability import _gate_runs, elapsed_seconds
 from .persistence.connection import connect
@@ -306,6 +307,20 @@ def next_action(payload: dict[str, Any], *, config_version: int = CONFIG_VERSION
     return plan_next_action(payload, config_version=config_version).code
 
 
+def _readiness(config: MergetrainConfig) -> dict[str, Any]:
+    """The config and Git preconditions that ``status`` weighs before queue work."""
+
+    repo_ready = config.repo.is_dir() and bool(git_repo_root(config.repo))
+    return {
+        "config_exists": config.config_exists,
+        "repo_ready": repo_ready,
+        "remote_ready": repo_ready and git_remote_exists(config.repo, config.git.remote),
+        "integration_ref_ready": repo_ready
+        and git_ref_exists(config.repo, config.git.integration_tracking_ref),
+        "remote_name": config.git.remote,
+    }
+
+
 def _public_job(job: Job, *, worktree_root: str = "", repo: str = "") -> dict[str, Any]:
     data = job.to_dict()
     worktree_path = str(data.get("worktree_path") or "")
@@ -395,7 +410,7 @@ def build_queue_summary(
     payload["next_action"] = next_action(
         {
             **payload,
-            "config_exists": config.config_exists,
+            **_readiness(config),
             "gc": {"worktree_candidates": []},
         },
         config_version=config.config_version,
@@ -834,7 +849,9 @@ def build_repo_snapshot(
             gate_names=gate_names,
             calculated_at=payload["generated_at"],
         )
-        payload["next_action"] = next_action(payload, config_version=config.config_version)
+        payload["next_action"] = next_action(
+            {**payload, **_readiness(config)}, config_version=config.config_version
+        )
         return payload
     finally:
         conn.close()

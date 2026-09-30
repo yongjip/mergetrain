@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from mergetrain.cli import main
 from mergetrain.config import load_config
 from mergetrain.errors import QueueError
 from mergetrain.hub import build_hub_snapshot, build_hub_summary
@@ -118,6 +122,27 @@ class HubSnapshotTests(unittest.TestCase):
                 "upgrade_mergetrain",
             )
 
+    def test_next_action_weighs_git_readiness_like_status(self) -> None:
+        # status recommends configuring the remote before any queue work, but
+        # both hub views, which never looked at Git, said to validate the queue.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "repos.json"
+            repo = make_repo(root, "no-remote")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            seed_queue(repo)
+            add_repo(repo, registry)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                main(["--repo", str(repo), "status", "--json"])
+            status = json.loads(out.getvalue())["next_action"]["code"]
+            full = build_hub_snapshot(load_registry(registry))["repos"][0]
+            summary = build_hub_summary(load_registry(registry))["repos"][0]
+
+        self.assertEqual(status, "configure_git_remote")
+        self.assertEqual(full["snapshot"]["next_action"], status)
+        self.assertEqual(summary["summary"]["next_action"], status)
+
     def test_daemon_flag_comes_from_the_registry_on_every_read(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -149,9 +174,10 @@ class HubSnapshotTests(unittest.TestCase):
             self.assertEqual(summary["view"], "summary")
             by_name = {entry.get("name"): entry for entry in summary["repos"]}
             self.assertEqual(by_name["live"]["summary"]["counts"]["queued"], 1)
+            # This repo is no Git repository, which status names first too.
             self.assertEqual(
                 by_name["live"]["summary"]["next_action"],
-                "validate_queued_jobs",
+                "open_git_repository",
             )
             self.assertNotIn("snapshot", by_name["live"])
             self.assertTrue(by_name["empty"]["empty"])
@@ -294,7 +320,8 @@ class HubStatusCliTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             lines = stdout.getvalue().splitlines()
-            self.assertIn("live: queued=1 | next: validate_queued_jobs", lines)
+            # This repo is no Git repository, which status names first too.
+            self.assertIn("live: queued=1 | next: open_git_repository", lines)
             self.assertTrue(any("gone" in line and "ERROR" in line for line in lines))
 
     def test_hub_status_summary_json_omits_full_snapshots(self) -> None:
