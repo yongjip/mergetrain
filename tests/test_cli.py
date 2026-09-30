@@ -2731,6 +2731,23 @@ class CliTests(unittest.TestCase):
         self.assertIn("outcome: failure / semantic_conflict", out.getvalue())
         self.assertIn("reason: semantic conflict with job 2", out.getvalue())
 
+    def test_inspect_never_creates_or_migrates_the_queue(self) -> None:
+        # inspect is a read verb, and MCP marks mergetrain_inspect read-only.
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".mergetrain.yaml").write_text(
+                render_default_config("demo"), encoding="utf-8"
+            )
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["--repo", str(repo), "inspect", "1", "--json"])
+
+            self.assertEqual(code, 1)
+            self.assertFalse(json.loads(out.getvalue())["ok"])
+            self.assertFalse((repo / ".mergetrain").exists())
+
     def test_inspect_train_has_structured_failure_categories(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

@@ -84,6 +84,11 @@
   branch whose tests failed could be validated with a weakened gate and then
   deployed. The configuration now comes from the control checkout unless
   `--config` names another file, and `init --write` writes it there.
+- Open the queue read-only in `inspect`, as `status` and `history` do.
+  `inspect`, which MCP also offers as the read-only `mergetrain_inspect`, opened
+  it writable: in a repository without a queue it created `.mergetrain/` and
+  the database, and against a queue from an older mergetrain it migrated the
+  schema, which then locked that older runner or daemon out.
 
 ## 3.3.0 - 2026-09-30
 

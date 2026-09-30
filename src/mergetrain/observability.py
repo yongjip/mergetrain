@@ -788,7 +788,8 @@ def inspect_job_payload(
     *,
     event_limit: int = 100,
 ) -> dict[str, Any]:
-    conn = connect(config.state.db)
+    # A read, like status and history: never create, migrate, or write the queue.
+    conn = connect(config.state.db, read_only=True)
     try:
         job = get_job(conn, job_id)
         lock = get_lock(conn)
