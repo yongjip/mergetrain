@@ -6,6 +6,7 @@ import getpass
 import os
 import sqlite3
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
@@ -397,8 +398,11 @@ def force_clear_lock_and_split(conn: sqlite3.Connection, *, owner: str, token: s
     remote — e.g. the wedged runner finished and a fresh runner acquired it), the
     split is skipped and ``False`` is returned, so a healthy in-flight runner is
     never clobbered. Returns ``True`` when the lock was cleared and orphans split.
+
+    Inside a transaction the caller already holds, it writes there, so the
+    caller can commit the clear together with its own record of it.
     """
-    with immediate(conn):
+    with nullcontext() if conn.in_transaction else immediate(conn):
         if not _release_lock_token(conn, owner=owner, token=token):
             return False
         _requeue_orphans(conn)

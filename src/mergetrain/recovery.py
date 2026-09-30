@@ -52,6 +52,7 @@ from .persistence.leases import (
     stranded_claim_plan,
 )
 from .persistence.recovery import unpack_push_refs
+from .persistence.transactions import immediate
 from .push_liveness import push_in_flight, push_lock_path
 
 # --------------------------------------------------------------------------- #
@@ -739,15 +740,19 @@ def force_unlock(
     audited_owner = public_owner(lock.owner)
     audited = json.dumps({**context, "owner": audited_owner}, sort_keys=True)
     if lock.liveness == "dead":
-        if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
-            return _lock_changed(lock, context)
-        event = record_run_event(
-            conn,
-            phase="unlock",
-            state="cleared",
-            message=f"cleared dead runner lock ({audited_owner})",
-            detail=audited,
-        )
+        # The clear and its audit event commit together. Separately, an audit
+        # write that failed after the clear left an unaudited clear that a
+        # retry could not repair: it found no lock left to clear.
+        with immediate(conn):
+            if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
+                return _lock_changed(lock, context)
+            event = record_run_event(
+                conn,
+                phase="unlock",
+                state="cleared",
+                message=f"cleared dead runner lock ({audited_owner})",
+                detail=audited,
+            )
         return UnlockOutcome(
             cleared=True,
             prior_owner=lock.owner,
@@ -774,15 +779,17 @@ def force_unlock(
     # Scope the clear to the exact lock we inspected: the reachability probe above
     # touches the network, and the wedged runner could finish and a fresh runner
     # acquire the lock in that window. A scoped no-match aborts without clobbering it.
-    if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
-        return _lock_changed(lock, context)
-    event = record_run_event(
-        conn,
-        phase="unlock",
-        state="forced",
-        message=f"force-cleared {lock.liveness} runner lock ({audited_owner})",
-        detail=audited,
-    )
+    # The steal commits with its audit event, as the dead-owner clear does.
+    with immediate(conn):
+        if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
+            return _lock_changed(lock, context)
+        event = record_run_event(
+            conn,
+            phase="unlock",
+            state="forced",
+            message=f"force-cleared {lock.liveness} runner lock ({audited_owner})",
+            detail=audited,
+        )
     return UnlockOutcome(
         cleared=True,
         prior_owner=lock.owner,

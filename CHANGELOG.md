@@ -262,6 +262,13 @@
   transient network error "Train landed (1 job)" was never delivered. Such a
   message is now kept in the notify state and sent again by later ticks until
   it is delivered, before newer messages for its repository.
+- Write `mergetrain unlock`'s audit event in the same transaction as the lock
+  it clears. unlock cleared the lock and returned stranded jobs to the queue,
+  then recorded the event in a second write. When that write timed out on a
+  busy queue, unlock reported a retryable `queue_busy` error although the
+  lock was already gone, and the retry answered "no runner lock to clear", so
+  the clear, or a forced steal, was never recorded. A failed write now
+  changes nothing, and the retry clears the lock and records it.
 
 ## 3.3.0 - 2026-09-30
 

@@ -24,7 +24,7 @@ from test_git_runner import git, make_demo_repo
 from mergetrain import git_runner as git_runner_module
 from mergetrain import recovery as recovery_module
 from mergetrain.config import load_config
-from mergetrain.errors import MergetrainError, QueueError
+from mergetrain.errors import MergetrainError, QueueBusy, QueueError
 from mergetrain.git_runner import GitRunner
 from mergetrain.persistence.claims import claim_all_queued
 from mergetrain.persistence.connection import connect
@@ -87,6 +87,39 @@ class DeadOwnerLockEvidenceTests(unittest.TestCase):
                 self.assertNotIn(lock.token, audit.detail)
             finally:
                 conn.close()
+
+    def test_an_unlock_whose_audit_write_fails_changes_nothing(self) -> None:
+        """#60: a lock cleared without its audit event could never be audited:
+        the retry the error invites finds no lock to clear."""
+
+        busy = QueueBusy("queue database is busy; the commit could not complete")
+        for owner, force in ((DEAD_OWNER, False), (f"runner:{os.getpid()}", True)):
+            with self.subTest(force=force), tempfile.TemporaryDirectory() as td:
+                repo, _marker = make_demo_repo(Path(td))
+                config = load_config(repo=repo)
+                conn = connect(config.state.db)
+                try:
+                    lock = acquire_runner_lock(conn, owner=owner)
+                    job = enqueue_job(conn, task="orphan", branch="feature/a")
+                    _stage_in_progress(conn, job.id, lock.token)
+
+                    with (
+                        patch.object(recovery_module, "_remote_reachable", return_value=True),
+                        patch.object(recovery_module, "record_run_event", side_effect=busy),
+                        self.assertRaises(QueueBusy),
+                    ):
+                        force_unlock(config, conn, force=force)
+                    current = get_lock(conn)
+                    self.assertEqual(current.token if current else "", lock.token)
+                    self.assertEqual(get_job(conn, job.id).status, "in_progress")
+
+                    with patch.object(recovery_module, "_remote_reachable", return_value=True):
+                        retried = force_unlock(config, conn, force=force)
+                    self.assertTrue(retried.cleared)
+                    self.assertIsNotNone(retried.audit_event_id)
+                    self.assertEqual(get_job(conn, job.id).status, "queued")
+                finally:
+                    conn.close()
 
     def test_force_unlock_does_not_clear_a_lock_replaced_during_remote_probe(self) -> None:
         with tempfile.TemporaryDirectory() as td:
