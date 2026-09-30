@@ -1039,6 +1039,24 @@ class SubcommandTests(unittest.TestCase):
             self.assertEqual(main(["mcp"]), 0)
         run_server.assert_called_once()
 
+    def test_global_config_and_db_reach_every_cli_child(self) -> None:
+        with patch("mergetrain.mcp_server.run_server", return_value=0) as run_server:
+            main(["--repo", "/r", "--config", "/c/alt.yaml", "--db", "/d/q.sqlite", "mcp"])
+        run_server.assert_called_once_with(
+            Path("/r"), config="/c/alt.yaml", db="/d/q.sqlite"
+        )
+
+        tools = MergetrainTools(repo=Path("/r"), config="/c/alt.yaml", db="/d/q.sqlite")
+        self.assertEqual(
+            tools._argv(["status", "--json"])[3:],
+            ["--repo", str(Path("/r")), "--config", "/c/alt.yaml", "--db", "/d/q.sqlite",
+             "status", "--json"],
+        )
+        self.assertEqual(
+            MergetrainTools(repo=Path("/r"))._argv(["status"])[3:],
+            ["--repo", str(Path("/r")), "status"],
+        )
+
     def test_a_missing_extra_prints_the_install_hint(self) -> None:
         err = io.StringIO()
         with (

@@ -255,11 +255,18 @@ class MergetrainTools:
     """
 
     repo: Path
+    config: str | None = None
+    db: str | None = None
 
     def _argv(self, args: list[str]) -> list[str]:
         # sys.executable -m keeps the child on this interpreter even when the
         # server was started from a venv that is not first on PATH.
-        return [sys.executable, "-m", "mergetrain", "--repo", str(self.repo), *args]
+        selected = ["--repo", str(self.repo)]
+        if self.config:
+            selected += ["--config", self.config]
+        if self.db:
+            selected += ["--db", self.db]
+        return [sys.executable, "-m", "mergetrain", *selected, *args]
 
     async def _run(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         # Use an async child handle rather than a worker-thread subprocess.run:
@@ -646,7 +653,7 @@ def _deploy_approval(result: Any) -> tuple[bool, str]:
     return True, "accepted"
 
 
-def build_server(repo: Path) -> Any:
+def build_server(repo: Path, *, config: str | None = None, db: str | None = None) -> Any:
     """Register the tool surface, annotated with what each tool actually does."""
 
     from mcp.server import MCPServer
@@ -654,7 +661,7 @@ def build_server(repo: Path) -> Any:
     from mcp.server.mcpserver import Elicit, Resolve
     from mcp.types import ToolAnnotations
 
-    tools = MergetrainTools(repo=repo)
+    tools = MergetrainTools(repo=repo, config=config, db=db)
     server = MCPServer(
         name="mergetrain",
         version=_server_version(),
@@ -743,11 +750,11 @@ def build_server(repo: Path) -> Any:
     return server
 
 
-def run_server(repo: Path) -> int:
+def run_server(repo: Path, *, config: str | None = None, db: str | None = None) -> int:
     """Serve over stdio, or explain how to install the extra."""
 
     try:
-        server = build_server(repo)
+        server = build_server(repo, config=config, db=db)
     except ImportError:
         print(f"mergetrain mcp: {INSTALL_HINT}", file=sys.stderr)
         return 1

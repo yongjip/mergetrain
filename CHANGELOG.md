@@ -44,6 +44,10 @@
   failed verification for every job of the deployment. These worktrees now
   carry the ID of the process that made them: gc keeps them while it runs
   and still removes the ones a stopped process left behind.
+- Pass `mergetrain mcp`'s `--config` and `--db` to every command the MCP tools
+  run. The server accepted both options and dropped them, so
+  `mergetrain --db shared.sqlite mcp` enqueued into, reported, validated, and
+  deployed the repository's default queue and configuration instead.
 
 ## 3.3.0 - 2026-09-30
 

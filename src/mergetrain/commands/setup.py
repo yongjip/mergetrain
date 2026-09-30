@@ -155,4 +155,6 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     # SDK; run_server prints the install hint when the extra is missing.
     from ..mcp_server import run_server
 
-    return run_server(Path(args.repo))
+    # Every tool runs a CLI child, so the server hands its global options to
+    # each one; a --config or --db given here must select the same queue.
+    return run_server(Path(args.repo), config=args.config, db=args.db)
