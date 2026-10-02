@@ -69,6 +69,7 @@ mergetrain = "mergetrain.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/yongjip/mergetrain"
+Source = "https://github.com/yongjip/mergetrain"
 Documentation = "https://github.com/yongjip/mergetrain/tree/main/docs"
 Issues = "https://github.com/yongjip/mergetrain/issues"
 Changelog = "https://github.com/yongjip/mergetrain/blob/main/CHANGELOG.md"

@@ -85,6 +85,48 @@ same five-tool, release-pinned stdio MCP server. The ordinary agent path remains
 `status → enqueue → stop`; the plugin does not grant deployment,
 unattended-operation, or recovery authority.
 
+## Pin a version and upgrade deliberately
+
+The runner, its daemon, and every script or agent that reads mergetrain's JSON
+should use the same release, and moving to a new one should be a decision, not
+a side effect of a routine `brew upgrade`. Pin the version where the runner
+gets it:
+
+```sh
+uv tool install mergetrain==3.4.0    # or: pipx install mergetrain==3.4.0
+brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving it
+```
+
+- A container image can take the version as a build argument and install
+  `mergetrain==${MERGETRAIN_VERSION}`.
+- If the repository has a Python development environment that the runner's
+  gates already use, pin mergetrain there too, so every worktree that syncs it
+  resolves the same release: for example `mergetrain==3.4.0` in its
+  `requirements.txt` or in the `dev` extra of its `pyproject.toml`. GitHub's
+  dependency graph reads those files, so the repository also appears among
+  mergetrain's dependents.
+
+To upgrade, read what changed first, then move the pin in one step:
+
+1. Read every [changelog](../CHANGELOG.md) section between the pinned version
+   and the target. Entries marked **Breaking** and a new `contract_version`
+   need action before the upgrade.
+2. If scripts parse mergetrain's JSON, check how they treat
+   `contract_version`. A script that accepts only the version it was written
+   for stops on a new one, which is the safe default: read the matching
+   "Contract N to N+1" section of the [contract policy](contract.md), adapt the
+   script, then accept the new version.
+3. Check the changelog for changed exit codes of the commands those scripts
+   call. For example, since 3.4.0 `daemon --once` exits 1 when a tick fails or
+   ships nothing.
+4. Move the pin. A pin inside the repository lands through the train like any
+   other change. Then confirm the release with `mergetrain --version` and the
+   machine contract with `mergetrain status --json`.
+
+An agent asked to upgrade mergetrain follows the same steps and stops for the
+operator when a **Breaking** entry touches anything the repository's scripts
+use.
+
 ## Updating the plugins
 
 The Claude Code and Codex plugins pin their MCP package to one release.

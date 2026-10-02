@@ -111,6 +111,12 @@ They are independent. Every one-shot JSON payload carries the contract version;
 `error.code`. Ignore unknown object keys. Unknown safety or next-action values
 must stop mutation and be shown to the operator.
 
+A `contract_version` the repository's scripts were not written for is an
+upgrade to review, not one to accept silently. When asked to upgrade
+mergetrain, read the changelog between the pinned and target releases, stop for
+the operator on any **Breaking** entry that touches what those scripts use, and
+follow the upgrade steps in `docs/install.md`.
+
 JSONL event streams put `contract_version` on `stream_start`. Dispatch frames
 by `type` and resume only after a persisted event ID, never a heartbeat. Raw
 logs may contain sensitive command output; prefer structured inspect evidence.

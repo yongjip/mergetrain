@@ -15,6 +15,12 @@ changes without an explicit compatibility decision.
 mergetrain 3.4.0 uses machine contract **5** and config schema **2**. They move
 only when their own boundary changes; neither is tied to the SQLite schema.
 
+Tooling that reads this JSON should check `contract_version` and treat a value
+it was not written for as an upgrade to review, not one to accept silently:
+stop, read the matching migration section below, adapt, then accept the new
+version. Pinning the mergetrain release keeps that moment under the operator's
+control; see [Pin a version and upgrade deliberately](install.md#pin-a-version-and-upgrade-deliberately).
+
 ## Contract 5 envelope
 
 Every one-shot JSON response carries top-level `contract_version`. Nested job
