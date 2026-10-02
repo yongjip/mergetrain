@@ -758,3 +758,31 @@ and the surface baseline is unchanged. Revisit when:
 - per-change landing becomes a repeated need, for example to attribute a
   measured regression to one job. The candidate is then an optional train-size
   limit whose default keeps today's behavior. One adopter needs it today.
+
+## Upgrade guidance correction — 2026-10-03
+
+A local upgrade audit found a PATH-selected 3.3.0 CLI and a live daemon launched
+from it while Homebrew and the loaded MCP used 3.4.0. A repository consumer
+accepted only contract 4: its read-only status check succeeded with 3.3.0 and
+failed with 3.4.0's contract 5. Both releases produced the same execution-policy
+identity for that control checkout. The operator also reported agents repeatedly
+attempting rollback. The audit separated runtime/consumer incompatibility
+from approval changes and target-release regressions. A supplied operational
+handoff also described an old daemon whose installation had been removed, a
+consumer fix blocked by its own completion wrapper, and a control checkout on
+a task branch. Its temporary prior-release bridge was a proposal, not an
+executed rollback. These are handover and bootstrap constraints; the guide
+requires fresh process/queue evidence before acting on such a plan.
+
+Classification: correction of existing installation, compatibility, and agent
+guidance. The existing CLI, process/service inspection, and consumer adaptation
+suffice; no command, flag, config field, diagnostic field, daemon behavior, MCP
+tool, recovery action, or automatic restart is added. The surface baseline and
+the five generated operating rules remain unchanged. One conditional upgrade
+bullet routes the shared protocol to the detailed guide.
+
+Success means an agent diagnoses the component mismatch, adapts the affected
+consumer, and replaces only the already authorized runner at a safe boundary
+while retaining the target release and queued evidence. Unknown safety actions
+and actual destination/policy changes still stop mutation. Revisit the guidance
+if a later release changes the documented migration or handover behavior.

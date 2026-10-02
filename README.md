@@ -229,6 +229,7 @@ then use `mergetrain stats --json` to inspect evidence from your own queue.
   [PR workflow comparison](https://github.com/yongjip/mergetrain/blob/main/docs/pr-workflows.md)
 - Operate: [Efficient operation](https://github.com/yongjip/mergetrain/blob/main/docs/best-practices.md) ·
   [Failure modes and recovery](https://github.com/yongjip/mergetrain/blob/main/docs/failure-modes.md) ·
+  [Upgrades](https://github.com/yongjip/mergetrain/blob/main/docs/upgrading.md) ·
   [Daemon](https://github.com/yongjip/mergetrain/blob/main/docs/daemon.md) ·
   [Multi-repo Hub](https://github.com/yongjip/mergetrain/blob/main/docs/hub.md)
 - Trust and extend: [Security](https://github.com/yongjip/mergetrain/blob/main/docs/security.md) ·

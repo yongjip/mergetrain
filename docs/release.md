@@ -200,7 +200,9 @@ an upload that already succeeded.
    scripts or agents built on mergetrain can notice, such as the machine
    contract, an exit code, a configuration check, or a command's behavior,
    open the section with an Upgrade notes list ahead of its Changes, as 3.4.0
-   does.
+   does. Include any required consumer adaptation and live daemon/MCP restart
+   sequence, so agents can follow [the upgrade procedure](upgrading.md) while
+   keeping the target release and existing work.
 4. Create a signed annotated tag on the exact verified `main` commit, verify it
    locally against the tracked allowed signer, and push it. Unsigned release
    tags are rejected by the release workflow:

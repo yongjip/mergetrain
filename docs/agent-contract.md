@@ -61,6 +61,16 @@ After an ambiguous push, `reconcile --apply` resolves state against the exact
 pinned remote endpoint and never repeats a push merely because the local row is
 uncertain. Deployment remains blocked while any job needs reconciliation.
 
+## Requested upgrades
+
+Keep the requested target release. Before changing it, inventory the CLI, the
+actual live daemon, and the MCP package separately and adapt affected consumers
+using the release migration. `status --diagnose` reports the querying CLI, so
+it cannot prove that an old daemon was replaced. A contract assertion or stale
+process alone is not grounds for rollback. Preserve queued work and existing
+destination/policy bindings. Follow [upgrading.md](upgrading.md) for the safe
+runner handover and for bringing an existing agent session forward.
+
 ## Machine consumers
 
 All JSON payloads carry `contract_version`. Branch on `error.code`, read

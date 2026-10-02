@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Document upgrades that preserve the requested release, existing queued work,
+  and destination/policy approvals. The guide distinguishes the querying CLI
+  from a live daemon, covers consumer contract checks, control-checkout
+  preconditions, bootstrap fixes, and safe runner/MCP replacement, and gives
+  existing agents a continuation prompt. Generated
+  instructions and all plugin skills now direct this procedure; an old
+  contract assertion or stale process alone is not grounds for rollback.
+
 ## 3.4.0 - 2026-09-30
 
 ### Upgrade notes

@@ -44,6 +44,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 ### Stable machine contract
 
 - Every JSON payload carries `contract_version`; ignore unknown keys and fail closed on unknown safety actions.
+- Requested upgrades keep the target release: check CLI, live daemon, and MCP versions separately, read the migration, and adapt affected consumers. A contract/version mismatch alone is not grounds for rollback. Preserve queued work and destination/policy bindings; follow [the upgrade procedure](https://github.com/yongjip/mergetrain/blob/main/docs/upgrading.md).
 - `deploy` means the atomic Git ref update plus configured verification. A downstream provider release is separate.
 <!-- END GENERATED: mergetrain-agent-protocol -->
 

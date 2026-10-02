@@ -42,6 +42,11 @@ worktrees.
     meet them, recommend waiting. When your change meets that section's
     patch-release criteria, say so at handoff and recommend a prompt patch
     release.
+11. For requested upgrades or mixed-version failures, read
+    `docs/upgrading.md`. Keep the target release, check the live daemon as well
+    as CLI/MCP, and adapt affected consumers using the release migration. Do
+    not silently downgrade to satisfy an old contract assertion or stale
+    process; preserve queued work and the existing approval scope.
 
 ## Useful commands
 

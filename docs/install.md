@@ -106,12 +106,16 @@ brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving
   dependency graph reads those files, so the repository also appears among
   mergetrain's dependents.
 
-To upgrade, read what changed first, then move the pin in one step:
+To upgrade, use [the upgrade procedure](upgrading.md) to adapt consumers and
+replace running processes while preserving existing work:
 
 1. Read every [changelog](../CHANGELOG.md) section between the pinned version
    and the target, starting with each release's Upgrade notes where it has
    them. Entries marked **Breaking** and a new `contract_version` need action
-   before the upgrade.
+   before the upgrade. Land support for both the current and target contracts
+   through the current authorized runner before changing its version. If the
+   wrapper blocks its own fix, follow the guide's
+   [bootstrap procedure](upgrading.md#land-compatibility-fixes-before-changing-the-runner).
 2. If scripts parse mergetrain's JSON, check how they treat
    `contract_version`. A script that accepts only the version it was written
    for stops on a new one, which is the safe default: read the matching
@@ -120,13 +124,19 @@ To upgrade, read what changed first, then move the pin in one step:
 3. Check the changelog for changed exit codes of the commands those scripts
    call. For example, since 3.4.0 `daemon --once` exits 1 when a tick fails or
    ships nothing.
-4. Move the pin. A pin inside the repository lands through the train like any
-   other change. Then confirm the release with `mergetrain --version` and the
-   machine contract with `mergetrain status --json`.
+4. Inventory the CLI, live daemon, and MCP separately. Finish the old runner
+   tick before changing its environment, move the pin, and restart the
+   previously authorized runner using the verified target executable. A pin
+   inside the repository lands through the train like any other change.
+   Confirm the release and contract, and check the actual new process;
+   `status --diagnose` reports the querying CLI's version, not the live daemon's.
 
-An agent asked to upgrade mergetrain follows the same steps and stops for the
-operator when a **Breaking** entry touches anything the repository's scripts
-use.
+An agent asked to upgrade keeps the target release and repairs affected
+consumers within the authorized scope. A **Breaking** label or unknown
+contract number calls for migration review, not an automatic rollback or a
+blanket stop. Preserve unknown-safety-action refusals and existing deployment
+boundaries; report a concrete remaining incompatibility when it cannot be
+resolved. See [the rollback boundary](upgrading.md#distinguish-compatibility-repair-from-rollback).
 
 ## Updating the plugins
 

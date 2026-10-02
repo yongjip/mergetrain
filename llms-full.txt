@@ -41,6 +41,7 @@ Purpose: Serialize committed local task branches through one merge/test/push/ver
 ### Stable machine contract
 
 - Every JSON payload carries `contract_version`; ignore unknown keys and fail closed on unknown safety actions.
+- Requested upgrades keep the target release: check CLI, live daemon, and MCP versions separately, read the migration, and adapt affected consumers. A contract/version mismatch alone is not grounds for rollback. Preserve queued work and destination/policy bindings; follow [the upgrade procedure](https://github.com/yongjip/mergetrain/blob/main/docs/upgrading.md).
 - `deploy` means the atomic Git ref update plus configured verification. A downstream provider release is separate.
 <!-- END GENERATED: mergetrain-agent-protocol -->
 
@@ -112,10 +113,15 @@ They are independent. Every one-shot JSON payload carries the contract version;
 must stop mutation and be shown to the operator.
 
 A `contract_version` the repository's scripts were not written for is an
-upgrade to review, not one to accept silently. When asked to upgrade
-mergetrain, read the changelog between the pinned and target releases, stop for
-the operator on any **Breaking** entry that touches what those scripts use, and
-follow the upgrade steps in `docs/install.md`.
+upgrade to review, not one to accept silently. When asked to upgrade, keep the
+target release, read the matching migration, and adapt affected consumers
+within the authorized scope. Inventory CLI, live daemon, and MCP separately;
+`status --diagnose` identifies the querying CLI, not the existing daemon. Finish
+the old tick before replacing its environment and resume only the previously
+authorized runner with unchanged destination/policy bindings. Preserve queued
+SHAs and Ready trains. A **Breaking** label or contract assertion alone does
+not justify rollback. Follow `docs/upgrading.md`, including its instructions
+for refreshing an existing agent session.
 
 JSONL event streams put `contract_version` on `stream_start`. Dispatch frames
 by `type` and resume only after a persisted event ID, never a heartbeat. Raw

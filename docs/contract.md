@@ -21,6 +21,13 @@ stop, read the matching migration section below, adapt, then accept the new
 version. Pinning the mergetrain release keeps that moment under the operator's
 control; see [Pin a version and upgrade deliberately](install.md#pin-a-version-and-upgrade-deliberately).
 
+During a requested upgrade, that stop applies to unsupported operations; it
+does not require abandoning the target release. Continue compatible reads,
+review the migration, and adapt affected consumers within the authorized scope.
+A contract-number mismatch alone is not evidence for rollback. The
+[upgrade procedure](upgrading.md) also covers live daemon replacement and
+existing agent sessions.
+
 ## Contract 5 envelope
 
 Every one-shot JSON response carries top-level `contract_version`. Nested job
