@@ -712,12 +712,20 @@ it, with its own record here.
 
 ### Evidence
 
-An external adopter's public repository built about 1,200 lines of its own
-dispatcher and recovery tooling around two behaviors. It replaces a blocked job
-with a repair commit made on a separate branch, so the original task branch
-stays untouched, and its documentation anticipates a native `replace` command.
-It also admits jobs strictly in arrival order, one per train, with a job that
-needs attention blocking every later job.
+An external adopter's public repository runs its own dispatcher and recovery
+scripts, about 1,200 lines, on top of mergetrain. Two of their behaviors bear
+on the product:
+
+- It replaces a blocked job with a repair commit made on a separate branch, so
+  the original task branch stays untouched. That takes about 25 lines on
+  today's mergetrain (enqueue, then dismiss), and its documentation anticipates
+  a native `replace` command.
+- It admits jobs strictly in arrival order, one per train, with a job that
+  needs attention blocking every later job. That takes about 250 lines, mostly
+  a ledger that keeps arrival numbers across retries and repairs.
+
+Most of the remaining lines automate repairs with a coding agent and recovery
+from policy changes, which mergetrain leaves to the operator.
 
 ### Existing fit and decision cost
 
