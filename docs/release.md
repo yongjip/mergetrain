@@ -196,7 +196,11 @@ an upload that already succeeded.
 3. Update the version and turn `## Unreleased` into the dated changelog heading
    for the intended release. Read the section first: the union merge that
    `.gitattributes` sets for `CHANGELOG.md` can splice together two parallel
-   entries that share an identical line.
+   entries that share an identical line. If the release changes anything that
+   scripts or agents built on mergetrain can notice, such as the machine
+   contract, an exit code, a configuration check, or a command's behavior,
+   open the section with an Upgrade notes list ahead of its Changes, as 3.4.0
+   does.
 4. Create a signed annotated tag on the exact verified `main` commit, verify it
    locally against the tracked allowed signer, and push it. Unsigned release
    tags are rejected by the release workflow:
