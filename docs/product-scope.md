@@ -707,3 +707,43 @@ No safety behavior changes. A consumer that checks `contract_version` sees 5
 and finds the migration in the contract policy. Retire other output the same
 way only when its last consumer inside mergetrain is gone and the owner decides
 it, with its own record here.
+
+## Replace and strict-order review — 2026-10-02
+
+### Evidence
+
+An external adopter's public repository built about 1,200 lines of its own
+dispatcher and recovery tooling around two behaviors. It replaces a blocked job
+with a repair commit made on a separate branch, so the original task branch
+stays untouched, and its documentation anticipates a native `replace` command.
+It also admits jobs strictly in arrival order, one per train, with a job that
+needs attention blocking every later job.
+
+### Existing fit and decision cost
+
+- `retry` already replaces a blocked or failed job atomically, from the job's
+  own branch. A repair made on another branch uses the existing composition:
+  enqueue that branch, then dismiss the blocked job. Between the two steps the
+  blocked job cannot run, so stopping there leaves no unsafe state.
+- Strict order is head-of-line blocking: one stuck job stops every later job.
+  That reverses the merge train's purpose, which is to set a failed job aside
+  so the rest still land. The needs behind it fit better elsewhere:
+  - a change that depends on another goes on a branch stacked on it, so it
+    cannot land without it;
+  - per-change measurement needs one job per train, not a stopped queue;
+  - arrival fairness does not justify stalling the queue.
+- The adopter's dispatcher schedules admission on top of the queue without
+  owning queue truth, which the product layers above allow.
+
+### Decision and revisit triggers
+
+No `replace` command, `retry --branch` option, or strict-order mode is added,
+and the surface baseline is unchanged. Revisit when:
+
+- a second adopter needs to replace a job from a different branch, or the
+  enqueue-then-dismiss composition produces a concrete incorrect state such as
+  a lost repair or a duplicate deployment. The candidate is then
+  `retry JOB_ID --branch BRANCH`, whose replacement never inherits `--auto`;
+- per-change landing becomes a repeated need, for example to attribute a
+  measured regression to one job. The candidate is then an optional train-size
+  limit whose default keeps today's behavior. One adopter needs it today.
