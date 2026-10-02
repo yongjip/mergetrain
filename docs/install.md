@@ -109,8 +109,9 @@ brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving
 To upgrade, read what changed first, then move the pin in one step:
 
 1. Read every [changelog](../CHANGELOG.md) section between the pinned version
-   and the target. Entries marked **Breaking** and a new `contract_version`
-   need action before the upgrade.
+   and the target, starting with each release's Upgrade notes where it has
+   them. Entries marked **Breaking** and a new `contract_version` need action
+   before the upgrade.
 2. If scripts parse mergetrain's JSON, check how they treat
    `contract_version`. A script that accepts only the version it was written
    for stops on a new one, which is the safe default: read the matching

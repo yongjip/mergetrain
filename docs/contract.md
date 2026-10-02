@@ -217,9 +217,12 @@ Contract 5 is not a safety fix. Each repository `snapshot` in the full
 summary of the selected train. Both existed only for the web dashboard. After
 3.3.0 removed the dashboard, nothing read them, and the owner retired them
 instead of maintaining output without a consumer. Contract 5 removes the two
-keys and changes nothing else: the rest of the full view, the `--summary` view,
-every other command's JSON, the failure envelope, and the exit codes are the
-same as in contract 4.
+keys and changes nothing else in the contract: the rest of the full view, the
+`--summary` view, every other command's JSON, the failure envelope, and the
+documented exit codes are the same as in contract 4. The same release, 3.4.0,
+also fixed `daemon --once`, which exited 0 where the documented codes call for
+1; the 3.4.0 upgrade notes in the [changelog](../CHANGELOG.md) list that and
+the release's other changes that scripts can notice.
 
 A consumer that read either key reads a job's progress from its repository
 instead:

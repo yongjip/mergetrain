@@ -2,6 +2,55 @@
 
 ## 3.4.0 - 2026-09-30
 
+### Upgrade notes
+
+These are the changes from 3.3.x that scripts and agents built on mergetrain
+can notice. Read them before moving a pin; the entries under Changes give the
+detail.
+
+- **Machine contract 5.** Every JSON payload now reports
+  `contract_version: 5`. The only keys removed are `eta` and `progress` in
+  each repository snapshot of `hub status --json`; `status`, `inspect`,
+  `events`, and every other command keep their shape. A script that accepts
+  only contract 4 stops on 5. Once it is confirmed not to read those two
+  keys, accept 5 as well. See
+  [Contract 4 to 5](docs/contract.md#contract-4-to-5-hub-read-model-retirement).
+- **`daemon --once` exit status.** It exited 0 for every tick. It now exits 1
+  when the tick raised an error, paused for a pending reconcile, or ran jobs
+  that did not all land (or validate, with `--validate-only`), and 0 when
+  there was nothing to do, a validated train is waiting to be deployed, or the
+  jobs landed. A wrapper that treats any non-zero exit as a crash should read
+  the tick's outcome or `status --json` instead.
+- **Daemon tick outcomes.** `--auto` jobs blocked because their approval no
+  longer matches count as jobs that did not land ("Nothing landed", or
+  "Partial" beside a landing), not as an idle tick. A tick that finds another
+  runner holding the lock waits and reports itself idle instead of an error.
+- **Stricter configuration.** A key repeated in one mapping, a YAML 1.1
+  integer with `_` separators or in base 60, a webhook URL with credentials
+  before the host, and a webhook URL that does not parse now fail with
+  `config_error`. A `${repo}` or `${worktree}` path that needs quoting after
+  `$$(` inside double quotes is refused before its gate runs. After the
+  upgrade, `mergetrain status --json` shows whether the configuration still
+  loads.
+- **Configuration source.** A runner started in a linked task worktree uses
+  the control checkout's `.mergetrain.yaml`, not the worktree's copy. Keep the
+  control checkout current; `status --diagnose --json` reports
+  `operator_config_drift` when it differs from the integration ref.
+- **Recovery commands.** `verify` without `--job` also selects failed
+  verifications, so `verify --ack succeeded` without `--job` acknowledges them
+  too. `reconcile --apply` marks a decision `applied` only when it wrote it.
+  `gc` and `reconcile` without `--apply`, and `verify`, no longer create a
+  queue where none exists.
+- **Failures.** An operating-system or SQLite error now returns the JSON
+  failure envelope (`mergetrain_error`, or the retryable `queue_busy` for a
+  locked database) instead of a traceback, and `events --jsonl` prints its
+  `stream_start` header before option and config errors.
+- **Python internals.** mergetrain's modules are not a supported Python
+  interface, and several internal names moved or went away; see "Simplify
+  internals" below.
+
+### Changes
+
 - **Breaking:** `hub status --json` no longer includes `eta` and `progress` in
   each repository's `snapshot`, and `contract_version` is now 5. The web
   dashboard that 3.3.0 removed was the only reader of either key. This is not
@@ -9,10 +58,11 @@
   bump marks the removal. Read a running job's phase, current gate, and
   elapsed time with `mergetrain inspect JOB_ID --json` or
   `mergetrain events --jsonl` in its repository instead; `stats --json` still
-  reports per-phase and per-gate timing medians. The rest of the full view,
-  `hub status --summary --json`, every other command's JSON, the failure
-  envelope, and exit codes are unchanged, and no CLI verb, flag, config field,
-  or MCP tool is added or removed.
+  reports per-phase and per-gate timing medians. This change leaves the rest
+  of the full view, `hub status --summary --json`, every other command's JSON,
+  and the failure envelope as they were, and adds or removes no CLI verb,
+  flag, config field, or MCP tool. Other changes in this release that scripts
+  can notice are listed under Upgrade notes.
 - Make `mergetrain reconcile` without `--apply` a real preview. It took the
   runner lock like the applied run, and taking the lock split a stopped
   runner's claims: it requeued them, dissolving a validated train that had
@@ -396,8 +446,8 @@
   selection, and the configured heartbeat and command timeout each go through
   one helper, and duplicated helpers and constants are gone. The runner's
   `process_batch` now hands a train's restore, assembly, gate, and record
-  phases to separate methods that share one run state. The CLI, MCP tools,
-  JSON contract, and config schema are unchanged.
+  phases to separate methods that share one run state. None of this changes
+  the CLI, the MCP tools, JSON output, or the config schema.
 
 ## 3.3.0 - 2026-09-30
 
