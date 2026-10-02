@@ -28,6 +28,26 @@ eligibility only while both the approved destination and execution-policy
 hashes still match; a changed destination, gate/reuse policy, command timeout,
 or verify hook turns the replacement into a manual job.
 
+### Repairing on a separate branch
+
+`retry` takes its fix from the job's own branch. When that branch must stay as
+it was handed off, for example because a different agent makes the repair, put
+the fix on a new branch that starts from it, then replace the job in two steps,
+in this order:
+
+```sh
+git worktree add ../repair-<id> -b repair/<id> <original-branch>
+# fix and commit in ../repair-<id>, leaving it clean
+mergetrain enqueue --task "<task> (repair of job <id>)" --branch repair/<id> --note "replaces job <id>"
+mergetrain dismiss <id> --note "replaced by job <new-id>"
+```
+
+Enqueue first, so an interruption between the steps cannot lose the repair:
+the failed job cannot run and only stays visible until it is dismissed. The
+notes keep the failure and its replacement linked in queue history. The
+replacement is a new job at the back of the queue, and it is unattended only if
+its own enqueue passes `--auto` under the same authority as the original.
+
 ## Deploy authorization changed
 
 Auto jobs bind approval to a credential-free hash of the fetch URL, the one

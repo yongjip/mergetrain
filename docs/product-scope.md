@@ -730,9 +730,12 @@ from policy changes, which mergetrain leaves to the operator.
 ### Existing fit and decision cost
 
 - `retry` already replaces a blocked or failed job atomically, from the job's
-  own branch. A repair made on another branch uses the existing composition:
-  enqueue that branch, then dismiss the blocked job. Between the two steps the
-  blocked job cannot run, so stopping there leaves no unsafe state.
+  own branch. A repair made on another branch uses the existing composition
+  that [failure modes](failure-modes.md#repairing-on-a-separate-branch)
+  documents: enqueue that branch, then dismiss the blocked job. Between the two
+  steps the blocked job cannot run, so stopping there leaves no unsafe state.
+  The ordering patterns are in
+  [best practices](best-practices.md#changes-that-must-land-in-order).
 - Strict order is head-of-line blocking: one stuck job stops every later job.
   That reverses the merge train's purpose, which is to set a failed job aside
   so the rest still land. The needs behind it fit better elsewhere:

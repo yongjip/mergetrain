@@ -92,6 +92,25 @@ Do not leave a validated train waiting while continuing to edit its branches.
 Freeze the intended membership, validate it, inspect the exact `train_id`, and
 request deploy approval promptly. A changed task head is correctly refused.
 
+### Changes that must land in order
+
+The queue is first in, first out, but its order is not a dependency mechanism:
+a failed job is set aside so the jobs behind it still land, and a retried job
+joins the back of the queue. Express order in Git instead:
+
+- **A change that needs another:** build its branch on top of the other and
+  enqueue only the top branch. That one job carries both changes, so the later
+  one can never land without the earlier one. If the job fails, fix the stack
+  and retry the job.
+- **One change per landing,** for example to attribute a measured regression
+  to exactly one change: the next train takes every queued job, so enqueue one
+  job, let it deploy, then enqueue the next. A dispatcher of your own can hold
+  later jobs outside the queue until then; the queue itself stays
+  mergetrain's.
+
+Holding every later job while one is stuck is deliberately not a queue mode:
+one failure would stop all work behind it.
+
 ## Design gates for fast failure
 
 Put cheap, high-signal checks before expensive checks. Keep commands
@@ -263,7 +282,9 @@ Fast recovery avoids repeating failed manual work:
    deploy.
 
 Do not bypass a failed row with a duplicate enqueue. That loses failure
-ownership and makes queue history harder to interpret.
+ownership and makes queue history harder to interpret. When the owning branch
+must stay as it was handed off, replace the job from a separate branch instead,
+as [failure modes](failure-modes.md#repairing-on-a-separate-branch) describes.
 
 ## Project profiles
 
