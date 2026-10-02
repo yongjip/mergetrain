@@ -696,17 +696,19 @@ and `stats --json` keeps the timing medians. Removing two keys is incompatible,
 so machine output moves to contract 5, with the migration in the
 [contract policy](contract.md#contract-4-to-5-hub-read-model-retirement). The
 owner decided to retire the keys rather than maintain output without a
-consumer, and to ship the change in 3.4.0 under the exception now recorded in
-the [release rules](release.md#when-to-cut-a-release). The CLI grammar, config
-schema, `hub status --summary --json`, and every other payload are unchanged;
+consumer, and to ship the change in 3.4.0 under a minor-release exception.
+That exception is now closed by the [release rules](release.md#when-to-cut-a-release).
+The CLI grammar, config schema, `hub status --summary --json`, and every other payload are unchanged;
 no command, flag, config field, state group, or MCP tool is added or removed.
 
 ### Safety impact and removal trigger
 
 No safety behavior changes. A consumer that checks `contract_version` sees 5
-and finds the migration in the contract policy. Retire other output the same
-way only when its last consumer inside mergetrain is gone and the owner decides
-it, with its own record here.
+and finds the migration in the contract policy. The subsequent upgrade report
+showed that strict contract-number assertions stopped external completion
+wrappers even though they read neither field. An internal consumer survey is
+therefore insufficient evidence for a minor-release exception. Future incompatible
+removals require a major release and their own record here.
 
 ## Replace and strict-order review — 2026-10-02
 
@@ -786,3 +788,12 @@ consumer, and replaces only the already authorized runner at a safe boundary
 while retaining the target release and queued evidence. Unknown safety actions
 and actual destination/policy changes still stop mutation. Revisit the guidance
 if a later release changes the documented migration or handover behavior.
+
+The operator's follow-up reported the waiting work landed, the target daemon and
+contract-5 wrapper were active, and existing task branches needed the landed
+consumer fix. The operator requested package publication so installed agent
+instructions and release-pinned plugins receive the guide. The 3.4.1 preparation
+also closes the future minor-contract exception, documents Hub restart boundaries,
+and records the intended gate environment after a deployment retry selected a
+global Python without `pytest`. These remain guidance and distribution changes;
+they add no automatic upgrade, restart, or recovery authority.

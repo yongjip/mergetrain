@@ -27,13 +27,13 @@ people who depend on it.
   or launch path (PyPI, `uvx`, the MCP Registry, or the plugins). Fold every
   other fix into the next release.
 - Ship at most one feature (minor) release per week.
-- Bump the major version only for a breaking change to the machine contract,
-  the CLI grammar, or the configuration schema. Group breaking changes into one
-  planned major release instead of shipping several majors in a row. The one
-  exception is removing machine output whose only consumer inside mergetrain is
-  gone: once the owner decides it and docs/contract.md records the contract
-  bump and migration, it may ship in a minor release, as contract 5 did in
-  3.4.0.
+- Bump the major version for any incompatible change to the machine contract,
+  the CLI grammar, or the configuration schema. Change `contract_version` only
+  in a major release; minor and patch releases preserve it. Group incompatible
+  changes, including field removals, into a planned major release. An internal
+  consumer survey cannot prove compatibility: external consumers may check the
+  contract number on every response. The minor-release exception used for
+  contract 5 in 3.4.0 is closed.
 - Do not publish a second version on the same day unless it fixes a regression
   in the first.
 - Changes to docs, tests, CI, or internal structure alone never justify a

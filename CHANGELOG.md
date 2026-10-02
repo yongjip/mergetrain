@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 3.4.1 - 2026-10-03
+
+### Upgrade notes
+
+- Machine contract **5** and config schema **2** are unchanged. When upgrading
+  from 3.3.x, read the 3.4.0 notes below and land reviewed consumer support for
+  contracts 4 and 5 using the current CLI before changing the installation pin.
+  Follow the [upgrade procedure](docs/upgrading.md) if that order was already
+  reversed and a completion wrapper blocks its own fix.
+- After installing the target, restart previously authorized daemon and Hub
+  processes at an idle execution boundary. Verify the actual process paths,
+  refresh the plugins, and reload their MCP servers; installation alone does
+  not replace loaded code. Preserve queued work and destination/policy scope.
+- Existing repositories can refresh their generated agent instructions with
+  `mergetrain init --refresh-instructions`. Review and commit the refreshed files
+  through the normal integration path so existing sessions can reread the guide.
+
+### Changes
+
+- Require a major release for future machine-contract changes, including field
+  removals whose internal consumer has retired. Close the minor-release exception
+  used in 3.4.0; strict contract-number assertions are themselves external consumers.
+- Clarify consumer-first installation, updating old task branches, daemon/Hub
+  handover, and choosing the Python environment that contains the gate tools.
 - Document upgrades that preserve the requested release, existing queued work,
   and destination/policy approvals. The guide distinguishes the querying CLI
   from a live daemon, covers consumer contract checks, control-checkout

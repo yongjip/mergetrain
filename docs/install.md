@@ -93,7 +93,7 @@ a side effect of a routine `brew upgrade`. Pin the version where the runner
 gets it:
 
 ```sh
-uv tool install mergetrain==3.4.0    # or: pipx install mergetrain==3.4.0
+uv tool install mergetrain==3.4.1    # or: pipx install mergetrain==3.4.1
 brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving it
 ```
 
@@ -101,7 +101,7 @@ brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving
   `mergetrain==${MERGETRAIN_VERSION}`.
 - If the repository has a Python development environment that the runner's
   gates already use, pin mergetrain there too, so every worktree that syncs it
-  resolves the same release: for example `mergetrain==3.4.0` in its
+  resolves the same release: for example `mergetrain==3.4.1` in its
   `requirements.txt` or in the `dev` extra of its `pyproject.toml`. GitHub's
   dependency graph reads those files, so the repository also appears among
   mergetrain's dependents.
@@ -110,26 +110,28 @@ To upgrade, use [the upgrade procedure](upgrading.md) to adapt consumers and
 replace running processes while preserving existing work:
 
 1. Read every [changelog](../CHANGELOG.md) section between the pinned version
-   and the target, starting with each release's Upgrade notes where it has
-   them. Entries marked **Breaking** and a new `contract_version` need action
-   before the upgrade. Land support for both the current and target contracts
-   through the current authorized runner before changing its version. If the
-   wrapper blocks its own fix, follow the guide's
+   and the target, starting with each release's Upgrade notes. Identify the
+   commands, fields, contract assertions, and safety actions each script reads.
+   Future contract changes require a major release; the published 3.3.x-to-3.4.x
+   contract 4-to-5 migration still needs consumer adaptation.
+2. Check changed exit codes as well as JSON fields. Since 3.4.0 `daemon --once`
+   exits 1 when a tick fails or processed jobs do not all land (or validate with
+   `--validate-only`); an idle tick still exits 0.
+3. Adapt and test consumers to accept both the current and target contracts
+   using an explicit reviewed set, while keeping their existing safety checks.
+   Test with the current CLI, then land the consumer fix through the current
+   authorized runner **before changing the installation pin**. A completion
+   wrapper that must land its own fix through its queue needs this order. If
+   it already blocks the fix, use the guide's
    [bootstrap procedure](upgrading.md#land-compatibility-fixes-before-changing-the-runner).
-2. If scripts parse mergetrain's JSON, check how they treat
-   `contract_version`. A script that accepts only the version it was written
-   for stops on a new one, which is the safe default: read the matching
-   "Contract N to N+1" section of the [contract policy](contract.md), adapt the
-   script, then accept the new version.
-3. Check the changelog for changed exit codes of the commands those scripts
-   call. For example, since 3.4.0 `daemon --once` exits 1 when a tick fails or
-   ships nothing.
-4. Inventory the CLI, live daemon, and MCP separately. Finish the old runner
-   tick before changing its environment, move the pin, and restart the
-   previously authorized runner using the verified target executable. A pin
-   inside the repository lands through the train like any other change.
-   Confirm the release and contract, and check the actual new process;
-   `status --diagnose` reports the querying CLI's version, not the live daemon's.
+4. Inventory the CLI, live daemon, Hub daemon, and MCP separately. Let active
+   ticks finish and confirm no managed repository has a running job before
+   changing the environment. Move the pin and restart the previously authorized
+   daemon and Hub at that idle boundary using the verified target executable;
+   queued and Ready work can remain. Preserve their launch arguments and scope.
+   A pin inside the repository lands through the train like any other change.
+   Confirm the release, contract, and actual new processes; `status --diagnose`
+   reports the querying CLI's version, not a live daemon's.
 
 An agent asked to upgrade keeps the target release and repairs affected
 consumers within the authorized scope. A **Breaking** label or unknown

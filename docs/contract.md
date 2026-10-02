@@ -12,7 +12,7 @@ changes without an explicit compatibility decision.
 | `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
 | Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-mergetrain 3.4.0 uses machine contract **5** and config schema **2**. They move
+mergetrain 3.4.1 uses machine contract **5** and config schema **2**. They move
 only when their own boundary changes; neither is tied to the SQLite schema.
 
 Tooling that reads this JSON should check `contract_version` and treat a value
@@ -175,21 +175,21 @@ The following promises apply indefinitely across 3.x releases:
    Adding another public core command requires measured repeated need and a
    product-scope review.
 
-An incompatible change is permitted only when continuing the old behavior
-would itself violate a safety guarantee. Such a release must fail the unsafe
-operation closed, document the migration, bump the affected machine contract,
-and provide a direct diagnostic. Convenience or naming preference is not a
-reason to break v3.
+Implementation fixes within 3.x must conform to the published contract.
+Any incompatible machine-contract change requires a major release, a contract
+bump, migration notes, and a direct diagnostic. Minor and patch releases keep
+`contract_version` unchanged, including when an internal consumer has retired.
+Convenience or naming preference is not a reason to break v3.
 
-Contract 5 is the one recorded exception to that rule, made by an explicit
-owner decision. It removes the `eta` and `progress` keys from each repository
-snapshot in `hub status --json`: they existed only for the web dashboard, 3.3.0
-removed that dashboard, and nothing else read them. The removal fixes no safety
-problem. It still bumps the machine contract and documents the migration
-([Contract 4 to 5](#contract-4-to-5-hub-read-model-retirement)). A later
-removal of the same kind, output whose only consumer inside mergetrain is gone,
-needs its own owner decision and record; every other incompatible change must
-meet the safety rule above.
+Contract 5 shipped in 3.4.0 under an owner-approved exception. It removed the
+`eta` and `progress` keys from each repository snapshot in `hub status --json`
+after the web dashboard was removed. That internal consumer survey missed the
+compatibility cost of changing the contract number itself: external scripts
+checking only contract 4 stopped on every command, even when they read neither
+removed field. The exception is closed. Contract 5 remains the 3.x contract;
+future incompatible removals wait for a major release. The already-published
+[contract 4-to-5 migration](#contract-4-to-5-hub-read-model-retirement) still
+applies when upgrading from 3.3.x.
 
 ## Additive changes
 
@@ -222,8 +222,8 @@ keys.
 Contract 5 is not a safety fix. Each repository `snapshot` in the full
 `hub status --json` view carried an `eta` completion estimate and a `progress`
 summary of the selected train. Both existed only for the web dashboard. After
-3.3.0 removed the dashboard, nothing read them, and the owner retired them
-instead of maintaining output without a consumer. Contract 5 removes the two
+3.3.0 removed the dashboard, no internal consumer read them, and the owner
+retired them instead of maintaining output without a consumer. Contract 5 removes the two
 keys and changes nothing else in the contract: the rest of the full view, the
 `--summary` view, every other command's JSON, the failure envelope, and the
 documented exit codes are the same as in contract 4. The same release, 3.4.0,

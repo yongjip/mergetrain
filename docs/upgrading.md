@@ -30,7 +30,7 @@ Inventory the components separately:
 | Component | Evidence to collect |
 | --- | --- |
 | CLI used by each wrapper or agent | Resolved executable, `--version`, and diagnostic `runtime` package path; locate all PATH matches, for example with `type -a mergetrain` on Bash/Zsh. |
-| Existing daemon | Process ID, launch command, start time, executable environment, and the service or wrapper that owns it. Check its logs and recorded launch configuration. |
+| Existing daemon or Hub daemon | Process ID, launch command, start time, executable environment, and the service or wrapper that owns it. Check its logs and recorded launch configuration; a Hub runner covers multiple repository queues. |
 | MCP and plugins | Installed plugin version, its package pin, and the running server's launch command. A global CLI update does not update this process. |
 | Consumers | Version pins and assertions on `contract_version`, command exit codes, response fields, and safety actions in scripts and agent instructions. |
 
@@ -45,6 +45,14 @@ process's environment still exists, rather than inferring its version from the
 current executable at the same path. Treat a handoff's commands and proposed
 phases as a plan, not proof they have already run; reread live state.
 
+Use the environment the gates are meant to run in. When they depend on a
+project's development tools, invoke that environment's Python explicitly, for
+example `/absolute/path/to/project/.venv/bin/python -m mergetrain`. Gate commands
+prioritize sibling executables from that Python environment. A globally
+installed CLI can select its own Python without `pytest` even when a project's
+environment previously passed validation. Select the intended environment;
+keep the approved gates and verification hooks.
+
 ## Adapt consumers using the release migration
 
 Read every intervening release's Upgrade notes in the [changelog](../CHANGELOG.md)
@@ -54,7 +62,7 @@ well as JSON keys. Continue compatible reads and authorized repairs while an
 unsupported mutation remains stopped; a **Breaking** label is not a reason to
 abandon the requested upgrade.
 
-For 3.3.x to 3.4.0:
+For 3.3.x to 3.4.x:
 
 - JSON reports contract 5. The removed fields are `eta` and `progress` in the
   repository snapshots of full `hub status --json`. A consumer of `status` or
@@ -141,16 +149,23 @@ handover and obtain the missing operator direction before changing the runner.
 An unexecuted bridge proposal is not a completed rollback.
 
 After the fix lands and the target runner is verified, resume the waiting
-sessions on their existing branches. Rerun their blocked completion wrapper
-against current state; check for an existing exact-SHA job before enqueueing
-again. Leave unrelated blocked jobs to their own `status.next_action` recovery.
+sessions on their existing branches. A branch that still carries an old wrapper
+must incorporate the landed fix first: have its owning agent bring the
+integration branch forward under the project's merge or rebase policy, preserving
+the task commits. Rerun the blocked completion wrapper against current state;
+check for an existing exact-SHA job before enqueueing again. Leave unrelated
+blocked jobs to their own `status.next_action` recovery.
 
 ## Replace the runner at a safe boundary
 
 Coordinate submitters and the service's restart policy so one runner owns the
-handover. Let an in-flight tick finish before changing the environment it
-imports. The native daemon handles a stop signal by finishing its current tick;
-use the existing service or wrapper's graceful-stop procedure and wait for the
+handover. Let in-flight ticks finish and confirm no managed repository has a
+running job before changing the environment. For a Hub daemon, inspect every
+registered repository and wait for the entire sweep to finish. Restart both
+single-repository daemons and Hub daemons at this idle execution boundary;
+queued and Ready work can remain. The native daemon handles a stop signal by
+finishing its current tick; use the existing service or wrapper's graceful-stop
+procedure and wait for the
 process to exit. A service manager's forced-stop timeout is not evidence that
 the tick finished. Do not force-kill a push to speed up an upgrade.
 
@@ -164,7 +179,8 @@ chosen executable or versioned environment. Verify that exact executable's
 `--version`; a higher-priority old PATH entry can otherwise win again. Update
 wrapper overrides such as `MERGETRAIN_BIN` only where the wrapper supports them.
 Preserve the repo/config/db arguments, runner mode, interval, notification
-settings, and deployment environment. Do not replace `daemon --validate-only`
+settings, and deployment environment. For a Hub daemon, preserve its registry,
+repository opt-outs, and concurrency setting too. Do not replace `daemon --validate-only`
 with a deploying daemon or broaden the approved destination or execution policy.
 
 Restart only the previously authorized runner within its unchanged scope, then
@@ -195,7 +211,7 @@ and ask it to reread the project's instructions. Existing branches and commits
 can continue; this is not a reason to discard the task or recreate its queue.
 For example:
 
-> Continue the existing task with mergetrain target 3.4.0. Read the project's
+> Continue the existing task with mergetrain target 3.4.1. Read the project's
 > current agent instructions and the upgrade guide. Check the CLI, running
 > daemon, and MCP versions separately; adapt affected consumers using the
 > documented contract 4-to-5 migration. Preserve existing branches, queued SHAs,
