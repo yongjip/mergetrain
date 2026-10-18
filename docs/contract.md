@@ -8,6 +8,13 @@ Consumers may ignore this additive field; neither job ID semantics nor the five
 MCP tool names/inputs change. See [queue policy](config.md#queue) and the
 [schema-16 upgrade](upgrading.md#ordered-processing-and-queue-schema-16).
 
+Repository-scoping addition (3.7.0): status adds the resolved checkout as `repo`.
+The five MCP tools accept an optional `repo` without changing existing required
+inputs. Omitted scope uses the server's launch repository. Explicit launch
+config/DB paths stay bound to their original checkout; a different checkout
+returns `unknown_scope` before any CLI runs. Contract 5, config schema 2, and
+queue schema 16 are unchanged. See [MCP repository scope](mcp.md#repository-scope).
+
 mergetrain is designed for coding agents and scripts that read state instead of
 guessing. The checked-in contract fingerprints fail CI whenever a JSON surface
 changes without an explicit compatibility decision.
@@ -20,7 +27,7 @@ changes without an explicit compatibility decision.
 | `contract_version` | every JSON payload and JSONL `stream_start` | machine output semantics |
 | Config `version` | `.mergetrain.yaml` | committed configuration schema |
 
-mergetrain 3.6.0 uses machine contract **5** and config schema **2**. They move
+mergetrain 3.7.0 uses machine contract **5** and config schema **2**. They move
 only when their own boundary changes; neither is tied to the SQLite schema.
 
 Tooling that reads this JSON should check `contract_version` and treat a value

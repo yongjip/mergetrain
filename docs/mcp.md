@@ -30,6 +30,9 @@ ambiguity and create authority the normal coding agent does not need.
 
 ## Repository scope
 
+Available from **3.7.0**. Refresh the plugin and start a fresh MCP session to
+load this input; updating the global CLI does not replace a running server.
+
 The server answers for the repository it was launched in. Every tool takes an
 optional `repo` path to operate on a different configured checkout, and any
 path that is not a checkout already configured by `mergetrain init` is refused

@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 3.7.0 - 2026-10-19
+
+### Upgrade notes
+
+- Machine contract **5**, config schema **2**, and queue schema **16** are
+  unchanged. Status adds `repo`; existing consumers can ignore this additive
+  field. Default batch processing and existing approval identities stay intact.
+- Refresh Codex, Claude Code, and agy plugins and start fresh MCP sessions.
+  Their launchers pin **3.7.0**. Upgrade the CLI and restart existing daemons
+  at the idle boundary with their same arguments and approval scope. See
+  [upgrading](docs/upgrading.md#repository-scope-in-370).
+- All five MCP tools accept an optional `repo`. Repeat the same value on
+  every call for a task; omitting it uses the launch repository. Explicit
+  launch `--config` or `--db` paths keep that server bound to its original
+  checkout; cross-checkout calls return `unknown_scope` before any CLI runs.
 
 ### Changes
 
@@ -8,7 +22,9 @@
   report the answering checkout in status. Keep explicit launch config/DB
   paths bound to the original checkout, refusing other scopes before any
   CLI runs. Preserve independent queues, linked-worktree sharing, and the
-  existing human-confirmed deployment plan.
+  existing human-confirmed deployment plan. Thanks to
+  [Drezzler](https://github.com/Drezzler) for the contribution in
+  [#273](https://github.com/yongjip/mergetrain/pull/273).
 - Keep task scope consistent in the agent instructions, distinguish
   checkout paths from shared queues, and follow the reported action when
   the correct repository has degraded Git configuration.

@@ -93,6 +93,24 @@ responses, including refusal of unknown safety actions and unsupported
 contracts. Use fixtures or disposable repositories for checks that would
 otherwise validate or deploy live work.
 
+## Repository scope in 3.7.0
+
+Upgrading from 3.6.0 retains machine contract 5, config schema 2, and queue
+schema 16. No database migration, policy change, or approval renewal is needed.
+Status adds `repo`; consumers must continue to ignore unknown additive fields.
+
+Update CLI installations and refresh the Codex, Claude Code, and agy plugins.
+Their launchers pin 3.7.0. Stop existing runners at the idle boundary below,
+then restart them with the same launch arguments and authorized scope. Start
+fresh MCP sessions; an existing session can keep the old package loaded.
+
+All five MCP tools accept an optional `repo`. If a task uses it, repeat the
+same value on every call; omitting it returns to the launch repository. An
+explicit launch `--config` or `--db` pins that server to its original checkout.
+A cross-checkout call returns `unknown_scope` before any CLI runs; use a
+separate server for that configured checkout. Linked worktrees still share
+the control checkout's queue. See [MCP repository scope](mcp.md#repository-scope).
+
 ## Ordered processing and queue schema 16
 
 The 3.6.0 release adds `queue.processing` and retains machine contract 5 and config
@@ -279,7 +297,7 @@ and ask it to reread the project's instructions. Existing branches and commits
 can continue; this is not a reason to discard the task or recreate its queue.
 For example:
 
-> Continue the existing task with mergetrain target 3.6.0. Read the project's
+> Continue the existing task with mergetrain target 3.7.0. Read the project's
 > current agent instructions and the upgrade guide. Check the CLI, running
 > daemon, and MCP versions separately; adapt affected consumers using the
 > documented contract 4-to-5 migration. Preserve existing branches, queued SHAs,

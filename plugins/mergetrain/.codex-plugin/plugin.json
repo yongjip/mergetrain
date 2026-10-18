@@ -1,6 +1,6 @@
 {
   "name": "mergetrain",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "description": "Queue committed branches from parallel LLM coding agents in Git worktrees. Test the combined tree in a local merge queue, require approval for Git pushes, and recover interrupted pushes.",
   "author": {
     "name": "Yongjip Kim",

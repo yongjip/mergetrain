@@ -7,13 +7,13 @@
     "url": "https://github.com/yongjip/mergetrain",
     "source": "github"
   },
-  "version": "3.6.0",
+  "version": "3.7.0",
   "websiteUrl": "https://github.com/yongjip/mergetrain",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mergetrain",
-      "version": "3.6.0",
+      "version": "3.7.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
@@ -24,7 +24,7 @@
         {
           "type": "named",
           "name": "--from",
-          "value": "mergetrain[mcp]==3.6.0"
+          "value": "mergetrain[mcp]==3.7.0"
         }
       ],
       "packageArguments": [

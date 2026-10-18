@@ -7,7 +7,7 @@ mergetrain commands; it does not require the optional Orca queue panel.
 
 ## Set up the repository before creating tasks
 
-Install mergetrain **3.6.0** on the host that owns the checkout. The recorded
+Install mergetrain **3.7.0** on the host that owns the checkout. The recorded
 Orca workflow tests used **3.5.0**; the target keeps machine contract **5** and
 config schema **2**. See
 [installation](install.md) for a pinned install and [upgrading](upgrading.md)
