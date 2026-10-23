@@ -107,6 +107,12 @@ class DeadOwnerLockEvidenceTests(unittest.TestCase):
                     lock = acquire_runner_lock(conn, owner=owner)
                     job = enqueue_job(conn, task="orphan", branch="feature/a")
                     _stage_in_progress(conn, job.id, lock.token)
+                    if force:
+                        conn.execute(
+                            "UPDATE locks SET heartbeat_at=?, expires_at=? WHERE name='runner'",
+                            SLEPT_LEASE,
+                        )
+                        conn.commit()
 
                     with (
                         patch.object(recovery_module, "_remote_reachable", return_value=True),
@@ -139,6 +145,10 @@ class DeadOwnerLockEvidenceTests(unittest.TestCase):
                 lock = acquire_runner_lock(conn, owner=owner)
                 job = enqueue_job(conn, task="replacement", branch="feature/a")
                 _stage_in_progress(conn, job.id, lock.token)
+                conn.execute(
+                    "UPDATE locks SET heartbeat_at=?, expires_at=? WHERE name='runner'", SLEPT_LEASE
+                )
+                conn.commit()
 
                 def replace_during_probe(_config) -> bool:  # type: ignore[no-untyped-def]
                     control = connect(config.state.db)
@@ -201,6 +211,50 @@ class ForcedUnlockRenewalEvidenceTests(unittest.TestCase):
         )
         conn.commit()
         return config, conn, lock, job
+
+    def test_force_unlock_keeps_a_valid_lease_after_the_heartbeat_setting_changes(self) -> None:
+        for liveness in ("alive", "unknown"):
+            with self.subTest(liveness=liveness), tempfile.TemporaryDirectory() as td:
+                config, conn, lock, job = self._slept_train(Path(td))
+                try:
+                    config_path = config.repo / ".mergetrain.yaml"
+                    config_path.write_text(
+                        config_path.read_text(encoding="utf-8").replace(
+                            "heartbeat_interval_seconds: 1", "heartbeat_interval_seconds: 10"
+                        ),
+                        encoding="utf-8",
+                    )
+                    running_config = load_config(repo=config.repo)
+                    # A runner that woke has renewed its lease. Its next pulse
+                    # is still due on the 10 s schedule it loaded at startup.
+                    refresh_runner_lock(conn, owner=lock.owner, token=lock.token, ttl_minutes=1)
+                    config_path.write_text(
+                        config_path.read_text(encoding="utf-8").replace(
+                            "heartbeat_interval_seconds: 10", "heartbeat_interval_seconds: 1"
+                        ),
+                        encoding="utf-8",
+                    )
+                    unlock_config = load_config(repo=config.repo)
+                    self.assertEqual(running_config.queue.heartbeat_interval_seconds, 10)
+                    self.assertEqual(unlock_config.queue.heartbeat_interval_seconds, 1)
+
+                    with (
+                        patch("mergetrain.persistence.leases.owner_liveness", return_value=liveness),
+                        patch.object(recovery_module, "_remote_reachable", return_value=True) as reachable,
+                    ):
+                        outcome = force_unlock(unlock_config, conn, force=True)
+
+                    self.assertFalse(outcome.cleared)
+                    self.assertEqual(outcome.exit_code, 4)
+                    self.assertIn("not expired", outcome.reason)
+                    reachable.assert_not_called()
+                    self.assertEqual(get_job(conn, job.id).status, "in_progress")
+                    self.assertEqual(get_lock(conn).token, lock.token)
+                    # The existing owner must still be able to renew normally.
+                    refresh_runner_lock(conn, owner=lock.owner, token=lock.token, ttl_minutes=1)
+                    self.assertFalse(any(event.phase == "unlock" for event in list_run_events(conn)))
+                finally:
+                    conn.close()
 
     def test_force_unlock_refuses_an_owner_that_renews_its_lease(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -278,9 +332,11 @@ class ForcedUnlockRenewalEvidenceTests(unittest.TestCase):
                 current = get_lock(conn)
 
                 self.assertFalse(outcome.cleared)
-                self.assertIn("lock changed", outcome.reason)
+                self.assertEqual(outcome.exit_code, 4)
+                self.assertIn("renewed its lease", outcome.reason)
                 self.assertEqual(current.token if current else "", lock.token)
                 self.assertEqual(get_job(conn, job.id).status, "in_progress")
+                self.assertFalse(any(event.phase == "unlock" for event in list_run_events(conn)))
             finally:
                 conn.close()
 

@@ -2005,7 +2005,7 @@ class CommandExitCodeTests(unittest.TestCase):
             self.assertFalse(payload["cleared"])
 
     @patch("mergetrain.recovery._RENEWAL_MARGIN_SECONDS", 0.0)
-    def test_unlock_force_clears_alive_lock(self) -> None:
+    def test_unlock_force_clears_expired_alive_lock(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo, _ = make_demo_repo(root)
@@ -2013,6 +2013,11 @@ class CommandExitCodeTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=30)
+                conn.execute(
+                    "UPDATE locks SET heartbeat_at='2000-01-01T00:00:00Z', "
+                    "expires_at='2000-01-01T00:01:00Z' WHERE name='runner'"
+                )
+                conn.commit()
             finally:
                 conn.close()
             code, payload = self._run(repo, "unlock", "--force", "--json")
@@ -2025,6 +2030,31 @@ class CommandExitCodeTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_unlock_force_refuses_a_valid_alive_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo, _ = make_demo_repo(Path(td))
+            config = load_config(repo=repo)
+            conn = connect(config.state.db)
+            try:
+                lock = acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=30)
+            finally:
+                conn.close()
+
+            with patch("mergetrain.recovery._remote_reachable") as reachable:
+                code, payload = self._run(repo, "unlock", "--force", "--json")
+
+            self.assertEqual(code, 4)
+            self.assertFalse(payload["cleared"])
+            self.assertIn("not expired", payload["reason"])
+            self.assertIsNone(payload["audit_event_id"])
+            reachable.assert_not_called()
+            conn = connect(config.state.db)
+            try:
+                current = get_lock(conn)
+                self.assertEqual(current.token if current else "", lock.token)
+            finally:
+                conn.close()
+
     @patch("mergetrain.recovery._RENEWAL_MARGIN_SECONDS", 0.0)
     def test_unlock_force_aborts_when_remote_unreachable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2034,6 +2064,11 @@ class CommandExitCodeTests(unittest.TestCase):
             conn = connect(config.state.db)
             try:
                 acquire_runner_lock(conn, owner=f"user:{os.getpid()}", ttl_minutes=30)
+                conn.execute(
+                    "UPDATE locks SET heartbeat_at='2000-01-01T00:00:00Z', "
+                    "expires_at='2000-01-01T00:01:00Z' WHERE name='runner'"
+                )
+                conn.commit()
             finally:
                 conn.close()
             rmtree(root / "remote.git")

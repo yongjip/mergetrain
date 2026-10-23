@@ -280,7 +280,7 @@ def build_parser(*, structured_errors: bool = False) -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help=(
-            "Steal an alive/unknown owner's lock once it misses a heartbeat "
+            "Clear an alive/unknown owner's expired lock after a missed heartbeat "
             "and the remote is reachable"
         ),
     )

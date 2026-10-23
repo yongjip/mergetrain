@@ -75,6 +75,15 @@ def _pending_refs(repo: Path) -> str:
     return git(repo, "for-each-ref", "--format=%(refname)", "refs/mergetrain/pending/")
 
 
+def _expire_runner_lease(conn) -> None:  # type: ignore[no-untyped-def]
+    # Simulate a suspension past the lease without waiting for its real TTL.
+    conn.execute(
+        "UPDATE locks SET heartbeat_at='2000-01-01T00:00:00Z', "
+        "expires_at='2000-01-01T00:01:00Z' WHERE name='runner'"
+    )
+    conn.commit()
+
+
 class _GitSpy:
     """Record the git subcommands ``recovery`` runs, delegating to the real call.
 
@@ -150,6 +159,7 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
                     # runner's terminal write.
                     control = connect(config.state.db)
                     try:
+                        _expire_runner_lease(control)
                         # A plain `unlock` must refuse an alive owner: the steal
                         # is only ever an explicit --force decision.
                         refused = force_unlock(config, control, force=False)
@@ -274,6 +284,11 @@ class ForceUnlockInPostPushWindowTests(unittest.TestCase):
 
             def land_then_steal(pushes, **kwargs):
                 real_push(pushes, **kwargs)
+                control = connect(config.state.db)
+                try:
+                    _expire_runner_lease(control)
+                finally:
+                    control.close()
                 out = io.StringIO()
                 with redirect_stdout(out):
                     code = main(["--repo", str(repo), "unlock", "--force", "--json"])

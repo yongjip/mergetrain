@@ -14,11 +14,12 @@
   lease expires by the wall clock: after a sleep longer than
   `queue.lock_ttl_minutes`, `status` recommended `unlock_wedged_runner` for up
   to one more heartbeat interval.
-- Clear an alive or unknown owner's lock with `unlock --force` only after the
-  owner misses a heartbeat. The command watches the lease for one
-  `queue.heartbeat_interval_seconds` plus 5 s, refuses with exit 4 when the
-  owner renews it, and then clears only the lease it watched. It used to also
-  clear a lease renewed since `status` recommended the unlock, which stopped a
+- Clear an alive or unknown owner's lock with `unlock --force` only after its
+  lease expires and the owner misses a heartbeat. Keep a valid lease even if
+  the heartbeat setting changed while its train ran. Watch an expired lease
+  for one `queue.heartbeat_interval_seconds` plus 5 s and refuse with exit 4
+  if it renews, including during the remote check. Clear only the unchanged,
+  expired lease. An old unlock recommendation can no longer stop a renewed
   healthy train.
 
 ### Documentation

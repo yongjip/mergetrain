@@ -121,6 +121,23 @@ the control checkout, a task worktree, and a nested directory whose path
 contained a space. This evidence supports the current composition rather than
 a new integration engine.
 
+Sleep and forced-unlock correction (2026-10-24): the laptop exercise showed
+an expired lease offered as `unlock_wedged_runner` after sleep. A stale unlock
+approval stopped a healthy train after its lease renewed. Review also
+reproduced a runner using a 10 s heartbeat losing its valid lease in 6.2 s
+after the caller's setting changed to 1 s. Existing lease expiry and renewal
+checks fit this recovery action: keep valid leases, observe expired leases for
+a wakeup renewal, and recheck the exact lease inside the clear transaction.
+Renewal during the remote probe is the same exit-4 refusal as renewal during
+observation. Classification: correction of existing recovery eligibility and
+runner timing; command, config, MCP, state, and queue-schema baselines stay
+unchanged. No new operator choice is added. The cost is up to the remaining
+lease TTL before an alive/unknown owner's lock becomes eligible, followed by
+one heartbeat interval plus 5 s (15 s at defaults); dead-owner recovery remains
+immediate. Success means a valid or renewed lease survives a stale approval,
+while an unchanged expired lease still clears with its marker-aware orphan
+split and audit. Retire this guard only if lease-based recovery is retired.
+
 ### Core
 
 - exact-SHA enqueue from a clean task worktree;

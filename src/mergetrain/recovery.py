@@ -16,6 +16,7 @@ import json
 import sqlite3
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any
 
 from .command_runner import run_command
@@ -52,7 +53,7 @@ from .persistence.leases import (
     stranded_claim_plan,
 )
 from .persistence.recovery import unpack_push_refs
-from .persistence.transactions import immediate
+from .persistence.transactions import _parse_utc, immediate
 from .push_liveness import push_in_flight, push_lock_path
 
 # --------------------------------------------------------------------------- #
@@ -594,9 +595,10 @@ _LOCK_CHANGED = (
     "runner lock changed while unlock checked it; nothing cleared (re-run if still wedged)"
 )
 
-# A healthy runner renews its lease once per heartbeat interval of its own
-# running time. The margin covers the polls between renewals, second-granular
-# lease timestamps, and a renewal that waits out a busy queue database.
+# Give an expired lease a heartbeat interval to renew after waking. The margin
+# covers polls, second-granular timestamps, and a busy queue database. The
+# observer's configured interval may differ from the running owner's interval,
+# so an unexpired lease is never eligible for this forced-clear path.
 _RENEWAL_MARGIN_SECONDS = 5.0
 
 
@@ -640,12 +642,13 @@ def force_unlock(
     """Clear a wedged runner lock (the expired-but-ALIVE/UNKNOWN + in_progress P5 case).
 
     Without ``--force`` only a DEAD/absent owner's lock is cleared. With
-    ``--force`` the ordering is load-bearing: (1) watch the lease for one
-    heartbeat interval and refuse if its owner renews it — that runner is not
-    wedged; (2) confirm the remote is reachable — if not, abort and change
-    nothing; (3) only then delete the lock, unrenewed, and run the marker-aware
-    split. It never itself writes ``deployed``/``failed`` — that verdict comes
-    solely from the subsequent remote-verified ``reconcile``.
+    ``--force`` the ordering is load-bearing: (1) require an expired lease,
+    then watch it for one heartbeat interval and refuse if its owner renews;
+    (2) confirm the remote is reachable — if not, abort and change nothing;
+    (3) recheck the lease inside the clear transaction and run the marker-aware
+    split only while it is still expired and unrenewed. It never itself writes
+    ``deployed``/``failed`` — that verdict comes solely from the subsequent
+    remote-verified ``reconcile``.
     """
     lock = get_lock(conn)
     if lock is None:
@@ -710,15 +713,28 @@ def force_unlock(
             f"runner lock owner is {lock.liveness}; rerun with --force to steal it",
             exit_code=4,
         )
-    current = _lock_after_heartbeat(config, conn, lock)
-    if current is None or current.token != lock.token:
-        return outcome(_LOCK_CHANGED)
-    if current.heartbeat_at != lock.heartbeat_at:
-        return outcome(
-            "runner renewed its lease within one heartbeat interval, so it is not "
-            "wedged; nothing cleared",
-            exit_code=4,
-        )
+
+    def checked_lock_outcome(current: RunnerLock | None) -> UnlockOutcome | None:
+        if current is None or (current.owner, current.token) != (lock.owner, lock.token):
+            return outcome(_LOCK_CHANGED)
+        if current.heartbeat_at != lock.heartbeat_at:
+            return outcome(
+                "runner renewed its lease while unlock checked it; nothing cleared",
+                exit_code=4,
+            )
+        # A running train keeps the timing policy it loaded at startup. The
+        # caller may have loaded a shorter interval since, so missing that
+        # caller's heartbeat window cannot prove a valid lease is wedged.
+        if _parse_utc(current.expires_at) > datetime.now(timezone.utc):
+            return outcome("runner lease has not expired; nothing cleared", exit_code=4)
+        return None
+
+    checked = checked_lock_outcome(lock)
+    if checked is not None:
+        return checked
+    checked = checked_lock_outcome(_lock_after_heartbeat(config, conn, lock))
+    if checked is not None:
+        return checked
     if not _remote_reachable(config):
         raise RemoteUnreachable(
             f"cannot reach remote '{config.git.remote}'; forced unlock aborted (nothing changed)"
@@ -729,6 +745,12 @@ def force_unlock(
     # without clobbering either. The steal commits with its audit event, as the
     # dead-owner clear does.
     with immediate(conn):
+        # The write transaction keeps renewal from racing this final check.
+        # A renewed lease is a refusal (exit 4), including during the probe;
+        # replacement or release stays the existing successful no-op.
+        checked = checked_lock_outcome(get_lock(conn))
+        if checked is not None:
+            return checked
         if not force_clear_lock_and_split(
             conn, owner=lock.owner, token=lock.token, heartbeat_at=lock.heartbeat_at
         ):

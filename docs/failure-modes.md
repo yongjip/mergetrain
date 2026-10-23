@@ -303,7 +303,10 @@ Reclaim rules when another runner tries to acquire:
 
 - **Dead owner PID** — reclaimed immediately.
 - **Valid (non-expired) lease** — never stolen, whether the owner PID looks alive
-  or unknown. This is the concurrency guarantee.
+  or unknown. This is the concurrency guarantee. `unlock --force` also refuses
+  it with exit `4`, even if the heartbeat setting changed since the runner
+  started. A forced unlock of a live or unknown owner must wait for lease
+  expiry; a provably dead owner is still cleared immediately.
 - **Expired lease, no in-progress jobs** — reclaimed, even if the owner PID still
   looks alive. A healthy runner would have refreshed its lease, so an expired
   lease means the owner is dead, hung, or a recycled PID. This prevents a reused
@@ -313,7 +316,8 @@ Reclaim rules when another runner tries to acquire:
   `unlock --force` clears the lock only after watching the lease for one
   `queue.heartbeat_interval_seconds` plus 5 s without a renewal. It refuses
   with exit `4` when the owner renews it, as a runner that slept past its
-  lease does once it wakes.
+  lease does once it wakes. Renewal during the remote check also refuses
+  with exit `4` and leaves the lock and jobs unchanged.
 
 Inspect with:
 

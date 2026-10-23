@@ -165,11 +165,12 @@ What you see after waking depends on what was running:
 | A push whose connection dropped | `status` reports `attention` and recommends `mergetrain reconcile --apply`; the daemon pauses deploys meanwhile | Run `mergetrain reconcile --apply`; the daemon then runs the job's gates again and lands it |
 
 A `status` read in the moment before that renewal can still recommend
-`unlock_wedged_runner`. Following it does no harm: `mergetrain unlock --force`
-first watches the lease for one `queue.heartbeat_interval_seconds` (10 by
-default) plus 5 s, and clears nothing when the daemon renews it. It clears the
-lease only when the daemon misses that heartbeat, as a stuck or suspended
-daemon does.
+`unlock_wedged_runner`. `mergetrain unlock --force` refuses a lease that is
+still valid, even if you shortened the heartbeat setting while the train ran.
+For an expired lease it watches for one `queue.heartbeat_interval_seconds`
+(10 by default) plus 5 s, and refuses with exit `4` if the daemon renews it,
+including during the remote check. It clears the unchanged lease only while
+it is still expired, as a stuck or suspended daemon's lease can be.
 
 With mergetrain 3.7.0 or earlier, the daemon renews only at its next heartbeat
 after waking, up to one heartbeat interval later, and `status` recommends
