@@ -92,6 +92,11 @@ Use mergetrain when:
 It is harness-agnostic: Codex, Claude Code, agy, scripts, and humans all use the
 same CLI and JSON contract.
 
+Running several Claude Code or Codex sessions on one laptop? The
+[one-laptop guide](docs/laptop-agents.md) covers worktrees, unattended landing,
+heavy gates, sleep and quiet periods, a push guard, and outcome reports, each
+tested in disposable repositories.
+
 ## Who should not use it?
 
 You probably do not need mergetrain when:

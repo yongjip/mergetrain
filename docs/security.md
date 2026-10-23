@@ -30,6 +30,13 @@ therefore governed by the host's shell permissions, credentials, and operating
 instructions, not by the MCP confirmation mechanism. Mergetrain cannot create
 an OS security boundary against another process running as the same user.
 
+A `pre-push` hook in the control checkout can refuse accidental direct pushes
+to the integration branch when agents share your credential on one machine;
+see the [push guard](laptop-agents.md#guard-against-accidental-pushes). It is
+not part of this boundary. `git push --no-verify` skips it, a separate clone
+or another machine has no copy of it, pushes made through the forge's web UI
+or API never run it, and an agent with shell access can change it.
+
 Give the runner the minimum remote permission needed for configured payload
 refs and permanent audit refs. Keep provider-specific credential setup outside
 core configuration and examples.

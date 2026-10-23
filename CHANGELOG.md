@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- Add a tested guide for several Claude Code and Codex sessions on one laptop:
+  linked worktrees as the enqueue boundary, unattended `--auto` landing, heavy
+  gates on a shared CPU, `caffeinate` and sleep, quiet periods, a `pre-push`
+  accident guard, read-only outcome reports for orchestrating sessions, and
+  repositories whose `AGENTS.md` ships to users. Real Claude Code and Codex
+  sessions handed off through the shared queue without naming it in the prompt.
+- Give `gates[].paths` its own configuration section with its matching and
+  fail-closed rules and a heavy-gate example.
+- Start the documented background daemon after one foreground tick: on a new
+  queue, the log redirect into `.mergetrain/` failed before the directory
+  existed. Run it with `PYTHONUNBUFFERED=1` so its log is written as it
+  happens; redirected output otherwise reached the log only at exit.
+
 ## 3.7.0 - 2026-10-19
 
 ### Upgrade notes

@@ -135,6 +135,8 @@ or blindly repeats a push.
 - [Configuration reference](config.md) for non-default Git, gates, verification,
   and performance settings.
 - [Operations](daemon.md) for validation and pre-approved deploy daemons.
+- [One laptop, several agents](laptop-agents.md) for Claude Code and Codex
+  sessions sharing one queue.
 - [Failure modes](failure-modes.md) for repair and recovery commands.
 - [MCP server](mcp.md) for the five-tool agent adapter.
 - [CLI reference](cli.md) for the stable core and advanced operator surfaces.

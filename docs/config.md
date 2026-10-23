@@ -387,25 +387,8 @@ generated configs may still contain the same gate explicitly; that exact
 default is ignored at runtime and `status --diagnose` recommends removing it. A customized
 gate is never discarded merely because it uses the same name.
 
-An optional non-empty `paths` list scopes a pre-push gate to the assembled
-train's changed paths. A scoped gate runs when any changed path matches any
-pattern; otherwise it emits a structured `skipped` gate event and keeps its
-normal gate index. Gates without `paths` always run, as does mergetrain's
-built-in `diff-check`.
-
-Patterns are repository-relative POSIX globs on every platform. `*`, `?`, and
-character classes match within one path segment; a segment containing only
-`**` matches zero or more complete segments. A class that starts with `!` or
-`^`, such as `[!_]` or `[^_]`, is negated, as in Git and the shells. Absolute paths, `.`/`..` segments,
-backslashes, empty segments, duplicate patterns, and `**` embedded inside
-another segment are rejected. `paths` is supported only for top-level
-pre-push `gates`, not `deploy.verify` or reuse fingerprints.
-
-mergetrain computes the path set once from the captured integration-base commit
-to the exact assembled train commit. Rename and copy records include both the
-old and new path; deletions remain visible. If Git cannot produce or mergetrain
-cannot parse the path set, every scoped gate runs. A path-selection failure can
-therefore cost time but can never silently weaken validation.
+An optional `paths` list runs a gate only when the train changes a path that
+can affect it; see [`gates[].paths`](#gatespaths).
 
 Configured gates remain sequential unless they share the same non-empty,
 contiguous `parallel_group`. `gate_parallelism.max_workers` is a resource-token
@@ -438,6 +421,64 @@ for Windows ships (`sh.exe` under the Git installation), and refuses to run gate
 at all when no POSIX shell can be found, rather than running them under a shell
 with different quoting rules. So one gate command works everywhere: write POSIX
 shell syntax, not `cmd` syntax, and expect POSIX quoting and expansion.
+
+### `gates[].paths`
+
+A non-empty `paths` list runs a top-level pre-push gate only when the train
+changes a listed path. Use it to keep a heavy suite off trains that cannot
+break it:
+
+```yaml
+gates:
+  - name: unit
+    run: python -B -m pytest -q -p no:cacheprovider tests/unit
+  - name: render
+    run: python -B -m pytest -q -p no:cacheprovider -n 4 tests/render
+    paths:
+      - src/example_app/render/**
+      - tests/render/**
+      - tests/conftest.py
+      - pyproject.toml
+```
+
+`unit` runs for every train. `render` runs only when a train changes the
+renderer, its tests, the shared pytest configuration in `tests/conftest.py`, or
+`pyproject.toml`, which holds the dependencies and pytest settings. A
+documentation-only train skips it. List every input that can change the
+gate's result: shared code it imports, fixtures, build scripts, manifests,
+lockfiles, and generated inputs. Leave cross-cutting security, policy, and
+repository-integrity checks unscoped.
+
+**Matching.** mergetrain computes the changed paths once per train, from the
+captured integration-base commit to the exact assembled train commit. A scoped
+gate runs when any changed path matches any pattern, so in a batch one member's
+change runs the gate for the whole train. Rename and copy records include both
+the old and the new path: moving a file out of `src/example_app/render/` still
+runs `render`. Deletions count too. A gate without a match records a
+`skipped` gate event, `no changed paths matched configured paths`, and keeps
+its normal gate index. Gates without `paths` always run, as does the built-in
+`diff-check`.
+
+**Fail closed.** If Git cannot produce the path set or mergetrain cannot parse
+it, every scoped gate runs. A path-selection failure can therefore cost time
+but can never silently weaken validation.
+
+**Patterns.** Patterns are repository-relative POSIX globs on every platform.
+`*`, `?`, and character classes match within one path segment; a segment
+containing only `**` matches zero or more complete segments. A class that
+starts with `!` or `^`, such as `[!_]` or `[^_]`, is negated, as in Git and the
+shells. Absolute paths, `.`/`..` segments, backslashes, empty segments,
+duplicate patterns, and `**` embedded inside another segment are rejected.
+`paths` is supported only for top-level pre-push `gates`, not `deploy.verify`
+or reuse fingerprints.
+
+**Policy.** `paths` is part of the gate policy that the control checkout's
+configuration supplies, so a change takes effect once it has landed there. It is
+also part of the execution policy that unattended approval binds: changing it
+blocks queued `--auto` jobs, as described in
+[Deploy authorization changed](failure-modes.md#deploy-authorization-changed).
+The [one-laptop guide](laptop-agents.md#keep-heavy-gates-affordable) combines
+this gate with parallel quick checks.
 
 ## `deploy.reuse`
 

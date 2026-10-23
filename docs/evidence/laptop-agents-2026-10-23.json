@@ -1,0 +1,320 @@
+{
+  "verified_on": "2026-10-23",
+  "platform": "macOS 27.0.1 laptop on battery power",
+  "mergetrain_release": "3.7.0",
+  "contract_version": 5,
+  "config_version": 2,
+  "installation": "PyPI wheel in a fresh virtual environment",
+  "tools": {
+    "python": "3.12.14",
+    "git": "2.54.0 (Apple Git-157)",
+    "ruff": "0.17.2",
+    "pytest": "9.1.1",
+    "pytest_xdist": "3.8.0"
+  },
+  "method": "A script ran each recipe's commands through /bin/sh, each in its own disposable Git repository with a local bare remote. Background daemons were started and stopped with the documented commands.",
+  "power_log_sleep_entries_during_runs": 0,
+  "recipes": {
+    "linked_worktree": {
+      "worktree_outside_checkout_shared_git_dir": true,
+      "shared_queue_db": true,
+      "control_daemon_landed_its_job": true,
+      "clone_had_own_queue": true,
+      "clone_job_id_in_own_queue": 1,
+      "clone_job_visible_to_control": false,
+      "control_daemon_tick": "mergetrain daemon tick: no auto-approved queued jobs",
+      "clone_work_landed": false
+    },
+    "unattended_auto": {
+      "enqueue_help_mentions_auto": false,
+      "manual_job_after_default_daemon": "queued",
+      "auto_job": {
+        "status": "deployed",
+        "push_status": "succeeded",
+        "verify_status": "not_configured",
+        "auto_deploy": true
+      },
+      "policy_change": {
+        "gate_command": {
+          "status": "blocked",
+          "reason": "deploy_authorization_changed",
+          "retry_while": "changed",
+          "retry_replacement_auto_deploy": false,
+          "note_code": "approval_execution_policy_changed"
+        },
+        "paths_only": {
+          "status": "blocked",
+          "reason": "deploy_authorization_changed",
+          "retry_while": "restored",
+          "retry_replacement_auto_deploy": true,
+          "note_code": "approval_execution_policy_changed"
+        }
+      }
+    },
+    "heavy_gates": {
+      "docs_only": {
+        "seconds": 0.9,
+        "render": [
+          "skipped",
+          "no changed paths matched configured paths"
+        ]
+      },
+      "render_change": {
+        "seconds": 3.2,
+        "render_states": [
+          "active",
+          "success"
+        ]
+      },
+      "rename_out_of_scope_render_states": [
+        "active",
+        "success"
+      ],
+      "batch_docs_plus_render": {
+        "statuses": [
+          "deployed",
+          "deployed"
+        ],
+        "same_deploy_sha": true,
+        "render_states": [
+          "active",
+          "success"
+        ]
+      },
+      "lint_and_unit_started_before_either_finished": true,
+      "render_started_seconds_after_unit_finished": 0.124
+    },
+    "persistent_validation_workspace": [
+      {
+        "mode": "validate",
+        "status": "validated",
+        "seconds": 6.7
+      },
+      {
+        "mode": "validate",
+        "status": "validated",
+        "seconds": 0.7
+      },
+      {
+        "mode": "daemon deploy",
+        "status": "deployed",
+        "seconds": 6.7
+      },
+      {
+        "mode": "daemon deploy",
+        "status": "deployed",
+        "seconds": 6.8
+      }
+    ],
+    "daemon_start": {
+      "first_tick_created_ignored_state_dir": true,
+      "log_written_while_running_with_PYTHONUNBUFFERED": true,
+      "without_PYTHONUNBUFFERED": {
+        "log_bytes_while_running": 0,
+        "log_bytes_after_exit": 316
+      },
+      "caffeinate_assertion": "00:00:01 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"",
+      "caffeinate_released_with_daemon": true
+    },
+    "sleep_simulation": {
+      "method": "SIGSTOP of the daemon and its gate processes, then SIGCONT",
+      "lock_ttl_seconds": 60,
+      "suspended_seconds": 75.6,
+      "while_suspended": {
+        "job_status": "in_progress",
+        "status_state": "running",
+        "next_action": {
+          "code": "unlock_wedged_runner",
+          "command": "mergetrain unlock --force",
+          "requires_approval": "recovery"
+        },
+        "competing_validate_error": "lock_held"
+      },
+      "next_action_after_resume": [
+        [
+          0.13,
+          "wait_for_runner"
+        ],
+        [
+          1.08,
+          "validate_queued_jobs"
+        ]
+      ],
+      "after_resume": {
+        "status": "deployed",
+        "push_status": "succeeded",
+        "verify_status": "not_configured"
+      }
+    },
+    "push_cut_off": {
+      "method": "SIGKILL of the remote's receive-pack and its pre-receive hook during the push",
+      "parked": {
+        "status": "needs_reconcile",
+        "push_status": "pending"
+      },
+      "status_next_action": {
+        "code": "reconcile_pending_deploy",
+        "command": "mergetrain reconcile --apply",
+        "requires_approval": "recovery"
+      },
+      "daemon_log_reported_pause": true,
+      "reconcile_apply_ok": true,
+      "after_reconcile": {
+        "status": "deployed",
+        "push_status": "succeeded"
+      }
+    },
+    "quiet_period": {
+      "seconds_from_sigterm_to_exit": 10.2,
+      "running_job": "deployed",
+      "while_stopped": {
+        "state": "waiting",
+        "counts": {
+          "attention": 0,
+          "done": 1,
+          "ready": 0,
+          "running": 0,
+          "waiting": 1
+        },
+        "next_action": "run_daemon_when_approved",
+        "state_after_10s": "waiting"
+      },
+      "job_enqueued_while_stopped": "queued",
+      "after_restart": {
+        "status": "deployed",
+        "push_status": "succeeded"
+      }
+    },
+    "push_guard": {
+      "task_worktree_shares_hook": true,
+      "direct_push_rc": 1,
+      "direct_push_message": "pre-push: refs/heads/main is updated by mergetrain; enqueue your branch instead",
+      "delete_push_rc": 1,
+      "audit_ref_for_other_commit_rc": 1,
+      "branch_push_rc": 0,
+      "mergetrain_deploy": {
+        "status": "deployed",
+        "push_status": "succeeded"
+      },
+      "no_verify_push_rc": 0,
+      "separate_clone_push_rc": 0
+    },
+    "outcome_report": {
+      "poll_cwd": "outside the repository, with --repo",
+      "success": [
+        "queued/not_run/not_run",
+        "in_progress/not_run/not_run",
+        "in_progress/pending/not_run",
+        "deployed/succeeded/succeeded"
+      ],
+      "gate_failure": {
+        "seen": [
+          "queued/not_run/not_run",
+          "failed/not_run/not_run"
+        ],
+        "retry_command": "mergetrain retry 2"
+      },
+      "old_job_after_retry": {
+        "status": "canceled",
+        "note": "retried as job 3"
+      },
+      "replacement_was_newest_status_row": true,
+      "replacement": [
+        "queued/not_run/not_run",
+        "in_progress/not_run/not_run",
+        "deployed/succeeded/succeeded"
+      ],
+      "verification_failure": {
+        "seen": [
+          "queued/not_run/not_run",
+          "in_progress/not_run/not_run",
+          "deployed/succeeded/failed"
+        ],
+        "status_next_action": "resolve_failed_verification",
+        "retry_command_offered": false
+      },
+      "manual_job": [
+        "validated/not_run/not_run"
+      ]
+    },
+    "shipped_agents_md": {
+      "wheel_files": [
+        "toolkit/__init__.py",
+        "toolkit/guide/AGENTS.md",
+        "toolkit-0.1.0.dist-info/METADATA",
+        "toolkit-0.1.0.dist-info/WHEEL",
+        "toolkit-0.1.0.dist-info/RECORD"
+      ],
+      "shipped_agents_md_mentions_mergetrain": false
+    }
+  },
+  "checks_passed": 67,
+  "checks_failed": 0,
+  "real_agents": {
+    "prompts_mention_mergetrain": false,
+    "claude_code": {
+      "version": "2.1.287",
+      "worktree": "linked worktree created by the operator",
+      "read": [
+        "CONTRIBUTING.md",
+        "AGENTS.mergetrain.md"
+      ],
+      "mergetrain_commands": [
+        "mergetrain enqueue --help",
+        "mergetrain enqueue --task shout --branch claude/shout --json"
+      ],
+      "seconds": 43.0
+    },
+    "codex": {
+      "version": "0.162.1",
+      "worktree": "codex exec --worktree (detached HEAD, linked to the control checkout)",
+      "git_common_dir_is_control": true,
+      "sandbox_note": "first git switch -c failed with 'cannot lock ref' in workspace-write; completed after the configured approval flow",
+      "older_mergetrain_on_login_path": "3.5.0 refused queue schema 16; Codex then used the 3.7.0 executable",
+      "seconds": 167.2
+    },
+    "queue_after_handoffs": [
+      {
+        "id": 2,
+        "branch": "codex/repeat-greeting",
+        "status": "queued",
+        "auto_deploy": false
+      },
+      {
+        "id": 1,
+        "branch": "claude/shout",
+        "status": "queued",
+        "auto_deploy": false
+      }
+    ],
+    "after_validate_only_once": [
+      {
+        "id": 2,
+        "status": "validated"
+      },
+      {
+        "id": 1,
+        "status": "validated"
+      }
+    ],
+    "push_commands_seen": [],
+    "remote_main_unchanged": true
+  },
+  "documentation_fixes": [
+    "docs/daemon.md: run one foreground tick first; the log redirect failed on a new queue",
+    "docs/daemon.md: PYTHONUNBUFFERED=1 so the redirected log is written as it happens"
+  ],
+  "reported_not_fixed": [
+    "daemon output is block-buffered when redirected",
+    "a user-created .mergetrain/ gets the database-only ignore",
+    "status recommends unlock --force for an alive runner whose lease expired during sleep"
+  ],
+  "not_exercised": [
+    "real lid close",
+    "network remote",
+    "Linux",
+    "Windows",
+    "deploy through MCP"
+  ],
+  "product_code_changed": false
+}
