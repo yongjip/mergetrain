@@ -204,6 +204,24 @@ def enable_persistent_validation_workspace(
     )
 
 
+class _WokenWallClock:
+    """A ``time.time`` that jumps an hour 0.3 s after its first read.
+
+    Waking from sleep moves the wall clock the lease expires on, while the
+    monotonic clock skipped the sleep.
+    """
+
+    def __init__(self) -> None:
+        self._real = time.time
+        self._first_read: float | None = None
+
+    def __call__(self) -> float:
+        now = time.monotonic()
+        if self._first_read is None:
+            self._first_read = now
+        return self._real() + (3600 if now - self._first_read > 0.3 else 0)
+
+
 class GitRunnerTests(unittest.TestCase):
     def test_auto_enqueue_blocks_when_execution_policy_changes_before_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -722,6 +740,34 @@ gates:
 
             self.assertEqual(raised.exception.returncode, 124)
             self.assertLess(time.monotonic() - started, 5)
+
+    def test_gate_plan_pulses_when_the_wall_clock_jumps(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".mergetrain.yaml").write_text(
+                """queue:
+  heartbeat_interval_seconds: 60
+gates:
+  - name: slow
+    run: '"$MERGETRAIN_RUNNER_PYTHON" -c "import time; time.sleep(1.5)"'
+""",
+                encoding="utf-8",
+            )
+            runner = GitRunner(load_config(repo=repo))
+            pulses: list[float] = []
+
+            with patch("time.time", side_effect=_WokenWallClock()):
+                runner._gates.run_configured_plan(
+                    worktree=repo,
+                    log=io.StringIO(),
+                    pulse=lambda: pulses.append(time.monotonic()),
+                    on_gate=None,
+                    initial_states={},
+                )
+
+            # The monitor renews once, right after the jump, although its 60 s
+            # monotonic interval never elapsed.
+            self.assertEqual(len(pulses), 1)
 
     def test_parallel_gate_honors_total_plan_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2456,6 +2502,25 @@ deploy:
                 )
             self.assertEqual(raised.exception.returncode, 124)
             self.assertLess(time.monotonic() - started, 3)
+
+    def test_managed_command_pulses_when_the_wall_clock_jumps(self) -> None:
+        # A runner that slept past its lease must renew at its next poll, not
+        # one more heartbeat interval later.
+        pulses: list[float] = []
+        with tempfile.TemporaryDirectory() as td:
+            with patch("time.time", side_effect=_WokenWallClock()):
+                run_shell(
+                    f'{SHELL_PYTHON} -c "import time; time.sleep(1.5)"',
+                    cwd=td,
+                    env=os.environ.copy(),
+                    log=io.StringIO(),
+                    pulse=lambda: pulses.append(time.monotonic()),
+                    pulse_interval_seconds=60,
+                    timeout_seconds=30,
+                )
+        # One pulse before the command starts and one after the jump; the
+        # 60 s monotonic interval alone allows no second pulse.
+        self.assertEqual(len(pulses), 2)
 
     def test_managed_command_replaces_invalid_utf8_output(self) -> None:
         with tempfile.TemporaryDirectory() as td:

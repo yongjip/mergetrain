@@ -295,8 +295,9 @@ to `dismiss` or `retry`.
 ## Stale lock
 
 The runner lock records an owner, unique token, and lease expiry. Claimed jobs
-store the same token. Managed subprocesses renew the lease periodically, and a
-refresh or state update with a stale token fails immediately.
+store the same token. Managed subprocesses renew the lease periodically, and at
+their next poll after the machine wakes from sleep. A refresh or state update
+with a stale token fails immediately.
 
 Reclaim rules when another runner tries to acquire:
 
@@ -308,7 +309,11 @@ Reclaim rules when another runner tries to acquire:
   lease means the owner is dead, hung, or a recycled PID. This prevents a reused
   PID from holding an abandoned lock open forever.
 - **Expired lease with in-progress jobs** — not auto-reclaimed; left for operator
-  investigation.
+  investigation. `status` recommends `unlock_wedged_runner`, and
+  `unlock --force` clears the lock only after watching the lease for one
+  `queue.heartbeat_interval_seconds` plus 5 s without a renewal. It refuses
+  with exit `4` when the owner renews it, as a runner that slept past its
+  lease does once it wakes.
 
 Inspect with:
 

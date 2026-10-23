@@ -9,6 +9,17 @@
   started with `>> .mergetrain/daemon.log 2>&1 &` kept its log empty until it
   exited or had buffered several kilobytes. The documented start no longer
   needs `PYTHONUNBUFFERED=1`.
+- Renew the runner lease as soon as the machine wakes. Renewals were
+  scheduled on the monotonic clock, which stops while a Mac sleeps, but the
+  lease expires by the wall clock: after a sleep longer than
+  `queue.lock_ttl_minutes`, `status` recommended `unlock_wedged_runner` for up
+  to one more heartbeat interval.
+- Clear an alive or unknown owner's lock with `unlock --force` only after the
+  owner misses a heartbeat. The command watches the lease for one
+  `queue.heartbeat_interval_seconds` plus 5 s, refuses with exit 4 when the
+  owner renews it, and then clears only the lease it watched. It used to also
+  clear a lease renewed since `status` recommended the unlock, which stopped a
+  healthy train.
 
 ### Documentation
 

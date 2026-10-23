@@ -24,6 +24,26 @@ from .windows_job import CREATE_SUSPENDED, WindowsJob
 Pulse = Callable[[], None]
 
 
+class PulseSchedule:
+    """When a runner's next lease pulse is due.
+
+    The lease expires on the wall clock, but the monotonic clock stops while
+    the machine sleeps. A pulse is due once either clock has moved one interval
+    on, so a runner that slept past its lease renews it as soon as it wakes.
+    """
+
+    def __init__(self, interval_seconds: float) -> None:
+        self._interval = max(0.1, float(interval_seconds))
+        self.restart()
+
+    def restart(self) -> None:
+        self._monotonic_due = time.monotonic() + self._interval
+        self._wall_due = time.time() + self._interval
+
+    def due(self) -> bool:
+        return time.monotonic() >= self._monotonic_due or time.time() >= self._wall_due
+
+
 class _RedactingLog(io.TextIOBase):
     """Mask secrets in subprocess output without closing the caller's log."""
 
@@ -374,7 +394,7 @@ def _run_managed(
         reader.start()
 
     started = time.monotonic()
-    next_pulse = started + max(0.1, pulse_interval_seconds)
+    pulses = PulseSchedule(pulse_interval_seconds)
     timed_out = False
     canceled = False
     try:
@@ -392,9 +412,9 @@ def _run_managed(
                     stderr_tail.append(f"command timed out after {timeout_seconds:g} seconds\n")
                     break
                 continue
-            if pulse is not None and now >= next_pulse:
+            if pulse is not None and pulses.due():
                 pulse()
-                next_pulse = now + max(0.1, pulse_interval_seconds)
+                pulses.restart()
             try:
                 process.wait(timeout=0.1)
             except subprocess.TimeoutExpired:

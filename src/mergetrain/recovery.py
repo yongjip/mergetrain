@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -38,7 +39,7 @@ from .git_ops import (
     git_remote_ref_sha,
     resolve_pending_ref,
 )
-from .models import Job, public_owner
+from .models import Job, RunnerLock, public_owner
 from .persistence.events import record_run_event
 from .persistence.jobs import counts, get_job, is_reconcile_conflict, list_jobs_fifo, mark_job
 from .persistence.leases import (
@@ -588,10 +589,41 @@ class UnlockOutcome:
     exit_code: int  # 0 cleared · 4 refused · 5 no lock
 
 
-# The inspected lock was replaced (or released) during the remote probe.
+# The inspected lock was replaced, released, or renewed while unlock checked it.
 _LOCK_CHANGED = (
-    "runner lock changed during the remote check; nothing cleared (re-run if still wedged)"
+    "runner lock changed while unlock checked it; nothing cleared (re-run if still wedged)"
 )
+
+# A healthy runner renews its lease once per heartbeat interval of its own
+# running time. The margin covers the polls between renewals, second-granular
+# lease timestamps, and a renewal that waits out a busy queue database.
+_RENEWAL_MARGIN_SECONDS = 5.0
+
+
+def _lock_after_heartbeat(
+    config: MergetrainConfig, conn: sqlite3.Connection, lock: RunnerLock
+) -> RunnerLock | None:
+    """Watch ``lock`` for one heartbeat interval and return it as it then stands.
+
+    A wall-clock expiry cannot show that an owner stopped renewing: a runner
+    that slept past its lease renews it as soon as it wakes, and an approval
+    acted on later finds a lease renewed since. This process counts the
+    interval in its own running time, during which a healthy runner renews.
+    Returns early once the lock is renewed, replaced, or released.
+    """
+
+    deadline = (
+        time.monotonic() + config.queue.heartbeat_interval_seconds + _RENEWAL_MARGIN_SECONDS
+    )
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        current = get_lock(conn)
+        if current is None or (current.token, current.heartbeat_at) != (
+            lock.token,
+            lock.heartbeat_at,
+        ):
+            return current
+    return lock
 
 
 def _remote_reachable(config: MergetrainConfig) -> bool:
@@ -608,10 +640,12 @@ def force_unlock(
     """Clear a wedged runner lock (the expired-but-ALIVE/UNKNOWN + in_progress P5 case).
 
     Without ``--force`` only a DEAD/absent owner's lock is cleared. With
-    ``--force`` the ordering is load-bearing: (1) confirm the remote is reachable
-    first — if not, abort and change nothing; (2) only then delete the lock and
-    run the marker-aware split. It never itself writes ``deployed``/``failed`` —
-    that verdict comes solely from the subsequent remote-verified ``reconcile``.
+    ``--force`` the ordering is load-bearing: (1) watch the lease for one
+    heartbeat interval and refuse if its owner renews it — that runner is not
+    wedged; (2) confirm the remote is reachable — if not, abort and change
+    nothing; (3) only then delete the lock, unrenewed, and run the marker-aware
+    split. It never itself writes ``deployed``/``failed`` — that verdict comes
+    solely from the subsequent remote-verified ``reconcile``.
     """
     lock = get_lock(conn)
     if lock is None:
@@ -676,16 +710,28 @@ def force_unlock(
             f"runner lock owner is {lock.liveness}; rerun with --force to steal it",
             exit_code=4,
         )
+    current = _lock_after_heartbeat(config, conn, lock)
+    if current is None or current.token != lock.token:
+        return outcome(_LOCK_CHANGED)
+    if current.heartbeat_at != lock.heartbeat_at:
+        return outcome(
+            "runner renewed its lease within one heartbeat interval, so it is not "
+            "wedged; nothing cleared",
+            exit_code=4,
+        )
     if not _remote_reachable(config):
         raise RemoteUnreachable(
             f"cannot reach remote '{config.git.remote}'; forced unlock aborted (nothing changed)"
         )
-    # Scope the clear to the exact lock we inspected: the reachability probe above
-    # touches the network, and the wedged runner could finish and a fresh runner
-    # acquire the lock in that window. A scoped no-match aborts without clobbering it.
-    # The steal commits with its audit event, as the dead-owner clear does.
+    # Scope the clear to the exact lease we watched: the reachability probe above
+    # touches the network, and in that window the runner could renew its lease,
+    # or finish and a fresh runner acquire the lock. A scoped no-match aborts
+    # without clobbering either. The steal commits with its audit event, as the
+    # dead-owner clear does.
     with immediate(conn):
-        if not force_clear_lock_and_split(conn, owner=lock.owner, token=lock.token):
+        if not force_clear_lock_and_split(
+            conn, owner=lock.owner, token=lock.token, heartbeat_at=lock.heartbeat_at
+        ):
             return outcome(_LOCK_CHANGED)
         event = record_run_event(
             conn,

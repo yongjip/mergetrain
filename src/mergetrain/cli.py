@@ -279,7 +279,10 @@ def build_parser(*, structured_errors: bool = False) -> argparse.ArgumentParser:
     p_unlock.add_argument(
         "--force",
         action="store_true",
-        help="Steal an alive/unknown owner's lock after confirming the remote is reachable",
+        help=(
+            "Steal an alive/unknown owner's lock once it misses a heartbeat "
+            "and the remote is reachable"
+        ),
     )
     p_unlock.add_argument("--json", action="store_true")
     p_unlock.set_defaults(func=cmd_unlock)

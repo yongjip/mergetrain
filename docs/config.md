@@ -254,9 +254,10 @@ queue:
 ```
 
 `lock_ttl_minutes` controls runner lock expiry. Managed Git, gate, and verify
-commands renew the lease every `heartbeat_interval_seconds`; the heartbeat must
-be shorter than the TTL. `command_timeout_seconds` terminates a command and
-marks the affected job failed. All queue timing values must be positive.
+commands renew the lease every `heartbeat_interval_seconds`, and right after
+the machine wakes from sleep; the heartbeat must be shorter than the TTL.
+`command_timeout_seconds` terminates a command and marks the affected job
+failed. All queue timing values must be positive.
 
 `processing` is a repository-wide setting. **Keep the default `batch` for
 ordinary parallel agent work.** It combines eligible queued jobs available

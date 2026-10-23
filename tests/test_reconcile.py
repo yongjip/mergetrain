@@ -2004,6 +2004,7 @@ class CommandExitCodeTests(unittest.TestCase):
             self.assertEqual(code, 4)
             self.assertFalse(payload["cleared"])
 
+    @patch("mergetrain.recovery._RENEWAL_MARGIN_SECONDS", 0.0)
     def test_unlock_force_clears_alive_lock(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -2024,6 +2025,7 @@ class CommandExitCodeTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    @patch("mergetrain.recovery._RENEWAL_MARGIN_SECONDS", 0.0)
     def test_unlock_force_aborts_when_remote_unreachable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

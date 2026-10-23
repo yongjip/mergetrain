@@ -13,6 +13,7 @@ from typing import IO
 
 from .command_runner import (
     Pulse,
+    PulseSchedule,
     command_env,
     command_limits,
     display_command,
@@ -120,8 +121,7 @@ class GateRunner:
 
         plan_started = time.monotonic()
         plan_timeout = self.config.gate_parallelism.timeout_seconds
-        pulse_interval = max(0.1, float(self.config.queue.heartbeat_interval_seconds))
-        next_pulse = time.monotonic() + pulse_interval
+        pulses = PulseSchedule(self.config.queue.heartbeat_interval_seconds)
 
         while pending:
             ready = [gate for gate in pending if set(dependencies[gate.name]).issubset(completed)]
@@ -203,14 +203,14 @@ class GateRunner:
                                 cwd=str(worktree),
                             )
                             cancel_event.set()
-                        if pulse is not None and now >= next_pulse:
+                        if pulse is not None and pulses.due():
                             try:
                                 pulse()
                             except BaseException as exc:
                                 if monitor_error is None:
                                     monitor_error = exc
                                     cancel_event.set()
-                            next_pulse = now + pulse_interval
+                            pulses.restart()
                 except BaseException:
                     # Signals reach only this thread. Leaving the executor waits
                     # for every worker, so stop their process groups first, or

@@ -121,12 +121,17 @@ def _release_lock_token(
     *,
     owner: str,
     token: str,
+    heartbeat_at: str | None = None,
 ) -> bool:
-    """Release one exact lease inside the caller's current transaction."""
+    """Release one exact lease inside the caller's current transaction.
+
+    With ``heartbeat_at``, only while the lease has not been renewed since.
+    """
 
     cur = conn.execute(
-        "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ?",
-        (RUNNER_LOCK_NAME, owner, token),
+        "DELETE FROM locks WHERE name = ? AND owner = ? AND token = ? "
+        "AND (? IS NULL OR heartbeat_at = ?)",
+        (RUNNER_LOCK_NAME, owner, token, heartbeat_at, heartbeat_at),
     )
     return cur.rowcount > 0
 
@@ -383,7 +388,13 @@ def release_runner_lock(conn: sqlite3.Connection, *, owner: str, token: str) -> 
         return _release_lock_token(conn, owner=owner, token=token)
 
 
-def force_clear_lock_and_split(conn: sqlite3.Connection, *, owner: str, token: str) -> bool:
+def force_clear_lock_and_split(
+    conn: sqlite3.Connection,
+    *,
+    owner: str,
+    token: str,
+    heartbeat_at: str | None = None,
+) -> bool:
     """Delete the runner lock and run the marker-aware orphan split, atomically.
 
     Used by ``unlock`` once it has decided the lock may be cleared (a dead/absent
@@ -395,13 +406,15 @@ def force_clear_lock_and_split(conn: sqlite3.Connection, *, owner: str, token: s
     The delete is **scoped** to that exact lock: if it matches nothing (the lock changed while unlock was probing the
     remote — e.g. the wedged runner finished and a fresh runner acquired it), the
     split is skipped and ``False`` is returned, so a healthy in-flight runner is
-    never clobbered. Returns ``True`` when the lock was cleared and orphans split.
+    never clobbered. With ``heartbeat_at`` the lease must also be unrenewed since
+    then, so an owner that renews it during the probe keeps it. Returns ``True``
+    when the lock was cleared and orphans split.
 
     Inside a transaction the caller already holds, it writes there, so the
     caller can commit the clear together with its own record of it.
     """
     with nullcontext() if conn.in_transaction else immediate(conn):
-        if not _release_lock_token(conn, owner=owner, token=token):
+        if not _release_lock_token(conn, owner=owner, token=token, heartbeat_at=heartbeat_at):
             return False
         _requeue_orphans(conn)
         return True

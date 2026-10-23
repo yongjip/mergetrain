@@ -96,6 +96,7 @@ class _GitSpy:
         return self._real(args, **kwargs)
 
 
+@patch.object(recovery_module, "_RENEWAL_MARGIN_SECONDS", 0.0)
 class ForceUnlockInPostPushWindowTests(unittest.TestCase):
     """The runner is mid-``push_verified_head``; the operator steals the lock."""
 

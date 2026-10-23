@@ -161,8 +161,22 @@ What you see after waking depends on what was running:
 | --- | --- | --- |
 | Nothing | The daemon's next tick runs | Nothing |
 | Gates | `status` reports `running` until the train lands | Nothing |
-| Gates, for longer than `queue.lock_ttl_minutes` (30 by default) | `status` recommends `unlock_wedged_runner` until the daemon's next heartbeat renews its lease; heartbeats come every `queue.heartbeat_interval_seconds` (10 by default) | Read `status` again after a heartbeat; do not run `unlock --force` while the daemon process is running |
+| Gates, for longer than `queue.lock_ttl_minutes` (30 by default) | The daemon renews its lease as soon as it wakes; `status` reports `running` until the train lands | Nothing |
 | A push whose connection dropped | `status` reports `attention` and recommends `mergetrain reconcile --apply`; the daemon pauses deploys meanwhile | Run `mergetrain reconcile --apply`; the daemon then runs the job's gates again and lands it |
+
+A `status` read in the moment before that renewal can still recommend
+`unlock_wedged_runner`. Following it does no harm: `mergetrain unlock --force`
+first watches the lease for one `queue.heartbeat_interval_seconds` (10 by
+default) plus 5 s, and clears nothing when the daemon renews it. It clears the
+lease only when the daemon misses that heartbeat, as a stuck or suspended
+daemon does.
+
+With mergetrain 3.7.0 or earlier, the daemon renews only at its next heartbeat
+after waking, up to one heartbeat interval later, and `status` recommends
+`unlock_wedged_runner` until then. Its `unlock --force` also clears a lease the
+daemon has renewed since, which stops a healthy train: read `status` again
+after a heartbeat, and do not run `unlock --force` while the daemon process is
+running.
 
 While the lease is expired, other runners are refused with `lock_held`, so a
 `validate` started right after waking cannot take over the train. To check
@@ -344,7 +358,14 @@ session pushed. See the [verification summary](evidence/laptop-agents-2026-10-23
 
 Sleep was simulated, not exercised: SIGSTOP and SIGCONT suspended the daemon
 and its gate processes, and killing the remote's `receive-pack` cut off the
-push. The lease renewed as soon as the processes resumed because the clock that
-schedules heartbeats kept running; after a real sleep, expect up to one
-heartbeat interval. A real lid close, a network remote, Linux, and Windows were
-not exercised; `caffeinate` and `pmset` are macOS tools.
+push. The lease renewed as soon as the processes resumed because the monotonic
+clock kept running while they were stopped; a real sleep stops it. A rerun on
+2026-10-24 gave the daemon a monotonic clock that skipped its suspension:
+3.7.0 recommended `unlock_wedged_runner` for 8.8 s after resume; with renewal
+on waking, the first `status` read, 0.15 s after resume, already recommended
+`wait_for_runner`. In the same rerun, `unlock --force` started during the
+suspension or 2 s after the daemon renewed cleared 3.7.0's lease and stopped
+its train; with the heartbeat check it refused both times, and both trains
+landed without rerunning their gates. A real lid close, a network remote,
+Linux, and Windows were not exercised; `caffeinate` and `pmset` are macOS
+tools.

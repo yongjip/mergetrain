@@ -255,7 +255,8 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     payload = {
         # ok = the command ran; `cleared` carries whether a lock was removed
         # (mirrors hub remove's ok:true + removed). The exit code carries the
-        # machine signal for no-lock (5) / refused-without-force (4).
+        # machine signal for no-lock (5) / refused (4): without --force, or
+        # because the owner renewed its lease.
         "ok": True,
         "cleared": outcome.cleared,
         "prior_owner": outcome.prior_owner,
