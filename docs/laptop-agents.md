@@ -262,8 +262,9 @@ directory. Repeat every 30 to 60 seconds and stop at the first matching row:
 | `needs_reconcile` | any | Push outcome unknown; the operator reconciles |
 | `canceled` | any | Canceled or replaced |
 
-Keep waiting on any other value, including `deployed` with `not_run` while
-verification runs. These calls start no runner and grant no authority. They
+Keep waiting on any other value. A job stays `in_progress`, with `push_status`
+`pending`, through its push and post-push verification; `deployed` appears
+with both results. These calls start no runner and grant no authority. They
 worked while the daemon held the runner lock.
 
 The agent that owns the branch fixes a failed or blocked job: it commits the
