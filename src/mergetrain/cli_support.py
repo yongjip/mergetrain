@@ -129,6 +129,17 @@ def _dump_jsonl(payload: dict[str, Any]) -> None:
     )
 
 
+def say_now(message: str) -> None:
+    """Print a daemon line as it happens.
+
+    Python block-buffers stdout redirected to a file, so a daemon started with
+    ``>> daemon.log`` would otherwise reach its log in large blocks or only at
+    exit.
+    """
+
+    print(message, flush=True)
+
+
 def _error_payload(
     code: str,
     message: str,

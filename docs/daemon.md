@@ -58,16 +58,17 @@ For a simple local service:
 
 ```sh
 mergetrain daemon --once
-PYTHONUNBUFFERED=1 nohup mergetrain daemon --interval 15 >> .mergetrain/daemon.log 2>&1 &
+nohup mergetrain daemon --interval 15 >> .mergetrain/daemon.log 2>&1 &
 ```
 
 The first tick creates `.mergetrain/` on a new queue, which the log redirect
 needs. Do not create that directory yourself: mergetrain then ignores only its
 database files there, and the log and integration worktrees show up as
-untracked files. `PYTHONUNBUFFERED=1` writes each log line as it happens;
-otherwise redirected output reaches the log in large blocks or at exit. On a
-laptop, the [one-laptop guide](laptop-agents.md#keep-the-daemon-running) adds a
-sleep assertion, a graceful stop, and what to expect after sleep.
+untracked files. With mergetrain 3.7.0 or earlier, put `PYTHONUNBUFFERED=1`
+before `nohup`: those releases write redirected output in large blocks or only
+at exit. On a laptop, the
+[one-laptop guide](laptop-agents.md#keep-the-daemon-running) adds a sleep
+assertion, a graceful stop, and what to expect after sleep.
 
 For schedulers, prefer one-shot ticks:
 

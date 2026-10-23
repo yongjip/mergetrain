@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..cli_support import dump_json
+from ..cli_support import dump_json, say_now
 from ..config import load_config
 from ..errors import QueueError
 
@@ -55,7 +55,7 @@ def cmd_hub_daemon(args: argparse.Namespace) -> int:
 
     if args.concurrency < 1:
         raise QueueError("hub daemon --concurrency must be at least 1")
-    say = (lambda message: None) if args.json and args.once else print
+    say = (lambda message: None) if args.json and args.once else say_now
     warned_without_webhook: set[str] = set()
 
     def resolve_notifier(path: str, key: str):

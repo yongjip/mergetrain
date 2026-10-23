@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..cli_support import _preflight_config, config_from_args
+from ..cli_support import _preflight_config, config_from_args, say_now
 from ..config import MergetrainConfig
 from ..daemon import daemon_loop
 from ..deploy_plan import deploy_destination_sha, deploy_execution_policy_sha
@@ -93,7 +93,7 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         interval_seconds=args.interval or config.queue.daemon_interval_seconds,
         lock_ttl_minutes=config.queue.lock_ttl_minutes,
         once=args.once,
-        say=print,
+        say=say_now,
         notifier=configured_notifier(config.notify) if args.notify else None,
         notification_name=config.project.name,
         notification_path=str(config.repo),

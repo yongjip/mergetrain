@@ -132,7 +132,7 @@ long as it runs:
 ```sh
 cd /path/to/example-app
 caffeinate -i mergetrain daemon --once
-PYTHONUNBUFFERED=1 nohup mergetrain daemon --interval 15 >> .mergetrain/daemon.log 2>&1 &
+nohup mergetrain daemon --interval 15 >> .mergetrain/daemon.log 2>&1 &
 echo $! > .mergetrain/daemon.pid
 nohup caffeinate -i -w "$(cat .mergetrain/daemon.pid)" >/dev/null 2>&1 &
 ```
@@ -142,8 +142,9 @@ creates `.mergetrain/`, which mergetrain marks as ignored, so the log and PID
 file stay out of `git status`. Do not create that directory yourself:
 mergetrain then ignores only its database files, and the log, the PID file,
 and the integration worktrees show up as untracked files.
-`PYTHONUNBUFFERED=1` writes each log line as it happens. Without it, the tested
-daemon's redirected output reached the log only when the daemon exited.
+With mergetrain 3.7.0 or earlier, put `PYTHONUNBUFFERED=1` before `nohup`:
+without it, the tested 3.7.0 daemon's redirected output reached the log only
+when the daemon exited.
 
 `caffeinate -i -w` holds macOS's idle-sleep assertion until the daemon exits;
 `pmset -g assertions` lists it as `PreventUserIdleSystemSleep`. It prevents
@@ -323,7 +324,7 @@ runs.
 | `--auto` | Hidden from `enqueue --help`; the default daemon landed the auto job and left a manual one queued. A gate-command change and a `paths`-only change each blocked an auto job before push. |
 | Heavy gates | `render` was skipped for documentation and ran for a renderer change, a rename out of its paths, and a mixed batch. `lint` and `unit` started together; `render` started after both passed. |
 | Persistent workspace | `validate` 6.7 s cold, 0.7 s warm; two daemon deploys 6.7 s and 6.8 s. |
-| Daemon start | One foreground tick created the ignored `.mergetrain/`; the control checkout stayed clean with the log and PID file. Without `PYTHONUNBUFFERED=1` the log stayed empty until the daemon exited. `caffeinate` held its assertion and exited with the daemon. |
+| Daemon start | One foreground tick created the ignored `.mergetrain/`; the control checkout stayed clean with the log and PID file. Without `PYTHONUNBUFFERED=1`, 3.7.0 left the log empty until the daemon exited. `caffeinate` held its assertion and exited with the daemon. |
 | Sleep | Daemon and gate suspended for 76 s, past a 60 s lock TTL: `status` offered `mergetrain unlock --force` (`unlock_wedged_runner`), a competing `validate` got `lock_held`, and after resume the offer was gone within a second and the train landed. A push cut off at the remote parked in `needs_reconcile`; `reconcile --apply` requeued it and the daemon landed it. |
 | Quiet period | SIGTERM during a 10 s gate: the job landed, then the daemon exited. A job enqueued while it was stopped waited, and landed after restart. |
 | Push guard | Refused direct, deletion, and mismatched-audit-ref pushes; passed branch pushes and a mergetrain deploy. `--no-verify` and a separate clone bypassed it. |

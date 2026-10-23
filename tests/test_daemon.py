@@ -4,7 +4,9 @@ import io
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -841,6 +843,56 @@ class DaemonOnceExitStatusTests(unittest.TestCase):
         for name, queued, batch, expected in cases:
             with self.subTest(name), tempfile.TemporaryDirectory() as td:
                 self.assertEqual(self._run_once(Path(td), queued=queued, batch=batch), expected)
+
+
+class RedirectedDaemonLogTests(unittest.TestCase):
+    """docs/daemon.md starts the daemon with `>> .mergetrain/daemon.log 2>&1 &`."""
+
+    def test_a_redirected_daemon_writes_its_first_line_before_it_exits(self) -> None:
+        env = {key: value for key, value in os.environ.items() if key != "PYTHONUNBUFFERED"}
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            (repo / ".mergetrain.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+            cases = (
+                (
+                    "daemon",
+                    ["--repo", str(repo), "daemon"],
+                    "mergetrain daemon tick: no auto-approved queued jobs",
+                ),
+                (
+                    "hub-daemon",
+                    ["hub", "daemon", "--registry", str(root / "registry.json")],
+                    "mergetrain hub sweep: no repos registered",
+                ),
+            )
+            for name, command, first_line in cases:
+                with self.subTest(name):
+                    log = root / f"{name}.log"
+                    with log.open("wb") as out:
+                        daemon = subprocess.Popen(
+                            [sys.executable, "-m", "mergetrain", *command, "--interval", "60"],
+                            stdout=out,
+                            stderr=subprocess.STDOUT,
+                            env=env,
+                        )
+                    try:
+                        deadline = time.monotonic() + 30
+                        while (
+                            b"\n" not in log.read_bytes()
+                            and daemon.poll() is None
+                            and time.monotonic() < deadline
+                        ):
+                            time.sleep(0.05)
+                        written = log.read_text(encoding="utf-8")
+                        self.assertIsNone(daemon.poll(), written)
+                        self.assertEqual(written.splitlines()[:1], [first_line])
+                    finally:
+                        daemon.kill()
+                        daemon.wait()
 
 
 class ReadOnlyTickTests(unittest.TestCase):

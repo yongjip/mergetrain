@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changes
+
+- Write each `daemon` and `hub daemon` line to a redirected log as it
+  happens. Python block-buffers stdout that goes to a file, so a daemon
+  started with `>> .mergetrain/daemon.log 2>&1 &` kept its log empty until it
+  exited or had buffered several kilobytes. The documented start no longer
+  needs `PYTHONUNBUFFERED=1`.
+
 ### Documentation
 
 - Add a tested guide for several Claude Code and Codex sessions on one laptop:
@@ -14,8 +22,7 @@
   fail-closed rules and a heavy-gate example.
 - Start the documented background daemon after one foreground tick: on a new
   queue, the log redirect into `.mergetrain/` failed before the directory
-  existed. Run it with `PYTHONUNBUFFERED=1` so its log is written as it
-  happens; redirected output otherwise reached the log only at exit.
+  existed.
 
 ## 3.7.0 - 2026-10-19
 
