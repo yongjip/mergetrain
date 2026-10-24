@@ -22,6 +22,12 @@
   expired lease. An old unlock recommendation can no longer stop a renewed
   healthy train.
 
+### Maintenance
+
+- Wait for both gate PID files to contain valid PIDs in the Ctrl-C test.
+  Reading a newly created, still-empty file could fail before the test sent
+  SIGINT on a busy CI runner.
+
 ### Documentation
 
 - Add a tested guide for several Claude Code and Codex sessions on one laptop:

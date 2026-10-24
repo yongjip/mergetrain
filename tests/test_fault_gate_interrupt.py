@@ -17,6 +17,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -74,6 +75,40 @@ def _wait_until(condition, seconds: float) -> bool:
     return condition()
 
 
+def _wait_for_pids(pid_files: list[Path], seconds: float) -> list[int]:
+    pids: list[int] = []
+
+    def read_pids() -> bool:
+        nonlocal pids
+        try:
+            values = [int(path.read_text(encoding="utf-8")) for path in pid_files]
+        except (FileNotFoundError, ValueError):
+            # write_text creates the file before its PID is available to read.
+            return False
+        if any(pid <= 0 for pid in values):
+            return False
+        pids = values
+        return True
+
+    _wait_until(read_pids, seconds)
+    return pids
+
+
+class GatePidReadinessTests(unittest.TestCase):
+    def test_waits_for_both_pid_files_to_be_written(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            pid_files = [Path(td) / "left.pid", Path(td) / "right.pid"]
+            writes = iter([("", ""), ("123", ""), ("123", "456")])
+
+            def publish_pids(_seconds: float) -> None:
+                for path, value in zip(pid_files, next(writes), strict=True):
+                    path.write_text(value, encoding="utf-8")
+
+            with mock.patch.object(time, "sleep", side_effect=publish_pids) as sleep:
+                self.assertEqual(_wait_for_pids(pid_files, 30), [123, 456])
+            self.assertEqual(sleep.call_count, 3)
+
+
 @unittest.skipUnless(os.name == "posix", "delivers SIGINT the way a terminal or MCP does")
 class GateInterruptTests(unittest.TestCase):
     def test_sigint_stops_a_parallel_gate_group(self) -> None:
@@ -107,11 +142,8 @@ class GateInterruptTests(unittest.TestCase):
             )
             pids: list[int] = []
             try:
-                self.assertTrue(
-                    _wait_until(lambda: all(path.exists() for path in pid_files), 30),
-                    "both gates never started",
-                )
-                pids = [int(path.read_text(encoding="utf-8")) for path in pid_files]
+                pids = _wait_for_pids(pid_files, 30)
+                self.assertEqual(len(pids), len(pid_files), "both gates never wrote their PIDs")
                 self.assertTrue(all(_alive(pid) for pid in pids))
 
                 runner.send_signal(signal.SIGINT)
