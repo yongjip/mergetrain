@@ -64,6 +64,34 @@ description does not prove improved search ranking or agent recommendation.
 - Codex plugin source: <https://github.com/yongjip/mergetrain/tree/main/plugins/mergetrain>
 - MCP Registry name: `io.github.yongjip/mergetrain`
 
+## GitHub MCP Registry onboarding
+
+Status (2026-10-25): the maintainer's onboarding request was sent to
+`partnerships@github.com`. GitHub review is pending; this is not a confirmed
+GitHub listing. Keep the existing email conversation for replies rather than
+sending duplicate requests.
+
+The request follows [GitHub's published submission route](https://github.blog/ai-and-ml/generative-ai/how-to-find-install-and-manage-mcp-servers-with-the-github-mcp-registry/).
+GitHub's [maintainer clarification](https://github.com/github/github-mcp-server/discussions/1257)
+distinguishes initial manual onboarding from later version synchronization.
+
+Verified immediately before sending:
+
+- Official Registry: `io.github.yongjip/mergetrain` **3.7.0**, `active`,
+  `isLatest: true`.
+- [GitHub Registry search](https://api.mcp.github.com/v0.1/servers?search=mergetrain):
+  no entries.
+- Package: PyPI `mergetrain` 3.7.0, local stdio, release-pinned `uvx` launch.
+- Repository and license: `yongjip/mergetrain`, MIT.
+- Published-package check: the documented repository-bound command initialized
+  the 3.7.0 server and listed all five tools. This does not establish that every
+  client displays the deployment form.
+
+Subject: `GitHub MCP Registry onboarding request: io.github.yongjip/mergetrain (3.7.0)`.
+The email includes the official Registry entry, package, manifest, source,
+installation and approval guides, and demo. See the
+[MCP guide](../mcp.md) for client setup and the operator's terminal fallback.
+
 ## Claude community marketplace submission
 
 The public submission form adds reviewed third-party plugins to

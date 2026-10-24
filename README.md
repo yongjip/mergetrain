@@ -195,6 +195,9 @@ codex plugin add mergetrain@mergetrain
 agy plugin install https://github.com/yongjip/mergetrain
 ```
 
+For VS Code / GitHub Copilot or direct MCP setup, see the
+[MCP installation and deployment-confirmation guide](docs/mcp.md#install).
+
 Initialize the repository:
 
 ```sh

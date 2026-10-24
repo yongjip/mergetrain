@@ -57,6 +57,22 @@ For tested Codex, Claude Code, and agy sessions inside Orca, see the
 [Orca agent guide](orca-agents.md), including the pinned MCP runtime and Python
 selection check.
 
+## Choose an MCP installation path
+
+| Client | Installation |
+| --- | --- |
+| Codex | Use the native plugin below, or the [manual MCP entry](mcp.md#codex-manual-mcp-configuration). |
+| Claude Code | Use the native plugin below, or the [manual MCP entry](mcp.md#claude-code-manual-mcp-configuration). |
+| VS Code / GitHub Copilot | Use the [pinned stdio configuration](mcp.md#vs-code--github-copilot). |
+| Other local MCP clients | Use the [pinned launch command](mcp.md#prepare-the-repository) in that client's stdio configuration. |
+
+The client needs access to the configured Git checkout and the `uvx` runtime.
+Choose one installation path per client to avoid duplicate tools. Check the
+five-tool connection first, then read the
+[deployment confirmation guide](mcp.md#what-counts-as-deployment-confirmation).
+If a client does not display the confirmation form, the operator can review
+and approve a fresh plan in the [interactive terminal](mcp.md#if-no-confirmation-dialog-appears).
+
 ## Codex native plugin
 
 With Codex CLI and `uv` installed, add the repository's Git marketplace and

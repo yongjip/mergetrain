@@ -5,14 +5,115 @@ the same versioned CLI JSON, not a second integration engine.
 
 ## Install
 
+Install [Git](https://git-scm.com/downloads) and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) on the machine
+that holds your repository. mergetrain is a local stdio server; it has no hosted
+endpoint or mergetrain account. The client must be able to start `uvx` and access
+the configured checkout, its queue, and its Git remote.
+
+For Codex or Claude Code, the [native plugin](install.md#codex-native-plugin)
+adds both the agent skill and the pinned MCP server. Choose the plugin or a
+manual MCP configuration below; installing both creates duplicate tools.
+
+### Prepare the repository
+
+For an already configured repository, keep its configuration and skip `init`.
+For a new setup:
+
 ```sh
-uv tool install 'mergetrain[mcp]'
-mergetrain mcp
+uv tool install 'mergetrain==3.7.0'
+cd /absolute/path/to/repo
+mergetrain init --project my-app --write
+```
+
+Add the project's test commands to `.mergetrain.yaml`: a new configuration has
+`gates: []` and runs no project tests. Commit the configuration and agent
+instructions through your normal integration path before creating task
+worktrees. See the [first-run guide](quickstart.md).
+
+The machine-level CLI and the MCP package are separate installations. Keep
+their versions aligned. A client can launch the pinned MCP extra without
+adding it to the global CLI installation:
+
+```sh
+uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.0' \
+  mergetrain --repo /absolute/path/to/repo mcp
 ```
 
 The published MCP Registry manifest launches the pinned package with `uvx` and
 the `mcp` extra. Release CI reconstructs that command in a clean environment,
 initializes the server, and checks the tool list and deploy schema.
+
+### Codex: manual MCP configuration
+
+Replace `/absolute/path/to/repo` with your configured checkout:
+
+```sh
+codex mcp add mergetrain -- \
+  uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.0' \
+  mergetrain --repo /absolute/path/to/repo mcp
+codex mcp list
+```
+
+Start a fresh session and inspect `/mcp`. See the
+[official OpenAI MCP documentation](https://developers.openai.com/codex/mcp).
+
+### Claude Code: manual MCP configuration
+
+Run from your project. The default local scope keeps this entry private to
+that project rather than committing a machine-specific absolute path:
+
+```sh
+claude mcp add --transport stdio mergetrain -- \
+  uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.0' \
+  mergetrain --repo /absolute/path/to/repo mcp
+claude mcp get mergetrain
+```
+
+Inspect `/mcp` in Claude Code. See its
+[MCP installation reference](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server).
+
+### VS Code / GitHub Copilot
+
+For the VS Code configuration format, add this entry to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "mergetrain": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--python", ">=3.10",
+        "--from", "mergetrain[mcp]==3.7.0",
+        "mergetrain", "--repo", "${workspaceFolder}", "mcp"
+      ]
+    }
+  }
+}
+```
+
+Open the configured repository as the workspace. Use **MCP: List Servers** to
+start the server and inspect its output. In a remote workspace or dev
+container, install the runtime where this command executes.
+
+Copilot's portable `.mcp.json` and user `mcp-config.json` use `mcpServers`
+instead of `servers`. Use **MCP: Add Server → Command (stdio)** for the selected
+configuration destination and enter the pinned launch command above with an
+absolute repository path. Follow the
+[VS Code configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)
+for the format used by your harness.
+
+### Check the connection
+
+Confirm that the five tools below are available. Ask the client to call
+`mergetrain_status` with `repo` set to the absolute configured checkout. Check
+the returned `repo`, `health`, `state`, and `next_action` before queueing work.
+A successful connection or read-only call does not verify deployment-dialog
+support. Check that separately before using MCP to deploy.
+
+These configuration examples were checked against the client references on
+2026-10-25. They do not promise the same approval UI in every client version.
 
 ## Five tools
 
@@ -93,6 +194,43 @@ mergetrain --repo /path/to/repo deploy
 
 The terminal renders and confirms a fresh plan; it does not expose plan hashes
 or train IDs to the user.
+
+### What counts as deployment confirmation?
+
+Starting or trusting the server, approving a tool invocation, and writing
+"I approve this deploy" in chat do not fill in the server's deployment form.
+For MCP deployment, review the tasks and destination in the client-rendered
+form, check its confirmation field, and submit the form. The server requires
+both the accepted response and that checked field.
+
+Claude Code documents [form elicitation](https://code.claude.com/docs/en/mcp#respond-to-mcp-elicitation-requests).
+Other client versions may connect and expose all five tools while failing to
+display the form. Do not infer support from the tool list alone.
+
+### If no confirmation dialog appears
+
+1. Read `mergetrain_status` for the same `repo`. Confirm whether anything
+   landed before trying another deployment path.
+2. If the call returned `confirmation_required` or `deploy_not_confirmed`,
+   report that deployment was not confirmed. `deploy_not_confirmed` alone
+   does not establish that the person saw and canceled a dialog.
+3. If the person declined the displayed plan, stop. Do not retry through
+   another path to override that decision.
+4. If the client did not display a form, give the operator the returned
+   terminal command. In an interactive terminal, the operator runs:
+
+   ```sh
+   mergetrain --repo /absolute/path/to/repo deploy
+   ```
+
+5. The operator reviews the fresh task list, Git destination, and refs, then
+   enters `y` or `yes` to approve that plan. Read status afterward and check
+   the configured post-push verification result.
+
+Do not loop the MCP deploy call, manufacture an acceptance response, supply a
+hidden plan hash, or add `--auto` to work around a missing dialog. Explicitly
+pre-approved unattended operation is a separate
+[CLI workflow](cli.md#enqueue); MCP enqueue never grants that approval.
 
 ## Inspection detail
 

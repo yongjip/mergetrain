@@ -30,6 +30,9 @@
 
 ### Documentation
 
+- Add pinned MCP setup instructions for Codex, Claude Code, and VS Code /
+  GitHub Copilot. Explain the separate deployment form and the interactive
+  terminal fallback when a client reports cancellation without showing it.
 - Add a tested guide for several Claude Code and Codex sessions on one laptop:
   linked worktrees as the enqueue boundary, unattended `--auto` landing, heavy
   gates on a shared CPU, `caffeinate` and sleep, quiet periods, a `pre-push`
