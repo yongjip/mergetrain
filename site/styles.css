@@ -25,7 +25,7 @@ a { color: inherit; }
 .shell { width: min(calc(100% - 40px), var(--max)); margin-inline: auto; }
 .nav { height: 76px; display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 11px; font-weight: 760; text-decoration: none; letter-spacing: -0.02em; }
-.brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.brand-mark { display: block; width: 44px; height: 44px; object-fit: contain; flex: none; }
 nav { display: flex; gap: 28px; }
 nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
 nav a:hover { color: var(--accent); }

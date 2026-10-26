@@ -2,18 +2,32 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.yongjip/mergetrain",
   "title": "Mergetrain",
+  "icons": [
+    {
+      "src": "https://yongjip.github.io/mergetrain/assets/mergetrain-icon.png",
+      "mimeType": "image/png",
+      "sizes": ["128x128"],
+      "theme": "light"
+    },
+    {
+      "src": "https://yongjip.github.io/mergetrain/assets/mergetrain-icon-dark.png",
+      "mimeType": "image/png",
+      "sizes": ["128x128"],
+      "theme": "dark"
+    }
+  ],
   "description": "Queue parallel-agent worktree branches, test together, serialize and recover Git pushes.",
   "repository": {
     "url": "https://github.com/yongjip/mergetrain",
     "source": "github"
   },
-  "version": "3.7.0",
+  "version": "3.7.1",
   "websiteUrl": "https://github.com/yongjip/mergetrain",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mergetrain",
-      "version": "3.7.0",
+      "version": "3.7.1",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
@@ -24,7 +38,7 @@
         {
           "type": "named",
           "name": "--from",
-          "value": "mergetrain[mcp]==3.7.0"
+          "value": "mergetrain[mcp]==3.7.1"
         }
       ],
       "packageArguments": [

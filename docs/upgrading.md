@@ -93,6 +93,21 @@ responses, including refusal of unknown safety actions and unsupported
 contracts. Use fixtures or disposable repositories for checks that would
 otherwise validate or deploy live work.
 
+## Maintenance update in 3.7.1
+
+Upgrading from 3.7.0 preserves machine contract 5, config schema 2, queue
+schema 16, and existing approval bindings. No migration is needed.
+
+The daemon renews its lease promptly after wake and flushes redirected logs
+line by line. Forced unlock preserves an active lease and refuses an expired
+lease that renews while the recovery check runs. Consumers should follow the
+returned refusal and reread status instead of forcing a second recovery.
+
+Update the CLI and restart each authorized daemon at its idle boundary with
+its existing arguments. Refresh the Codex, Claude Code, and agy plugins to
+load the 3.7.1 pin, then start fresh MCP sessions. The MCP server now includes
+light/dark logo metadata; clients that do not display icons keep working.
+
 ## Repository scope in 3.7.0
 
 Upgrading from 3.6.0 retains machine contract 5, config schema 2, and queue

@@ -57,6 +57,16 @@ grammar, break existing operator muscle memory, and add no decision value when
 
 ## Product layers
 
+Brand identity update (2026-10-27): the owner selected the blue express mark
+and requested its use in MCP and public websites. The existing server and
+plugin manifests lacked icons, while the website used an unrelated `mt` tile.
+Use the standard MCP `icons` identity metadata, Registry icon URLs, and plugin
+listing/composer image fields. Embedded package images avoid a new server-side
+network dependency. This is presentation metadata, not a new command, tool,
+input, listener, queue state or approval path; the surface baseline is unchanged.
+Success is the same selected shape in light/dark metadata and website assets.
+Remove these mappings only if their corresponding existing adapter is retired.
+
 Recovery guidance correction (2026-09-06): the local 2048 pilot reproduced a
 duplicate-branch error recommending `--allow-duplicate`, which v3 rejects as a
 removed option. Existing `retry` successfully replaces the fixed blocked/failed

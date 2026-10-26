@@ -21,7 +21,7 @@ For an already configured repository, keep its configuration and skip `init`.
 For a new setup:
 
 ```sh
-uv tool install 'mergetrain==3.7.0'
+uv tool install 'mergetrain==3.7.1'
 cd /absolute/path/to/repo
 mergetrain init --project my-app --write
 ```
@@ -36,7 +36,7 @@ their versions aligned. A client can launch the pinned MCP extra without
 adding it to the global CLI installation:
 
 ```sh
-uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.0' \
+uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.1' \
   mergetrain --repo /absolute/path/to/repo mcp
 ```
 
@@ -50,7 +50,7 @@ Replace `/absolute/path/to/repo` with your configured checkout:
 
 ```sh
 codex mcp add mergetrain -- \
-  uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.0' \
+  uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.1' \
   mergetrain --repo /absolute/path/to/repo mcp
 codex mcp list
 ```
@@ -65,7 +65,7 @@ that project rather than committing a machine-specific absolute path:
 
 ```sh
 claude mcp add --transport stdio mergetrain -- \
-  uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.0' \
+  uvx --python ">=3.10" --from 'mergetrain[mcp]==3.7.1' \
   mergetrain --repo /absolute/path/to/repo mcp
 claude mcp get mergetrain
 ```
@@ -85,7 +85,7 @@ For the VS Code configuration format, add this entry to `.vscode/mcp.json`:
       "command": "uvx",
       "args": [
         "--python", ">=3.10",
-        "--from", "mergetrain[mcp]==3.7.0",
+        "--from", "mergetrain[mcp]==3.7.1",
         "mergetrain", "--repo", "${workspaceFolder}", "mcp"
       ]
     }

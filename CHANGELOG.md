@@ -2,8 +2,24 @@
 
 ## Unreleased
 
+## 3.7.1 - 2026-10-27
+
+### Upgrade notes
+
+- Machine contract **5**, config schema **2**, and queue schema **16** are
+  unchanged. No database migration or approval renewal is required.
+- Upgrade the CLI and restart existing daemons at the idle boundary with the
+  same launch arguments. This loads the wake-time lease renewal, safe unlock,
+  and redirected-log fixes. Keep the current queue and deployment policy.
+- Refresh Codex, Claude Code, and agy plugins and start fresh MCP sessions;
+  launchers pin **3.7.1**. MCP clients that support server icons receive the
+  new blue/white express logo. See [upgrading](docs/upgrading.md#maintenance-update-in-371).
+
 ### Changes
 
+- Use the approved blue express logo for MCP identity icons, the Codex plugin,
+  and the website. Include transparent light/dark PNGs in the package so MCP
+  clients can display the server icon without downloading an external image.
 - Write each `daemon` and `hub daemon` line to a redirected log as it
   happens. Python block-buffers stdout that goes to a file, so a daemon
   started with `>> .mergetrain/daemon.log 2>&1 &` kept its log empty until it

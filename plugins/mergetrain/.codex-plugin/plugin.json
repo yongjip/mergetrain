@@ -1,6 +1,6 @@
 {
   "name": "mergetrain",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "description": "Queue committed branches from parallel LLM coding agents in Git worktrees. Test the combined tree in a local merge queue, require approval for Git pushes, and recover interrupted pushes.",
   "author": {
     "name": "Yongjip Kim",
@@ -27,6 +27,11 @@
   ],
   "skills": "./skills/",
   "interface": {
+    "brandColor": "#005DE8",
+    "composerIcon": "./assets/icon.png",
+    "composerIconDark": "./assets/icon-dark.png",
+    "logo": "./assets/icon.png",
+    "logoDark": "./assets/icon-dark.png",
     "displayName": "mergetrain",
     "shortDescription": "Safely integrate committed branches from parallel coding agents.",
     "longDescription": "For local, worktree-first repositories: queue committed branches from parallel coding agents, test the combined tree in order, keep integration pushes under one human-gated owner, and recover interrupted pushes. Not for single-agent work or PR-first repositories already using GitHub Merge Queue or GitLab Merge Trains.",

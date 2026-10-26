@@ -113,7 +113,7 @@ a side effect of a routine `brew upgrade`. Pin the version where the runner
 gets it:
 
 ```sh
-uv tool install mergetrain==3.7.0    # or: pipx install mergetrain==3.7.0
+uv tool install mergetrain==3.7.1    # or: pipx install mergetrain==3.7.1
 brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving it
 ```
 
@@ -121,7 +121,7 @@ brew pin mergetrain                  # Homebrew: keep `brew upgrade` from moving
   `mergetrain==${MERGETRAIN_VERSION}`.
 - If the repository has a Python development environment that the runner's
   gates already use, pin mergetrain there too, so every worktree that syncs it
-  resolves the same release: for example `mergetrain==3.7.0` in its
+  resolves the same release: for example `mergetrain==3.7.1` in its
   `requirements.txt` or in the `dev` extra of its `pyproject.toml`. GitHub's
   dependency graph reads those files, so the repository also appears among
   mergetrain's dependents.
@@ -229,7 +229,7 @@ tool use may download that wheel and its runtime dependencies. Prepare it before
 starting a fresh agent session to avoid a cold MCP startup timeout:
 
 ```sh
-uvx --python ">=3.10" --from "mergetrain[mcp]==3.7.0" mergetrain --version
+uvx --python ">=3.10" --from "mergetrain[mcp]==3.7.1" mergetrain --version
 ```
 
 No hosted service or provider credential is introduced.

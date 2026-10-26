@@ -1578,6 +1578,28 @@ class MCPPlanChangeDuringConfirmationTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_MCP, "the mcp extra is not installed")
 class ServerRegistrationTests(unittest.TestCase):
+    def test_initialize_advertises_packaged_icons_for_both_themes(self) -> None:
+        import base64
+        import struct
+
+        from mcp import Client
+
+        from mergetrain.mcp_server import build_server
+
+        async def initialize():
+            async with Client(build_server(Path("/repo"))) as client:
+                return client.server_info
+
+        info = asyncio.run(initialize())
+        self.assertEqual([icon.theme for icon in info.icons], ["light", "dark"])
+        for icon in info.icons:
+            self.assertEqual(icon.mime_type, "image/png")
+            self.assertEqual(icon.sizes, ["128x128"])
+            self.assertTrue(icon.src.startswith("data:image/png;base64,"))
+            png = base64.b64decode(icon.src.split(",", 1)[1], validate=True)
+            self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(struct.unpack(">II", png[16:24]), (128, 128))
+
     def test_every_tool_is_registered_with_truthful_annotations(self) -> None:
         from mergetrain.mcp_server import build_server
 

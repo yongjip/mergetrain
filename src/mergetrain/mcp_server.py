@@ -24,6 +24,7 @@ itself has to fail loudly.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -36,6 +37,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from importlib.resources import files
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -902,12 +904,23 @@ def build_server(repo: Path, *, config: str | None = None, db: str | None = None
     from mcp.server import MCPServer
     from mcp.server.elicitation import ElicitationResult
     from mcp.server.mcpserver import Elicit, Resolve
-    from mcp.types import ToolAnnotations
+    from mcp.types import Icon, ToolAnnotations
 
     tools = MergetrainTools(repo=repo, config=config, db=db)
     server = MCPServer(
         name="mergetrain",
         version=_server_version(),
+        icons=[
+            Icon(
+                src="data:image/png;base64," + base64.b64encode(
+                    files("mergetrain").joinpath("assets").joinpath(filename).read_bytes()
+                ).decode("ascii"),
+                mime_type="image/png",
+                sizes=["128x128"],
+                theme="dark" if filename == "icon-dark.png" else "light",
+            )
+            for filename in ("icon.png", "icon-dark.png")
+        ],
         instructions=(
             "mergetrain is a local merge-and-push queue for coding-agent "
             "branches. Work in the assigned worktree, commit a clean HEAD, read "

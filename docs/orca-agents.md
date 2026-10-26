@@ -15,7 +15,7 @@ The native plugins use `uvx`, independently of a Homebrew or globally installed
 mergetrain CLI. Before starting the client, verify their pinned runtime:
 
 ```sh
-uvx --python ">=3.10" --from "mergetrain[mcp]==3.7.0" mergetrain --version
+uvx --python ">=3.10" --from "mergetrain[mcp]==3.7.1" mergetrain --version
 ```
 
 The current plugin and Registry launchers select Python **3.10 or newer**
@@ -29,14 +29,14 @@ The first run may download an interpreter and dependencies. Prepare the exact
 pinned runtime in the task terminal before starting a fresh agent session:
 
 ```sh
-uvx --python ">=3.10" --from "mergetrain[mcp]==3.7.0" mergetrain --version
+uvx --python ">=3.10" --from "mergetrain[mcp]==3.7.1" mergetrain --version
 ```
 
 Cold dependency installation exceeded the tested clients' 30-second MCP startup
 limit. Preparing the runtime before model startup avoids that work during the
 handshake. Claude also cached a failed connection for about 15 minutes in one
 attempt; use a fresh session after preparing the runtime and check its actual
-connection before assigning edits. The package stays pinned to **3.7.0**.
+connection before assigning edits. The package stays pinned to **3.7.1**.
 See [installation](install.md) for `uv` and version upgrade guidance.
 
 ## Codex CLI
@@ -50,7 +50,7 @@ codex plugin list --marketplace mergetrain
 codex mcp list --json
 ```
 
-The plugin row should say **installed, enabled**, with version **3.7.0**.
+The plugin row should say **installed, enabled**, with version **3.7.1**.
 The MCP inventory should include enabled `mergetrain` with a stdio `uvx`
 command. Codex **0.133.0** does not accept `--json` on `plugin list`; the JSON
 option above belongs to `mcp list`.
@@ -72,7 +72,7 @@ claude plugin details mergetrain@mergetrain
 claude mcp list
 ```
 
-Check `enabled: true`, version **3.7.0**, and its mergetrain MCP configuration.
+Check `enabled: true`, version **3.7.1**, and its mergetrain MCP configuration.
 `plugin details` lists the `mergetrain` and `deploy` skills and one MCP server.
 After preparing the pinned runtime, the native MCP health check reported
 **Connected** in the recorded 3.5.0 test.
@@ -100,7 +100,7 @@ pinned stdio runtime before starting a fresh session exposed the tools:
 
 ```sh
 agy mcp add mergetrain-orca -- uvx --python ">=3.10" \
-  --from "mergetrain[mcp]==3.7.0" mergetrain --repo /absolute/path/to/control-checkout mcp
+  --from "mergetrain[mcp]==3.7.1" mergetrain --repo /absolute/path/to/control-checkout mcp
 agy mcp list
 ```
 
