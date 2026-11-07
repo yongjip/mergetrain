@@ -288,13 +288,20 @@ def build_parser(*, structured_errors: bool = False) -> argparse.ArgumentParser:
     p_unlock.set_defaults(func=cmd_unlock)
 
     p_cancel = subparsers.add_parser("cancel")
-    p_cancel.add_argument("job_id", type=int)
+    p_cancel.add_argument(
+        "job_or_branch",
+        help="Job id, or the branch of its one active job",
+    )
     p_cancel.add_argument("--note", default="")
     p_cancel.add_argument("--json", action="store_true")
     p_cancel.set_defaults(func=cmd_cancel)
 
     p_dismiss = subparsers.add_parser("dismiss")
-    p_dismiss.add_argument("job_id", type=int, nargs="?", help="Job to dismiss (or use --all)")
+    p_dismiss.add_argument(
+        "job_or_branch",
+        nargs="?",
+        help="Job to dismiss by id or branch (or use --all)",
+    )
     p_dismiss.add_argument("--all", action="store_true", help="Dismiss every blocked/failed job")
     p_dismiss.add_argument(
         "--force",

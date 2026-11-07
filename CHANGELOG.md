@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changes
+
+- `cancel` and `dismiss` accept a branch name in place of a job id. A branch
+  must name exactly one non-terminal job — the same uniqueness `enqueue`
+  already enforces — and an unknown or ambiguous branch fails with the
+  cancelable/dismissable states or the matching job ids. Job ids keep
+  precedence, and every state guard, reconcile-conflict refusal, and
+  `--force`, `--note`, and `--all` semantic runs unchanged on the resolved
+  job. The machine contract and JSON payload shapes are unchanged.
+
 ## 3.7.1 - 2026-10-27
 
 ### Upgrade notes

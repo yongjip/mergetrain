@@ -2131,6 +2131,220 @@ class CliTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def _queue_repo(self) -> Path:
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        repo = Path(td.name)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / ".mergetrain.yaml").write_text(render_default_config("demo"), encoding="utf-8")
+        return repo
+
+    def _run_queue_json(self, repo: Path, argv: list[str]):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = main(["--repo", str(repo), *argv, "--json"])
+        return code, json.loads(out.getvalue())
+
+    def test_cancel_accepts_a_branch_name_resolving_to_its_active_job(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["cancel", "feature/a"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["job"]["id"], job.id)
+        self.assertEqual(payload["job"]["status"], "canceled")
+
+    def test_dismiss_accepts_a_branch_name_resolving_to_its_blocked_job(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            mark_job(conn, job.id, status="blocked", note="gate failed")
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["dismiss", "feature/a"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual([item["id"] for item in payload["dismissed"]], [job.id])
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            self.assertEqual(get_job(conn, job.id).status, "canceled")
+        finally:
+            conn.close()
+
+    def test_job_ids_take_precedence_over_numeric_branch_names(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            first = enqueue_job(conn, task="a", branch="feature/named")
+            # A branch literally named like the first job's id: only id
+            # precedence keeps `cancel <first.id>` aimed at the first job.
+            second = enqueue_job(conn, task="b", branch=str(first.id))
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["cancel", str(first.id)])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["job"]["id"], first.id)
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            self.assertEqual(get_job(conn, second.id).status, "queued")
+        finally:
+            conn.close()
+
+    def test_unknown_job_id_error_points_at_status_for_the_job_id(self) -> None:
+        repo = self._queue_repo()
+
+        code, payload = self._run_queue_json(repo, ["cancel", "999"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "queue_error")
+        self.assertIn("job not found: 999", payload["error"]["message"])
+        self.assertIn("'mergetrain status'", payload["error"]["message"])
+
+    def test_cancel_by_unknown_branch_names_the_cancelable_states(self) -> None:
+        repo = self._queue_repo()
+
+        code, payload = self._run_queue_json(repo, ["cancel", "feature/none"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "queue_error")
+        self.assertIn("no active job on branch 'feature/none'", payload["error"]["message"])
+        for state in ("queued", "in_progress", "validated", "blocked", "failed"):
+            self.assertIn(state, payload["error"]["message"])
+
+    def test_dismiss_by_unknown_branch_names_the_dismissable_states(self) -> None:
+        repo = self._queue_repo()
+
+        code, payload = self._run_queue_json(repo, ["dismiss", "feature/none"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "queue_error")
+        self.assertIn("no active job on branch 'feature/none'", payload["error"]["message"])
+        self.assertIn("blocked", payload["error"]["message"])
+        self.assertIn("failed", payload["error"]["message"])
+
+    def test_branch_with_multiple_active_jobs_requires_a_job_id(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            blocked = enqueue_job(conn, task="a", branch="feature/dup")
+            mark_job(conn, blocked.id, status="blocked", note="gate failed")
+            queued = enqueue_job(conn, task="b", branch="feature/dup", allow_duplicate=True)
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["cancel", "feature/dup"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "queue_error")
+        message = payload["error"]["message"]
+        self.assertIn("multiple active jobs", message)
+        self.assertIn(f"{blocked.id} (blocked)", message)
+        self.assertIn(f"{queued.id} (queued)", message)
+
+    def test_dismiss_by_branch_still_refuses_live_work(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")  # stays queued
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["dismiss", "feature/a"])
+
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "only a blocked or failed job can be dismissed",
+            payload["error"]["message"],
+        )
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            self.assertEqual(get_job(conn, job.id).status, "queued")
+        finally:
+            conn.close()
+
+    def test_cancel_by_branch_still_refuses_an_unresolved_push(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            conn.execute(
+                "UPDATE deploy_queue SET status='needs_reconcile' WHERE id=?",
+                (job.id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["cancel", "feature/a"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("unresolved push", payload["error"]["message"])
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            self.assertEqual(get_job(conn, job.id).status, "needs_reconcile")
+        finally:
+            conn.close()
+
+    def test_cancel_by_branch_on_a_train_member_cancels_the_whole_train(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            first = enqueue_job(conn, task="a", branch="feature/a")
+            second = enqueue_job(conn, task="b", branch="feature/b")
+            for job in [first, second]:
+                mark_job(conn, job.id, status="validated", train_id="train-1", train_size=2)
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["cancel", "feature/a"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["job"]["id"], first.id)
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            # Branch addressing reaches the same train-level cancel as the id.
+            self.assertEqual(get_job(conn, first.id).status, "canceled")
+            self.assertEqual(get_job(conn, second.id).status, "canceled")
+        finally:
+            conn.close()
+
+    def test_dismiss_by_branch_with_force_clears_a_reconcile_conflict(self) -> None:
+        repo = self._queue_repo()
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            job = enqueue_job(conn, task="a", branch="feature/a")
+            conn.execute(
+                "UPDATE deploy_queue SET status='blocked', pending_deploy_sha=?, "
+                "push_status='pending' WHERE id=?",
+                ("a" * 40, job.id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        code, payload = self._run_queue_json(repo, ["dismiss", "feature/a", "--force"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual([item["id"] for item in payload["dismissed"]], [job.id])
+        # Identical outcome to the job-id path: the conflict note is kept.
+        self.assertIn("reconcile conflict", payload["dismissed"][0]["note"])
+        conn = connect(load_config(repo=repo).state.db)
+        try:
+            self.assertEqual(get_job(conn, job.id).status, "canceled")
+        finally:
+            conn.close()
+
     def test_missing_config_fails_deploy_path_but_permits_recovery(self) -> None:
         # #84 defect 6: with no .mergetrain.yaml, deploy-capable paths must not
         # ship against guessed defaults (origin/main, minimal gates). They fail

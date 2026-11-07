@@ -31,6 +31,7 @@ from mergetrain.persistence.jobs import (
     get_job,
     list_train_jobs,
     mark_job,
+    nonterminal_branch_jobs,
     resolve_deployment_verify_status,
     retry_job,
     supersede_validated_train,
@@ -455,6 +456,24 @@ class StoreTests(unittest.TestCase):
         claimed = real_get_job(conn, job.id)
         self.assertEqual(claimed.status, "in_progress")
         self.assertEqual(claimed.claim_token, "new-owner-token")
+
+    def test_nonterminal_branch_jobs_skip_terminal_history_and_keep_arrival_order(self) -> None:
+        conn = self.make_conn()
+        landed = enqueue_job(conn, task="a", branch="feature/dup")
+        mark_job(conn, landed.id, status="deployed", note="done")
+        blocked = enqueue_job(conn, task="b", branch="feature/dup")
+        queued = enqueue_job(conn, task="c", branch="feature/dup", allow_duplicate=True)
+
+        jobs = nonterminal_branch_jobs(conn, "feature/dup")
+
+        # Terminal history on the branch must not intercept branch addressing,
+        # and duplicate actives (normally impossible via enqueue) stay ordered.
+        self.assertEqual([job.id for job in jobs], [blocked.id, queued.id])
+        with self.assertRaises(DuplicateActiveBranch) as raised:
+            enqueue_job(conn, task="d", branch="feature/dup")
+        # The enqueue duplicate guard resolves through the same oldest-active
+        # lookup, so the two never disagree on which job a branch names.
+        self.assertEqual(raised.exception.existing_job_id, blocked.id)
 
     def test_duplicate_active_branch_is_a_typed_error_naming_the_escape(self) -> None:
         conn = self.make_conn()

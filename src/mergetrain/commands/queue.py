@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,9 @@ from ..persistence.jobs import (
     enqueue_job,
     get_job,
     is_reconcile_conflict,
+    job_exists,
     list_dismissable_jobs,
+    nonterminal_branch_jobs,
     refuse_reconcile_conflict,
     retry_job,
     supersede_validated_train,
@@ -291,6 +294,44 @@ def cmd_supersede(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_job_or_branch(conn: sqlite3.Connection, token: str, *, action: str) -> int:
+    """Resolve one job id or branch name to a job id (pure addressing sugar).
+
+    Job ids keep precedence over branch names, so every existing invocation
+    keeps its meaning. A branch must name exactly one non-terminal job — the
+    same uniqueness enqueue enforces — and the resolved id then runs the
+    command's unchanged state guards. No new state transition exists here.
+    """
+
+    try:
+        job_id = int(token)
+    except ValueError:
+        job_id = None
+    if job_id is not None:
+        if not job_exists(conn, job_id):
+            raise QueueError(
+                f"job not found: {job_id}; check 'mergetrain status' for the job id"
+            )
+        return job_id
+    jobs = nonterminal_branch_jobs(conn, token)
+    if not jobs:
+        states = (
+            "blocked or failed"
+            if action == "dismiss"
+            else "queued, in_progress, validated, blocked, or failed"
+        )
+        raise QueueError(
+            f"no active job on branch '{token}' ({action} takes a job id in: "
+            f"{states}); check 'mergetrain status' for job ids"
+        )
+    if len(jobs) > 1:
+        matches = ", ".join(f"{job.id} ({job.status})" for job in jobs)
+        raise QueueError(
+            f"branch '{token}' has multiple active jobs: {matches}; pass a job id"
+        )
+    return jobs[0].id
+
+
 def cmd_dismiss(args: argparse.Namespace) -> int:
     """Clear superseded blocked/failed jobs so they stop pinning next_action.
 
@@ -304,9 +345,14 @@ def cmd_dismiss(args: argparse.Namespace) -> int:
         if args.all:
             targets = list_dismissable_jobs(conn)
         else:
-            if args.job_id is None:
+            if args.job_or_branch is None:
                 raise QueueError("dismiss requires a job id or --all")
-            targets = [get_job(conn, args.job_id)]
+            targets = [
+                get_job(
+                    conn,
+                    _resolve_job_or_branch(conn, args.job_or_branch, action="dismiss"),
+                )
+            ]
         dismissed: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for target in targets:
@@ -343,7 +389,8 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     config = config_from_args(args)
     conn = connect(config.state.db)
     try:
-        job = cancel_job(conn, args.job_id, note=args.note or "")
+        job_id = _resolve_job_or_branch(conn, args.job_or_branch, action="cancel")
+        job = cancel_job(conn, job_id, note=args.note or "")
     finally:
         conn.close()
     if args.json:
