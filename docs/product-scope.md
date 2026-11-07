@@ -67,6 +67,17 @@ input, listener, queue state or approval path; the surface baseline is unchanged
 Success is the same selected shape in light/dark metadata and website assets.
 Remove these mappings only if their corresponding existing adapter is retired.
 
+Branch-addressed cancel and dismiss (2026-11-08): `cancel` and `dismiss`
+accept a branch name in place of a job id. Queue reads show branches first,
+and `enqueue` already refuses a duplicate active branch, so a branch names at
+most one non-terminal job. Job ids keep precedence, and every existing state
+guard, reconcile-conflict refusal, and `--force`/`--note`/`--all` semantic
+runs unchanged on the resolved job. Classification: argument resolution on
+two existing hidden recovery verbs — no new command, flag, config field, or
+state transition, so no admission test applies and the surface baseline above
+is unchanged. Remove branch addressing if operators stop addressing jobs by
+branch.
+
 Recovery guidance correction (2026-09-06): the local 2048 pilot reproduced a
 duplicate-branch error recommending `--allow-duplicate`, which v3 rejects as a
 removed option. Existing `retry` successfully replaces the fixed blocked/failed

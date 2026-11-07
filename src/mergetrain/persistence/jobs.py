@@ -42,14 +42,27 @@ def _status_placeholders(statuses: tuple[str, ...] | list[str]) -> str:
     return ",".join("?" for _ in statuses)
 
 
+def nonterminal_branch_jobs(conn: sqlite3.Connection, branch: str) -> list[Job]:
+    """Every non-terminal job on ``branch``, oldest first.
+
+    Branch addressing for the recovery verbs: enqueue keeps one active job per
+    branch, so this is normally exactly one job. Terminal history on the same
+    branch must not intercept a branch-named command, and two non-terminal
+    rows (normally impossible) stay in arrival order so callers can refuse.
+    """
+
+    placeholders = _status_placeholders(TERMINAL_STATUSES)
+    rows = conn.execute(
+        f"SELECT * FROM deploy_queue WHERE branch = ? AND status NOT IN ({placeholders}) "
+        "ORDER BY id ASC",
+        (branch, *TERMINAL_STATUSES),
+    ).fetchall()
+    return [Job.from_row(row) for row in rows]
+
+
 def _active_branch_job_id(conn: sqlite3.Connection, branch: str) -> int | None:
-    placeholders = _status_placeholders(ACTIVE_STATUSES)
-    row = conn.execute(
-        f"SELECT id FROM deploy_queue WHERE branch = ? AND status IN ({placeholders}) "
-        "ORDER BY id LIMIT 1",
-        (branch, *ACTIVE_STATUSES),
-    ).fetchone()
-    return int(row["id"]) if row is not None else None
+    jobs = nonterminal_branch_jobs(conn, branch)
+    return jobs[0].id if jobs else None
 
 
 def _task_label(task: str) -> str:
@@ -433,6 +446,19 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> Job:
     if row is None:
         raise QueueError(f"job not found: {job_id}")
     return Job.from_row(row)
+
+
+def job_exists(conn: sqlite3.Connection, job_id: int) -> bool:
+    """Whether ``job_id`` exists, without loading the row or raising.
+
+    Branch addressing pre-checks an id-shaped token so it can distinguish a
+    missing job from a branch name; the command's own read follows as usual.
+    """
+
+    return (
+        conn.execute("SELECT 1 FROM deploy_queue WHERE id = ?", (job_id,)).fetchone()
+        is not None
+    )
 
 
 def list_jobs(conn: sqlite3.Connection, *, limit: int = 50) -> list[Job]:

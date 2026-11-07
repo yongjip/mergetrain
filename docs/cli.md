@@ -129,7 +129,7 @@ grammar.
 | Resolve stranded or ambiguous push state | `reconcile [--apply]` |
 | Repair a failed job from its owning branch | `retry JOB_ID [--rebase] [--force]` |
 | Replace an exact validated train | `supersede --train-id ID --replacement TASK BRANCH WORKTREE` |
-| Cancel or dismiss work | `cancel JOB_ID`, `dismiss JOB_ID [--force]`, `dismiss --all` |
+| Cancel or dismiss work | `cancel JOB_OR_BRANCH`, `dismiss JOB_OR_BRANCH [--force]`, `dismiss --all` |
 | Resolve post-push verification | `verify [--job ID] [--ack succeeded|failed]` |
 | Clear a wedged runner lock | `unlock [--force]` |
 | Preview or apply cleanup | `gc [--apply] [--delete-branches]` |
@@ -140,6 +140,11 @@ grammar.
 
 The state response tells the operator which exceptional command is appropriate.
 Do not memorize this table or infer recovery from raw SQLite state.
+
+`cancel` and `dismiss` take a job id or a branch name. A branch must name
+exactly one active (non-terminal) job — the same uniqueness `enqueue` enforces
+— and a job id always wins when both could match; every state guard then runs
+on the resolved job exactly as with an explicit id.
 
 ## Removed interfaces
 
